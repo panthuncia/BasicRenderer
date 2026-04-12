@@ -51,6 +51,8 @@ struct PreparedShaderSource
     ShaderPreprocessDiagnostics diagnostics;
 };
 
+inline constexpr uint32_t kBRSLPreprocessVersion = 1;
+
 static inline void SortAndUniqueStrings(std::vector<std::string>& values)
 {
     std::sort(values.begin(), values.end());

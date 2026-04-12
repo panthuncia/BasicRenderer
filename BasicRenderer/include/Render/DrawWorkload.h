@@ -21,6 +21,10 @@ inline bool ShouldSkipSourcePassForCLodAlphaBlend(const RenderPhase& pass) {
         || pass == Engine::Primary::GBufferPass;
 }
 
+inline bool ShouldAddSupplementalCLodShadowWorkload(const Mesh& mesh, const RenderPhase& pass) {
+    return mesh.IsCLodMesh() && pass == Engine::Primary::ShadowMapsPass;
+}
+
 template<class F>
 void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
     const auto& technique = mesh.material->Technique();
@@ -43,6 +47,17 @@ void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
             pass,
             clodOnly
         });
+
+        // Keep the legacy shadow path alive while the CLod shadow variant is under construction.
+        // CLod shadow work is mirrored into a dedicated clodOnly workload so the future CLod VSM
+        // path can come online without changing mesh pass classification again.
+        if (ShouldAddSupplementalCLodShadowWorkload(mesh, pass)) {
+            callback(DrawWorkloadKey {
+                technique.compileFlags,
+                pass,
+                true
+            });
+        }
     }
 
     if (clodAlphaBlend) {

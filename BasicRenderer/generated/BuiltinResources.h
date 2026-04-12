@@ -82,12 +82,16 @@ struct Builtin {
     inline static constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
     inline static constexpr std::string_view MeshletVertexIndices = "Builtin::MeshResources::MeshletVertexIndices";
   };
+  struct Noise {
+    inline static constexpr std::string_view BlueNoise2D = "Builtin::Noise::BlueNoise2D";
+  };
   inline static constexpr std::string_view NormalMatrixBuffer = "Builtin::NormalMatrixBuffer";
   struct PPLL {
     inline static constexpr std::string_view Counter = "Builtin::PPLL::Counter";
     inline static constexpr std::string_view DataBuffer = "Builtin::PPLL::DataBuffer";
     inline static constexpr std::string_view HeadPointerTexture = "Builtin::PPLL::HeadPointerTexture";
   };
+  inline static constexpr std::string_view PerFrameBuffer = "Builtin::PerFrameBuffer";
   inline static constexpr std::string_view PerMaterialDataBuffer = "Builtin::PerMaterialDataBuffer";
   inline static constexpr std::string_view PerMeshBuffer = "Builtin::PerMeshBuffer";
   inline static constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
@@ -110,8 +114,12 @@ struct Builtin {
     inline static constexpr std::string_view VisibilityTexture = "Builtin::PrimaryCamera::VisibilityTexture";
   };
   struct Shadows {
-    inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";
-    inline static constexpr std::string_view ShadowMaps = "Builtin::Shadows::ShadowMaps";
+    inline static constexpr std::string_view CLodClipmapInfo = "Builtin::Shadows::CLodClipmapInfo";
+    inline static constexpr std::string_view CLodCompactMainCamera = "Builtin::Shadows::CLodCompactMainCamera";
+    inline static constexpr std::string_view CLodCompactShadowCameras = "Builtin::Shadows::CLodCompactShadowCameras";
+    inline static constexpr std::string_view CLodDirectionalPageViewInfo = "Builtin::Shadows::CLodDirectionalPageViewInfo";
+    inline static constexpr std::string_view CLodPageTable = "Builtin::Shadows::CLodPageTable";
+    inline static constexpr std::string_view CLodPhysicalPages = "Builtin::Shadows::CLodPhysicalPages";
   };
   struct SkeletonResources {
     inline static constexpr std::string_view BoneTransforms = "Builtin::SkeletonResources::BoneTransforms";

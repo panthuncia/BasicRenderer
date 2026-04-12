@@ -3,29 +3,56 @@
 #include <memory>
 #include <vector>
 
+#include "Interfaces/IResourceProvider.h"
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 
 class Buffer;
 class CLodStreamingSystem;
+class PixelBuffer;
 
-class CLodExtension final : public RenderGraph::IRenderGraphExtension {
+class CLodExtension final : public RenderGraph::IRenderGraphExtension, public IResourceProvider {
 public:
     explicit CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters);
     ~CLodExtension();
 
+    void PrepareForBuild(RenderGraph& rg) override;
     void Initialize(RenderGraph& rg) override;
     void OnRegistryReset(ResourceRegistry* reg) override;
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
+    std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+    std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
     bool IsReyesTessellationDisabled() const;
+    void RefreshShadowConfiguredSettings();
+    uint32_t GetVisibleClusterCapacity() const;
+    void RefreshCoreVisibleClusterCapacity();
+    void InitializeCoreResources();
+    void InitializeDeepVisibilityResources();
+    void InitializeShadowResources();
+    void RefreshShadowResourcesForCurrentSettings();
+    void TagCoreResourceUsages();
+    void TagShadowResourceUsages();
+    void ReleaseBufferBackings();
+    void ReleaseShadowResourceBackings();
     void EnsureReyesResourcesInitialized();
     void SyncReyesResourceEntities(bool enabled);
 
     CLodExtensionType m_type;
     uint32_t m_maxVisibleClusters = 0u;
+    uint32_t m_visibleClusterCapacity = 0u;
+    uint32_t m_reyesFullClusterOutputCapacity = 0u;
+    uint32_t m_reyesOwnedClusterCapacity = 0u;
+    uint32_t m_reyesSplitQueueCapacity = 0u;
+    uint32_t m_reyesDiceQueueCapacity = 0u;
+    uint32_t m_reyesDiceQueuePhysicalCapacity = 0u;
+    uint32_t m_reyesRasterWorkCapacity = 0u;
+    uint32_t m_reyesOwnershipBitsetWordCount = 0u;
+    uint64_t m_reyesRequestedBudgetBytes = 0u;
+    uint64_t m_reyesAllocatedBudgetBytes = 0u;
+    bool m_reyesBudgetLimited = false;
 
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
@@ -55,17 +82,15 @@ private:
 
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
-    // TODO: There was a strange bug here where CLod raster indirect command buffers ended up with invalid data, even immediately
-    // after the data was written, if that buffer was shared between phase 1 and phase 2 of the CLod rasterization process. 
-    // The root cause is currently unknown, but it may be related to synchronization issues around indirect command consumption 
-    // or an underlying issue with shared CLod raster resources. For now, the workaround is to duplicate the raster indirect args 
-    // buffer for phase 1 and phase 2, even though they should be mutually-exclusive with correct synchronization
-    //
-    // Further testing is required to determine whether the root cause is a CLod usage bug, a synchronization bug
-    // specific to indirect command consumption, or a larger underlying issue affecting resources that are explicitly reused 
-    // within the same frame (though no other passes exhibit similar behavior)
+    // TODO: Raster-bucket indirect args have exhibited invalid data when reused across otherwise separate
+    // CLod rasterization paths. Until the root cause is understood, keep HW, compute SW, and SW page-job
+    // indirect command streams on dedicated resources for each phase.
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferSw;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPhase2Sw;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPageJob;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPhase2PageJob;
 
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsBuffer;
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsCounterBuffer;
@@ -109,6 +134,67 @@ private:
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityStatsBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowPageTableTexture;
+    std::shared_ptr<PixelBuffer> m_shadowPhysicalPagesTexture;
+    std::shared_ptr<Buffer> m_shadowPageMetadataBuffer;
+    std::shared_ptr<Buffer> m_shadowInvalidationInputsBuffer;
+    std::shared_ptr<Buffer> m_shadowInvalidationCountBuffer;
+    std::shared_ptr<Buffer> m_shadowInvalidatedInstancesBitsetBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidatesBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidateCountBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveRawPagesBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveRawPageCountBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictedInvalidationScratchBitsetBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictedInvalidationPagesBufferA;
+    std::shared_ptr<Buffer> m_shadowPredictedInvalidationPageCountBufferA;
+    std::shared_ptr<Buffer> m_shadowAllocationRequestsBuffer;
+    std::shared_ptr<Buffer> m_shadowAllocationCountBuffer;
+    std::shared_ptr<Buffer> m_shadowAllocationIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkTileWorkBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkTileCountBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkTileIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_shadowFreePhysicalPagesBuffer;
+    std::shared_ptr<Buffer> m_shadowReusablePhysicalPagesBuffer;
+    std::shared_ptr<Buffer> m_shadowPageListHeaderBuffer;
+    std::shared_ptr<Buffer> m_shadowDirtyPageFlagsBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowDirtyPageHierarchyTexture;
+    std::shared_ptr<Buffer> m_shadowClipmapInfoBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkClipmapDataBuffer;
+    std::shared_ptr<Buffer> m_shadowCompactMainCameraBuffer;
+    std::shared_ptr<Buffer> m_shadowCompactShadowCameraBuffer;
+    std::shared_ptr<Buffer> m_shadowDirectionalPageViewInfoBuffer;
+    std::shared_ptr<Buffer> m_shadowRuntimeStateBuffer;
+    std::shared_ptr<Buffer> m_shadowStatsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersBuffer;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersCounterBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBufferSkinned;
+    std::shared_ptr<Buffer> m_swPageJobCountBuffer;
+    std::shared_ptr<Buffer> m_swPageJobCountBufferSkinned;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBufferPhase2Skinned;
+    std::shared_ptr<Buffer> m_swPageJobCountBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobCountBufferPhase2Skinned;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferSkinned;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferPhase2Skinned;
+    std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobClusterTagsBufferPhase2;
+    std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBuffer;
+    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBuffer;
+    std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBufferSw;
+    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBufferSw;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
+    bool m_providerRegisteredForCurrentRegistry = false;
+    bool m_shadowVirtualResourcesNeedReset = true;
+    uint32_t m_shadowConfiguredBackingResolution = 0u;
+    uint32_t m_shadowConfiguredMaxPhysicalPageCount = 0u;
+    uint32_t m_shadowConfiguredPageJobMaxPages = 0u;
+    uint32_t m_shadowConfiguredPageJobRecordCapacity = 0u;
+    uint32_t m_shadowConfiguredComputeClusterCapacity = 0u;
+    uint32_t m_shadowConfiguredExpandedRecordCapacity = 0u;
 };

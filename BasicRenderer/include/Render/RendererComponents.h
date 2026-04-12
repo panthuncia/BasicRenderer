@@ -3,6 +3,7 @@
 #include <BasicScene/Components.h>
 
 #include <memory>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -30,12 +31,12 @@ namespace Components {
 
     struct LightViewInfo {
         std::vector<uint64_t> viewIDs;
+        std::vector<int64_t> virtualShadowUnwrappedPageOffsetX;
+        std::vector<int64_t> virtualShadowUnwrappedPageOffsetY;
         std::shared_ptr<BufferView> lightBufferView;
         uint32_t lightBufferIndex = 0;
         uint32_t viewInfoBufferIndex = 0;
         Matrix projectionMatrix;
-        std::shared_ptr<PixelBuffer> depthMap;
-        std::shared_ptr<PixelBuffer> linearDepthMap;
         uint32_t depthResX = 0;
         uint32_t depthResY = 0;
     };
@@ -61,6 +62,7 @@ namespace Components {
 
     struct ObjectDrawInfo {
         IndirectDrawInfo drawInfo;
+        std::vector<uint32_t> perMeshInstanceBufferIndices;
         std::shared_ptr<BufferView> perObjectCBView;
         uint32_t perObjectCBIndex;
         std::shared_ptr<BufferView> normalMatrixView;

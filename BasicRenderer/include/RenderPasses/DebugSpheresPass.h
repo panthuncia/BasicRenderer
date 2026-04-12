@@ -26,6 +26,7 @@ public:
 		builder->WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
 			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
 			.IsGeometryPass();
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {

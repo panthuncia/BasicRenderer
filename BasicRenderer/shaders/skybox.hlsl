@@ -11,7 +11,7 @@ void SkyboxCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint hdrTargetUAVIndex = UintRootConstant3;
     const uint motionVectorsUAVIndex = UintRootConstant4;
 
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 
     const uint screenW = perFrameBuffer.screenResX;
     const uint screenH = perFrameBuffer.screenResY;
@@ -55,8 +55,7 @@ void SkyboxCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float2 prevNdc = prevClip.xy / max(abs(prevClip.w), 1e-6f);
 
     TextureCube<float4> skyboxTexture = ResourceDescriptorHeap[envInfo.cubeMapDescriptorIndex];
-    const float3 color = skyboxTexture.SampleLevel(g_linearClamp, worldDir, 0.0f).xyz;
-
+    float3 color = skyboxTexture.SampleLevel(g_linearClamp, worldDir, 0.0f).xyz;
     RWTexture2D<float4> hdrTarget = ResourceDescriptorHeap[hdrTargetUAVIndex];
     hdrTarget[pixel] = float4(color, 1.0f);
 

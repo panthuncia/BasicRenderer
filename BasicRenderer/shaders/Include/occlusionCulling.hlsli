@@ -211,4 +211,85 @@ void OcclusionCullingPerspectiveTexture2D(
     fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
 }
 
+bool ConservativeAnyHitTexture2DArraySphereQuery(
+    Texture2DArray<uint> queryTexture,
+    uint arrayLayer,
+    uint2 baseResolution,
+    in const Camera camera,
+    float3 viewSpaceCenter,
+    float scaledBoundingRadius,
+    out uint sampledMipLevel,
+    out bool queryClipped)
+{
+    viewSpaceCenter.y = -viewSpaceCenter.y;
+
+    float4 vLBRT;
+    if (camera.isOrtho)
+    {
+        viewSpaceCenter.y = -viewSpaceCenter.y; // Un-invert for ortho (matches OcclusionCulling)
+        vLBRT = sphere_screen_extents_ortho(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+    }
+    else
+    {
+        vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+        vLBRT.x = -vLBRT.x;
+        vLBRT.z = -vLBRT.z;
+    }
+
+    const float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
+    const float4 vUV = vLBRT.xwzy * vToUV + 0.5f;
+    const float2 uvMin = vUV.xy;
+    const float2 uvMax = vUV.zw;
+
+    if (uvMax.x < 0.0f || uvMin.x > 1.0f ||
+        uvMax.y < 0.0f || uvMin.y > 1.0f)
+    {
+        sampledMipLevel = 0u;
+        queryClipped = false;
+        return false;
+    }
+
+    queryClipped = any(uvMin < 0.0f.xx) || any(uvMax > 1.0f.xx);
+
+    const float2 clampedUvMin = saturate(uvMin);
+    const float2 clampedUvMax = saturate(uvMax);
+    const float2 baseResolutionF = float2(baseResolution);
+    const float2 minTexel = clamp(baseResolutionF * clampedUvMin, 0.0f.xx, baseResolutionF - 1.0f.xx);
+    const float2 maxTexel = clamp(baseResolutionF * clampedUvMax, 0.0f.xx, baseResolutionF - 1.0f.xx);
+    const float pixelWidth = max(maxTexel.x - minTexel.x, maxTexel.y - minTexel.y);
+    const uint sampleWidth = 2u;
+    const uint maxMipLevel = firstbithigh(max(baseResolution.x, baseResolution.y));
+
+    sampledMipLevel = min(
+        (uint)clamp(ceil(log2(max(pixelWidth, 1.0f))) - log2((float)sampleWidth), 0.0f, (float)maxMipLevel),
+        maxMipLevel);
+
+    const int2 quadCornerTexel = int2(minTexel) >> sampledMipLevel;
+    const int2 minCornerTexel = int2(minTexel) >> sampledMipLevel;
+    const int2 maxCornerTexel = int2(maxTexel) >> sampledMipLevel;
+    const int2 atMipPixelWidth = maxCornerTexel - minCornerTexel + 1;
+    const int2 texelBounds = max(int2(0, 0), (int2(baseResolution) >> sampledMipLevel) - 1);
+
+    [loop]
+    for (uint x = 0u; x <= sampleWidth; ++x)
+    {
+        [loop]
+        for (uint y = 0u; y <= sampleWidth; ++y)
+        {
+            if ((int)x >= atMipPixelWidth.x || (int)y >= atMipPixelWidth.y)
+            {
+                continue;
+            }
+
+            const int2 sampleTexel = clamp(quadCornerTexel + int2(x, y), int2(0, 0), texelBounds);
+            if (queryTexture.Load(int4(sampleTexel, arrayLayer, sampledMipLevel)) != 0u)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 #endif // OCCLUSION_CULLING_HLSLI

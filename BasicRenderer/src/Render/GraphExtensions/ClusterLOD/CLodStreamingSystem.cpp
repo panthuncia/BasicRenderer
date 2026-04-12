@@ -218,6 +218,9 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     std::fill(m_streamingResidencyInitializedBitsCpu.begin(), m_streamingResidencyInitializedBitsCpu.end(), 0u);
     m_streamingRequestsInProgress.clear();
     m_pendingLoadPriorityByGroup.clear();
+    m_streamingDiagnosticTick = 0;
+    m_lastInProgressSuppressionLogTick.clear();
+    m_lastMeshManagerQueuedLogTick.clear();
     m_streamingActiveGroupScanCount = 0u;
     m_streamingNonResidentBitsUploadPending = true;
     m_streamingDomainDirty = true;
@@ -287,7 +290,9 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
         [this]() {
             ProcessStreamingRequestsBudgeted();
         }));
-    streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("SkinningPass"));
+    // Keep the CLod front-end behind the visibility/depth clear so the graph
+    // cannot legally sink ClearVisibilityBufferPass after CLod rasterization.
+    streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("ClearVisibilityBufferPass"));
     outPasses.push_back(std::move(streamingBeginPassDesc));
 }
 
@@ -356,8 +361,10 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                 .PinToQueue(m_uploadQueueSlot));
     }
 
-    // Schedule a readback copy pass to capture the load counter + load requests
-    // produced by culling pass 2 into a staging buffer ring slot.
+    // Schedule a readback copy pass immediately after the final CLod shadow
+    // culling writer. Anchoring this to a later unrelated pass can let the
+    // scheduler synchronize the copy queue against the wrong producer queue,
+    // which risks reading stale or zeroed streaming counters.
     if (m_streamingReadbackFenceHandle.IsValid() && !m_readbackStagingSlots.empty()) {
         uint32_t selectedSlot = UINT32_MAX;
         uint64_t fv = 0;
@@ -401,7 +408,7 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                         slot.usedGroupsBufferStaging,
                         m_streamingReadbackFenceHandle,
                         fv))
-                    .At(RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass"))
+                    .At(RenderGraph::ExternalInsertPoint::After("CLodShadow::HierarchialCullingPass2"))
                     .PreferQueue(QueueKind::Copy));
 
             // Wake the background worker so it can HostWait for the new fence value.
@@ -472,6 +479,39 @@ bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest&
                 SetPendingLoadPriority(groupIndex, priority);
             }
         }
+
+        constexpr uint64_t kDiagnosticLogCooldownTicks = 120u;
+        const uint64_t currentTick = m_streamingDiagnosticTick;
+        bool shouldLog = true;
+        if (const auto it = m_lastInProgressSuppressionLogTick.find(groupIndex);
+            it != m_lastInProgressSuppressionLogTick.end()) {
+            shouldLog = currentTick >= it->second + kDiagnosticLogCooldownTicks;
+        }
+
+        if (shouldLog) {
+            m_lastInProgressSuppressionLogTick[groupIndex] = currentTick;
+
+            MeshManager::CLodStreamingDebugStats debugStats{};
+            bool meshQueued = false;
+            if (MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr) {
+                meshQueued = meshManager->IsCLodGroupDiskIOQueued(groupIndex);
+                debugStats = meshManager->GetCLodStreamingDebugStats();
+            }
+
+            spdlog::info(
+                "CLod streaming diag[tick={}]: suppressing duplicate load for group {} because it is already in progress; newPriority={} accumulatedPriority={} meshQueued={} cpuPending={} cpuInProgress={} meshPending={} meshQueuedOrInFlight={} meshCompleted={}",
+                currentTick,
+                groupIndex,
+                priority,
+                GetPendingLoadPriority(groupIndex),
+                meshQueued ? 1u : 0u,
+                static_cast<uint32_t>(m_pendingStreamingRequests.size()),
+                static_cast<uint32_t>(m_streamingRequestsInProgress.size()),
+                debugStats.queuedRequests,
+                debugStats.queuedOrInFlightGroups,
+                debugStats.completedResults);
+        }
+
         return false;
     }
 
@@ -1185,6 +1225,7 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                     m_readbackGapPinnedGroups[groupIndex] = m_readbackGeneration;
                 }
             }
+
             TouchGroupPages(groupIndex);
         }
         else {
@@ -1203,6 +1244,8 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
 }
 
 void CLodStreamingSystem::PollCompletedReadbackSlots() {
+    ++m_streamingDiagnosticTick;
+
     // Drain decoded (groupIndex, priority) pairs produced by the background worker thread.
     std::vector<std::pair<uint32_t, uint32_t>> batch;
     std::vector<uint32_t> usedGroupsBatch;
@@ -1510,6 +1553,29 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
 
         // If disk I/O is already queued/in-flight for this group, skip.
         if (meshManager->IsCLodGroupDiskIOQueued(groupIndex)) {
+            constexpr uint64_t kDiagnosticLogCooldownTicks = 120u;
+            const uint64_t currentTick = m_streamingDiagnosticTick;
+            bool shouldLog = true;
+            if (const auto it = m_lastMeshManagerQueuedLogTick.find(groupIndex);
+                it != m_lastMeshManagerQueuedLogTick.end()) {
+                shouldLog = currentTick >= it->second + kDiagnosticLogCooldownTicks;
+            }
+
+            if (shouldLog) {
+                m_lastMeshManagerQueuedLogTick[groupIndex] = currentTick;
+                const auto debugStats = meshManager->GetCLodStreamingDebugStats();
+                spdlog::info(
+                    "CLod streaming diag[tick={}]: skipping group {} because MeshManager still reports it queued/in-flight; priority={} cpuPending={} cpuInProgress={} meshPending={} meshQueuedOrInFlight={} meshCompleted={}",
+                    currentTick,
+                    groupIndex,
+                    GetPendingLoadPriority(groupIndex),
+                    static_cast<uint32_t>(m_pendingStreamingRequests.size()),
+                    static_cast<uint32_t>(m_streamingRequestsInProgress.size()),
+                    debugStats.queuedRequests,
+                    debugStats.queuedOrInFlightGroups,
+                    debugStats.completedResults);
+            }
+
             processed++;
             continue;
         }

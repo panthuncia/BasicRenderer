@@ -6,6 +6,7 @@
 #define DX12RENDERER_H
 
 #include <windows.h>
+#include <d3d12.h>
 #include <chrono>
 #include <directxmath.h>
 #include <memory>
@@ -21,9 +22,6 @@
 #include "Scene/Scene.h"
 #include "Managers/InputManager.h"
 #include "Render/RenderGraph/RenderGraph.h"
-#include "Resources/ShadowMaps.h"
-#include "RenderPasses/DebugRenderPass.h"
-#include "NsightAftermathGpuCrashTracker.h"
 #include "Managers/ViewManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/MeshManager.h"
@@ -72,8 +70,7 @@ private:
 
 class Renderer {
 public:
-    Renderer() : m_gpuCrashTracker(m_markerMap){
-    }
+    Renderer() = default;
 
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
@@ -85,7 +82,6 @@ public:
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
-    void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 	bool IsInitialized() const { return m_isInitialized; }
@@ -133,6 +129,7 @@ private:
 	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
     std::shared_ptr<PixelBuffer> m_defaultEnvironmentCubemap = nullptr;
     std::shared_ptr<PixelBuffer> m_defaultEnvironmentPrefilteredCubemap = nullptr;
+    std::shared_ptr<PixelBuffer> m_blueNoiseTexture = nullptr;
     bool m_warnedUsingFallbackEnvironment = false;
     bool m_warnedNullScene = false;
     bool m_warnedMissingPrimaryCamera = false;
@@ -235,11 +232,6 @@ private:
 
 	std::vector<SettingsManager::Subscription> m_settingsSubscriptions;
 
-    GpuCrashTracker::MarkerMap m_markerMap;
-    // Nsight Aftermath instrumentation
-    GFSDK_Aftermath_ContextHandle m_hAftermathCommandListContext;
-    GpuCrashTracker m_gpuCrashTracker;
-
 	DeferredFunctions m_preFrameDeferredFunctions;
     int32_t m_lastFrameTaskNodeIndex = -1;
     br::render::SceneRenderBridge m_sceneRenderBridge;
@@ -276,7 +268,6 @@ private:
 
     class CoreResourceProvider : public IResourceProvider {
 	public:
-        std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_upscaledHDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
@@ -286,8 +277,6 @@ private:
 				return m_gbufferMotionVectors;
             if (key.ToString() == Builtin::Color::HDRColorTarget)
 				return m_HDRColorTarget;
-            if (key.ToString() == Builtin::DebugTexture)
-				return m_currentDebugTexture;
             if (key.ToString() == Builtin::PostProcessing::UpscaledHDR)
 				return m_upscaledHDRColorTarget;
 		
@@ -313,7 +302,6 @@ private:
 		}
 
         void Cleanup() {
-            m_currentDebugTexture = nullptr;
 			m_HDRColorTarget = nullptr;
 			m_upscaledHDRColorTarget = nullptr;
 			m_gbufferMotionVectors = nullptr;

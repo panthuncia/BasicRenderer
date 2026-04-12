@@ -111,7 +111,7 @@ void CommitDeepVisibilityStatsWave(
 [numthreads(8, 8, 1)]
 void CLodDeepVisibilityResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 
     Texture2D<uint> headPointers = ResourceDescriptorHeap[CLOD_DEEP_VISIBILITY_RESOLVE_HEAD_POINTER_DESCRIPTOR_INDEX];
     RWTexture2D<float4> hdrTarget = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Color::HDRColorTarget)];

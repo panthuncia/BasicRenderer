@@ -675,7 +675,7 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, diceEntry.visibleClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, diceEntry.visibleClusterIndex);
     const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
     const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
     const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);

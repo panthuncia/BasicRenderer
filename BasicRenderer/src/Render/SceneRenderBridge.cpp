@@ -124,7 +124,6 @@ void DestroyRendererCamera(flecs::entity entity, ViewManager& viewManager) {
 void DestroyRendererLight(flecs::entity entity, LightManager& lightManager) {
     if (entity.has<Components::LightViewInfo>()) {
         lightManager.RemoveLight(entity);
-        entity.remove<Components::LightViewInfo>();
     }
     entity.remove<Components::DepthMap>();
 }
@@ -288,14 +287,12 @@ LightResourceSignature BuildLightSignature(const Components::Light& light, uint1
 }
 
 void ApplyLightRendererBindings(Components::Light& light, flecs::entity dst) {
+    light.lightInfo.shadowViewInfoIndex = -1;
+    light.lightInfo.shadowMapIndex = -1;
+    light.lightInfo.shadowSamplerIndex = -1;
+
     if (const auto* viewInfo = dst.try_get<Components::LightViewInfo>()) {
         light.lightInfo.shadowViewInfoIndex = viewInfo->viewInfoBufferIndex;
-        if (const auto* depthMap = dst.try_get<Components::DepthMap>()) {
-            if (depthMap->depthMap) {
-                light.lightInfo.shadowMapIndex = depthMap->depthMap->GetSRVInfo(0).slot.index;
-                light.lightInfo.shadowSamplerIndex = Sampler::GetDefaultShadowSampler()->GetDescriptorIndex();
-            }
-        }
     }
 }
 
@@ -319,12 +316,6 @@ void SyncLightDerivedState(
         AddLightReturn addInfo = lightManager.AddLight(&rendererLight.lightInfo, dst.id());
         dst.set<Components::LightViewInfo>(addInfo.lightViewInfo);
 
-        if (addInfo.shadowMap.has_value()) {
-            dst.set<Components::DepthMap>(*addInfo.shadowMap);
-        } else {
-            dst.remove<Components::DepthMap>();
-        }
-
         if (sceneFrustumPlanes) {
             dst.set<Components::FrustumPlanes>(*sceneFrustumPlanes);
         } else {
@@ -338,6 +329,8 @@ void SyncLightDerivedState(
     } else if (sceneFrustumPlanes) {
         dst.set<Components::FrustumPlanes>(*sceneFrustumPlanes);
     }
+
+	dst.remove<Components::DepthMap>();
 
     ApplyLightRendererBindings(rendererLight, dst);
     if (const auto* viewInfo = dst.try_get<Components::LightViewInfo>()) {
@@ -463,6 +456,7 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
             renderable.stableID = stableSceneID.value;
             renderable.matrix = matrix;
             renderable.meshInstances = meshInstances;
+            renderable.transformChanged = transformChanged;
             if (const auto* name = src.try_get<Components::Name>()) {
                 renderable.name = name->name;
             }
@@ -557,6 +551,15 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     const auto renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     const auto shadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution")();
     const auto directionalCascadeCount = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+    const auto maxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance")();
+    const auto directionalShadowVerticalExtent = SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")();
+    const bool lightResourceSettingsChanged =
+        !m_hasLightResourceSettings ||
+        m_lastShadowResolution != shadowResolution ||
+        m_lastDirectionalCascadeCount != directionalCascadeCount ||
+        m_lastMaxShadowDistance != maxShadowDistance ||
+        m_lastDirectionalShadowVerticalExtent != directionalShadowVerticalExtent ||
+        m_lastHasPrimaryCamera != snapshot.hasPrimaryCamera;
 
     ++m_currentIngestionFrame;
     m_primaryCameraEntityId = 0;
@@ -575,7 +578,11 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
         // Entity is in the changed list, so always update common components
         CopyCommonComponents(dst, renderable.stableID, renderable.name, renderable.matrix);
         entityState.lastMatrix = renderable.matrix.matrix;
-        dst.add<Components::RenderTransformUpdated>();
+        if (renderable.transformChanged || isNew) {
+            dst.add<Components::RenderTransformUpdated>();
+        } else {
+            dst.remove<Components::RenderTransformUpdated>();
+        }
 
         if (isNew || meshChanged) {
             SyncRenderableDerivedState(dst, &renderable.meshInstances, *objectManager);
@@ -627,6 +634,32 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             dst.remove<Components::SkipShadowPass>();
         }
     }
+
+    if (lightResourceSettingsChanged) {
+        auto resyncQuery = renderWorld.query_builder<Components::Light>()
+            .with<Components::LightViewInfo>()
+            .with<BridgedSceneEntity>()
+            .with<Components::Active>()
+            .build();
+        resyncQuery.each([&](flecs::entity entity, Components::Light& light) {
+            const auto* frustumPlanes = entity.try_get<Components::FrustumPlanes>();
+            SyncLightDerivedState(
+                entity,
+                light,
+                frustumPlanes,
+                *lightManager,
+                shadowResolution,
+                directionalCascadeCount,
+                m_primaryCameraEntityId != 0);
+        });
+    }
+
+    m_lastShadowResolution = shadowResolution;
+    m_lastDirectionalCascadeCount = directionalCascadeCount;
+    m_lastMaxShadowDistance = maxShadowDistance;
+    m_lastDirectionalShadowVerticalExtent = directionalShadowVerticalExtent;
+    m_lastHasPrimaryCamera = snapshot.hasPrimaryCamera;
+    m_hasLightResourceSettings = true;
 
     // Remove stale entities using alive sets from the snapshot
     std::vector<uint64_t> staleStableSceneIDs;

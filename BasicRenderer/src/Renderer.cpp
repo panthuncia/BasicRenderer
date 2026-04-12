@@ -28,14 +28,10 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "RenderPasses/DebugRenderPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
-#include "RenderPasses/ObjectCullingPass.h"
-#include "RenderPasses/MeshletCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
-#include "RenderPasses/SkinningPass.h"
 #include "RenderPasses/Base/ComputePass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
@@ -48,9 +44,6 @@
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "NsightAftermathGpuCrashTracker.h"
-#include "Aftermath/GFSDK_Aftermath.h"
-#include "NsightAftermathHelpers.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
@@ -217,7 +210,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().Setup();
 
     CreateTextures();
-    CreateGlobalResources();
 
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
@@ -241,6 +233,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
     m_pTextureFactory = TextureFactory::CreateUnique();
+
+    CreateGlobalResources();
 
 	m_managerInterface.SetManagers(
         m_pMeshManager.get(), 
@@ -622,13 +616,6 @@ void Renderer::RunRenderResourceSyncStage() {
         }
     });
 
-    // Clean up RenderTransformUpdated tags so they're fresh for next frame's IngestSnapshot.
-    // Defer structural changes to avoid modifying tables while the query has them locked.
-    world.defer_begin();
-    m_renderTransformUpdatedCleanupQuery.each([](flecs::entity e) {
-        e.remove<Components::RenderTransformUpdated>();
-    });
-    world.defer_end();
 }
 
 void Renderer::BeginFrameTaskGraphCapture() {
@@ -649,6 +636,14 @@ void Renderer::PublishFrameTaskGraphCapture() {
 }
 
 void Renderer::CreateGlobalResources() {
+    auto blueNoiseAsset = LoadTextureFromFile(L"BuiltinTextures/BlueNoise470.png", nullptr, false);
+    if (blueNoiseAsset) {
+        blueNoiseAsset->EnsureUploaded(*m_pTextureFactory);
+        m_blueNoiseTexture = blueNoiseAsset->ImagePtr();
+        if (m_blueNoiseTexture) {
+            m_blueNoiseTexture->SetName("Blue Noise 2D");
+        }
+    }
 }
 
 void Renderer::CreateDefaultEnvironmentResources() {
@@ -759,15 +754,17 @@ flecs::entity Renderer::GetValidatedPrimaryRenderCamera(bool attemptResync) {
 void Renderer::SetSettings() {
 	auto& settingsManager = SettingsManager::GetInstance();
 
-    uint8_t numDirectionalCascades = 4;
-	float maxShadowDistance = 30.0f;
+    uint8_t numDirectionalCascades = static_cast<uint8_t>(CLodVirtualShadowDefaultClipmapCount);
+	float maxShadowDistance = 100.0f;
+    float directionalShadowVerticalExtent = maxShadowDistance;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
-    settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
+    settingsManager.registerSetting<float>("directionalShadowVerticalExtent", directionalShadowVerticalExtent);
+        settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1f, maxShadowDistance, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
-	settingsManager.registerSetting<bool>("enableShadows", false);
+	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
     settingsManager.registerSetting<uint16_t>("reflectionCubemapResolution", 512);
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
@@ -799,7 +796,13 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableGTAO", m_gtaoEnabled);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
-    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::WorkGraph);
+    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
+    settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);
+    settingsManager.registerSetting<uint32_t>(CLodPageJobDiameterThresholdSettingName, 64u);
+    settingsManager.registerSetting<float>(CLodPageJobSparseRatioSettingName, 0.5f);
+    settingsManager.registerSetting<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName, 32u);
+    settingsManager.registerSetting<uint32_t>(CLodPageJobRecordCapacitySettingName, CLodPageJobDefaultRecordCapacity);
+    settingsManager.registerSetting<bool>(CLodPageJobForceAllSettingName, false);
     settingsManager.registerSetting<bool>("enableBloom", m_bloom);
     settingsManager.registerSetting<bool>("enableJitter", m_jitter);
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
@@ -812,12 +815,13 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
     settingsManager.registerSetting<bool>("queueSchedulingEnableLogging", false);
-    settingsManager.registerSetting<float>("queueSchedulingWidthScale", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingWidthScale", 0.0f); // Disable multi-queue scheduling
     settingsManager.registerSetting<float>("queueSchedulingPenaltyBias", 0.0f);
     settingsManager.registerSetting<float>("queueSchedulingMinPenalty", 1.0f);
     settingsManager.registerSetting<float>("queueSchedulingResourcePressureWeight", 1.0f);
@@ -826,7 +830,20 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
-    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, false);
+    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
+	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
+    settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName, CLodVirtualShadowDefaultBackingResolution);
+    settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName, CLodVirtualShadowDefaultPhysicalPageCount);
+    settingsManager.registerSetting<float>(CLodDirectionalVirtualShadowLodBiasSettingName, CLodVirtualShadowDefaultDirectionalLodBias);
+    settingsManager.registerSetting<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName, true);
+    settingsManager.registerSetting<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName, 1.0f);
+    settingsManager.registerSetting<float>(CLodDirectionalVirtualShadowSourceAngleDegreesSettingName, CLodVirtualShadowDefaultDirectionalSourceAngleDegrees);
+    settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName, CLodVirtualShadowDefaultSmrtRayCountDirectional);
+    settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName, CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional);
+    settingsManager.registerSetting<float>(CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName, CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees);
+    settingsManager.registerSetting<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName, CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional);
+    settingsManager.registerSetting<float>(CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName, CLodVirtualShadowDefaultSmrtMaxTraceDistanceWorld);
+	settingsManager.registerSetting<uint32_t>(CLodReyesResourceBudgetBytesSettingName, 512u*1024u*1024u); // 500 MB for reyes
 	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -894,10 +911,42 @@ void Renderer::SetSettings() {
         (void)newValue;
         rebuildRenderGraph = true;
         }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>(CLodEnablePageJobVSMSettingName, [this](const bool& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint32_t>(CLodPageJobDiameterThresholdSettingName, [this](const uint32_t& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<float>(CLodPageJobSparseRatioSettingName, [this](const float& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName, [this](const uint32_t& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint32_t>(CLodPageJobRecordCapacitySettingName, [this](const uint32_t& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>(CLodPageJobForceAllSettingName, [this](const bool& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
         m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>(CLodDisableReyesRasterizationSettingName, [this](const bool& newValue) {
             (void)newValue;
             rebuildRenderGraph = true;
             }));
+        m_settingsSubscriptions.push_back(settingsManager.addObserver<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName, [this](const uint32_t& newValue) {
+            (void)newValue;
+            rebuildRenderGraph = true;
+            }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint32_t>(CLodReyesResourceBudgetBytesSettingName, [this](const uint32_t& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
 		m_meshletCulling = newValue;
 		rebuildRenderGraph = true;
@@ -909,11 +958,16 @@ void Renderer::SetSettings() {
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
         m_jitter = newValue;
         }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint8_t>("numDirectionalLightCascades", [](const uint8_t& newValue) {
+		auto& settingsManager = SettingsManager::GetInstance();
+		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(newValue, 0.1f, maxShadowDistance, maxShadowDistance));
+        }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [](const float& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
 		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
-		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
-        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
+		auto maxShadowDistance = std::max(newValue, 1.0f);
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1f, maxShadowDistance, maxShadowDistance));
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
         ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
@@ -1023,10 +1077,6 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
-#if defined(ENABLE_NSIGHT_AFTERMATH)
-    m_gpuCrashTracker.Initialize();
-#endif
-
     DeviceManager::GetInstance().Initialize();
 
 	auto device = DeviceManager::GetInstance().GetDevice();
@@ -1034,20 +1084,6 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().InitializeAdapter();
 
     auto result = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing, m_swapChain);
-
-
-#if defined(ENABLE_NSIGHT_AFTERMATH)
-    const uint32_t aftermathFlags =
-        GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.
-        GFSDK_Aftermath_FeatureFlags_EnableResourceTracking |    // Enable tracking of resources.
-        GFSDK_Aftermath_FeatureFlags_CallStackCapturing |        // Capture call stacks for all draw calls, compute dispatches, and resource copies.
-        GFSDK_Aftermath_FeatureFlags_GenerateShaderDebugInfo;    // Generate debug information for shaders.
-
-    AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_DX12_Initialize(
-        GFSDK_Aftermath_Version_API,
-        aftermathFlags,
-        rhi::dx12::get_device(device)));
-#endif
 
     // Create RTV descriptor heap
 	rhi::DescriptorHeapDesc rtvHeapDesc = {};
@@ -1280,7 +1316,9 @@ void Renderer::Update(float elapsedSeconds) {
 
     auto camera = GetValidatedPrimaryRenderCamera(false);
     if (!camera) {
-        rebuildRenderGraph = true;
+        camera = GetValidatedPrimaryRenderCamera(true);
+    }
+    if (!camera) {
         spdlog::warn("Renderer: bridged primary camera is unavailable after scene sync. Skipping frame update work.");
         return;
     }
@@ -1347,6 +1385,14 @@ void Renderer::Update(float elapsedSeconds) {
         ZoneScopedN("Renderer::Update::RenderGraphUpdate");
         currentRenderGraph->Update(context, deviceManager.GetDevice());
     });
+
+    // Clear transform-update tags only after render-graph update so passes such as
+    // virtual shadow invalidation can still consume same-frame movement signals.
+    world.defer_begin();
+    m_renderTransformUpdatedCleanupQuery.each([](flecs::entity e) {
+        e.remove<Components::RenderTransformUpdated>();
+    });
+    world.defer_end();
 
     runCapturedStage("ScheduleSceneUpdate", [&]() {
         ZoneScopedN("Renderer::Update::ScheduleSceneUpdate");
@@ -1515,6 +1561,7 @@ void Renderer::Render() {
         orgSettings.numFramesInFlight        = m_numFramesInFlight;
         orgSettings.collectPipelineStatistics = false;
         orgSettings.useAsyncCompute           = sm.getSettingGetter<bool>("useAsyncCompute")();
+        orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
         orgSettings.autoAliasMode             = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
         orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
         orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
@@ -1692,6 +1739,9 @@ void Renderer::Cleanup() {
     m_currentEnvironment.reset();
     m_defaultEnvironmentCubemap.reset();
     m_defaultEnvironmentPrefilteredCubemap.reset();
+    if (currentScene) {
+        currentScene->Deactivate();
+    }
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
 	m_pViewManager.reset();
@@ -1749,6 +1799,9 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
         m_completedSceneSnapshot.reset();
     }
         m_sceneRenderBridge.Clear(m_managerInterface);
+        if (currentScene) {
+            currentScene->Deactivate();
+        }
         currentScene.reset();
         rebuildRenderGraph = true;
         IsSceneReadyForFrame(true);
@@ -1757,6 +1810,9 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 
 	if (currentScene != newScene) {
 		m_sceneRenderBridge.Clear(m_managerInterface);
+        if (currentScene) {
+            currentScene->Deactivate();
+        }
 	}
 
     m_sceneTaskCompleted.store(false);
@@ -1930,7 +1986,7 @@ void Renderer::CreateRenderGraph() {
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        uint maxClusters = 100000; // TODO: make this configurable based on scene content   
+        uint maxClusters = 1000000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
             std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");
@@ -1939,6 +1995,12 @@ void Renderer::CreateRenderGraph() {
             currentRenderGraph->RegisterExtension(
                 std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(maxClusters)),
                 "CLodAlpha");
+        }
+        constexpr bool kEnableShadowCLodVariant = true;
+        if (kEnableShadowCLodVariant) {
+            currentRenderGraph->RegisterExtension(
+                std::make_unique<CLodExtension>(CLodExtensionType::Shadow, static_cast<uint32_t>(maxClusters)),
+                "CLodShadow");
         }
 		m_renderGraphRuntimeInitialized = true;
     }
@@ -1957,6 +2019,7 @@ void Renderer::CreateRenderGraph() {
 	newGraph->RegisterProvider(m_pMaterialManager.get());
 	newGraph->RegisterProvider(m_pSkeletonManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
+    newGraph->PrepareExtensionsForBuild();
 
     auto& depth = primaryCameraEntity.get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth.depthMap;
@@ -1971,6 +2034,7 @@ void Renderer::CreateRenderGraph() {
         newGraph->RegisterResource(Builtin::PrimaryCamera::ProjectedDepthTexture, depthTexture);
     }
     newGraph->RegisterResource(Builtin::Backbuffer, m_dynamicBackbuffer);
+    newGraph->RegisterResource(Builtin::PerFrameBuffer, ResourceManager::GetInstance().GetPerFrameBuffer());
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1980,9 +2044,6 @@ void Renderer::CreateRenderGraph() {
     BuildBRDFIntegrationPass(newGraph.get());
 
     BuildEnvironmentPipeline(newGraph.get());
-
-    // Skinning comes before Z prepass
-    newGraph->BuildComputePass<SkinningPass>("SkinningPass");
     
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
@@ -2027,14 +2088,6 @@ void Renderer::CreateRenderGraph() {
         BuildLightClusteringPipeline(newGraph.get());
     }
 
-    auto& debugPassBuilder = newGraph->BuildRenderPass<DebugRenderPass>("DebugPass");
-
-    auto drawShadows = getShadowsEnabled();
-    if (drawShadows) {
-        BuildMainShadowPass(newGraph.get());
-        debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
-    }
-
     // Linear depth downsample is scheduled by CLodExtension between phase-1 and phase-2.
 	
     auto currentEnvironmentCubemap = m_defaultEnvironmentCubemap;
@@ -2055,13 +2108,11 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, currentEnvironmentCubemap);
     newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, currentEnvironmentPrefilteredCubemap);
 
-    if (m_currentEnvironment != nullptr) {
-        newGraph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");
+    if (m_blueNoiseTexture) {
+        newGraph->RegisterResource(Builtin::Noise::BlueNoise2D, m_blueNoiseTexture);
     }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
-
-    BuildPPLLPipeline(newGraph.get());
 
 	// Start of post-processing passes
 
@@ -2078,10 +2129,10 @@ void Renderer::CreateRenderGraph() {
     rg::memory::SetResourceUsageHint(*histogramBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
-        newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
-        newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
+    newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
+    newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
 
-        newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
+    newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());
@@ -2106,13 +2157,6 @@ void Renderer::CreateRenderGraph() {
     newGraph->BuildRenderPass<DebugResolvePass>("DebugResolvePass");
 
     newGraph->BuildRenderPass<MenuRenderPass>("MenuRenderPass");
-	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
-		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
-		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
-        if (debugPass) {
-            debugPass->SetTexture(m_coreResourceProvider.m_currentDebugTexture.get());
-        }
-	}
 
     if (getDrawBoundingSpheres()) {
         newGraph->BuildRenderPass<DebugSpherePass>("DebugSpherePass");
@@ -2120,7 +2164,7 @@ void Renderer::CreateRenderGraph() {
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
 
-    newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
+    //newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
 
     newGraph->CompileStructural();
     newGraph->Setup();
@@ -2148,20 +2192,5 @@ void Renderer::SetEnvironmentInternal(std::wstring name) {
             spdlog::warn("Environment file not found: {}. Falling back to blank environment resources.", envpath.string());
             m_warnedUsingFallbackEnvironment = true;
         }
-    }
-}
-
-void Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
-    m_coreResourceProvider.m_currentDebugTexture = texture;
-	if (currentRenderGraph == nullptr) {
-		return;
-	}
-    auto pPass = currentRenderGraph->GetRenderPassByName("DebugPass");
-    if (pPass != nullptr) {
-        auto pDebugPass = std::dynamic_pointer_cast<DebugRenderPass>(pPass);
-        pDebugPass->SetTexture(texture.get());
-    }
-    else {
-        spdlog::warn("Debug pass does not exist");
     }
 }

@@ -5,6 +5,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
+#include "Utilities/Utilities.h"
 #include "../shaders/PerPassRootConstants/bloomSampleRootConstants.h"
 
 struct BloomSamplePassInputs {
@@ -83,19 +84,15 @@ public:
         misc[MIP_INDEX] = m_mipIndex;
         misc[MIP_WIDTH] = m_pHDRTarget->GetWidth() >> m_mipIndex;
         misc[MIP_HEIGHT] = m_pHDRTarget->GetHeight() >> m_mipIndex;
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-
-        float miscFloats[NumMiscFloatRootConstants] = {};
         if (m_isUpsample) {
-            miscFloats[FILTER_RADIUS] = 0.001f; // Kernel size
-            miscFloats[ASPECT_RATIO] = misc[MIP_WIDTH] / (float)misc[MIP_HEIGHT]; // Aspect ratio
+            misc[BLOOM_SAMPLE_FILTER_RADIUS] = as_uint(0.001f); // Kernel size
+            misc[BLOOM_SAMPLE_ASPECT_RATIO] = as_uint(misc[MIP_WIDTH] / static_cast<float>(misc[MIP_HEIGHT])); // Aspect ratio
         }
         else {
-            miscFloats[SRC_TEXEL_SIZE_X] = 1.0f / misc[MIP_WIDTH]; // Texel size X
-            miscFloats[SRC_TEXEL_SIZE_Y] = 1.0f / misc[MIP_HEIGHT]; // Texel size Y
+            misc[SRC_TEXEL_SIZE_X] = as_uint(1.0f / misc[MIP_WIDTH]); // Texel size X
+            misc[SRC_TEXEL_SIZE_Y] = as_uint(1.0f / misc[MIP_HEIGHT]); // Texel size Y
         }
-        //commandList->SetGraphicsRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, &miscFloats, 0);
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, miscFloats);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
         commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
         return {};

@@ -13,8 +13,7 @@ public:
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
         builder->WithCopySource(
-            "Builtin::PrimaryCamera::LinearDepthMap",
-            "Builtin::Shadows::LinearShadowMaps")
+            "Builtin::PrimaryCamera::LinearDepthMap")
             .WithCopyDest(Builtin::LastFrameLinearDepthMaps);
     }
 

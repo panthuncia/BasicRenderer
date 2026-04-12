@@ -629,3 +629,10 @@ void Mesh::SetMaterialDataIndex(unsigned int index) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
 }
+
+void Mesh::SetRasterBucketIndex(unsigned int index) {
+	m_perMeshBufferData.rasterBucketIndex = index;
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+}

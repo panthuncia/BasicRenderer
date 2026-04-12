@@ -188,6 +188,30 @@ void GBufferMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             "finalized shader should not contain unresolved descriptor calls");
         }, failureCount);
 
+    RunTest("per-frame builtin rewrite resolves descriptor lookup", []() {
+        const std::string source = R"(
+[numthreads(8, 8, 1)]
+void UsesPerFrameBuiltinCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
+    uint cameraIndex = ResourceDescriptorIndex(Builtin::CameraBuffer);
+    uint frameIndex = perFrameBuffer.frameIndex + cameraIndex;
+}
+)";
+
+        PreparedShaderSource prepared =
+            PrepareShaderSourceForEntryPoint(MakeBuffer(source), "UsesPerFrameBuiltinCS");
+
+        std::unordered_map<std::string, std::string> replacementMap = {
+            {"Builtin::PerFrameBuffer", "ResourceDescriptorIndex0"},
+            {"Builtin::CameraBuffer", "ResourceDescriptorIndex1"},
+        };
+        std::string finalized = FinalizePreparedShaderSource(prepared, replacementMap);
+        Require(!Contains(finalized, "Builtin::"), "finalized shader should not contain Builtin::");
+        Require(CollectResourceDescriptorCallsFromText(finalized).empty(),
+            "finalized shader should not contain unresolved descriptor calls");
+        }, failureCount);
+
     RunTest("parse degradation triggers fallback but rewrite still completes", []() {
         const std::string source = R"(
 float BrokenFunction(

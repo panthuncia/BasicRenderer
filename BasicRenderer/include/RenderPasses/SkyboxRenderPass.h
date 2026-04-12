@@ -14,6 +14,7 @@ public:
         builder->WithShaderResource(Builtin::Environment::CurrentCubemap, Builtin::Environment::InfoBuffer)
             .WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap, Builtin::CameraBuffer)
             .WithUnorderedAccess(Builtin::Color::HDRColorTarget, Builtin::GBuffer::MotionVectors);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

@@ -4,6 +4,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "../shaders/PerPassRootConstants/clodReyesResetRootConstants.h"
 
@@ -58,6 +59,8 @@ void ReyesQueueResetPass::DeclareResourceUsages(ComputePassBuilder* builder)
     for (const auto& splitQueueOverflowCounter : m_splitQueueOverflowCounters) {
         builder->WithUnorderedAccess(splitQueueOverflowCounter);
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void ReyesQueueResetPass::Setup() {}

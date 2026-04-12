@@ -20,6 +20,7 @@ public:
 	void DeclareResourceUsages(ComputePassBuilder* builder) {
 		builder->WithShaderResource(Builtin::CameraBuffer, Builtin::Light::ActiveLightIndices, Builtin::Light::InfoBuffer)
 			.WithUnorderedAccess(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer, Builtin::Light::PagesCounter);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {

@@ -4,8 +4,6 @@
 #include "../../generated/BuiltinResources.h"
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
-#include "RenderPasses/VisibilityBufferPass.h"
-#include "RenderPasses/GBufferConstructionPass.h"
 #include "RenderPasses/PrimaryDepthCopyPass.h"
 #include "RenderPasses/VisUtil/BuildPixelListPass.h"
 #include "RenderPasses/VisUtil/EvaluateMaterialGroupsPass.h"
@@ -15,8 +13,6 @@
 #include "RenderPasses/VisUtil/MaterialBlockOffsetsPass.h"
 #include "RenderPasses/VisUtil/BuildMaterialIndirectCommandBufferPass.h"
 #include "RenderPasses/brdfIntegrationPass.h"
-#include "RenderPasses/ShadowPass.h"
-#include "RenderPasses/GBuffer.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
@@ -25,8 +21,7 @@
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/DeferredShadingPass.h"
-#include "RenderPasses/PPLLFillPass.h"
-#include "RenderPasses/PPLLResolvePass.h"
+#include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
@@ -145,21 +140,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     brdfIntegrationTexture->SetName("BRDF Integration Texture");
     brdfIntegrationTexture->EnableIdleDematerialization(120);
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
-
-        graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
-}
-
-void BuildOcclusionCullingPipeline(RenderGraph* graph) {
-
-	bool shadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows")();
-	bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
-	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
-	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
-
-}
-
-void BuildGeneralCullingPipeline(RenderGraph* graph) {
-
+	graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
 }
 
 inline void RegisterVisUtilResources(RenderGraph* graph)
@@ -213,14 +194,6 @@ void BuildGBufferPipeline(RenderGraph* graph) {
     bool clearRTVs = false;
     if (!occlusionCulling || !indirect) {
         clearRTVs = true; // We will not run an earlier pass
-    }
-
-    if (!visibilityRendering) {
-        graph->BuildRenderPass<GBufferPass>("newObjectsPrepass", GBufferPassInputs{
-                enableWireframe,
-                useMeshShaders,
-                indirect,
-                clearRTVs });
     }
     else {
 
@@ -355,22 +328,6 @@ void BuildEnvironmentPipeline(RenderGraph* graph) {
     graph->BuildRenderPass<EnvironmentFilterPass>("Environment Prefilter Pass");
 }
 
-void BuildMainShadowPass(RenderGraph* graph) {
-	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
-	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
-	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
-	bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
-	// TODO: Make a better way of evaluating dependencies between settings. Maybe a graph?
-	indirect = indirect && useMeshShaders; // Mesh shader pipelines are required for indirect draws
-
-    bool clearRTVs = false;
-    if (!occlusionCulling || !indirect) {
-        clearRTVs = true; // We will not run an earlier pass
-    }
-
-    graph->BuildRenderPass<ShadowPass>("ShadowPass", ShadowPassInputs{ wireframe, useMeshShaders, indirect, true, clearRTVs });
-}
-
 void BuildLinearDepthDownsamplePass(RenderGraph* graph) {
     graph->BuildComputePass<DownsamplePass>("LinearDepthDownsamplePass");
 }
@@ -388,6 +345,14 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
 	// Uses existing GBuffer resources
     graph->BuildComputePass<DeferredShadingPass>("DeferredShadingPass");
+
+    // Skybox needs the final opaque depth classification. In the CLod two-phase path,
+    // a second linear-depth copy is inserted immediately before DeferredShadingPass.
+    // Building the skybox here keeps it after that final depth write while still
+    // letting forward/transparent passes blend over the background.
+    if (currentEnvironment != nullptr) {
+        graph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");
+    }
 
 	// Forward pass for materials incompatible with deferred rendering
     graph->BuildRenderPass<ForwardRenderPass>("Forward render pass", ForwardRenderPassInputs{
@@ -421,67 +386,67 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasUAV = true;
     desc.hasNonShaderVisibleUAV = true;
     desc.allowAlias = true;
-    auto PPLLHeadPointerTexture = PixelBuffer::CreateSharedUnmaterialized(desc);
-    PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
-    rg::memory::SetResourceUsageHint(*PPLLHeadPointerTexture, "OIT resources");
-    auto PPLLBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
-        static_cast<uint32_t>(numPPLLNodes),
-        static_cast<uint32_t>(PPLLNodeSize),
-        true,
-        false,
-        false,
-        rhi::HeapType::DeviceLocal);
-    PPLLBuffer->SetAllowAlias(true);
-    PPLLBuffer->SetName("PPLLBuffer");
-    rg::memory::SetResourceUsageHint(*PPLLBuffer, "OIT resources");
-    auto PPLLCounter = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, sizeof(uint32_t), true);
-    {
-        BufferBase::DescriptorRequirements descReq{};
-        descReq.createCBV = false;
-        descReq.createSRV = true;
-        descReq.createUAV = true;
-        descReq.createNonShaderVisibleUAV = true;
-        descReq.uavCounterOffset = 0;
+    //auto PPLLHeadPointerTexture = PixelBuffer::CreateSharedUnmaterialized(desc);
+    //PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
+    //rg::memory::SetResourceUsageHint(*PPLLHeadPointerTexture, "OIT resources");
+    //auto PPLLBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
+    //    static_cast<uint32_t>(numPPLLNodes),
+    //    static_cast<uint32_t>(PPLLNodeSize),
+    //    true,
+    //    false,
+    //    false,
+    //    rhi::HeapType::DeviceLocal);
+    //PPLLBuffer->SetAllowAlias(true);
+    //PPLLBuffer->SetName("PPLLBuffer");
+    //rg::memory::SetResourceUsageHint(*PPLLBuffer, "OIT resources");
+    //auto PPLLCounter = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, sizeof(uint32_t), true);
+    //{
+    //    BufferBase::DescriptorRequirements descReq{};
+    //    descReq.createCBV = false;
+    //    descReq.createSRV = true;
+    //    descReq.createUAV = true;
+    //    descReq.createNonShaderVisibleUAV = true;
+    //    descReq.uavCounterOffset = 0;
 
-        descReq.srvDesc = rhi::SrvDesc{
-            .dimension = rhi::SrvDim::Buffer,
-            .formatOverride = rhi::Format::R32_UInt,
-            .buffer = {
-                .kind = rhi::BufferViewKind::Typed,
-                .firstElement = 0,
-                .numElements = 1,
-                .structureByteStride = 0,
-            },
-        };
+    //    descReq.srvDesc = rhi::SrvDesc{
+    //        .dimension = rhi::SrvDim::Buffer,
+    //        .formatOverride = rhi::Format::R32_UInt,
+    //        .buffer = {
+    //            .kind = rhi::BufferViewKind::Typed,
+    //            .firstElement = 0,
+    //            .numElements = 1,
+    //            .structureByteStride = 0,
+    //        },
+    //    };
 
-        descReq.uavDesc = rhi::UavDesc{
-            .dimension = rhi::UavDim::Buffer,
-            .formatOverride = rhi::Format::R32_UInt,
-            .buffer = {
-                .kind = rhi::BufferViewKind::Typed,
-                .firstElement = 0,
-                .numElements = 1,
-                .structureByteStride = 0,
-                .counterOffsetInBytes = 0,
-            },
-        };
+    //    descReq.uavDesc = rhi::UavDesc{
+    //        .dimension = rhi::UavDim::Buffer,
+    //        .formatOverride = rhi::Format::R32_UInt,
+    //        .buffer = {
+    //            .kind = rhi::BufferViewKind::Typed,
+    //            .firstElement = 0,
+    //            .numElements = 1,
+    //            .structureByteStride = 0,
+    //            .counterOffsetInBytes = 0,
+    //        },
+    //    };
 
-        PPLLCounter->SetDescriptorRequirements(descReq);
-    }
-    PPLLCounter->SetName("PPLLCounter");
-    rg::memory::SetResourceUsageHint(*PPLLCounter, "OIT resources");
+    //    PPLLCounter->SetDescriptorRequirements(descReq);
+    //}
+    //PPLLCounter->SetName("PPLLCounter");
+    //rg::memory::SetResourceUsageHint(*PPLLCounter, "OIT resources");
 
-    graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
-    graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
-    graph->RegisterResource(Builtin::PPLL::Counter, PPLLCounter);
+    //graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
+    //graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
+    //graph->RegisterResource(Builtin::PPLL::Counter, PPLLCounter);
 
-    graph->BuildRenderPass<PPLLFillPass>("PPFillPass", PPLLFillPassInputs{
-        wireframe,
-        numPPLLNodes,
-        useMeshShaders,
-        indirect });
+    //graph->BuildRenderPass<PPLLFillPass>("PPFillPass", PPLLFillPassInputs{
+    //    wireframe,
+    //    numPPLLNodes,
+    //    useMeshShaders,
+    //    indirect });
 
-    graph->BuildRenderPass<PPLLResolvePass>("PPLLResolvePass");
+    //graph->BuildRenderPass<PPLLResolvePass>("PPLLResolvePass");
 }
 
 void BuildBloomPipeline(RenderGraph* graph) {

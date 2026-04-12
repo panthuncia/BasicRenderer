@@ -17,45 +17,17 @@
 #include "DefaultDirection.h"
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Materials/Material.h"
 #include "Mesh/Mesh.h"
 #include "Mesh/VertexLayout.h"
 #include "Scene/Components.h"
-#include "NsightAftermathHelpers.h"
 #include "Resources/PixelBuffer.h"
 
 using namespace DirectX;
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
-#if defined(ENABLE_NSIGHT_AFTERMATH)
-        auto tdrTerminationTimeout = std::chrono::seconds(3);
-        auto tStart = std::chrono::steady_clock::now();
-        auto tElapsed = std::chrono::milliseconds::zero();
-
-        GFSDK_Aftermath_CrashDump_Status status = GFSDK_Aftermath_CrashDump_Status_Unknown;
-        AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_GetCrashDumpStatus(&status));
-
-        while (status != GFSDK_Aftermath_CrashDump_Status_CollectingDataFailed &&
-            status != GFSDK_Aftermath_CrashDump_Status_Finished &&
-            tElapsed < tdrTerminationTimeout)
-        {
-            // Sleep 50ms and poll the status again until timeout or Aftermath finished processing the crash dump.
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_GetCrashDumpStatus(&status));
-
-            auto tEnd = std::chrono::steady_clock::now();
-            tElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(tEnd - tStart);
-        }
-
-        if (status != GFSDK_Aftermath_CrashDump_Status_Finished)
-        {
-            std::stringstream err_msg;
-            err_msg << "Unexpected crash dump status: " << status;
-            MessageBoxA(NULL, err_msg.str().c_str(), "Aftermath Error", MB_OK);
-        }
-#endif
-
         // Print the error code for debugging purposes
         std::cerr << "HRESULT failed with error code: " << std::hex << hr << std::endl;
         throw std::runtime_error("HRESULT failed");
@@ -816,6 +788,118 @@ std::vector<Cascade> setupCascades(
         cascades.push_back(cascade);
     }
     return cascades;
+}
+
+std::vector<Cascade> setupDirectionalClipmaps(
+    int numClipmaps,
+    const DirectX::XMVECTOR& lightDir,
+    const DirectX::XMVECTOR& camPos,
+    const DirectX::XMVECTOR& camDir,
+    const DirectX::XMVECTOR& camUp,
+    float nearPlane,
+    float fovY,
+    float aspectRatio,
+    const std::vector<float>& clipFarPlanes,
+    float clipVerticalExtent)
+{
+    using namespace DirectX;
+    std::vector<Cascade> clipmaps;
+    clipmaps.reserve(numClipmaps);
+
+    (void)camDir;
+    (void)camUp;
+    XMVECTOR lightUp = (fabs(XMVectorGetY(lightDir)) > 0.99f) ? XMVectorSet(0, 0, -1, 0) : XMVectorSet(0, 1, 0, 0);
+    const XMVECTOR normalizedLightDir = XMVector3Normalize(lightDir);
+    const XMMATRIX defaultLightView = XMMatrixLookToRH(
+        XMVectorZero(),
+        normalizedLightDir,
+        lightUp);
+    const XMMATRIX defaultLightViewInverse = XMMatrixInverse(nullptr, defaultLightView);
+
+    const float clipZeroFar = !clipFarPlanes.empty()
+        ? std::max(clipFarPlanes.front(), nearPlane)
+        : std::max(nearPlane * 2.0f, 1.0f);
+    const float tanHalfFov = tanf(fovY * 0.5f);
+    const float clipZeroHalfHeight = clipZeroFar * tanHalfFov;
+    const float clipZeroHalfWidth = clipZeroHalfHeight * aspectRatio;
+    const float clipZeroScale = std::max(
+        std::sqrt(clipZeroHalfWidth * clipZeroHalfWidth + clipZeroHalfHeight * clipZeroHalfHeight),
+        1.0f);
+    const float ndcPageSize = 2.0f / static_cast<float>(CLodVirtualShadowFixedVirtualPageCountPerAxis);
+    const float clampedClipVerticalExtent = std::max(clipVerticalExtent, 1.0f);
+    const float clipHeightOffsetScale = 5.0f;
+    const float clipNearScale = 0.01f;
+    const float clipFarScale = 10.0f;
+
+    for (int i = 0; i < numClipmaps; ++i)
+    {
+        const float clipScale = clipZeroScale * std::pow(2.0f, static_cast<float>(i));
+        // The user-configured vertical extent acts as a minimum clip depth, but
+        // coarse clipmaps still need their light-space depth and origin offset to
+        // grow with XY coverage or they stop containing the scene.
+        const float nearDistance = std::max(
+            std::max(clipNearScale * clipScale, clampedClipVerticalExtent * 0.001f),
+            0.01f);
+        const float farDistance = std::max(
+            std::max(clipFarScale * clipScale, clampedClipVerticalExtent),
+            nearDistance + 1.0f);
+        const XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(
+            -clipScale,
+            clipScale,
+            -clipScale,
+            clipScale,
+            nearDistance,
+            farDistance);
+
+        const float pageWorldSize = clipScale * ndcPageSize;
+        const XMVECTOR targetLightView = XMVector3TransformCoord(camPos, defaultLightView);
+        const float targetLightViewX = XMVectorGetX(targetLightView);
+        const float targetLightViewY = XMVectorGetY(targetLightView);
+        const float targetLightViewZ = XMVectorGetZ(targetLightView);
+
+        const int64_t pageOffsetX = -static_cast<int64_t>(std::ceil(targetLightViewX / pageWorldSize));
+        const int64_t pageOffsetY = -static_cast<int64_t>(std::ceil(-targetLightViewY / pageWorldSize));
+
+        const XMVECTOR alignedTargetLightView = XMVectorSet(
+            static_cast<float>(-pageOffsetX) * pageWorldSize,
+            static_cast<float>(pageOffsetY) * pageWorldSize,
+            targetLightViewZ,
+            1.0f);
+        const XMVECTOR alignedTargetWorld = XMVector3TransformCoord(alignedTargetLightView, defaultLightViewInverse);
+
+        const float lightDistance = std::max(clipHeightOffsetScale * clipScale, farDistance * 0.5f);
+        const XMVECTOR lightPos = alignedTargetWorld - normalizedLightDir * lightDistance;
+        const XMMATRIX lightView = XMMatrixLookToRH(lightPos, normalizedLightDir, lightUp);
+        Cascade clipmap;
+        clipmap.size = clipScale * 2.0f;
+        XMStoreFloat4(&clipmap.worldCenter, lightPos);
+        clipmap.pageOffsetX = pageOffsetX;
+        clipmap.pageOffsetY = pageOffsetY;
+        clipmap.nearPlane = nearDistance;
+        clipmap.farPlane = farDistance;
+        clipmap.viewMatrix = lightView;
+        clipmap.orthoMatrix = lightOrtho;
+
+        const std::array<XMVECTOR, 6> viewSpacePlanes = {
+            XMVectorSet(1.0f, 0.0f, 0.0f, clipScale),
+            XMVectorSet(-1.0f, 0.0f, 0.0f, clipScale),
+            XMVectorSet(0.0f, 1.0f, 0.0f, clipScale),
+            XMVectorSet(0.0f, -1.0f, 0.0f, clipScale),
+            XMVectorSet(0.0f, 0.0f, -1.0f, -nearDistance),
+            XMVectorSet(0.0f, 0.0f, 1.0f, farDistance),
+        };
+
+        for (size_t planeIndex = 0; planeIndex < viewSpacePlanes.size(); ++planeIndex)
+        {
+            ClippingPlane plane{};
+            XMStoreFloat4(&plane.plane, XMPlaneNormalize(viewSpacePlanes[planeIndex]));
+            clipmap.frustumPlanes[planeIndex] = plane;
+        }
+
+        clipmaps.push_back(clipmap);
+    }
+
+    return clipmaps;
 }
 
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda) {

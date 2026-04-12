@@ -18,6 +18,7 @@ public:
         builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
             .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

@@ -24,6 +24,7 @@ struct VisBufferPSInput
 #endif
     nointerpolation uint visibleClusterIndex : TEXCOORD3;
     nointerpolation uint viewID : TEXCOORD4;
+    nointerpolation uint shadowClipmapIndex : TEXCOORD5;
 };
 
 struct ClodViewRasterInfo
@@ -113,7 +114,7 @@ struct PerFrameBuffer {
     
     uint mainCameraIndex;
     uint numLights;
-    uint numShadowCascades;
+    uint numDirectionalClipmaps;
     
     unsigned int activeEnvironmentIndex;
     
@@ -128,7 +129,11 @@ struct PerFrameBuffer {
     float clusterZSplitDepth; // view-space depth to switch to log
     
     uint frameIndex; // 0 to 64
-    uint pad[3];
+    uint shadowVirtualSmrtDirectionalCountsPacked;
+    float shadowVirtualSmrtMaxRayAngleFromLightDegrees;
+    float shadowVirtualSmrtRayLengthScaleDirectional;
+    float shadowVirtualSmrtMaxTraceDistanceWorld;
+    float _padSmrt;
 };
 
 struct BoundingSphere {
@@ -154,7 +159,8 @@ struct LightInfo {
     bool shadowCaster;
     BoundingSphere boundingSphere;
     float maxRange;
-    uint pad[2];
+    float shadowSourceRadius;
+    float shadowSourceAngleDegrees;
 };
 
 struct MaterialInfo {
@@ -234,6 +240,7 @@ struct PerObjectBuffer {
 
 struct PerMeshBuffer {
     uint materialDataIndex;
+    uint rasterBucketIndex;
     uint vertexFlags;
     uint vertexByteSize;
     uint skinningVertexByteSize;
@@ -248,7 +255,6 @@ struct PerMeshBuffer {
     uint vertexBufferOffset;
     uint numVertices;
     uint numMeshlets;
-    uint pad[1];
 };
 
 struct PerMeshInstanceBuffer {
@@ -396,6 +402,7 @@ struct VisibleCluster
     unsigned int groupID;
     unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
+    unsigned int shadowClipmapIndex;
 };
 
 struct CLodReyesFullClusterOutput

@@ -16,7 +16,8 @@ public:
 	}
 	unsigned int GetCompileFlagsSlot(MaterialCompileFlags flags);
 	unsigned int GetMaterialSlot(unsigned int materialID, std::optional<PerMaterialCB> data = std::nullopt);
-	unsigned int GetRasterFlagsSlot(MaterialRasterFlags rasterFlags);
+	unsigned int AcquireRasterBucket(MaterialRasterFlags rasterFlags);
+	void ReleaseRasterBucket(MaterialRasterFlags rasterFlags);
 
 	void IncrementMaterialUsageCount(Material& material);
 	void DecrementMaterialUsageCount(const Material& material);
@@ -73,6 +74,7 @@ private:
 	// Material raster flags to raster bin mapping
 	std::unordered_map<uint32_t, unsigned int> m_rasterFlagToBucketMapping;
 	std::vector<MaterialRasterFlags> m_bucketToRasterFlagMapping;
+	std::vector<unsigned int> m_rasterBucketUsageCounts;
 	unsigned int m_rasterBucketsUsed = 0;
 	std::vector<unsigned int> m_freeRasterBuckets;
 

@@ -1,10 +1,13 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 
 #include <rhi.h>
 
+#include "Managers/Singletons/SettingsManager.h"
 #include "Mesh/ClusterLODTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "ShaderBuffers.h"
@@ -12,7 +15,26 @@
 inline constexpr const char* CLodStreamingMeshManagerGetterSettingName = "getMeshManager";
 inline constexpr const char* CLodStreamingCpuUploadBudgetSettingName = "clodStreamingCpuUploadBudgetRequests";
 inline constexpr const char* CLodDisableReyesRasterizationSettingName = "clodDisableReyesRasterization";
-
+inline constexpr const char* CLodReyesResourceBudgetBytesSettingName = "clodReyesResourceBudgetBytes";
+inline constexpr const char* CLodDisableVirtualShadowPageCachingSettingName = "clodDisableVirtualShadowPageCaching";
+inline constexpr const char* CLodEnablePageJobVSMSettingName = "clodEnablePageJobVSM";
+inline constexpr const char* CLodPageJobDiameterThresholdSettingName = "clodPageJobDiameterThreshold";
+inline constexpr const char* CLodPageJobSparseRatioSettingName = "clodPageJobSparseRatio";
+inline constexpr const char* CLodPageJobMaxPagesPerClusterSettingName = "clodPageJobMaxPagesPerCluster";
+inline constexpr const char* CLodPageJobRecordCapacitySettingName = "clodPageJobRecordCapacity";
+inline constexpr const char* CLodPageJobForceAllSettingName = "clodPageJobForceAll";
+inline constexpr const char* CLodWorkGraphComputePageJobDescriptorBufferId = "CLod::WorkGraphComputePageJobDescriptors";
+inline constexpr const char* CLodDirectionalVirtualShadowMaxBackingResolutionSettingName = "clodDirectionalVirtualShadowMaxBackingResolution";
+inline constexpr const char* CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName = "clodDirectionalVirtualShadowMaxPhysicalPages";
+inline constexpr const char* CLodDirectionalVirtualShadowLodBiasSettingName = "clodDirectionalVirtualShadowLodBias";
+inline constexpr const char* CLodDirectionalVirtualShadowAutoLodBiasSettingName = "clodDirectionalVirtualShadowAutoLodBias";
+inline constexpr const char* CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName = "clodDirectionalVirtualShadowAutoLodBiasScale";
+inline constexpr const char* CLodDirectionalVirtualShadowSourceAngleDegreesSettingName = "clodDirectionalVirtualShadowSourceAngleDegrees";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName = "clodDirectionalVirtualShadowSmrtRayCountDirectional";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName = "clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName = "clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName = "clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName = "clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld";
 enum class CLodPriorityMode : uint8_t {
     Max, // Duplicate group requests keep the maximum reported priority
     Sum, // Duplicate group requests accumulate (sum) their priorities
@@ -26,6 +48,7 @@ enum class CLodSoftwareRasterMode : uint8_t {
 
 enum class CLodRasterOutputKind : uint8_t {
     VisibilityBuffer,
+    VirtualShadow,
     DeepVisibility,
 };
 
@@ -66,6 +89,29 @@ struct RasterizeClustersCommand
     unsigned int rasterBucketID;
     unsigned int dispatchX, dispatchY, dispatchZ;
 };
+
+struct CLodSoftwareRasterPageJobRecord
+{
+    uint32_t sortedClusterIndex = 0u;
+    uint32_t physicalPageIndex = 0u;
+    uint32_t packedPagePixelOrigin = 0u;
+    uint32_t packedAtlasOrigin = 0u;
+    uint32_t clipmapLayer = 0u;
+    uint32_t wrappedPageX = 0u;
+    uint32_t wrappedPageY = 0u;
+};
+
+static_assert(sizeof(CLodSoftwareRasterPageJobRecord) == 28u, "CLodSoftwareRasterPageJobRecord size must match HLSL");
+
+struct CLodWorkGraphComputePageJobDescriptors
+{
+    uint32_t visibleClustersUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t visibleClustersCounterUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodWorkGraphComputePageJobDescriptors) == 16u, "CLodWorkGraphComputePageJobDescriptors size must match HLSL");
 
 struct CLodViewRasterInfo
 {
@@ -109,6 +155,554 @@ struct CLodDeepVisibilityStats
 };
 
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
+
+inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 22u;
+inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 22u;
+inline constexpr uint32_t CLodVirtualShadowPhysicalPageSize = 128u;
+inline constexpr uint32_t CLodVirtualShadowFixedVirtualPageCountPerAxis = 128u;
+inline constexpr uint32_t CLodVirtualShadowFixedVirtualResolution =
+    CLodVirtualShadowFixedVirtualPageCountPerAxis * CLodVirtualShadowPhysicalPageSize;
+inline constexpr uint32_t CLodVirtualShadowDefaultVirtualResolution = CLodVirtualShadowFixedVirtualResolution;
+inline constexpr uint32_t CLodVirtualShadowMaxVirtualResolution = CLodVirtualShadowFixedVirtualResolution;
+inline constexpr uint32_t CLodVirtualShadowDefaultPageTableResolution =
+    CLodVirtualShadowDefaultVirtualResolution / CLodVirtualShadowPhysicalPageSize;
+inline constexpr uint32_t CLodVirtualShadowMaxPageTableResolution =
+    CLodVirtualShadowMaxVirtualResolution / CLodVirtualShadowPhysicalPageSize;
+inline constexpr uint32_t CLodVirtualShadowMinBackingResolution = 4096u;
+inline constexpr uint32_t CLodVirtualShadowMediumBackingResolution = 8192u;
+inline constexpr uint32_t CLodVirtualShadowMaxBackingResolution = 16384u;
+inline constexpr uint32_t CLodVirtualShadowDefaultBackingResolution = CLodVirtualShadowMaxBackingResolution;
+inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalAtlasPagesWide =
+    CLodVirtualShadowDefaultBackingResolution / CLodVirtualShadowPhysicalPageSize;
+inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalAtlasPagesHigh =
+    CLodVirtualShadowDefaultBackingResolution / CLodVirtualShadowPhysicalPageSize;
+inline constexpr uint32_t CLodVirtualShadowMaxPhysicalAtlasPagesWide =
+    CLodVirtualShadowMaxBackingResolution / CLodVirtualShadowPhysicalPageSize;
+inline constexpr uint32_t CLodVirtualShadowMaxPhysicalAtlasPagesHigh =
+    CLodVirtualShadowMaxBackingResolution / CLodVirtualShadowPhysicalPageSize;
+inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
+    CLodVirtualShadowDefaultPhysicalAtlasPagesWide * CLodVirtualShadowDefaultPhysicalAtlasPagesHigh;
+inline constexpr uint32_t CLodVirtualShadowMaxPhysicalPageCount =
+    CLodVirtualShadowMaxPhysicalAtlasPagesWide * CLodVirtualShadowMaxPhysicalAtlasPagesHigh;
+inline constexpr float CLodVirtualShadowDefaultDirectionalLodBias = 3.0f;
+inline constexpr float CLodVirtualShadowDefaultDirectionalSourceAngleDegrees = 6.0f;
+inline constexpr uint32_t CLodVirtualShadowDefaultSmrtRayCountDirectional = 2u;
+inline constexpr uint32_t CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional = 2u;
+inline constexpr float CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees = 5.0f;
+inline constexpr float CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional = 0.02f;
+inline constexpr float CLodVirtualShadowDefaultSmrtMaxTraceDistanceWorld = 150.0f;
+inline constexpr uint32_t CLodVirtualShadowMarkTileSize = 16u;
+inline constexpr uint32_t CLodVirtualShadowBlockPagesPerAxis = 4u;
+inline constexpr uint32_t CLodVirtualShadowBlockPackedPhysicalPageIndexCount =
+    (CLodVirtualShadowBlockPagesPerAxis * CLodVirtualShadowBlockPagesPerAxis) / 2u;
+inline constexpr uint32_t CLodVirtualShadowBlockMaxTrackedPerCluster = 32u;
+inline constexpr uint32_t CLodVirtualShadowMaxMarkTileGridDimension = 512u;
+inline constexpr uint32_t CLodVirtualShadowMaxMarkTileCount =
+    CLodVirtualShadowMaxMarkTileGridDimension * CLodVirtualShadowMaxMarkTileGridDimension;
+inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
+inline constexpr uint32_t CLodVirtualShadowMaxInvalidationInputs = 1u << 16;
+inline constexpr uint32_t CLodPageJobDefaultRecordCapacity = 1u << 20;
+inline constexpr uint32_t CLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
+inline constexpr uint32_t CLodVirtualShadowPredictiveCandidateCapacity = 1u << 16;
+inline constexpr uint32_t CLodVirtualShadowPredictiveRawPageCapacity = 1u << 20;
+inline constexpr uint32_t CLodVirtualShadowClipmapValidFlag = 0x1u;
+inline constexpr uint32_t CLodVirtualShadowClipmapInvalidateFlag = 0x2u;
+inline constexpr uint32_t CLodVirtualShadowPageAllocatedMask = 0x80000000u;
+inline constexpr uint32_t CLodVirtualShadowPageDirtyMask = 0x40000000u;
+inline constexpr uint32_t CLodVirtualShadowPageContentValidMask = 0x20000000u;
+inline constexpr uint32_t CLodVirtualShadowPageVisitedMask = 0x10000000u;
+inline constexpr uint32_t CLodVirtualShadowPageRerenderedThisFrameMask = 0x08000000u;
+inline constexpr uint32_t CLodVirtualShadowPhysicalPageIndexMask = 0x07FFFFFFu;
+inline constexpr uint32_t CLodVirtualShadowPhysicalPageResidentFlag = 0x1u;
+inline constexpr uint32_t CLodVirtualShadowInvalidationFlagUsePreviousBounds = 0x1u;
+inline constexpr uint32_t CLodVirtualShadowInvalidationFlagUseCurrentBounds = 0x2u;
+inline constexpr uint32_t CLodVirtualShadowInvalidationFlagSkinned = 0x4u;
+
+constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
+{
+    return (physicalPageCount + 31u) / 32u;
+}
+
+constexpr uint32_t CLodVirtualShadowSanitizeBackingResolution(uint32_t backingResolution)
+{
+    if (backingResolution <= CLodVirtualShadowMinBackingResolution) {
+        return CLodVirtualShadowMinBackingResolution;
+    }
+
+    if (backingResolution <= CLodVirtualShadowMediumBackingResolution) {
+        return CLodVirtualShadowMediumBackingResolution;
+    }
+
+    return CLodVirtualShadowMaxBackingResolution;
+}
+
+constexpr uint32_t CLodVirtualShadowPhysicalAtlasPageAxisLimitFromBackingResolution(uint32_t backingResolution)
+{
+    return CLodVirtualShadowSanitizeBackingResolution(backingResolution) / CLodVirtualShadowPhysicalPageSize;
+}
+
+constexpr uint32_t CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(uint32_t backingResolution)
+{
+    const uint32_t axisLimit = CLodVirtualShadowPhysicalAtlasPageAxisLimitFromBackingResolution(backingResolution);
+    return axisLimit * axisLimit;
+}
+
+constexpr uint32_t CLodVirtualShadowMovedInstanceBitWordCount()
+{
+    return (CLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
+}
+
+constexpr uint32_t CLodVirtualShadowPredictedPageListCapacity()
+{
+    return CLodVirtualShadowMaxSupportedClipmapCount *
+        CLodVirtualShadowMaxPageTableResolution *
+        CLodVirtualShadowMaxPageTableResolution;
+}
+
+constexpr uint32_t CLodVirtualShadowPredictedPageBitsetWordCount()
+{
+    return (CLodVirtualShadowPredictedPageListCapacity() + 31u) / 32u;
+}
+
+constexpr uint32_t CLodVirtualShadowSanitizeVirtualResolution(uint32_t virtualResolution)
+{
+    (void)virtualResolution;
+    return CLodVirtualShadowFixedVirtualResolution;
+}
+
+constexpr uint32_t CLodVirtualShadowPageTableResolutionFromVirtualResolution(uint32_t virtualResolution)
+{
+    return CLodVirtualShadowSanitizeVirtualResolution(virtualResolution) / CLodVirtualShadowPhysicalPageSize;
+}
+
+constexpr uint32_t CLodVirtualShadowPhysicalAtlasPagesWideFromPageCount(
+    uint32_t maxPhysicalPages,
+    uint32_t maxAtlasPagesWide = CLodVirtualShadowMaxPhysicalAtlasPagesWide)
+{
+    if (maxPhysicalPages == 0u) {
+        return 0u;
+    }
+
+    const uint32_t sanitizedAtlasPagesWide = maxAtlasPagesWide > CLodVirtualShadowMaxPhysicalAtlasPagesWide
+        ? CLodVirtualShadowMaxPhysicalAtlasPagesWide
+        : maxAtlasPagesWide;
+
+    return maxPhysicalPages < sanitizedAtlasPagesWide
+        ? maxPhysicalPages
+        : sanitizedAtlasPagesWide;
+}
+
+constexpr uint32_t CLodVirtualShadowPhysicalAtlasPagesHighFromPageCount(uint32_t maxPhysicalPages, uint32_t atlasPagesWide)
+{
+    return atlasPagesWide == 0u ? 0u : ((maxPhysicalPages + atlasPagesWide - 1u) / atlasPagesWide);
+}
+
+constexpr uint32_t CLodVirtualShadowSanitizePhysicalPageCount(uint32_t maxPhysicalPages)
+{
+    return maxPhysicalPages > CLodVirtualShadowMaxPhysicalPageCount
+        ? CLodVirtualShadowMaxPhysicalPageCount
+        : maxPhysicalPages;
+}
+
+constexpr uint32_t CLodVirtualShadowSanitizePhysicalPageCount(uint32_t maxPhysicalPages, uint32_t maxSupportedPhysicalPages)
+{
+    const uint32_t sanitizedMaxSupportedPhysicalPages =
+        maxSupportedPhysicalPages > CLodVirtualShadowMaxPhysicalPageCount
+        ? CLodVirtualShadowMaxPhysicalPageCount
+        : maxSupportedPhysicalPages;
+    return maxPhysicalPages > sanitizedMaxSupportedPhysicalPages
+        ? sanitizedMaxSupportedPhysicalPages
+        : maxPhysicalPages;
+}
+
+constexpr uint32_t CLodVirtualShadowPhysicalAtlasPagesWideFromPhysicalPageCount(uint32_t maxPhysicalPages)
+{
+    return CLodVirtualShadowPhysicalAtlasPagesWideFromPageCount(
+        CLodVirtualShadowSanitizePhysicalPageCount(maxPhysicalPages));
+}
+
+constexpr uint32_t CLodVirtualShadowPhysicalAtlasPagesWideFromPhysicalPageCount(
+    uint32_t maxPhysicalPages,
+    uint32_t backingResolution)
+{
+    const uint32_t sanitizedMaxPhysicalPages = CLodVirtualShadowSanitizePhysicalPageCount(
+        maxPhysicalPages,
+        CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(backingResolution));
+    return CLodVirtualShadowPhysicalAtlasPagesWideFromPageCount(
+        sanitizedMaxPhysicalPages,
+        CLodVirtualShadowPhysicalAtlasPageAxisLimitFromBackingResolution(backingResolution));
+}
+
+constexpr uint32_t CLodVirtualShadowPhysicalAtlasPagesHighFromPhysicalPageCount(uint32_t maxPhysicalPages)
+{
+    const uint32_t physicalPageCount = CLodVirtualShadowSanitizePhysicalPageCount(maxPhysicalPages);
+    const uint32_t atlasPagesWide = CLodVirtualShadowPhysicalAtlasPagesWideFromPageCount(physicalPageCount);
+    return CLodVirtualShadowPhysicalAtlasPagesHighFromPageCount(physicalPageCount, atlasPagesWide);
+}
+
+constexpr uint32_t CLodVirtualShadowPhysicalAtlasPagesHighFromPhysicalPageCount(
+    uint32_t maxPhysicalPages,
+    uint32_t backingResolution)
+{
+    const uint32_t physicalPageCount = CLodVirtualShadowSanitizePhysicalPageCount(
+        maxPhysicalPages,
+        CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(backingResolution));
+    const uint32_t atlasPagesWide = CLodVirtualShadowPhysicalAtlasPagesWideFromPhysicalPageCount(
+        physicalPageCount,
+        backingResolution);
+    return CLodVirtualShadowPhysicalAtlasPagesHighFromPageCount(physicalPageCount, atlasPagesWide);
+}
+
+constexpr uint32_t CLodVirtualShadowMaxDirectionalPageViewInfoEntryCount()
+{
+    return CLodVirtualShadowMaxSupportedClipmapCount *
+        CLodVirtualShadowMaxPageTableResolution *
+        CLodVirtualShadowMaxPageTableResolution;
+}
+
+struct CLodVirtualShadowResolutionConfig
+{
+    uint32_t virtualResolution = CLodVirtualShadowDefaultVirtualResolution;
+    uint32_t pageTableResolution = CLodVirtualShadowDefaultPageTableResolution;
+    uint32_t physicalAtlasPagesWide = CLodVirtualShadowDefaultPhysicalAtlasPagesWide;
+    uint32_t physicalAtlasPagesHigh = CLodVirtualShadowDefaultPhysicalAtlasPagesHigh;
+    uint32_t maxPhysicalPages = CLodVirtualShadowDefaultPhysicalPageCount;
+    uint32_t maxAllocationRequests = (std::min)(CLodVirtualShadowDefaultPhysicalPageCount, CLodVirtualShadowMaxAllocationRequests);
+    float directionalLodBias = CLodVirtualShadowDefaultDirectionalLodBias;
+};
+
+constexpr CLodVirtualShadowResolutionConfig CLodVirtualShadowBuildResolutionConfig(
+    uint32_t virtualResolution,
+    uint32_t maxPhysicalPages,
+    float directionalLodBias = CLodVirtualShadowDefaultDirectionalLodBias,
+    uint32_t backingResolution = CLodVirtualShadowDefaultBackingResolution)
+{
+    const uint32_t sanitizedVirtualResolution = CLodVirtualShadowSanitizeVirtualResolution(virtualResolution);
+    const uint32_t maxSupportedPhysicalPages = CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(backingResolution);
+    const uint32_t sanitizedMaxPhysicalPages = CLodVirtualShadowSanitizePhysicalPageCount(
+        maxPhysicalPages,
+        maxSupportedPhysicalPages);
+    const uint32_t physicalAtlasPagesWide = CLodVirtualShadowPhysicalAtlasPagesWideFromPhysicalPageCount(
+        sanitizedMaxPhysicalPages,
+        backingResolution);
+
+    return {
+        .virtualResolution = sanitizedVirtualResolution,
+        .pageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(sanitizedVirtualResolution),
+        .physicalAtlasPagesWide = physicalAtlasPagesWide,
+        .physicalAtlasPagesHigh = CLodVirtualShadowPhysicalAtlasPagesHighFromPageCount(sanitizedMaxPhysicalPages, physicalAtlasPagesWide),
+        .maxPhysicalPages = sanitizedMaxPhysicalPages,
+        .maxAllocationRequests = (std::min)(sanitizedMaxPhysicalPages, CLodVirtualShadowMaxAllocationRequests),
+        .directionalLodBias = directionalLodBias,
+    };
+}
+
+constexpr CLodVirtualShadowResolutionConfig CLodVirtualShadowBuildResolutionConfig(uint32_t virtualResolution)
+{
+    return CLodVirtualShadowBuildResolutionConfig(
+        virtualResolution,
+        CLodVirtualShadowDefaultPhysicalPageCount,
+        CLodVirtualShadowDefaultDirectionalLodBias,
+        CLodVirtualShadowDefaultBackingResolution);
+}
+
+constexpr CLodVirtualShadowResolutionConfig CLodVirtualShadowBuildResolutionConfig()
+{
+    return CLodVirtualShadowBuildResolutionConfig(
+        CLodVirtualShadowFixedVirtualResolution,
+        CLodVirtualShadowDefaultPhysicalPageCount,
+        CLodVirtualShadowDefaultDirectionalLodBias,
+        CLodVirtualShadowDefaultBackingResolution);
+}
+
+inline uint32_t CLodVirtualShadowGetConfiguredMaxBackingResolution()
+{
+    auto& settingsManager = SettingsManager::GetInstance();
+    return CLodVirtualShadowSanitizeBackingResolution(
+        settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName)());
+}
+
+inline uint32_t CLodVirtualShadowGetConfiguredMaxPhysicalPageCapacity()
+{
+    return CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(
+        CLodVirtualShadowGetConfiguredMaxBackingResolution());
+}
+
+inline uint32_t CLodVirtualShadowGetConfiguredComputeClusterCapacity(uint32_t maxVisibleClusters)
+{
+    return (std::max)(1u, maxVisibleClusters);
+}
+
+inline float CLodVirtualShadowAutomaticDirectionalLodBiasFromBudget(uint32_t maxPhysicalPages, float autoLodBiasScale)
+{
+    const uint32_t sanitizedMaxPhysicalPages = CLodVirtualShadowSanitizePhysicalPageCount(maxPhysicalPages);
+    if (sanitizedMaxPhysicalPages == 0u) {
+        return 0.0f;
+    }
+
+    const float pressureRatio =
+        static_cast<float>(CLodVirtualShadowDefaultPhysicalPageCount) /
+        static_cast<float>(sanitizedMaxPhysicalPages);
+    const float positiveScale = (std::max)(autoLodBiasScale, 0.0f);
+    return pressureRatio > 1.0f ? (std::log2(pressureRatio) * positiveScale) : 0.0f;
+}
+
+inline CLodVirtualShadowResolutionConfig CLodVirtualShadowBuildRuntimeResolutionConfig()
+{
+    auto& settingsManager = SettingsManager::GetInstance();
+    const uint32_t configuredBackingResolution =
+        CLodVirtualShadowSanitizeBackingResolution(
+            settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName)());
+    const uint32_t configuredMaxPhysicalPages =
+        settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName)();
+    const float manualDirectionalLodBias =
+        settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowLodBiasSettingName)();
+    const bool autoDirectionalLodBias =
+        settingsManager.getSettingGetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName)();
+    const float autoDirectionalLodBiasScale =
+        settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName)();
+
+    float effectiveDirectionalLodBias = manualDirectionalLodBias;
+    if (autoDirectionalLodBias) {
+        effectiveDirectionalLodBias +=
+            CLodVirtualShadowAutomaticDirectionalLodBiasFromBudget(configuredMaxPhysicalPages, autoDirectionalLodBiasScale);
+    }
+
+    return CLodVirtualShadowBuildResolutionConfig(
+        CLodVirtualShadowFixedVirtualResolution,
+        configuredMaxPhysicalPages,
+        effectiveDirectionalLodBias,
+        configuredBackingResolution);
+}
+
+static_assert(
+    (CLodVirtualShadowDefaultVirtualResolution % CLodVirtualShadowPhysicalPageSize) == 0u,
+    "CLod virtual shadow resolution must be divisible by the page size");
+
+static_assert(
+    (CLodVirtualShadowMaxVirtualResolution % CLodVirtualShadowPhysicalPageSize) == 0u,
+    "CLod max virtual shadow resolution must be divisible by the page size");
+
+static_assert(
+    CLodVirtualShadowDefaultClipmapCount <= CLodVirtualShadowMaxSupportedClipmapCount,
+    "Default VSM clipmap count must not exceed the supported maximum");
+
+static_assert(
+    CLodVirtualShadowMaxPhysicalPageCount <= CLodVirtualShadowPhysicalPageIndexMask,
+    "VSM physical page count must fit in the page table physical page index bits");
+
+struct CLodVirtualShadowClipmapInfo
+{
+    float worldOriginX = 0.0f;
+    float worldOriginY = 0.0f;
+    float worldOriginZ = 0.0f;
+    float texelWorldSize = 0.0f;
+    uint32_t pageOffsetX = 0u;
+    uint32_t pageOffsetY = 0u;
+    uint32_t pageTableLayer = 0u;
+    uint32_t shadowCameraBufferIndex = 0xFFFFFFFFu;
+    uint32_t clipLevel = 0u;
+    uint32_t flags = 0u;
+    int32_t clearOffsetX = 0;
+    int32_t clearOffsetY = 0;
+    float directionalLodBias = CLodVirtualShadowDefaultDirectionalLodBias;
+    uint32_t virtualResolution = CLodVirtualShadowDefaultVirtualResolution;
+    uint32_t pageTableResolution = CLodVirtualShadowDefaultPageTableResolution;
+    uint32_t physicalAtlasPagesWide = CLodVirtualShadowDefaultPhysicalAtlasPagesWide;
+    uint32_t physicalAtlasPagesHigh = CLodVirtualShadowDefaultPhysicalAtlasPagesHigh;
+};
+
+static_assert(sizeof(CLodVirtualShadowClipmapInfo) == 68u, "CLodVirtualShadowClipmapInfo size must match HLSL");
+
+struct CLodVirtualShadowMainCameraInfo
+{
+    DirectX::XMFLOAT4 positionWorldSpace{};
+    DirectX::XMMATRIX viewInverse{};
+    DirectX::XMMATRIX projectionInverse{};
+};
+
+static_assert(sizeof(CLodVirtualShadowMainCameraInfo) == 144u, "CLodVirtualShadowMainCameraInfo size must match HLSL");
+
+struct CLodVirtualShadowCompactShadowCameraInfo
+{
+    DirectX::XMMATRIX view{};
+    DirectX::XMMATRIX projection{};
+    DirectX::XMMATRIX viewProjection{};
+    uint32_t isOrtho = 0u;
+    uint32_t pad[3] = {};
+};
+
+static_assert(sizeof(CLodVirtualShadowCompactShadowCameraInfo) == 208u, "CLodVirtualShadowCompactShadowCameraInfo size must match HLSL");
+
+struct CLodVirtualShadowMarkClipmapData
+{
+    float texelWorldSize = 0.0f;
+    uint32_t pageOffsetX = 0u;
+    uint32_t pageOffsetY = 0u;
+    uint32_t pageTableLayer = 0u;
+    uint32_t flags = 0u;
+    uint32_t virtualResolution = CLodVirtualShadowDefaultVirtualResolution;
+    uint32_t pageTableResolution = CLodVirtualShadowDefaultPageTableResolution;
+    uint32_t physicalAtlasPagesWide = CLodVirtualShadowDefaultPhysicalAtlasPagesWide;
+    uint32_t physicalAtlasPagesHigh = CLodVirtualShadowDefaultPhysicalAtlasPagesHigh;
+    float directionalLodBias = CLodVirtualShadowDefaultDirectionalLodBias;
+    uint32_t pad0[2] = {};
+    DirectX::XMFLOAT4 directionalPageViewRow{};
+    DirectX::XMMATRIX shadowViewProjection{};
+};
+
+static_assert(sizeof(CLodVirtualShadowMarkClipmapData) == 128u, "CLodVirtualShadowMarkClipmapData size must match HLSL");
+
+struct CLodVirtualShadowMarkTileWorkItem
+{
+    uint32_t tileCoordX = 0u;
+    uint32_t tileCoordY = 0u;
+    uint32_t minDepthBits = 0x7F7FFFFFu;
+    uint32_t maxDepthBits = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowMarkTileWorkItem) == 16u, "CLodVirtualShadowMarkTileWorkItem size must match HLSL");
+
+struct CLodVirtualShadowBlockMeta
+{
+    uint32_t packedVirtualBlockOrigin = 0u;
+    uint32_t packedWrappedBlockOrigin = 0u;
+    uint32_t activePageMask = 0u;
+    uint32_t packedActiveRectAndFlags = 0u;
+    uint32_t packedPhysicalPageIndices[CLodVirtualShadowBlockPackedPhysicalPageIndexCount] = {};
+};
+
+static_assert(sizeof(CLodVirtualShadowBlockMeta) == 48u, "CLodVirtualShadowBlockMeta size must match HLSL");
+
+struct CLodVirtualShadowPageAllocationRequest
+{
+    uint32_t virtualAddress = 0u;
+    uint32_t clipmapIndex = 0u;
+    uint32_t priority = 0u;
+    uint32_t flags = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPageAllocationRequest) == 16u, "CLodVirtualShadowPageAllocationRequest size must match HLSL");
+
+struct CLodVirtualShadowInvalidationInput
+{
+    uint32_t perMeshInstanceBufferIndex = 0u;
+    uint32_t flags = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowInvalidationInput) == 16u, "CLodVirtualShadowInvalidationInput size must match HLSL");
+
+struct CLodVirtualShadowPredictiveInvalidationCandidate
+{
+    DirectX::XMFLOAT4 worldCenterAndRadius{};
+    uint32_t shadowViewId = 0xFFFFFFFFu;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+    uint32_t pad2 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPredictiveInvalidationCandidate) == 32u, "CLodVirtualShadowPredictiveInvalidationCandidate size must match HLSL");
+
+struct CLodVirtualShadowPredictedRawPage
+{
+    uint32_t virtualAddress = 0u;
+    uint32_t clipmapIndex = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPredictedRawPage) == 16u, "CLodVirtualShadowPredictedRawPage size must match HLSL");
+
+struct CLodVirtualShadowPredictedPage
+{
+    uint32_t virtualAddress = 0u;
+    uint32_t clipmapIndex = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPredictedPage) == 16u, "CLodVirtualShadowPredictedPage size must match HLSL");
+
+struct CLodVirtualShadowPhysicalPageMeta
+{
+    uint32_t ownerVirtualAddress = 0u;
+    uint32_t lastTouchedFrame = 0u;
+    uint32_t flags = 0u;
+    uint32_t ownerClipmapIndex = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPhysicalPageMeta) == 16u, "CLodVirtualShadowPhysicalPageMeta size must match HLSL");
+
+struct CLodVirtualShadowPageListHeader
+{
+    uint32_t freePageCount = 0u;
+    uint32_t reusablePageCount = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPageListHeader) == 16u, "CLodVirtualShadowPageListHeader size must match HLSL");
+
+struct CLodVirtualShadowRuntimeState
+{
+    uint32_t clipmapCount = 0u;
+    uint32_t supportedClipmapCount = 0u;
+    uint32_t virtualResolution = 0u;
+    uint32_t pageTableResolution = 0u;
+    uint32_t physicalAtlasPagesWide = 0u;
+    uint32_t physicalAtlasPagesHigh = 0u;
+    uint32_t maxPhysicalPages = 0u;
+    uint32_t maxAllocationRequests = 0u;
+    float directionalLodBias = CLodVirtualShadowDefaultDirectionalLodBias;
+};
+
+static_assert(sizeof(CLodVirtualShadowRuntimeState) == 36u, "CLodVirtualShadowRuntimeState size must match expected layout");
+
+struct CLodVirtualShadowStats
+{
+    uint32_t activeClipmapCount = 0u;
+    uint32_t validClipmapCount = 0u;
+    uint32_t allocationRequestCount = 0u;
+    uint32_t allocationDispatchGroupCount = 0u;
+    uint32_t freePhysicalPageCount = 0u;
+    uint32_t reusablePhysicalPageCount = 0u;
+    uint32_t setupResetApplied = 0u;
+    uint32_t markRequestOverflowCount = 0u;
+    uint32_t setupResetForced = 0u;
+    uint32_t setupResetNoPreviousState = 0u;
+    uint32_t setupResetStructureMismatch = 0u;
+    uint32_t setupResetLightDirectionChanged = 0u;
+    float currentAllocationPercentage = 0.0f;
+    float targetPressureLodBias = 0.0f;
+    float smoothedPressureLodBias = 0.0f;
+    uint32_t framesSinceOverBudget = 0u;
+    uint32_t setupWrappedClearedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t setupStaleDirtyClearedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t markResidentCleanHits[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t markResidentDirtyHits[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t preAllocateNonZeroPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t preAllocateDirtyPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t selectedPixels[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t projectionRejectedPixels[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t requestedPages[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t nonZeroPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t allocatedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t dirtyPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t clearedUnwrittenDirtyPages[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t visitedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t visitedDirtyPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t predictiveInvalidatedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t invalidatedCurrentBoundsPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t invalidatedPreviousBoundsPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t invalidatedSkinnedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+};
+
+static_assert(
+    sizeof(CLodVirtualShadowStats) == (16u * sizeof(uint32_t)) + (19u * CLodVirtualShadowMaxSupportedClipmapCount * sizeof(uint32_t)),
+    "CLodVirtualShadowStats size must match HLSL");
+
 
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;
 inline constexpr uint32_t CLodReyesMaxVisibilityMicroTrianglesPerPatch = 128u;
@@ -337,7 +931,11 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
         unorderedAccessCounter,
         createNonShaderVisibleUAV,
         rhi::HeapType::DeviceLocal);
-    buffer->SetAllowAlias(allowAlias);
+    // Read-only structured buffers in the CLod pipeline are typically populated via
+    // BUFFER_UPLOAD before their first graph pass reads them. The aliasing planner
+    // cannot synthesize an initialization write for that pattern, so disallow aliasing
+    // unless the buffer participates in unordered-access writes.
+    buffer->SetAllowAlias(allowAlias && unorderedAccess);
     return buffer;
 }
 

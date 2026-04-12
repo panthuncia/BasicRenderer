@@ -40,8 +40,8 @@ public:
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
-        builder->WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }), Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
-            .WithUnorderedAccess(Subresources(Builtin::PrimaryCamera::LinearDepthMap, FromMip{ 1 }), Subresources(Builtin::Shadows::LinearShadowMaps, FromMip{ 1 }));
+        builder->WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
+            .WithUnorderedAccess(Subresources(Builtin::PrimaryCamera::LinearDepthMap, FromMip{ 1 }));
     }
 
     void Setup() override {

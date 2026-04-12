@@ -56,9 +56,14 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::Light::PointLightCubemapBuffer,
             Builtin::Light::SpotLightMatrixBuffer,
             Builtin::Light::DirectionalLightCascadeBuffer,
+            Builtin::Shadows::CLodClipmapInfo,
+            Builtin::Shadows::CLodDirectionalPageViewInfo,
+            Builtin::Shadows::CLodPageTable,
+            Builtin::Shadows::CLodPhysicalPages,
+		    Builtin::Shadows::CLodCompactMainCamera,
+            Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::Light::ClusterBuffer,
             Builtin::Light::PagesBuffer,
-            //Builtin::Shadows::ShadowMaps,
             Builtin::CLod::Offsets,
             Builtin::CLod::GroupChunks,
             Builtin::CLod::Groups,
@@ -69,6 +74,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo,
+			Builtin::Noise::BlueNoise2D,
             m_visibleClustersBuffer,
             m_deepVisibilityNodesBuffer,
             m_deepVisibilityCounterBuffer,
@@ -91,10 +97,13 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
     if (m_primaryHeadPointerTexture) {
         builder->WithShaderResource(m_primaryHeadPointerTexture);
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void DeepVisibilityResolvePass::Setup()
 {
+    RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
     m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
 }
 

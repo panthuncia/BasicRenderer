@@ -33,7 +33,7 @@ public:
     }
 
 	void SetDirectionalCascadeSplits(const std::vector<float>& splits) {
-        switch (perFrameCBData.numShadowCascades) {
+		switch (perFrameCBData.numDirectionalClipmaps) {
         case 1:
             perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(splits[0], 0, 0, 0);
             break;

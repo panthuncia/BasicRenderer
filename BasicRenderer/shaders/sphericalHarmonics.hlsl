@@ -10,12 +10,11 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 	uint face = DTid.z;
 
     uint faceSize = UintRootConstant0;
-    float weight = FloatRootConstant0;
     uint samplerIndex = UintRootConstant1;
     uint environmentBufferDescriptorIndex = UintRootConstant2;
     uint environmentIndex = UintRootConstant2;
 	
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+	ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     RWStructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Environment::InfoBuffer)];
     TextureCube<float4> g_envMap = ResourceDescriptorHeap[environments[environmentIndex].cubeMapDescriptorIndex];
 	

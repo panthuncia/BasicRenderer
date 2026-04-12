@@ -49,7 +49,7 @@ void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 {
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     uint screenW = perFrame.screenResX;
     uint screenH = perFrame.screenResY;
     if (dtid.x >= screenW || dtid.y >= screenH)
@@ -95,7 +95,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 {
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     uint screenW = perFrame.screenResX;
     uint screenH = perFrame.screenResY;
     if (dtid.x >= screenW || dtid.y >= screenH)

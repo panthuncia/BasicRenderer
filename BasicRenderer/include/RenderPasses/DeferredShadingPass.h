@@ -34,7 +34,13 @@ public:
 			Builtin::GBuffer::MetallicRoughness,
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
-			Builtin::Shadows::ShadowMaps)
+			Builtin::Shadows::CLodClipmapInfo,
+			Builtin::Shadows::CLodCompactMainCamera,
+			Builtin::Shadows::CLodCompactShadowCameras,
+			Builtin::Shadows::CLodDirectionalPageViewInfo,
+			Builtin::Shadows::CLodPageTable,
+			Builtin::Shadows::CLodPhysicalPages,
+			Builtin::Noise::BlueNoise2D)
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget,
 				Builtin::DebugVisualization);
 
@@ -45,9 +51,12 @@ public:
 		if (m_gtaoEnabled) {
 			builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
 		}
+
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {
+		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

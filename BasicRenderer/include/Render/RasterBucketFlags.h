@@ -9,9 +9,14 @@ enum MaterialRasterFlags : uint32_t {
 	MaterialRasterFlagsAlphaTest = 1 << 0,
 	MaterialRasterFlagsDoubleSided = 1 << 1,
 	MaterialRasterFlagsGeometricDisplacement = 1 << 2,
+	MaterialRasterFlagsSkinned = 1 << 3,
 };
 
 // operators
+inline MaterialRasterFlags operator|(MaterialRasterFlags a, MaterialRasterFlags b) {
+	return static_cast<MaterialRasterFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
 inline MaterialRasterFlags operator|=(MaterialRasterFlags& a, MaterialRasterFlags b) {
 	a = static_cast<MaterialRasterFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 	return a;

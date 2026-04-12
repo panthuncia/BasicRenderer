@@ -7,6 +7,7 @@
 #include "Managers/EnvironmentManager.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Utilities/Utilities.h"
 
 #include <vector>
 
@@ -41,6 +42,7 @@ public:
 		}
 
 		builder->WithUnorderedAccess(Builtin::Environment::InfoBuffer);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 
 		m_declaredResourcesChanged = false;
 	}
@@ -108,8 +110,6 @@ public:
 		unsigned int miscParams[NumMiscUintRootConstants] = { };
 		miscParams[UintRootConstant1] = m_samplerIndex; // Sampler index
 
-		float miscFloatParams[NumMiscFloatRootConstants] = { };
-
 		for (const auto& j : m_pending) {
 			if (!j.srcCubemap) continue;
 
@@ -117,10 +117,9 @@ public:
 			miscParams[UintRootConstant0] = cubemapRes; // Resolution
 			miscParams[UintRootConstant2] = j.environmentIndex; // Environment index
 
-			//miscFloatParams[FloatRootConstant0] =  (4.0f * XM_PI / (cubemapRes * cubemapRes * 6)); // Weight
+			// miscParams[UintRootConstant19] = as_uint(4.0f * XM_PI / (cubemapRes * cubemapRes * 6)); // Optional SH weight
 
 			commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscParams);
-			commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, miscFloatParams);
 
 			// dispatch over X�Y tiles, Z=6 faces
 			unsigned int groupsX = (cubemapRes + 15) / 16;

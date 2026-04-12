@@ -45,6 +45,7 @@ public:
                               Builtin::PerMeshBuffer,
                               Builtin::PerMaterialDataBuffer)
          .WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer");
+		b->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

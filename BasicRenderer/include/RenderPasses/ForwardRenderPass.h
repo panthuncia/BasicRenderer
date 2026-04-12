@@ -65,7 +65,12 @@ public:
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices,
-            Builtin::Shadows::ShadowMaps)
+            Builtin::Shadows::CLodClipmapInfo,
+            Builtin::Shadows::CLodCompactMainCamera,
+            Builtin::Shadows::CLodCompactShadowCameras,
+            Builtin::Shadows::CLodDirectionalPageViewInfo,
+            Builtin::Shadows::CLodPageTable,
+            Builtin::Shadows::CLodPhysicalPages)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .IsGeometryPass();
@@ -90,9 +95,12 @@ public:
                 builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
             }
         }
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {
+        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+
         auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
             .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass))

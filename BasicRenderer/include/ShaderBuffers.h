@@ -64,7 +64,7 @@ struct PerFrameCB {
     //unsigned int pointLightCubemapBufferIndex;
     //unsigned int spotLightMatrixBufferIndex;
     //unsigned int directionalLightCascadeBufferIndex;
-	unsigned int numShadowCascades;
+    unsigned int numDirectionalClipmaps;
 
     unsigned int activeEnvironmentIndex;
     //unsigned int environmentBufferDescriptorIndex;
@@ -83,7 +83,11 @@ struct PerFrameCB {
     float clusterZSplitDepth; // view-space depth to switch to log
 
     unsigned int frameIndex; // 0 to 63
-    unsigned int pad[3];
+    unsigned int shadowVirtualSmrtDirectionalCountsPacked = 0u;
+    float shadowVirtualSmrtMaxRayAngleFromLightDegrees = 0.0f;
+    float shadowVirtualSmrtRayLengthScaleDirectional = 0.0f;
+    float shadowVirtualSmrtMaxTraceDistanceWorld = 0.0f;
+    float _padSmrt = 0.0f;
 };
 
 // Object flags (shared with HLSL OBJECT_FLAG_* defines)
@@ -99,6 +103,7 @@ struct PerObjectCB {
 
 struct PerMeshCB {
     unsigned int materialDataIndex;
+    unsigned int rasterBucketIndex;
     unsigned int vertexFlags;
 	unsigned int vertexByteSize;
     unsigned int skinningVertexByteSize;
@@ -113,7 +118,6 @@ struct PerMeshCB {
     unsigned int vertexBufferOffset;
     unsigned int numVertices;
     unsigned int numMeshlets;
-    unsigned int pad[1];
 };
 
 struct PerMeshInstanceCB {
@@ -209,7 +213,8 @@ struct LightInfo {
     bool shadowCaster;
 	BoundingSphere boundingSphere;
     float maxRange;
-	unsigned int pad[2];
+    float shadowSourceRadius = 0.0f;
+    float shadowSourceAngleDegrees = 0.0f;
 };
 
 #define LIGHTS_PER_PAGE 12
@@ -373,6 +378,16 @@ struct VisibleCluster {
     unsigned int groupID;
     unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
+    unsigned int shadowClipmapIndex;      // Virtual shadow clipmap index, or 0xFFFFFFFF when not applicable
+    unsigned int virtualShadowPayload;
+    bool hasVirtualShadowBlockData;
+    bool virtualShadowBlockOverflowed;
+    unsigned int virtualShadowBlockCoordX;
+    unsigned int virtualShadowBlockCoordY;
+    unsigned int virtualShadowActiveMinPageX;
+    unsigned int virtualShadowActiveMinPageY;
+    unsigned int virtualShadowActiveMaxPageX;
+    unsigned int virtualShadowActiveMaxPageY;
 };
 
 inline constexpr uint32_t PackedVisibleClusterViewBits = 8u;
@@ -383,16 +398,33 @@ inline constexpr uint32_t PackedVisibleClusterPageDescriptorBits = 20u;
 inline constexpr uint32_t PackedVisibleClusterPageIndexBits = 10u;
 inline constexpr uint32_t PackedVisibleClusterPageShift = 18u;
 inline constexpr uint32_t PackedVisibleClusterPageSizeBytes = 1u << PackedVisibleClusterPageShift;
-inline constexpr uint32_t PackedVisibleClusterStrideBytes = 12u;
+inline constexpr uint32_t PackedVisibleClusterInvalidShadowClipmapIndex = 0xFFFFFFFFu;
+inline constexpr uint32_t PackedVisibleClusterStrideBytes = 16u;
+inline constexpr uint32_t PackedVisibleClusterVsmClipmapBits = 5u;
+inline constexpr uint32_t PackedVisibleClusterVsmBlockCoordBits = 5u;
+inline constexpr uint32_t PackedVisibleClusterVsmLocalPageBits = 2u;
+inline constexpr uint32_t PackedVisibleClusterVsmClipmapMask = (1u << PackedVisibleClusterVsmClipmapBits) - 1u;
+inline constexpr uint32_t PackedVisibleClusterVsmInvalidClipmapBits = PackedVisibleClusterVsmClipmapMask;
+inline constexpr uint32_t PackedVisibleClusterVsmClipmapShift = 0u;
+inline constexpr uint32_t PackedVisibleClusterVsmBlockXShift = PackedVisibleClusterVsmClipmapShift + PackedVisibleClusterVsmClipmapBits;
+inline constexpr uint32_t PackedVisibleClusterVsmBlockYShift = PackedVisibleClusterVsmBlockXShift + PackedVisibleClusterVsmBlockCoordBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMinXShift = PackedVisibleClusterVsmBlockYShift + PackedVisibleClusterVsmBlockCoordBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMinYShift = PackedVisibleClusterVsmRectMinXShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMaxXShift = PackedVisibleClusterVsmRectMinYShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMaxYShift = PackedVisibleClusterVsmRectMaxXShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmOverflowShift = PackedVisibleClusterVsmRectMaxYShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmHasBlockDataShift = PackedVisibleClusterVsmOverflowShift + 1u;
 
 inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
 {
     uint32_t word0 = 0;
     uint32_t word1 = 0;
     uint32_t word2 = 0;
+    uint32_t word3 = 0;
     std::memcpy(&word0, data + 0, sizeof(uint32_t));
     std::memcpy(&word1, data + 4, sizeof(uint32_t));
     std::memcpy(&word2, data + 8, sizeof(uint32_t));
+    std::memcpy(&word3, data + 12, sizeof(uint32_t));
 
     VisibleCluster cluster{};
     cluster.viewID = word0 & 0xFFu;
@@ -401,6 +433,21 @@ inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
     cluster.groupID = ((word1 >> PackedVisibleClusterLocalMeshletBits) & 0x3FFFFu) | ((word2 & 0x3u) << 18u);
     cluster.pageSlabDescriptorIndex = (word2 >> 2u) & 0xFFFFFu;
     cluster.pageSlabByteOffset = ((word2 >> 22u) & 0x3FFu) << PackedVisibleClusterPageShift;
+    cluster.virtualShadowPayload = word3;
+
+    const uint32_t encodedClipmapIndex =
+        (word3 >> PackedVisibleClusterVsmClipmapShift) & PackedVisibleClusterVsmClipmapMask;
+    cluster.shadowClipmapIndex = encodedClipmapIndex == PackedVisibleClusterVsmInvalidClipmapBits
+        ? PackedVisibleClusterInvalidShadowClipmapIndex
+        : encodedClipmapIndex;
+    cluster.hasVirtualShadowBlockData = ((word3 >> PackedVisibleClusterVsmHasBlockDataShift) & 0x1u) != 0u;
+    cluster.virtualShadowBlockOverflowed = ((word3 >> PackedVisibleClusterVsmOverflowShift) & 0x1u) != 0u;
+    cluster.virtualShadowBlockCoordX = (word3 >> PackedVisibleClusterVsmBlockXShift) & 0x1Fu;
+    cluster.virtualShadowBlockCoordY = (word3 >> PackedVisibleClusterVsmBlockYShift) & 0x1Fu;
+    cluster.virtualShadowActiveMinPageX = (word3 >> PackedVisibleClusterVsmRectMinXShift) & 0x3u;
+    cluster.virtualShadowActiveMinPageY = (word3 >> PackedVisibleClusterVsmRectMinYShift) & 0x3u;
+    cluster.virtualShadowActiveMaxPageX = (word3 >> PackedVisibleClusterVsmRectMaxXShift) & 0x3u;
+    cluster.virtualShadowActiveMaxPageY = (word3 >> PackedVisibleClusterVsmRectMaxYShift) & 0x3u;
     return cluster;
 }
 
@@ -411,7 +458,6 @@ enum RootSignatureLayout {
 	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
 	MiscUintRootSignatureIndex,
-	MiscFloatRootSignatureIndex,
 	ResourceDescriptorIndicesRootSignatureIndex,
 	IndirectCommandSignatureRootSignatureIndex,
 	NumRootSignatureParameters
@@ -441,7 +487,7 @@ enum SettingsRootConstants {
 	NumSettingsRootConstants
 };
 
-enum MiscUintRootConstants { // Used for pass-specific one-off constants
+enum MiscUintRootConstants { // Used for pass-specific one-off constants, including float payloads bit-cast on the shader side via asfloat()
     UintRootConstant0,
     UintRootConstant1,
     UintRootConstant2,
@@ -457,17 +503,12 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant12,
     UintRootConstant13,
 	UintRootConstant14,
+    UintRootConstant15,
+    UintRootConstant16,
+    UintRootConstant17,
+    UintRootConstant18,
+    UintRootConstant19,
 	NumMiscUintRootConstants
-};
-
-enum MiscFloatRootConstants { // Used for pass-specific one-off constants
-	FloatRootConstant0,
-	FloatRootConstant1,
-	FloatRootConstant2,
-	FloatRootConstant3,
-	FloatRootConstant4,
-	FloatRootConstant5,
-	NumMiscFloatRootConstants
 };
 
 enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manually

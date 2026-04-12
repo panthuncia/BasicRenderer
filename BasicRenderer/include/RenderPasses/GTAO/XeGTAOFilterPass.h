@@ -21,6 +21,7 @@ public:
         builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::LinearDepthMap)
             .WithUnorderedAccess(Builtin::GTAO::WorkingDepths)
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

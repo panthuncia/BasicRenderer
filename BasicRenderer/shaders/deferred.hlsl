@@ -12,7 +12,7 @@
 void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 
     uint screenW = perFrameBuffer.screenResX;
     uint screenH = perFrameBuffer.screenResY;
@@ -89,6 +89,13 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 break;
             case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:
                 payload = PackDebugUint(lightingOutput.clusterLightCount);
+                break;
+            case OUTPUT_VSM_PREFERRED_CLIPMAP:
+            case OUTPUT_VSM_SAMPLED_CLIPMAP:
+            case OUTPUT_VSM_PAGE_STATE:
+            case OUTPUT_VSM_PHYSICAL_PAGE:
+            case OUTPUT_VSM_RERENDERED_THIS_FRAME:
+                payload = lightingOutput.shadowDebugPayload;
                 break;
 #endif
         }

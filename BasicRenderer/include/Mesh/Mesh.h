@@ -88,6 +88,7 @@ public:
 	BoundingSphere GetAnimatedBoundingSphere(size_t animationIndex) const;
 
 	void SetMaterialDataIndex(unsigned int index);
+	void SetRasterBucketIndex(unsigned int index);
 
 	void SetCLodBufferViews(
 		std::unique_ptr<BufferView> clusterLODGroupsView,

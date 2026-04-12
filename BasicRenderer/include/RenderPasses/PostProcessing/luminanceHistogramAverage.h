@@ -3,6 +3,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Utilities/Utilities.h"
 #include "../shaders/PerPassRootConstants/luminanceHistogramAverageRootConstants.h"
 
 class LuminanceHistogramAveragePass : public ComputePass {
@@ -31,14 +32,13 @@ public:
 		commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
 		commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
 
-        float passConstants[NumMiscFloatRootConstants] = {};
-        passConstants[MIN_LOG_LUMINANCE] = 0.001f; // Minimum log luminance value
-        passConstants[LOG_LUMINANCE_RANGE] = (log2(10.0f) - log2(0.1f)); // range for log luminance
-        passConstants[TIME_COEFFICIENT] = context.deltaTime;
-		passConstants[NUM_PIXELS] = static_cast<float>(context.renderResolution.x * context.renderResolution.y);
+		uint32_t passConstants[NumMiscUintRootConstants] = {};
+        passConstants[MIN_LOG_LUMINANCE] = as_uint(0.001f); // Minimum log luminance value
+        passConstants[LOG_LUMINANCE_RANGE] = as_uint(log2(10.0f) - log2(0.1f)); // range for log luminance
+        passConstants[TIME_COEFFICIENT] = as_uint(context.deltaTime);
+		passConstants[NUM_PIXELS] = as_uint(static_cast<float>(context.renderResolution.x * context.renderResolution.y));
 
-        //commandList->SetComputeRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, passConstants, 0);
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, passConstants);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
 
         BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 

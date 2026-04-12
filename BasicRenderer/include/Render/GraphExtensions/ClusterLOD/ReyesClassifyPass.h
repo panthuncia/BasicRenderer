@@ -17,8 +17,10 @@ public:
         std::shared_ptr<Buffer> visibleClustersReadBaseCounterBuffer,
         std::shared_ptr<Buffer> fullClusterOutputsBuffer,
         std::shared_ptr<Buffer> fullClusterCounterBuffer,
+        uint32_t fullClusterOutputCapacity,
         std::shared_ptr<Buffer> ownedClustersBuffer,
         std::shared_ptr<Buffer> ownedClustersCounterBuffer,
+        uint32_t ownedClusterCapacity,
         std::shared_ptr<Buffer> ownershipBitsetBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> telemetryBuffer,
@@ -36,8 +38,10 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersReadBaseCounterBuffer;
     std::shared_ptr<Buffer> m_fullClusterOutputsBuffer;
     std::shared_ptr<Buffer> m_fullClusterCounterBuffer;
+    uint32_t m_fullClusterOutputCapacity = 0u;
     std::shared_ptr<Buffer> m_ownedClustersBuffer;
     std::shared_ptr<Buffer> m_ownedClustersCounterBuffer;
+    uint32_t m_ownedClusterCapacity = 0u;
     std::shared_ptr<Buffer> m_ownershipBitsetBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;

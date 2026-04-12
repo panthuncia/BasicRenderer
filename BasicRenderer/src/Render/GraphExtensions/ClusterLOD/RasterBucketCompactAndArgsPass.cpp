@@ -11,6 +11,7 @@
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
+#include "../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodCompactionRootConstants.h"
 
 RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
@@ -53,6 +54,12 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
         L"CompactClustersAndBuildIndirectArgsCS",
         {},
         "CLod_RasterBucketsCompactAndArgsPSO");
+    m_clearPipeline = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"shaders/ClusterLOD/clodUtil.hlsl",
+        L"ClearUintStructuredBufferCSMain",
+        {},
+        "CLod_RasterBucketsClearUintPSO");
 
     rhi::IndirectArg args[] = {
         {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 2 } } },
@@ -85,6 +92,8 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
     if (m_reyesOwnershipBitsetBuffer) {
         builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void RasterBucketCompactAndArgsPass::Setup() {
@@ -101,6 +110,9 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     auto& pm = PSOManager::GetInstance();
 
     auto numBuckets = context.materialManager->GetRasterBucketCount();
+    if (numBuckets == 0u) {
+        return {};
+    }
     const uint32_t kThreads = 64;
     const uint64_t maxItems = std::max<uint64_t>(m_maxVisibleClusters, numBuckets);
     const uint32_t groups = static_cast<uint32_t>((maxItems + kThreads - 1u) / kThreads);
@@ -108,6 +120,34 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
     commandList.BindLayout(pm.GetComputeRootSignature().GetHandle());
+
+    BindResourceDescriptorIndices(commandList, m_clearPipeline.GetResourceDescriptorSlots());
+    commandList.BindPipeline(m_clearPipeline.GetAPIPipelineState().GetHandle());
+
+    uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = numBuckets;
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        clearRootConstants);
+    commandList.Dispatch((numBuckets + 63u) / 64u, 1u, 1u);
+
+    rhi::BufferBarrier writeCursorBarrier{};
+    writeCursorBarrier.buffer = m_writeCursorBuffer->GetAPIResource().GetHandle();
+    writeCursorBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    writeCursorBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    writeCursorBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+    writeCursorBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+
+    rhi::BarrierBatch barrierBatch{};
+    barrierBatch.buffers = { &writeCursorBarrier };
+    commandList.Barriers(barrierBatch);
+
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
@@ -169,12 +209,6 @@ void RasterBucketCompactAndArgsPass::Update(const UpdateExecutionContext& execut
         m_indirectArgsBuffer->ResizeStructured(numBuckets);
     }
 
-    std::vector<uint32_t> zeroData(numBuckets, 0u);
-    BUFFER_UPLOAD(
-        zeroData.data(),
-        static_cast<uint32_t>(zeroData.size() * sizeof(uint32_t)),
-        rg::runtime::UploadTarget::FromShared(m_writeCursorBuffer),
-        0);
 }
 
 void RasterBucketCompactAndArgsPass::Cleanup() {}

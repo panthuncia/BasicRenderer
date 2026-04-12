@@ -251,6 +251,11 @@ public:
         m_alphaDeepVisibilityStatsQuery = {};
 		m_reyesTelemetryPhase1Query = {};
 		m_reyesTelemetryPhase2Query = {};
+        m_shadowTelemetryQuery = {};
+        m_shadowVisibleCounterQuery = {};
+        m_shadowVisibleClustersQuery = {};
+        m_shadowVirtualShadowStatsQuery = {};
+		m_shadowVirtualShadowRuntimeStateQuery = {};
     }
 
     // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
@@ -335,11 +340,41 @@ private:
         float dominantInstancePercent = 0.0f;
     };
 
-    CLodWorkGraphTelemetryCounters m_clodTelemetryCounters{};
-    bool m_clodTelemetryHasData = false;
-    bool m_clodTelemetryCapturePending = false;
-    uint64_t m_clodTelemetryCaptureCount = 0;
-    std::string m_clodTelemetryStatus = "No captures yet.";
+    struct CLodWorkGraphCaptureState {
+        CLodWorkGraphTelemetryCounters counters{};
+        bool hasData = false;
+        bool capturePending = false;
+        uint64_t captureCount = 0;
+        std::string status = "No captures yet.";
+
+        bool captureStatsPending = false;
+        uint64_t captureStatsId = 0;
+        bool captureHasPendingCounter = false;
+        bool captureHasPendingClusters = false;
+        uint32_t capturePendingVisibleCount = 0;
+        std::vector<VisibleCluster> capturePendingClusters;
+        bool captureStatsAvailable = false;
+        CLodCaptureStats captureStats{};
+    };
+
+    CLodWorkGraphCaptureState m_clodTelemetry;
+    CLodWorkGraphCaptureState m_shadowClodTelemetry;
+    uint64_t m_directionalShadowDebugLastSequence = 0;
+    CLodDirectionalShadowDebugSnapshot m_directionalShadowDebugLatest{};
+
+    struct CLodVirtualShadowCaptureState {
+        CLodVirtualShadowStats stats{};
+        CLodVirtualShadowRuntimeState runtimeState{};
+        bool hasData = false;
+        bool capturePending = false;
+        bool captureHasPendingStats = false;
+        bool captureHasPendingRuntimeState = false;
+        uint64_t captureId = 0;
+        uint64_t captureCount = 0;
+        std::string status = "No VSM captures yet.";
+    };
+
+    CLodVirtualShadowCaptureState m_shadowVirtualShadowTelemetry;
 
     bool m_clodReyesTelemetryHasData = false;
     bool m_clodReyesTelemetryCapturePending = false;
@@ -370,15 +405,6 @@ private:
     bool m_frameTaskGraphPaused = false;
     br::render::SceneOverlapStatus m_sceneOverlapStatus{};
 
-    bool m_clodCaptureStatsPending = false;
-    uint64_t m_clodCaptureStatsId = 0;
-    bool m_clodCaptureHasPendingCounter = false;
-    bool m_clodCaptureHasPendingClusters = false;
-    uint32_t m_clodCapturePendingVisibleCount = 0;
-    std::vector<VisibleCluster> m_clodCapturePendingClusters;
-    bool m_clodCaptureStatsAvailable = false;
-    CLodCaptureStats m_clodCaptureStats{};
-
     bool m_clodAlphaTelemetryHasData = false;
     bool m_clodAlphaTelemetryCapturePending = false;
     uint64_t m_clodAlphaTelemetryCaptureId = 0;
@@ -394,10 +420,15 @@ private:
     std::string m_clodAlphaTelemetryStatus = "No alpha captures yet.";
 
     flecs::query<const Components::Resource> m_telemetryQuery;
+    flecs::query<const Components::Resource> m_shadowTelemetryQuery;
     flecs::query<const Components::Resource> m_reyesTelemetryPhase1Query;
     flecs::query<const Components::Resource> m_reyesTelemetryPhase2Query;
     flecs::query<const Components::Resource> m_visibleClustersQuery;
     flecs::query<const Components::Resource> m_visibleCounterQuery;
+    flecs::query<const Components::Resource> m_shadowVisibleClustersQuery;
+    flecs::query<const Components::Resource> m_shadowVisibleCounterQuery;
+    flecs::query<const Components::Resource> m_shadowVirtualShadowStatsQuery;
+    flecs::query<const Components::Resource> m_shadowVirtualShadowRuntimeStateQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityCounterQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityOverflowQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityStatsQuery;
@@ -406,7 +437,8 @@ private:
     void DrawCLodTelemetryWindow();
     void DrawFrameTaskGraphWindow();
     void DrawAutoAliasPlannerWindow();
-    void TryFinalizeCLodCaptureStats(uint64_t captureId);
+    void TryFinalizeCLodCaptureStats(CLodWorkGraphCaptureState& captureState, uint64_t captureId, const char* captureLabel);
+    void TryFinalizeCLodVirtualShadowCapture(uint64_t captureId);
     void TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId);
     void TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId);
 
@@ -482,6 +514,90 @@ private:
     bool m_clodDisableReyesRasterization = false;
     std::function<bool()> getCLodDisableReyesRasterization;
     std::function<void(bool)> setCLodDisableReyesRasterization;
+
+    bool m_clodDisableVirtualShadowPageCaching = false;
+    std::function<bool()> getCLodDisableVirtualShadowPageCaching;
+    std::function<void(bool)> setCLodDisableVirtualShadowPageCaching;
+
+    bool m_clodEnablePageJobVSM = false;
+    std::function<bool()> getCLodEnablePageJobVSM;
+    std::function<void(bool)> setCLodEnablePageJobVSM;
+
+    uint32_t m_clodPageJobDiameterThreshold = 64u;
+    std::function<uint32_t()> getCLodPageJobDiameterThreshold;
+    std::function<void(uint32_t)> setCLodPageJobDiameterThreshold;
+
+    float m_clodPageJobSparseRatio = 0.5f;
+    std::function<float()> getCLodPageJobSparseRatio;
+    std::function<void(float)> setCLodPageJobSparseRatio;
+
+    uint32_t m_clodPageJobMaxPagesPerCluster = 32u;
+    std::function<uint32_t()> getCLodPageJobMaxPagesPerCluster;
+    std::function<void(uint32_t)> setCLodPageJobMaxPagesPerCluster;
+
+    uint32_t m_clodPageJobRecordCapacity = CLodPageJobDefaultRecordCapacity;
+    std::function<uint32_t()> getCLodPageJobRecordCapacity;
+    std::function<void(uint32_t)> setCLodPageJobRecordCapacity;
+
+    bool m_clodPageJobForceAll = false;
+    std::function<bool()> getCLodPageJobForceAll;
+    std::function<void(bool)> setCLodPageJobForceAll;
+
+    uint32_t m_clodDirectionalVirtualShadowMaxBackingResolution = CLodVirtualShadowDefaultBackingResolution;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxBackingResolution;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowMaxBackingResolution;
+
+    uint32_t m_clodDirectionalVirtualShadowMaxPhysicalPages = CLodVirtualShadowDefaultPhysicalPageCount;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxPhysicalPages;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowMaxPhysicalPages;
+
+    float m_clodDirectionalVirtualShadowLodBias = CLodVirtualShadowDefaultDirectionalLodBias;
+    std::function<float()> getCLodDirectionalVirtualShadowLodBias;
+    std::function<void(float)> setCLodDirectionalVirtualShadowLodBias;
+
+    bool m_clodDirectionalVirtualShadowAutoLodBias = true;
+    std::function<bool()> getCLodDirectionalVirtualShadowAutoLodBias;
+    std::function<void(bool)> setCLodDirectionalVirtualShadowAutoLodBias;
+
+    float m_clodDirectionalVirtualShadowAutoLodBiasScale = 1.0f;
+    std::function<float()> getCLodDirectionalVirtualShadowAutoLodBiasScale;
+    std::function<void(float)> setCLodDirectionalVirtualShadowAutoLodBiasScale;
+
+    float m_clodDirectionalVirtualShadowSourceAngleDegrees = CLodVirtualShadowDefaultDirectionalSourceAngleDegrees;
+    std::function<float()> getCLodDirectionalVirtualShadowSourceAngleDegrees;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSourceAngleDegrees;
+
+    uint32_t m_clodDirectionalVirtualShadowSmrtRayCountDirectional = CLodVirtualShadowDefaultSmrtRayCountDirectional;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowSmrtRayCountDirectional;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowSmrtRayCountDirectional;
+
+    uint32_t m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional;
+
+    float m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees;
+    std::function<float()> getCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees;
+
+    float m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional;
+    std::function<float()> getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional;
+
+    float m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = CLodVirtualShadowDefaultSmrtMaxTraceDistanceWorld;
+    std::function<float()> getCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld;
+
+    uint8_t m_numDirectionalLightCascades = 0u;
+    std::function<uint8_t()> getNumDirectionalLightCascades;
+    std::function<void(uint8_t)> setNumDirectionalLightCascades;
+
+    float m_maxShadowDistance = 0.0f;
+    std::function<float()> getMaxShadowDistance;
+    std::function<void(float)> setMaxShadowDistance;
+
+    float m_directionalShadowVerticalExtent = 0.0f;
+    std::function<float()> getDirectionalShadowVerticalExtent;
+    std::function<void(float)> setDirectionalShadowVerticalExtent;
 
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
@@ -691,6 +807,111 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_clodDisableReyesRasterization = getCLodDisableReyesRasterization();
     observerSetting(m_clodDisableReyesRasterization, CLodDisableReyesRasterizationSettingName);
 
+    getCLodDisableVirtualShadowPageCaching = settingsManager.getSettingGetter<bool>(CLodDisableVirtualShadowPageCachingSettingName);
+    setCLodDisableVirtualShadowPageCaching = settingsManager.getSettingSetter<bool>(CLodDisableVirtualShadowPageCachingSettingName);
+    m_clodDisableVirtualShadowPageCaching = getCLodDisableVirtualShadowPageCaching();
+    observerSetting(m_clodDisableVirtualShadowPageCaching, CLodDisableVirtualShadowPageCachingSettingName);
+
+    getCLodEnablePageJobVSM = settingsManager.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName);
+    setCLodEnablePageJobVSM = settingsManager.getSettingSetter<bool>(CLodEnablePageJobVSMSettingName);
+    m_clodEnablePageJobVSM = getCLodEnablePageJobVSM();
+    observerSetting(m_clodEnablePageJobVSM, CLodEnablePageJobVSMSettingName);
+
+    getCLodPageJobDiameterThreshold = settingsManager.getSettingGetter<uint32_t>(CLodPageJobDiameterThresholdSettingName);
+    setCLodPageJobDiameterThreshold = settingsManager.getSettingSetter<uint32_t>(CLodPageJobDiameterThresholdSettingName);
+    m_clodPageJobDiameterThreshold = getCLodPageJobDiameterThreshold();
+    observerSetting(m_clodPageJobDiameterThreshold, CLodPageJobDiameterThresholdSettingName);
+
+    getCLodPageJobSparseRatio = settingsManager.getSettingGetter<float>(CLodPageJobSparseRatioSettingName);
+    setCLodPageJobSparseRatio = settingsManager.getSettingSetter<float>(CLodPageJobSparseRatioSettingName);
+    m_clodPageJobSparseRatio = getCLodPageJobSparseRatio();
+    observerSetting(m_clodPageJobSparseRatio, CLodPageJobSparseRatioSettingName);
+
+    getCLodPageJobMaxPagesPerCluster = settingsManager.getSettingGetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName);
+    setCLodPageJobMaxPagesPerCluster = settingsManager.getSettingSetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName);
+    m_clodPageJobMaxPagesPerCluster = getCLodPageJobMaxPagesPerCluster();
+    observerSetting(m_clodPageJobMaxPagesPerCluster, CLodPageJobMaxPagesPerClusterSettingName);
+
+    getCLodPageJobRecordCapacity = settingsManager.getSettingGetter<uint32_t>(CLodPageJobRecordCapacitySettingName);
+    setCLodPageJobRecordCapacity = settingsManager.getSettingSetter<uint32_t>(CLodPageJobRecordCapacitySettingName);
+    m_clodPageJobRecordCapacity = getCLodPageJobRecordCapacity();
+    observerSetting(m_clodPageJobRecordCapacity, CLodPageJobRecordCapacitySettingName);
+
+    getCLodPageJobForceAll = settingsManager.getSettingGetter<bool>(CLodPageJobForceAllSettingName);
+    setCLodPageJobForceAll = settingsManager.getSettingSetter<bool>(CLodPageJobForceAllSettingName);
+    m_clodPageJobForceAll = getCLodPageJobForceAll();
+    observerSetting(m_clodPageJobForceAll, CLodPageJobForceAllSettingName);
+
+    getCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
+    setCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
+    m_clodDirectionalVirtualShadowMaxBackingResolution = getCLodDirectionalVirtualShadowMaxBackingResolution();
+    observerSetting(m_clodDirectionalVirtualShadowMaxBackingResolution, CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
+
+    getCLodDirectionalVirtualShadowMaxPhysicalPages = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
+    setCLodDirectionalVirtualShadowMaxPhysicalPages = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
+    m_clodDirectionalVirtualShadowMaxPhysicalPages = getCLodDirectionalVirtualShadowMaxPhysicalPages();
+    observerSetting(m_clodDirectionalVirtualShadowMaxPhysicalPages, CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
+
+    getCLodDirectionalVirtualShadowLodBias = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowLodBiasSettingName);
+    setCLodDirectionalVirtualShadowLodBias = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowLodBiasSettingName);
+    m_clodDirectionalVirtualShadowLodBias = getCLodDirectionalVirtualShadowLodBias();
+    observerSetting(m_clodDirectionalVirtualShadowLodBias, CLodDirectionalVirtualShadowLodBiasSettingName);
+
+    getCLodDirectionalVirtualShadowAutoLodBias = settingsManager.getSettingGetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName);
+    setCLodDirectionalVirtualShadowAutoLodBias = settingsManager.getSettingSetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName);
+    m_clodDirectionalVirtualShadowAutoLodBias = getCLodDirectionalVirtualShadowAutoLodBias();
+    observerSetting(m_clodDirectionalVirtualShadowAutoLodBias, CLodDirectionalVirtualShadowAutoLodBiasSettingName);
+
+    getCLodDirectionalVirtualShadowAutoLodBiasScale = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+    setCLodDirectionalVirtualShadowAutoLodBiasScale = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+    m_clodDirectionalVirtualShadowAutoLodBiasScale = getCLodDirectionalVirtualShadowAutoLodBiasScale();
+    observerSetting(m_clodDirectionalVirtualShadowAutoLodBiasScale, CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+
+    getCLodDirectionalVirtualShadowSourceAngleDegrees = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
+    setCLodDirectionalVirtualShadowSourceAngleDegrees = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
+    m_clodDirectionalVirtualShadowSourceAngleDegrees = getCLodDirectionalVirtualShadowSourceAngleDegrees();
+    observerSetting(m_clodDirectionalVirtualShadowSourceAngleDegrees, CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtRayCountDirectional = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName);
+    setCLodDirectionalVirtualShadowSmrtRayCountDirectional = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName);
+    m_clodDirectionalVirtualShadowSmrtRayCountDirectional = getCLodDirectionalVirtualShadowSmrtRayCountDirectional();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtRayCountDirectional, CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName);
+    setCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName);
+    m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = getCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional, CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName);
+    setCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName);
+    m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = getCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees, CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
+    setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
+    m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional, CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName);
+    setCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName);
+    m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = getCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld, CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName);
+
+    getNumDirectionalLightCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades");
+    setNumDirectionalLightCascades = settingsManager.getSettingSetter<uint8_t>("numDirectionalLightCascades");
+    m_numDirectionalLightCascades = getNumDirectionalLightCascades();
+    observerSetting(m_numDirectionalLightCascades, "numDirectionalLightCascades");
+
+    getMaxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance");
+    setMaxShadowDistance = settingsManager.getSettingSetter<float>("maxShadowDistance");
+    m_maxShadowDistance = getMaxShadowDistance();
+    observerSetting(m_maxShadowDistance, "maxShadowDistance");
+
+    getDirectionalShadowVerticalExtent = settingsManager.getSettingGetter<float>("directionalShadowVerticalExtent");
+    setDirectionalShadowVerticalExtent = settingsManager.getSettingSetter<float>("directionalShadowVerticalExtent");
+    m_directionalShadowVerticalExtent = getDirectionalShadowVerticalExtent();
+    observerSetting(m_directionalShadowVerticalExtent, "directionalShadowVerticalExtent");
+
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
@@ -801,6 +1022,12 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .with<CLodWorkGraphTelemetryBufferTag>()
         .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
+    const auto shadowTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionShadowTag>();
+    m_shadowTelemetryQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodWorkGraphTelemetryBufferTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
     m_reyesTelemetryPhase1Query = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<CLodReyesTelemetryBufferPhase1Tag>()
@@ -820,6 +1047,26 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .query_builder<const Components::Resource>()
         .with<VisibleClustersCounterTag>()
         .with<CLodExtensionTypeTag>(visBufferTag)
+        .build();
+    m_shadowVisibleClustersQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<VisibleClustersBufferTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
+    m_shadowVisibleCounterQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<VisibleClustersCounterTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
+    m_shadowVirtualShadowStatsQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodVirtualShadowStatsTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
+    m_shadowVirtualShadowRuntimeStateQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodVirtualShadowRuntimeStateTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
         .build();
 
     const auto alphaTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionAlphaBlendTag>();
@@ -881,7 +1128,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     const float fps = ImGui::GetIO().Framerate;
     const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
 
-    SetCLodWorkGraphTelemetryEnabled((m_menuEnabled && showCLodTelemetry) || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+    SetCLodWorkGraphTelemetryEnabled(
+        (m_menuEnabled && showCLodTelemetry) ||
+        m_clodTelemetry.capturePending ||
+        m_clodTelemetry.captureStatsPending ||
+        m_shadowClodTelemetry.capturePending ||
+        m_shadowClodTelemetry.captureStatsPending);
 
     if (!m_menuEnabled) {
         ImGui::SetNextWindowBgAlpha(0.8f);
@@ -953,6 +1205,186 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         }
         if (ImGui::Checkbox("Disable Reyes Tessellation/Displacement", &m_clodDisableReyesRasterization)) {
             setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);
+        }
+        if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
+            setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
+        }
+        if (ImGui::Checkbox("Enable Page-Job VSM Raster", &m_clodEnablePageJobVSM)) {
+            setCLodEnablePageJobVSM(m_clodEnablePageJobVSM);
+        }
+        if (m_clodEnablePageJobVSM) {
+            int diameterThreshold = static_cast<int>(m_clodPageJobDiameterThreshold);
+            if (ImGui::SliderInt("Page-Job Diameter Threshold", &diameterThreshold, 1, 255)) {
+                m_clodPageJobDiameterThreshold = static_cast<uint32_t>(std::clamp(diameterThreshold, 1, 255));
+                setCLodPageJobDiameterThreshold(m_clodPageJobDiameterThreshold);
+            }
+            if (ImGui::SliderFloat("Page-Job Sparse Ratio", &m_clodPageJobSparseRatio, 0.0f, 1.0f, "%.2f")) {
+                setCLodPageJobSparseRatio(m_clodPageJobSparseRatio);
+            }
+            int maxPages = static_cast<int>(m_clodPageJobMaxPagesPerCluster);
+            if (ImGui::SliderInt("Page-Job Max Pages/Cluster", &maxPages, 1, 255)) {
+                m_clodPageJobMaxPagesPerCluster = static_cast<uint32_t>(std::clamp(maxPages, 1, 255));
+                setCLodPageJobMaxPagesPerCluster(m_clodPageJobMaxPagesPerCluster);
+            }
+            int pageJobRecordCapacity = static_cast<int>(m_clodPageJobRecordCapacity);
+            if (ImGui::SliderInt("Page-Job Record Capacity", &pageJobRecordCapacity, 1, 8 * 1024 * 1024)) {
+                m_clodPageJobRecordCapacity = static_cast<uint32_t>(std::clamp(pageJobRecordCapacity, 1, 8 * 1024 * 1024));
+                setCLodPageJobRecordCapacity(m_clodPageJobRecordCapacity);
+            }
+            if (ImGui::Checkbox("Force All Opaque VSM -> Page-Job", &m_clodPageJobForceAll)) {
+                setCLodPageJobForceAll(m_clodPageJobForceAll);
+            }
+        }
+        int directionalLightClipmaps = static_cast<int>(m_numDirectionalLightCascades);
+        if (ImGui::SliderInt("Directional VSM Clipmaps", &directionalLightClipmaps, 1, static_cast<int>(CLodVirtualShadowMaxSupportedClipmapCount))) {
+            directionalLightClipmaps = std::clamp(directionalLightClipmaps, 1, static_cast<int>(CLodVirtualShadowMaxSupportedClipmapCount));
+            m_numDirectionalLightCascades = static_cast<uint8_t>(directionalLightClipmaps);
+            setNumDirectionalLightCascades(m_numDirectionalLightCascades);
+        }
+        static constexpr uint32_t kDirectionalVsmBackingResolutionOptions[] = {
+            CLodVirtualShadowMinBackingResolution,
+            CLodVirtualShadowMediumBackingResolution,
+            CLodVirtualShadowMaxBackingResolution,
+        };
+        static constexpr const char* kDirectionalVsmBackingResolutionLabels[] = {
+            "4K",
+            "8K",
+            "16K",
+        };
+        int directionalVsmBackingResolutionIndex = 0;
+        for (int optionIndex = 0; optionIndex < static_cast<int>(std::size(kDirectionalVsmBackingResolutionOptions)); ++optionIndex) {
+            if (CLodVirtualShadowSanitizeBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution) ==
+                kDirectionalVsmBackingResolutionOptions[optionIndex]) {
+                directionalVsmBackingResolutionIndex = optionIndex;
+                break;
+            }
+        }
+        if (ImGui::Combo(
+                "Directional VSM Backing Size",
+                &directionalVsmBackingResolutionIndex,
+                kDirectionalVsmBackingResolutionLabels,
+                static_cast<int>(std::size(kDirectionalVsmBackingResolutionLabels)))) {
+            directionalVsmBackingResolutionIndex = std::clamp(
+                directionalVsmBackingResolutionIndex,
+                0,
+                static_cast<int>(std::size(kDirectionalVsmBackingResolutionOptions)) - 1);
+            m_clodDirectionalVirtualShadowMaxBackingResolution =
+                kDirectionalVsmBackingResolutionOptions[directionalVsmBackingResolutionIndex];
+            setCLodDirectionalVirtualShadowMaxBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution);
+
+            const uint32_t backingMaxPhysicalPages = CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(
+                m_clodDirectionalVirtualShadowMaxBackingResolution);
+            if (m_clodDirectionalVirtualShadowMaxPhysicalPages > backingMaxPhysicalPages) {
+                m_clodDirectionalVirtualShadowMaxPhysicalPages = backingMaxPhysicalPages;
+                setCLodDirectionalVirtualShadowMaxPhysicalPages(m_clodDirectionalVirtualShadowMaxPhysicalPages);
+            }
+        }
+        const uint32_t backingMaxPhysicalPages = CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(
+            m_clodDirectionalVirtualShadowMaxBackingResolution);
+        int maxPhysicalPages = static_cast<int>(m_clodDirectionalVirtualShadowMaxPhysicalPages);
+        if (ImGui::SliderInt("Directional VSM Physical Pages", &maxPhysicalPages, 1, static_cast<int>(backingMaxPhysicalPages))) {
+            maxPhysicalPages = std::clamp(maxPhysicalPages, 1, static_cast<int>(backingMaxPhysicalPages));
+            m_clodDirectionalVirtualShadowMaxPhysicalPages = static_cast<uint32_t>(maxPhysicalPages);
+            setCLodDirectionalVirtualShadowMaxPhysicalPages(m_clodDirectionalVirtualShadowMaxPhysicalPages);
+        }
+        if (ImGui::Checkbox("Auto Directional VSM LOD Bias", &m_clodDirectionalVirtualShadowAutoLodBias)) {
+            setCLodDirectionalVirtualShadowAutoLodBias(m_clodDirectionalVirtualShadowAutoLodBias);
+        }
+        if (ImGui::SliderFloat("Directional VSM Manual LOD Bias", &m_clodDirectionalVirtualShadowLodBias, -4.0f, 4.0f, "%.2f")) {
+            setCLodDirectionalVirtualShadowLodBias(m_clodDirectionalVirtualShadowLodBias);
+        }
+        if (ImGui::SliderFloat("Directional VSM Auto Bias Scale", &m_clodDirectionalVirtualShadowAutoLodBiasScale, 0.0f, 4.0f, "%.2f")) {
+            m_clodDirectionalVirtualShadowAutoLodBiasScale = std::max(m_clodDirectionalVirtualShadowAutoLodBiasScale, 0.0f);
+            setCLodDirectionalVirtualShadowAutoLodBiasScale(m_clodDirectionalVirtualShadowAutoLodBiasScale);
+        }
+        if (ImGui::SliderFloat("Directional VSM Source Angle", &m_clodDirectionalVirtualShadowSourceAngleDegrees, 0.0f, 10.0f, "%.2f deg")) {
+            m_clodDirectionalVirtualShadowSourceAngleDegrees = std::max(m_clodDirectionalVirtualShadowSourceAngleDegrees, 0.0f);
+            setCLodDirectionalVirtualShadowSourceAngleDegrees(m_clodDirectionalVirtualShadowSourceAngleDegrees);
+        }
+        int smrtRayCountDirectional = static_cast<int>(m_clodDirectionalVirtualShadowSmrtRayCountDirectional);
+        if (ImGui::SliderInt("Directional VSM SMRT Rays", &smrtRayCountDirectional, 0, 32)) {
+            m_clodDirectionalVirtualShadowSmrtRayCountDirectional = static_cast<uint32_t>(std::max(smrtRayCountDirectional, 0));
+            setCLodDirectionalVirtualShadowSmrtRayCountDirectional(m_clodDirectionalVirtualShadowSmrtRayCountDirectional);
+        }
+        int smrtSamplesPerRayDirectional = static_cast<int>(m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional);
+        if (ImGui::SliderInt("Directional VSM SMRT Samples/Ray", &smrtSamplesPerRayDirectional, 0, 16)) {
+            m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = static_cast<uint32_t>(std::max(smrtSamplesPerRayDirectional, 0));
+            setCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional(m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional);
+        }
+        if (ImGui::SliderFloat(
+                "Directional VSM SMRT Max Ray Angle",
+                &m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees,
+                0.0f,
+                15.0f,
+                "%.2f deg")) {
+            m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees =
+                std::max(m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees, 0.0f);
+            setCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees(
+                m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees);
+        }
+        if (ImGui::SliderFloat(
+                "Directional VSM SMRT Ray Length Scale",
+                &m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional,
+                0.0f,
+                0.25f,
+                "%.3f")) {
+            m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional =
+                std::max(m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional, 0.0f);
+            setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional(
+                m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional);
+        }
+        if (ImGui::SliderFloat(
+                "Directional VSM SMRT Max Trace Distance",
+                &m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld,
+                1.0f,
+                2000.0f,
+                "%.1f")) {
+            m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld =
+                std::max(m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld, 1.0f);
+            setCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld(
+                m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld);
+        }
+        const CLodVirtualShadowResolutionConfig virtualShadowConfig =
+            CLodVirtualShadowBuildRuntimeResolutionConfig();
+        const float budgetDirectionalLodBias = m_clodDirectionalVirtualShadowAutoLodBias
+            ? CLodVirtualShadowAutomaticDirectionalLodBiasFromBudget(
+                virtualShadowConfig.maxPhysicalPages,
+                m_clodDirectionalVirtualShadowAutoLodBiasScale)
+            : 0.0f;
+        ImGui::Text(
+            "Directional VSM Virtual Space: %u x %u pages (%u texels/page, fixed 16K)",
+            CLodVirtualShadowFixedVirtualPageCountPerAxis,
+            CLodVirtualShadowFixedVirtualPageCountPerAxis,
+            CLodVirtualShadowPhysicalPageSize);
+        ImGui::Text(
+            "Directional VSM Backing Cap: %u x %u texels (%u pages max)",
+            CLodVirtualShadowSanitizeBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution),
+            CLodVirtualShadowSanitizeBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution),
+            backingMaxPhysicalPages);
+        ImGui::Text(
+            "Directional VSM Physical Atlas: %u x %u pages (%u total)",
+            virtualShadowConfig.physicalAtlasPagesWide,
+            virtualShadowConfig.physicalAtlasPagesHigh,
+            virtualShadowConfig.maxPhysicalPages);
+        ImGui::Text(
+            "Directional VSM Bias: manual=%.2f budgetBase=%.2f configured=%.2f",
+            m_clodDirectionalVirtualShadowLodBias,
+            budgetDirectionalLodBias,
+            virtualShadowConfig.directionalLodBias);
+        ImGui::Text(
+            "Directional VSM SMRT: angle=%.2f deg rays=%u samples/ray=%u maxRayAngle=%.2f deg rayLengthScale=%.2f",
+            m_clodDirectionalVirtualShadowSourceAngleDegrees,
+            m_clodDirectionalVirtualShadowSmrtRayCountDirectional,
+            m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional,
+            m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees,
+            m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional);
+        if (ImGui::SliderFloat("Directional Shadow Distance", &m_maxShadowDistance, 1.0f, 1000.0f, "%.1f")) {
+            m_maxShadowDistance = std::max(m_maxShadowDistance, 1.0f);
+            setMaxShadowDistance(m_maxShadowDistance);
+        }
+        if (ImGui::SliderFloat("Directional Shadow Vertical Extent", &m_directionalShadowVerticalExtent, 1.0f, 1000.0f, "%.1f")) {
+            m_directionalShadowVerticalExtent = std::max(m_directionalShadowVerticalExtent, 1.0f);
+            setDirectionalShadowVerticalExtent(m_directionalShadowVerticalExtent);
         }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
@@ -1540,17 +1972,17 @@ inline void Menu::DisplaySelectedNode() {
     ImGui::End();
 }
 
-inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
-    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
+inline void Menu::TryFinalizeCLodCaptureStats(CLodWorkGraphCaptureState& captureState, uint64_t captureId, const char* captureLabel) {
+    if (!captureState.captureStatsPending || captureState.captureStatsId != captureId) {
         return;
     }
 
-    if (!m_clodCaptureHasPendingCounter || !m_clodCaptureHasPendingClusters) {
+    if (!captureState.captureHasPendingCounter || !captureState.captureHasPendingClusters) {
         return;
     }
 
-    const uint32_t requestedCount = m_clodCapturePendingVisibleCount;
-    const uint32_t availableCount = static_cast<uint32_t>(m_clodCapturePendingClusters.size());
+    const uint32_t requestedCount = captureState.capturePendingVisibleCount;
+    const uint32_t availableCount = static_cast<uint32_t>(captureState.capturePendingClusters.size());
     const uint32_t decodeCount = (std::min)(requestedCount, availableCount);
 
     std::unordered_map<uint32_t, uint32_t> viewHistogram;
@@ -1562,7 +1994,7 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
     uniqueMeshlets.reserve(decodeCount > 0 ? decodeCount : 1);
 
     for (uint32_t i = 0; i < decodeCount; ++i) {
-        const VisibleCluster& cluster = m_clodCapturePendingClusters[i];
+        const VisibleCluster& cluster = captureState.capturePendingClusters[i];
         viewHistogram[cluster.viewID]++;
         instanceHistogram[cluster.instanceID]++;
         const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | (static_cast<uint64_t>(cluster.groupID) << 16ull) | static_cast<uint64_t>(cluster.localMeshletIndex);
@@ -1593,12 +2025,13 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
         stats.dominantInstancePercent = 100.0f * static_cast<float>(stats.maxClustersPerInstance) / static_cast<float>(decodeCount);
     }
 
-    m_clodCaptureStats = stats;
-    m_clodCaptureStatsAvailable = true;
-    m_clodCaptureStatsPending = false;
+    captureState.captureStats = stats;
+    captureState.captureStatsAvailable = true;
+    captureState.captureStatsPending = false;
 
     spdlog::info(
-        "CLod WG stats capture: visible={}, views={}, instances={}, uniqueMeshlets={}, maxPerView={}, maxPerInstance={}",
+        "{} stats capture: visible={}, views={}, instances={}, uniqueMeshlets={}, maxPerView={}, maxPerInstance={}",
+        captureLabel,
         stats.visibleClusterCount,
         stats.uniqueViews,
         stats.uniqueInstances,
@@ -1666,14 +2099,34 @@ inline void Menu::TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId) {
         m_clodReyesTelemetryPhase2.patchRasterizedMicroTriangleCount);
 }
 
+inline void Menu::TryFinalizeCLodVirtualShadowCapture(uint64_t captureId) {
+    if (!m_shadowVirtualShadowTelemetry.capturePending || m_shadowVirtualShadowTelemetry.captureId != captureId) {
+        return;
+    }
+
+    if (!m_shadowVirtualShadowTelemetry.captureHasPendingStats || !m_shadowVirtualShadowTelemetry.captureHasPendingRuntimeState) {
+        return;
+    }
+
+    m_shadowVirtualShadowTelemetry.capturePending = false;
+    m_shadowVirtualShadowTelemetry.hasData = true;
+    m_shadowVirtualShadowTelemetry.captureCount++;
+    m_shadowVirtualShadowTelemetry.status = "Capture completed.";
+}
+
 inline void Menu::DrawCLodTelemetryWindow() {
     ImGui::Begin("CLod Work Graph Telemetry", nullptr);
 
     Resource* clodTelemetryResource = nullptr;
+    Resource* shadowClodTelemetryResource = nullptr;
     Resource* reyesTelemetryPhase1Resource = nullptr;
     Resource* reyesTelemetryPhase2Resource = nullptr;
     Resource* clodVisibleClustersResource = nullptr;
     Resource* clodVisibleCounterResource = nullptr;
+    Resource* shadowClodVisibleClustersResource = nullptr;
+    Resource* shadowClodVisibleCounterResource = nullptr;
+    Resource* shadowVirtualShadowStatsResource = nullptr;
+    Resource* shadowVirtualShadowRuntimeStateResource = nullptr;
     Resource* alphaNodeCounterResource = nullptr;
     Resource* alphaOverflowCounterResource = nullptr;
     Resource* alphaStatsResource = nullptr;
@@ -1682,6 +2135,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             if (clodTelemetryResource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
                     clodTelemetryResource = resource.get();
+                }
+            }
+            });
+
+        m_shadowTelemetryQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowClodTelemetryResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowClodTelemetryResource = resource.get();
                 }
             }
             });
@@ -1718,6 +2179,38 @@ inline void Menu::DrawCLodTelemetryWindow() {
             }
             });
 
+        m_shadowVisibleClustersQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowClodVisibleClustersResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowClodVisibleClustersResource = resource.get();
+                }
+            }
+            });
+
+        m_shadowVisibleCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowClodVisibleCounterResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowClodVisibleCounterResource = resource.get();
+                }
+            }
+            });
+
+        m_shadowVirtualShadowStatsQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowVirtualShadowStatsResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowVirtualShadowStatsResource = resource.get();
+                }
+            }
+            });
+
+        m_shadowVirtualShadowRuntimeStateQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowVirtualShadowRuntimeStateResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowVirtualShadowRuntimeStateResource = resource.get();
+                }
+            }
+            });
+
         m_alphaDeepVisibilityCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
             if (alphaNodeCounterResource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
@@ -1744,6 +2237,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
 
     const bool captureStatsResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
+    const bool shadowCaptureStatsResourcesReady = (shadowClodVisibleClustersResource != nullptr) && (shadowClodVisibleCounterResource != nullptr);
     const bool alphaCaptureResourcesReady =
         (alphaNodeCounterResource != nullptr) &&
         (alphaOverflowCounterResource != nullptr) &&
@@ -1752,29 +2246,46 @@ inline void Menu::DrawCLodTelemetryWindow() {
         (reyesTelemetryPhase1Resource != nullptr) &&
         (reyesTelemetryPhase2Resource != nullptr);
     auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
-    const bool canCapture = (clodTelemetryResource != nullptr) && (readbackService != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
+    const bool canCapture =
+        (clodTelemetryResource != nullptr) &&
+        (readbackService != nullptr) &&
+        (!m_clodTelemetry.capturePending) &&
+        (!m_clodTelemetry.captureStatsPending);
+    const bool canCaptureShadow =
+        (shadowClodTelemetryResource != nullptr) &&
+        (readbackService != nullptr) &&
+        (!m_shadowClodTelemetry.capturePending) &&
+        (!m_shadowClodTelemetry.captureStatsPending);
+    const bool canCaptureVirtualShadow =
+        (shadowVirtualShadowStatsResource != nullptr) &&
+        (shadowVirtualShadowRuntimeStateResource != nullptr) &&
+        (readbackService != nullptr) &&
+        (!m_shadowVirtualShadowTelemetry.capturePending);
     const bool canCaptureReyes = reyesCaptureResourcesReady && (readbackService != nullptr) && (!m_clodReyesTelemetryCapturePending);
     const bool canCaptureAlpha = alphaCaptureResourcesReady && (readbackService != nullptr) && (!m_clodAlphaTelemetryCapturePending);
 
     if (!captureStatsResourcesReady) {
-        ImGui::TextDisabled("Extended stats unavailable: visible cluster resources not found.");
+        ImGui::TextDisabled("Primary extended stats unavailable: visible cluster resources not found.");
+    }
+    if (!shadowCaptureStatsResourcesReady) {
+        ImGui::TextDisabled("Shadow extended stats unavailable: visible cluster resources not found.");
     }
 
     if (!canCapture) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button("Capture CLod WG Metrics")) {
-        m_clodTelemetryCapturePending = true;
-        m_clodTelemetryStatus = "Capture requested.";
+    if (ImGui::Button("Capture CLod Primary Metrics")) {
+        m_clodTelemetry.capturePending = true;
+        m_clodTelemetry.status = "Capture requested.";
 
         const bool requestCaptureStats = captureStatsResourcesReady;
         if (requestCaptureStats) {
-            m_clodCaptureStatsPending = true;
-            m_clodCaptureStatsId++;
-            m_clodCaptureHasPendingCounter = false;
-            m_clodCaptureHasPendingClusters = false;
-            m_clodCapturePendingVisibleCount = 0;
-            m_clodCapturePendingClusters.clear();
+            m_clodTelemetry.captureStatsPending = true;
+            m_clodTelemetry.captureStatsId++;
+            m_clodTelemetry.captureHasPendingCounter = false;
+            m_clodTelemetry.captureHasPendingClusters = false;
+            m_clodTelemetry.capturePendingVisibleCount = 0;
+            m_clodTelemetry.capturePendingClusters.clear();
         }
 
         if (readbackService) {
@@ -1783,11 +2294,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
-                m_clodTelemetryCapturePending = false;
+                m_clodTelemetry.capturePending = false;
 
                 constexpr size_t telemetryBytes = sizeof(uint32_t) * static_cast<size_t>(CLodWorkGraphCounterCount);
                 if (result.data.size() < telemetryBytes) {
-                    m_clodTelemetryStatus = "Capture failed: telemetry payload too small.";
+                    m_clodTelemetry.status = "Capture failed: telemetry payload too small.";
                     spdlog::warn("CLod telemetry capture payload too small ({} bytes).", result.data.size());
                     return;
                 }
@@ -1795,10 +2306,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 CLodWorkGraphTelemetryCounters decoded{};
                 std::memcpy(decoded.counters.data(), result.data.data(), telemetryBytes);
 
-                m_clodTelemetryCounters = decoded;
-                m_clodTelemetryHasData = true;
-                m_clodTelemetryCaptureCount++;
-                m_clodTelemetryStatus = "Capture completed.";
+                m_clodTelemetry.counters = decoded;
+                m_clodTelemetry.hasData = true;
+                m_clodTelemetry.captureCount++;
+                m_clodTelemetry.status = "Capture completed.";
 
                 auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
                     return decoded.counters[static_cast<size_t>(idx)];
@@ -1826,10 +2337,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     replayNodeInput,
                     replayMeshletInput);
                 });
+
         }
 
         if (requestCaptureStats) {
-            const uint64_t captureId = m_clodCaptureStatsId;
+            const uint64_t captureId = m_clodTelemetry.captureStatsId;
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
@@ -1837,19 +2349,19 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     clodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
-                    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
+                    if (!m_clodTelemetry.captureStatsPending || m_clodTelemetry.captureStatsId != captureId) {
                         return;
                     }
 
                     if (result.data.size() < sizeof(uint32_t)) {
-                        m_clodTelemetryStatus = "Capture failed: visible counter payload too small.";
-                        m_clodCaptureStatsPending = false;
+                        m_clodTelemetry.status = "Capture failed: visible counter payload too small.";
+                        m_clodTelemetry.captureStatsPending = false;
                         return;
                     }
 
-                    std::memcpy(&m_clodCapturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
-                    m_clodCaptureHasPendingCounter = true;
-                    TryFinalizeCLodCaptureStats(captureId);
+                    std::memcpy(&m_clodTelemetry.capturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
+                    m_clodTelemetry.captureHasPendingCounter = true;
+                    TryFinalizeCLodCaptureStats(m_clodTelemetry, captureId, "CLod primary WG");
                     });
 
                 readbackService->RequestReadbackCapture(
@@ -1857,26 +2369,26 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     clodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
-                    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
+                    if (!m_clodTelemetry.captureStatsPending || m_clodTelemetry.captureStatsId != captureId) {
                         return;
                     }
 
                     const size_t clusterBytes = PackedVisibleClusterStrideBytes;
                     const size_t count = result.data.size() / clusterBytes;
-                    m_clodCapturePendingClusters.resize(count);
+                    m_clodTelemetry.capturePendingClusters.resize(count);
                     if (count > 0) {
                         const std::byte* rawClusters = result.data.data();
                         for (size_t i = 0; i < count; ++i) {
-                            m_clodCapturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
+                            m_clodTelemetry.capturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
                         }
                     }
 
-                    m_clodCaptureHasPendingClusters = true;
-                    TryFinalizeCLodCaptureStats(captureId);
+                    m_clodTelemetry.captureHasPendingClusters = true;
+                    TryFinalizeCLodCaptureStats(m_clodTelemetry, captureId, "CLod primary WG");
                     });
             }
 
-            m_clodTelemetryStatus = "Capture requested (extended stats).";
+            m_clodTelemetry.status = "Capture requested (extended stats).";
         }
     }
     if (!canCapture) {
@@ -1884,7 +2396,197 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
 
     ImGui::SameLine();
-    ImGui::Text("Status: %s", m_clodTelemetryStatus.c_str());
+    ImGui::Text("Primary Status: %s", m_clodTelemetry.status.c_str());
+
+    if (!canCaptureShadow) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture CLod Shadow Metrics")) {
+        m_shadowClodTelemetry.capturePending = true;
+        m_shadowClodTelemetry.status = "Capture requested.";
+
+        const bool requestCaptureStats = shadowCaptureStatsResourcesReady;
+        if (requestCaptureStats) {
+            m_shadowClodTelemetry.captureStatsPending = true;
+            m_shadowClodTelemetry.captureStatsId++;
+            m_shadowClodTelemetry.captureHasPendingCounter = false;
+            m_shadowClodTelemetry.captureHasPendingClusters = false;
+            m_shadowClodTelemetry.capturePendingVisibleCount = 0;
+            m_shadowClodTelemetry.capturePendingClusters.clear();
+        }
+
+        if (readbackService) {
+            readbackService->RequestReadbackCapture(
+                "CLodShadow::HierarchialCullingPass1",
+                shadowClodTelemetryResource,
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
+                m_shadowClodTelemetry.capturePending = false;
+
+                constexpr size_t telemetryBytes = sizeof(uint32_t) * static_cast<size_t>(CLodWorkGraphCounterCount);
+                if (result.data.size() < telemetryBytes) {
+                    m_shadowClodTelemetry.status = "Capture failed: telemetry payload too small.";
+                    spdlog::warn("CLod shadow telemetry capture payload too small ({} bytes).", result.data.size());
+                    return;
+                }
+
+                CLodWorkGraphTelemetryCounters decoded{};
+                std::memcpy(decoded.counters.data(), result.data.data(), telemetryBytes);
+
+                m_shadowClodTelemetry.counters = decoded;
+                m_shadowClodTelemetry.hasData = true;
+                m_shadowClodTelemetry.captureCount++;
+                m_shadowClodTelemetry.status = "Capture completed.";
+
+                auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
+                    return decoded.counters[static_cast<size_t>(idx)];
+                    };
+
+                const uint32_t objectThreads = counter(CLodWorkGraphCounterIndex::ObjectCullThreads);
+                const uint32_t objectActive = counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads);
+                const uint32_t traverseThreads = counter(CLodWorkGraphCounterIndex::TraverseNodesThreads);
+                const uint32_t traverseActive = counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads);
+                const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
+                const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
+                const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+                const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
+                const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+
+                spdlog::info(
+                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node={}, meshlet={})",
+                    objectActive,
+                    objectThreads,
+                    traverseActive,
+                    traverseThreads,
+                    clusterActive,
+                    clusterThreads,
+                    visibleWrites,
+                    replayNodeInput,
+                    replayMeshletInput);
+                });
+
+        }
+
+        if (requestCaptureStats) {
+            const uint64_t captureId = m_shadowClodTelemetry.captureStatsId;
+
+            if (readbackService) {
+                readbackService->RequestReadbackCapture(
+                    "CLodShadow::HierarchialCullingPass1",
+                    shadowClodVisibleCounterResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
+                    if (!m_shadowClodTelemetry.captureStatsPending || m_shadowClodTelemetry.captureStatsId != captureId) {
+                        return;
+                    }
+
+                    if (result.data.size() < sizeof(uint32_t)) {
+                        m_shadowClodTelemetry.status = "Capture failed: visible counter payload too small.";
+                        m_shadowClodTelemetry.captureStatsPending = false;
+                        return;
+                    }
+
+                    std::memcpy(&m_shadowClodTelemetry.capturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
+                    m_shadowClodTelemetry.captureHasPendingCounter = true;
+                    TryFinalizeCLodCaptureStats(m_shadowClodTelemetry, captureId, "CLod shadow WG");
+                    });
+
+                readbackService->RequestReadbackCapture(
+                    "CLodShadow::HierarchialCullingPass1",
+                    shadowClodVisibleClustersResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
+                    if (!m_shadowClodTelemetry.captureStatsPending || m_shadowClodTelemetry.captureStatsId != captureId) {
+                        return;
+                    }
+
+                    const size_t clusterBytes = PackedVisibleClusterStrideBytes;
+                    const size_t count = result.data.size() / clusterBytes;
+                    m_shadowClodTelemetry.capturePendingClusters.resize(count);
+                    if (count > 0) {
+                        const std::byte* rawClusters = result.data.data();
+                        for (size_t i = 0; i < count; ++i) {
+                            m_shadowClodTelemetry.capturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
+                        }
+                    }
+
+                    m_shadowClodTelemetry.captureHasPendingClusters = true;
+                    TryFinalizeCLodCaptureStats(m_shadowClodTelemetry, captureId, "CLod shadow WG");
+                    });
+            }
+
+            m_shadowClodTelemetry.status = "Capture requested (extended stats).";
+        }
+    }
+    if (!canCaptureShadow) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Shadow Status: %s", m_shadowClodTelemetry.status.c_str());
+
+    if (!shadowVirtualShadowStatsResource || !shadowVirtualShadowRuntimeStateResource) {
+        ImGui::TextDisabled("VSM stats unavailable: required stats/runtime-state resources not found.");
+    }
+
+    if (!canCaptureVirtualShadow) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture Virtual Shadow Metrics")) {
+        m_shadowVirtualShadowTelemetry.capturePending = true;
+        m_shadowVirtualShadowTelemetry.captureHasPendingStats = false;
+        m_shadowVirtualShadowTelemetry.captureHasPendingRuntimeState = false;
+        m_shadowVirtualShadowTelemetry.captureId++;
+        m_shadowVirtualShadowTelemetry.status = "Capture requested.";
+
+        const uint64_t captureId = m_shadowVirtualShadowTelemetry.captureId;
+
+        readbackService->RequestReadbackCapture(
+            "CLodShadow::VirtualShadowGatherStatsPass",
+            shadowVirtualShadowStatsResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_shadowVirtualShadowTelemetry.capturePending || m_shadowVirtualShadowTelemetry.captureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodVirtualShadowStats)) {
+                    m_shadowVirtualShadowTelemetry.capturePending = false;
+                    m_shadowVirtualShadowTelemetry.status = "Capture failed: VSM stats payload too small.";
+                    return;
+                }
+
+                std::memcpy(&m_shadowVirtualShadowTelemetry.stats, result.data.data(), sizeof(CLodVirtualShadowStats));
+                m_shadowVirtualShadowTelemetry.captureHasPendingStats = true;
+                TryFinalizeCLodVirtualShadowCapture(captureId);
+            });
+
+        readbackService->RequestReadbackCapture(
+            "CLodShadow::VirtualShadowSetupPass",
+            shadowVirtualShadowRuntimeStateResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_shadowVirtualShadowTelemetry.capturePending || m_shadowVirtualShadowTelemetry.captureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodVirtualShadowRuntimeState)) {
+                    m_shadowVirtualShadowTelemetry.capturePending = false;
+                    m_shadowVirtualShadowTelemetry.status = "Capture failed: VSM runtime-state payload too small.";
+                    return;
+                }
+
+                std::memcpy(&m_shadowVirtualShadowTelemetry.runtimeState, result.data.data(), sizeof(CLodVirtualShadowRuntimeState));
+                m_shadowVirtualShadowTelemetry.captureHasPendingRuntimeState = true;
+                TryFinalizeCLodVirtualShadowCapture(captureId);
+            });
+    }
+    if (!canCaptureVirtualShadow) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("VSM Status: %s", m_shadowVirtualShadowTelemetry.status.c_str());
 
     if (!reyesCaptureResourcesReady) {
         ImGui::TextDisabled("Reyes metrics unavailable: phase telemetry resources not found.");
@@ -2043,6 +2745,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
             m_clodStreamingOpsHistory.push_back({ std::chrono::steady_clock::now(), latestOps });
         }
 
+        CLodDirectionalShadowDebugSnapshot latestShadowDebug{};
+        if (TryReadCLodDirectionalShadowDebugSnapshot(m_directionalShadowDebugLastSequence, latestShadowDebug)) {
+            m_directionalShadowDebugLatest = latestShadowDebug;
+        }
+
         const auto now = std::chrono::steady_clock::now();
         const auto horizon = std::chrono::seconds(5);
         m_clodStreamingOpsHistory.erase(
@@ -2151,165 +2858,453 @@ inline void Menu::DrawCLodTelemetryWindow() {
         }
     }
 
-    if (m_clodTelemetryHasData) {
-        auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
-            return m_clodTelemetryCounters.counters[static_cast<size_t>(idx)];
-            };
-
-        auto drawUtilizationRow = [&](const char* label, uint32_t active, uint32_t total) {
-            const float efficiency = (total > 0)
-                ? (100.0f * static_cast<float>(active) / static_cast<float>(total))
-                : 0.0f;
-            ImGui::Text("%s: %u / %u (%.1f%%)", label, active, total, efficiency);
-            };
-
-        ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(m_clodTelemetryCaptureCount));
-        drawUtilizationRow(
-            "ObjectCull active draw threads",
-            counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
-            counter(CLodWorkGraphCounterIndex::ObjectCullThreads));
-        drawUtilizationRow(
-            "TraverseNodes active child threads",
-            counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesThreads));
-        drawUtilizationRow(
-            "ClusterCull in-range threads",
-            counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
-            counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
-
-        const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
-        const uint32_t clusterSurvivingLanes = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
-        drawUtilizationRow("ClusterCull surviving lanes", clusterSurvivingLanes, clusterActiveLanes);
-
-        ImGui::Text("Traverse node records: internal=%u leaf=%u culled=%u rejectedByError=%u",
-            counter(CLodWorkGraphCounterIndex::TraverseNodesInternalNodeRecords),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
-
-        const uint32_t traverseCoalescedLaunches = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedLaunches);
-        const uint32_t traverseCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputRecords);
-        const float avgRecordsPerLaunch = (traverseCoalescedLaunches > 0)
-            ? (static_cast<float>(traverseCoalescedInputRecords) / static_cast<float>(traverseCoalescedLaunches))
-            : 0.0f;
-        const float packingPercent = 100.0f * avgRecordsPerLaunch / 8.0f;
-
-        ImGui::Text("Traverse coalesced launches: %u | input records: %u | avg records/launch: %.2f (%.1f%% of 8)",
-            traverseCoalescedLaunches,
-            traverseCoalescedInputRecords,
-            avgRecordsPerLaunch,
-            packingPercent);
-
-        std::array<uint32_t, 8> traverseInputHistogram = {
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount1),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount2),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount3),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount4),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount5),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount6),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount7),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount8)
-        };
-
-        ImGui::TextUnformatted("Traverse coalesced input histogram (records per launch):");
-        float histogramValues[8] = {};
-        for (size_t i = 0; i < traverseInputHistogram.size(); ++i) {
-            histogramValues[i] = static_cast<float>(traverseInputHistogram[i]);
-        }
-
-        static const char* kHistogramLabels[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-        if (ImPlot::BeginPlot("##TraverseCoalescedInputHistogram", ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
-            ImPlot::SetupAxes("Records", "Launches", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::SetupAxisTicks(ImAxis_X1, 0.0, 7.0, 8, kHistogramLabels);
-            ImPlot::PlotBars("Launches", histogramValues, 8, 0.6f, 0.0f);
-            ImPlot::EndPlot();
-        }
-
-        const uint32_t clusterWaves = counter(CLodWorkGraphCounterIndex::ClusterCullWaves);
-        const uint32_t zeroSurvivorWaves = counter(CLodWorkGraphCounterIndex::ClusterCullZeroSurvivorWaves);
-        const uint32_t survivingWaves = (clusterWaves > zeroSurvivorWaves)
-            ? (clusterWaves - zeroSurvivorWaves)
-            : 0u;
-        drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
-
-        ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
-
+    const auto drawWorkGraphCaptureSection = [&](const char* title, const CLodWorkGraphCaptureState& captureState) {
         ImGui::Separator();
-        ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");
-        {
-            const uint32_t meshletIter = counter(CLodWorkGraphCounterIndex::ClusterCullMeshletIterations);
-            const uint32_t rejFrustum = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedFrustum);
-            const uint32_t rejCond2 = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCondition2);
-            const uint32_t rejOccl = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOcclusion);
-            const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
-            const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
-            const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
-            const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds;
+        ImGui::TextUnformatted(title);
 
-            ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
-            ImGui::Text("Survived: %u", survived);
-            ImGui::Text("Rejected total: %u", totalRejected);
+        if (captureState.capturePending) {
+            ImGui::Text("Telemetry capture status: pending...");
+        }
+        else if (!captureState.hasData) {
+            ImGui::TextDisabled("No telemetry capture results yet.");
+        }
+        else {
+            auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
+                return captureState.counters.counters[static_cast<size_t>(idx)];
+            };
 
-            auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
-                const float pct = (total > 0)
-                    ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+            auto drawUtilizationRow = [&](const char* label, uint32_t active, uint32_t total) {
+                const float efficiency = (total > 0)
+                    ? (100.0f * static_cast<float>(active) / static_cast<float>(total))
                     : 0.0f;
-                ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+                ImGui::Text("%s: %u / %u (%.1f%%)", label, active, total, efficiency);
             };
-            rejectionRow("Frustum cull", rejFrustum, totalRejected);
-            rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
-            rejectionRow("Occlusion cull", rejOccl, totalRejected);
-            rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
-            rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
+
+            ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(captureState.captureCount));
+            drawUtilizationRow(
+                "ObjectCull active draw threads",
+                counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
+                counter(CLodWorkGraphCounterIndex::ObjectCullThreads));
+            drawUtilizationRow(
+                "ObjectCull visible threads",
+                counter(CLodWorkGraphCounterIndex::ObjectCullVisibleThreads),
+                counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads));
+
+            const uint32_t objectCullRejectedFrustum = counter(CLodWorkGraphCounterIndex::ObjectCullRejectedFrustum);
+            const uint32_t objectCullInvalidBounds = counter(CLodWorkGraphCounterIndex::ObjectCullInvalidBounds);
+            const uint32_t objectCullRejectedTotal = objectCullRejectedFrustum + objectCullInvalidBounds;
+            ImGui::Text("ObjectCull rejected: %u", objectCullRejectedTotal);
+            if (objectCullRejectedTotal > 0u) {
+                auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
+                    const float pct = (total > 0)
+                        ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+                        : 0.0f;
+                    ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+                };
+                rejectionRow("Invalid bounds", objectCullInvalidBounds, objectCullRejectedTotal);
+                rejectionRow("Frustum reject", objectCullRejectedFrustum, objectCullRejectedTotal);
+                rejectionRow("Left plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneLeft), objectCullRejectedFrustum);
+                rejectionRow("Right plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneRight), objectCullRejectedFrustum);
+                rejectionRow("Bottom plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneBottom), objectCullRejectedFrustum);
+                rejectionRow("Top plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneTop), objectCullRejectedFrustum);
+                rejectionRow("Near plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneNear), objectCullRejectedFrustum);
+                rejectionRow("Far plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneFar), objectCullRejectedFrustum);
+            }
+            drawUtilizationRow(
+                "TraverseNodes active child threads",
+                counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesThreads));
+            drawUtilizationRow(
+                "ClusterCull in-range threads",
+                counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
+                counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
+
+            const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
+            const uint32_t clusterSurvivingLanes = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
+            drawUtilizationRow("ClusterCull surviving lanes", clusterSurvivingLanes, clusterActiveLanes);
+
+            ImGui::Text("Traverse node records: internal=%u leaf=%u culled=%u rejectedByError=%u",
+                counter(CLodWorkGraphCounterIndex::TraverseNodesInternalNodeRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
+
+            const uint32_t traverseCoalescedLaunches = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedLaunches);
+            const uint32_t traverseCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputRecords);
+            const float avgRecordsPerLaunch = (traverseCoalescedLaunches > 0)
+                ? (static_cast<float>(traverseCoalescedInputRecords) / static_cast<float>(traverseCoalescedLaunches))
+                : 0.0f;
+            const float packingPercent = 100.0f * avgRecordsPerLaunch / 8.0f;
+
+            ImGui::Text("Traverse coalesced launches: %u | input records: %u | avg records/launch: %.2f (%.1f%% of 8)",
+                traverseCoalescedLaunches,
+                traverseCoalescedInputRecords,
+                avgRecordsPerLaunch,
+                packingPercent);
+
+            std::array<uint32_t, 8> traverseInputHistogram = {
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount1),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount2),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount3),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount4),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount5),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount6),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount7),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount8)
+            };
+
+            ImGui::TextUnformatted("Traverse coalesced input histogram (records per launch):");
+            float histogramValues[8] = {};
+            for (size_t i = 0; i < traverseInputHistogram.size(); ++i) {
+                histogramValues[i] = static_cast<float>(traverseInputHistogram[i]);
+            }
+
+            static const char* kHistogramLabels[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
+            const std::string histogramId = std::string("##TraverseCoalescedInputHistogram") + title;
+            if (ImPlot::BeginPlot(histogramId.c_str(), ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
+                ImPlot::SetupAxes("Records", "Launches", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+                ImPlot::SetupAxisTicks(ImAxis_X1, 0.0, 7.0, 8, kHistogramLabels);
+                ImPlot::PlotBars("Launches", histogramValues, 8, 0.6f, 0.0f);
+                ImPlot::EndPlot();
+            }
+
+            const uint32_t clusterWaves = counter(CLodWorkGraphCounterIndex::ClusterCullWaves);
+            const uint32_t zeroSurvivorWaves = counter(CLodWorkGraphCounterIndex::ClusterCullZeroSurvivorWaves);
+            const uint32_t survivingWaves = (clusterWaves > zeroSurvivorWaves)
+                ? (clusterWaves - zeroSurvivorWaves)
+                : 0u;
+            drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
+
+            ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");
+            {
+                const uint32_t meshletIter = counter(CLodWorkGraphCounterIndex::ClusterCullMeshletIterations);
+                const uint32_t rejFrustum = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedFrustum);
+                const uint32_t rejCond2 = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCondition2);
+                const uint32_t rejOccl = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOcclusion);
+                const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
+                const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
+                const uint32_t rejCleanPages = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCleanPages);
+                const uint32_t shadowClipmapMisses = counter(CLodWorkGraphCounterIndex::ClusterCullShadowClipmapMisses);
+                const uint32_t shadowDirtyRegionHits = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyRegionHits);
+                const uint32_t shadowDirtyQueries = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyQueries);
+                const uint32_t shadowDirtyClipped = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyQueriesClipped);
+                const uint32_t shadowDirtyCoarseMipChecks = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyRegionCoarseMipChecks);
+                const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
+                const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds + rejCleanPages;
+
+                ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
+                ImGui::Text("Survived: %u", survived);
+                ImGui::Text("Rejected total: %u", totalRejected);
+
+                auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
+                    const float pct = (total > 0)
+                        ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+                        : 0.0f;
+                    ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+                };
+                rejectionRow("Frustum cull", rejFrustum, totalRejected);
+                rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
+                rejectionRow("Occlusion cull", rejOccl, totalRejected);
+                rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
+                rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
+                rejectionRow("Clean shadow pages", rejCleanPages, totalRejected);
+                ImGui::Text("  Shadow clipmap misses: %u", shadowClipmapMisses);
+                ImGui::Text("  Shadow dirty queries: %u | clipped: %u | coarse-mip checks: %u",
+                    shadowDirtyQueries,
+                    shadowDirtyClipped,
+                    shadowDirtyCoarseMipChecks);
+                ImGui::Text("  Shadow dirty hits: %u | clean-page rejects: %u",
+                    shadowDirtyRegionHits,
+                    rejCleanPages);
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("SW/HW/PageJob classification breakdown");
+            {
+                const uint32_t contributing = counter(CLodWorkGraphCounterIndex::ClassifyContributing);
+                const uint32_t routedHW = counter(CLodWorkGraphCounterIndex::ClassifyRoutedHW);
+                const uint32_t routedSW = counter(CLodWorkGraphCounterIndex::ClassifyRoutedSW);
+                const uint32_t routedPJ = counter(CLodWorkGraphCounterIndex::ClassifyRoutedPageJob);
+                ImGui::Text("Contributing (survived cull): %u", contributing);
+                ImGui::Text("Routed -> HW: %u | SW: %u | PageJob: %u", routedHW, routedSW, routedPJ);
+                if (contributing > 0) {
+                    ImGui::Text("  HW: %.1f%% | SW: %.1f%% | PJ: %.1f%%",
+                        100.0f * routedHW / (float)contributing,
+                        100.0f * routedSW / (float)contributing,
+                        100.0f * routedPJ / (float)contributing);
+                }
+
+                const uint32_t pjRejectReyes = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectReyesDisplacement);
+                const uint32_t pjRejectAlpha = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectAlphaTested);
+                const uint32_t pjRejectNoClipmap = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectNoClipmapIndex);
+                const uint32_t pjRejectThreshold = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectBelowThreshold);
+                const uint32_t pjRejectDisabled = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectDisabled);
+                const uint32_t pjRejectAlreadySW = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectAlreadySW);
+                const uint32_t swDisabled = counter(CLodWorkGraphCounterIndex::ClassifySwDisabled);
+                const uint32_t totalPJRejects = pjRejectReyes + pjRejectAlpha + pjRejectNoClipmap
+                    + pjRejectThreshold + pjRejectDisabled + pjRejectAlreadySW;
+
+                ImGui::Text("PageJob rejections (total: %u):", totalPJRejects);
+                ImGui::Text("  Disabled: %u | AlreadySW: %u | ReyesDisplacement: %u",
+                    pjRejectDisabled, pjRejectAlreadySW, pjRejectReyes);
+                ImGui::Text("  AlphaTested: %u | NoClipmapIdx: %u | BelowThreshold: %u",
+                    pjRejectAlpha, pjRejectNoClipmap, pjRejectThreshold);
+                ImGui::Text("  SW classification disabled (contributes but !swRasterEnabled): %u", swDisabled);
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("PageJob WG pipeline");
+            {
+                const uint32_t buildProcessed = counter(CLodWorkGraphCounterIndex::PageJobBuildClustersProcessed);
+                const uint32_t buildEmitted = counter(CLodWorkGraphCounterIndex::PageJobBuildPagesEmitted);
+                ImGui::Text("Build: processed=%u emitted=%u", buildProcessed, buildEmitted);
+
+                const uint32_t rasterJobs = counter(CLodWorkGraphCounterIndex::PageJobRasterJobsLaunched);
+                const uint32_t pixWritten = counter(CLodWorkGraphCounterIndex::PageJobRasterPixelsWritten);
+                const uint32_t flagWrites = counter(CLodWorkGraphCounterIndex::PageJobRasterFlagWrites);
+                ImGui::Text("Raster: jobs=%u pixWritten=%u flagWrites=%u", rasterJobs, pixWritten, flagWrites);
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
+            ImGui::Text("Node attempts: %u | Cluster attempts: %u",
+                counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),
+                counter(CLodWorkGraphCounterIndex::Phase1OcclusionClusterReplayEnqueueAttempts));
+
+            ImGui::TextUnformatted("Phase 2 replay launch validation");
+            ImGui::Text("ReplayNode launches: %u | input records: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeLaunches),
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords));
+            ImGui::Text("ReplayNode emitted traverse records: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeRecordsEmitted));
+            ImGui::Text("ReplayMeshlet launches: %u | input records: %u | emitted bucket records: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletLaunches),
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords),
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletBucketRecordsEmitted));
+
+            ImGui::TextUnformatted("Phase 2 downstream consumption");
+            ImGui::Text("Replay Traverse records consumed: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayTraverseRecordsConsumed));
+            ImGui::Text("Replay ClusterCull bucket records consumed: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayClusterBucketRecordsConsumed));
         }
 
         ImGui::Separator();
-        ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
-        ImGui::Text("Node attempts: %u | Cluster attempts: %u",
-            counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),
-            counter(CLodWorkGraphCounterIndex::Phase1OcclusionClusterReplayEnqueueAttempts));
+        ImGui::TextUnformatted("Extended capture statistics");
+        if (captureState.captureStatsPending) {
+            ImGui::Text("Capture stats status: pending...");
+        }
+        else if (!captureState.captureStatsAvailable) {
+            ImGui::TextDisabled("No extended capture results yet.");
+        }
+        else {
+            ImGui::Text("Visible clusters: %u", captureState.captureStats.visibleClusterCount);
+            ImGui::Text("Unique views: %u | Unique instances: %u | Unique meshlets: %u",
+                captureState.captureStats.uniqueViews,
+                captureState.captureStats.uniqueInstances,
+                captureState.captureStats.uniqueMeshlets);
+            ImGui::Text("Avg clusters/view: %.2f | Avg clusters/instance: %.2f",
+                captureState.captureStats.avgClustersPerView,
+                captureState.captureStats.avgClustersPerInstance);
+            ImGui::Text("Max clusters/view: %u (%.1f%% of total)",
+                captureState.captureStats.maxClustersPerView,
+                captureState.captureStats.dominantViewPercent);
+            ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
+                captureState.captureStats.maxClustersPerInstance,
+                captureState.captureStats.dominantInstancePercent);
+        }
+    };
 
-        ImGui::TextUnformatted("Phase 2 replay launch validation");
-        ImGui::Text("ReplayNode launches: %u | input records: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeLaunches),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords));
-        ImGui::Text("ReplayNode emitted traverse records: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeRecordsEmitted));
-        ImGui::Text("ReplayMeshlet launches: %u | input records: %u | emitted bucket records: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletLaunches),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletBucketRecordsEmitted));
+    drawWorkGraphCaptureSection("Primary CLod WG", m_clodTelemetry);
+    drawWorkGraphCaptureSection("Shadow CLod WG", m_shadowClodTelemetry);
 
-        ImGui::TextUnformatted("Phase 2 downstream consumption");
-        ImGui::Text("Replay Traverse records consumed: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayTraverseRecordsConsumed));
-        ImGui::Text("Replay ClusterCull bucket records consumed: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayClusterBucketRecordsConsumed));
+    ImGui::Separator();
+    ImGui::TextUnformatted("Directional shadow clipmap snapshot");
+    ImGui::Text("Clipmaps published: %u", m_directionalShadowDebugLatest.clipmapCount);
+    for (uint32_t clipmapIndex = 0; clipmapIndex < m_directionalShadowDebugLatest.clipmapCount; ++clipmapIndex) {
+        const auto& clipmap = m_directionalShadowDebugLatest.clipmaps[clipmapIndex];
+        if (clipmap.valid == 0u) {
+            continue;
+        }
+
+        ImGui::Text(
+            "Clip %u: pos=(%.2f, %.2f, %.2f) size=%.2f near=%.3f far=%.3f pageOffset=(%lld, %lld)",
+            clipmapIndex,
+            clipmap.positionWorldSpace[0],
+            clipmap.positionWorldSpace[1],
+            clipmap.positionWorldSpace[2],
+            clipmap.clipDiameter,
+            clipmap.nearPlane,
+            clipmap.farPlane,
+            static_cast<long long>(clipmap.pageOffsetX),
+            static_cast<long long>(clipmap.pageOffsetY));
     }
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Extended capture statistics");
-    if (m_clodCaptureStatsPending) {
-        ImGui::Text("Capture stats status: pending...");
+    ImGui::TextUnformatted("Virtual Shadow Map");
+    if (m_shadowVirtualShadowTelemetry.capturePending) {
+        ImGui::Text("VSM capture status: pending...");
     }
-    else if (!m_clodCaptureStatsAvailable) {
-        ImGui::TextDisabled("No extended capture results yet.");
+    else if (!m_shadowVirtualShadowTelemetry.hasData) {
+        ImGui::TextDisabled("No VSM capture results yet.");
     }
     else {
-        ImGui::Text("Visible clusters: %u", m_clodCaptureStats.visibleClusterCount);
-        ImGui::Text("Unique views: %u | Unique instances: %u | Unique meshlets: %u",
-            m_clodCaptureStats.uniqueViews,
-            m_clodCaptureStats.uniqueInstances,
-            m_clodCaptureStats.uniqueMeshlets);
-        ImGui::Text("Avg clusters/view: %.2f | Avg clusters/instance: %.2f",
-            m_clodCaptureStats.avgClustersPerView,
-            m_clodCaptureStats.avgClustersPerInstance);
-        ImGui::Text("Max clusters/view: %u (%.1f%% of total)",
-            m_clodCaptureStats.maxClustersPerView,
-            m_clodCaptureStats.dominantViewPercent);
-        ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
-            m_clodCaptureStats.maxClustersPerInstance,
-            m_clodCaptureStats.dominantInstancePercent);
+        const CLodVirtualShadowStats& stats = m_shadowVirtualShadowTelemetry.stats;
+        const CLodVirtualShadowRuntimeState& runtimeState = m_shadowVirtualShadowTelemetry.runtimeState;
+        const uint32_t displayedClipmapCount = (std::min)(
+            (std::max)((std::max)(stats.activeClipmapCount, stats.validClipmapCount), runtimeState.clipmapCount),
+            CLodVirtualShadowMaxSupportedClipmapCount);
+        ImGui::Text("Captures: %llu", static_cast<unsigned long long>(m_shadowVirtualShadowTelemetry.captureCount));
+        ImGui::Text("Clipmaps: active=%u valid=%u supportedMax=%u", stats.activeClipmapCount, stats.validClipmapCount, CLodVirtualShadowMaxSupportedClipmapCount);
+        ImGui::Text(
+            "Runtime: publishedActive=%u supported=%u virtualRes=%u pageTable=%u physicalAtlas=%ux%u maxPhysicalPages=%u maxRequests=%u lodBias=%.2f",
+            runtimeState.clipmapCount,
+            runtimeState.supportedClipmapCount,
+            runtimeState.virtualResolution,
+            runtimeState.pageTableResolution,
+            runtimeState.physicalAtlasPagesWide,
+            runtimeState.physicalAtlasPagesHigh,
+            runtimeState.maxPhysicalPages,
+            runtimeState.maxAllocationRequests,
+            runtimeState.directionalLodBias);
+        ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u",
+            stats.allocationRequestCount,
+            stats.allocationDispatchGroupCount,
+            stats.freePhysicalPageCount,
+            stats.reusablePhysicalPageCount);
+        ImGui::Text(
+            "Controller: requestAllocation=%.1f%% targetBias=%.2f smoothedBias=%.2f recoveryStableFrames=%u",
+            stats.currentAllocationPercentage * 100.0f,
+            stats.targetPressureLodBias,
+            stats.smoothedPressureLodBias,
+            stats.framesSinceOverBudget);
+        ImGui::Text("Lifecycle diagnostics: setupReset=%u requestOverflow=%u unwrittenClears=%u",
+            stats.setupResetApplied,
+            stats.markRequestOverflowCount,
+            std::accumulate(
+                std::begin(stats.clearedUnwrittenDirtyPages),
+                std::end(stats.clearedUnwrittenDirtyPages),
+                0u));
+        ImGui::Text("Setup reset reasons: forced=%u noPrev=%u structureMismatch=%u lightDirChanged=%u",
+            stats.setupResetForced,
+            stats.setupResetNoPreviousState,
+            stats.setupResetStructureMismatch,
+            stats.setupResetLightDirectionChanged);
+        uint32_t totalVisitedPageTableEntries = 0u;
+        uint32_t totalVisitedDirtyPageTableEntries = 0u;
+        uint32_t totalResidentCleanHits = 0u;
+        uint32_t totalResidentDirtyHits = 0u;
+        uint32_t totalRequestedPages = 0u;
+        uint32_t totalDirtyPageTableEntries = 0u;
+        uint32_t totalPredictiveInvalidatedPageTableEntries = 0u;
+        uint32_t totalInvalidatedCurrentBoundsPageTableEntries = 0u;
+        uint32_t totalInvalidatedPreviousBoundsPageTableEntries = 0u;
+        uint32_t totalInvalidatedSkinnedPageTableEntries = 0u;
+        for (uint32_t clipmapIndex = 0u; clipmapIndex < displayedClipmapCount; ++clipmapIndex) {
+            totalVisitedPageTableEntries += stats.visitedPageTableEntries[clipmapIndex];
+            totalVisitedDirtyPageTableEntries += stats.visitedDirtyPageTableEntries[clipmapIndex];
+            totalResidentCleanHits += stats.markResidentCleanHits[clipmapIndex];
+            totalResidentDirtyHits += stats.markResidentDirtyHits[clipmapIndex];
+            totalRequestedPages += stats.requestedPages[clipmapIndex];
+            totalDirtyPageTableEntries += stats.dirtyPageTableEntries[clipmapIndex];
+            totalPredictiveInvalidatedPageTableEntries += stats.predictiveInvalidatedPageTableEntries[clipmapIndex];
+            totalInvalidatedCurrentBoundsPageTableEntries += stats.invalidatedCurrentBoundsPageTableEntries[clipmapIndex];
+            totalInvalidatedPreviousBoundsPageTableEntries += stats.invalidatedPreviousBoundsPageTableEntries[clipmapIndex];
+            totalInvalidatedSkinnedPageTableEntries += stats.invalidatedSkinnedPageTableEntries[clipmapIndex];
+        }
+        ImGui::Text("Cache lifecycle: cleanHits=%u dirtyHits=%u requests=%u visitedPT=%u visitedDirtyPT=%u dirtyPT=%u",
+            totalResidentCleanHits,
+            totalResidentDirtyHits,
+            totalRequestedPages,
+            totalVisitedPageTableEntries,
+            totalVisitedDirtyPageTableEntries,
+            totalDirtyPageTableEntries);
+        ImGui::Text("Request creators: predictiveInv=%u invalidateCurr=%u invalidatePrev=%u invalidateSkinned=%u wrapClr=%u staleClr=%u",
+            totalPredictiveInvalidatedPageTableEntries,
+            totalInvalidatedCurrentBoundsPageTableEntries,
+            totalInvalidatedPreviousBoundsPageTableEntries,
+            totalInvalidatedSkinnedPageTableEntries,
+            std::accumulate(
+                std::begin(stats.setupWrappedClearedPageTableEntries),
+                std::end(stats.setupWrappedClearedPageTableEntries),
+                0u),
+            std::accumulate(
+                std::begin(stats.setupStaleDirtyClearedPageTableEntries),
+                std::end(stats.setupStaleDirtyClearedPageTableEntries),
+                0u));
+        ImGui::TextDisabled("Dirty PT is sampled at GatherStatsPass before ClearPages re-marks cleared pages dirty for the hierarchy build.");
+        if (ImGui::BeginTable("##VirtualShadowStatsTable", 20, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Clip");
+            ImGui::TableSetupColumn("Selected");
+            ImGui::TableSetupColumn("Proj Reject");
+            ImGui::TableSetupColumn("Requests");
+            ImGui::TableSetupColumn("Clean Hits");
+            ImGui::TableSetupColumn("Dirty Hits");
+            ImGui::TableSetupColumn("Wrap Clr");
+            ImGui::TableSetupColumn("Stale Clr");
+            ImGui::TableSetupColumn("Pre NZ PT");
+            ImGui::TableSetupColumn("Pre Dirty PT");
+            ImGui::TableSetupColumn("NonZero PT");
+            ImGui::TableSetupColumn("Allocated PT");
+            ImGui::TableSetupColumn("Visited PT");
+            ImGui::TableSetupColumn("Visited Dirty");
+            ImGui::TableSetupColumn("Dirty PT");
+            ImGui::TableSetupColumn("NoWrite Clr");
+            ImGui::TableSetupColumn("Pred Inv");
+            ImGui::TableSetupColumn("Inv Curr");
+            ImGui::TableSetupColumn("Inv Prev");
+            ImGui::TableSetupColumn("Inv Skin");
+            ImGui::TableHeadersRow();
+
+            for (uint32_t clipmapIndex = 0u; clipmapIndex < displayedClipmapCount; ++clipmapIndex) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%u", clipmapIndex);
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%u", stats.selectedPixels[clipmapIndex]);
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%u", stats.projectionRejectedPixels[clipmapIndex]);
+                ImGui::TableSetColumnIndex(3);
+                ImGui::Text("%u", stats.requestedPages[clipmapIndex]);
+                ImGui::TableSetColumnIndex(4);
+                ImGui::Text("%u", stats.markResidentCleanHits[clipmapIndex]);
+                ImGui::TableSetColumnIndex(5);
+                ImGui::Text("%u", stats.markResidentDirtyHits[clipmapIndex]);
+                ImGui::TableSetColumnIndex(6);
+                ImGui::Text("%u", stats.setupWrappedClearedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(7);
+                ImGui::Text("%u", stats.setupStaleDirtyClearedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(8);
+                ImGui::Text("%u", stats.preAllocateNonZeroPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(9);
+                ImGui::Text("%u", stats.preAllocateDirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(10);
+                ImGui::Text("%u", stats.nonZeroPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(11);
+                ImGui::Text("%u", stats.allocatedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(12);
+                ImGui::Text("%u", stats.visitedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(13);
+                ImGui::Text("%u", stats.visitedDirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(14);
+                ImGui::Text("%u", stats.dirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(15);
+                ImGui::Text("%u", stats.clearedUnwrittenDirtyPages[clipmapIndex]);
+                ImGui::TableSetColumnIndex(16);
+                ImGui::Text("%u", stats.predictiveInvalidatedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(17);
+                ImGui::Text("%u", stats.invalidatedCurrentBoundsPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(18);
+                ImGui::Text("%u", stats.invalidatedPreviousBoundsPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(19);
+                ImGui::Text("%u", stats.invalidatedSkinnedPageTableEntries[clipmapIndex]);
+            }
+
+            ImGui::EndTable();
+        }
     }
 
     ImGui::Separator();

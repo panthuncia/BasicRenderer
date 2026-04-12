@@ -22,7 +22,6 @@ class SortedUnsignedIntBuffer;
 
 struct AddLightReturn {
 	Components::LightViewInfo lightViewInfo;
-	std::optional<Components::DepthMap> shadowMap;
 	std::optional<Components::FrustumPlanes> frustumPlanes;
 };
 
@@ -38,7 +37,7 @@ public:
     unsigned int GetNumLights();
     void SetCurrentCamera(flecs::entity camera);
 	void SetViewManager(ViewManager* viewManager);
-	void UpdateLightBufferView(BufferView* view, LightInfo& data);
+	void UpdateLightBufferView(BufferView* view, const LightInfo& data);
     void UpdateLightViewInfo(flecs::entity light);
 	unsigned int GetLightPagePoolSize() { return m_lightPagePoolSize; }
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
@@ -59,8 +58,6 @@ private:
 
 	std::shared_ptr<ResourceGroup> m_pLightViewInfoResourceGroup;
 	std::shared_ptr<ResourceGroup> m_pLightBufferResourceGroup;
-	std::shared_ptr<ShadowMaps> m_pShadowMapResourceGroup;
-	std::shared_ptr<LinearShadowMaps> m_pLinearShadowMapResourceGroup;
 
 	std::shared_ptr<Buffer> m_pClusterBuffer;
 	std::shared_ptr<Buffer> m_pLightPagesBuffer;
@@ -73,7 +70,9 @@ private:
     // Settings funcs
 	std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
+	std::function<float()> getMaxShadowDistance;
     std::function<uint16_t()> getShadowResolution;
+	std::function<float()> getDirectionalVirtualShadowSourceAngleDegrees;
     std::function<void(std::shared_ptr<void>)> markForDelete;
 	ViewManager* m_pViewManager = nullptr;
 	unsigned int m_lightPagePoolSize = 0;
@@ -86,6 +85,7 @@ private:
 		CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId);
 	std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
 		CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t entityId);
+	void RebuildDirectionalLightViewInfoBuffer(std::optional<uint64_t> excludedLightEntityId = std::nullopt);
 
 	void RemoveLightViewInfo(flecs::entity light);
 };

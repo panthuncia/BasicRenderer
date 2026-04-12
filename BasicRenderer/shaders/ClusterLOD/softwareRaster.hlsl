@@ -8,6 +8,7 @@
 // to the per-view visibility buffer.
 
 #include "include/cbuffers.hlsli"
+#include "include/clodVirtualShadowClipmap.hlsli"
 #include "include/structs.hlsli"
 #include "include/skinningCommon.hlsli"
 #include "include/vertex.hlsli"
@@ -19,6 +20,10 @@
 #include "include/visibleClusterPacking.hlsli"
 #include "include/visibilityPacking.hlsli"
 #include "include/debugPayload.hlsli"
+
+#ifndef CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+#define CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW 0
+#endif
 
 // Bit-packed position decode (mirrors mesh.hlsl / gbuffer.hlsl)
 
@@ -96,6 +101,45 @@ groupshared float2  gs_screenPos[SW_RASTER_MAX_VERTS];
 groupshared float   gs_linearDepth[SW_RASTER_MAX_VERTS];
 groupshared float   gs_invClipW[SW_RASTER_MAX_VERTS];
 groupshared float2  gs_texcoord[SW_RASTER_MAX_VERTS];
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
+{
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+
+    CLodVirtualShadowClipmapInfo clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    if (!CLodVirtualShadowTryGetClipmapInfoForView(viewID, clipmapInfos, clipmapInfo))
+    {
+        return false;
+    }
+
+    const float2 shadowUv = saturate((float2(pixel) + 0.5f) / max((float)clipmapInfo.virtualResolution, 1.0f));
+    const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUv, clipmapInfo);
+    const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
+
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
+    const uint3 pageCoords = uint3(wrappedPageCoords, clipmapInfo.pageTableLayer);
+    const uint pageEntry = pageTable[pageCoords];
+    if (!CLodVirtualShadowPageEntryCanRaster(pageEntry))
+    {
+        return false;
+    }
+
+    const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
+    const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(shadowUv, clipmapInfo);
+    const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords, clipmapInfo);
+
+    RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
+    InterlockedMin(physicalPages[atlasPixel], asuint(linearDepth));
+    uint ignored = 0u;
+    InterlockedOr(
+        pageTable[pageCoords],
+        kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask,
+        ignored);
+    return true;
+}
+#endif
 
 #if defined(PSO_ALPHA_TEST) || defined(CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST)
 bool SWAlphaTestFailed(float2 texcoords, uint materialDataIndex)
@@ -225,7 +269,7 @@ SkinningInfluences SWDecodePackedWeights(
 }
 
 void SWRasterCluster(
-    uint3 packedCluster,
+    uint4 packedCluster,
     uint unsortedClusterIndex,
     uint GI,
     uint subGroup,
@@ -246,7 +290,7 @@ void SWRasterCluster(
     const uint vertCount = CLodDescVertexCount(desc);
     const uint triCount  = CLodDescTriangleCount(desc);
 
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
@@ -283,12 +327,18 @@ void SWRasterCluster(
             hdr.compressedPositionQuantExp,
             int3(desc.minQx, desc.minQy, desc.minQz),
             pageSlabDescriptorIndex);
+#if defined(PSO_SKINNED)
+        SkinningInfluences skinning = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+        skinning = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
+        localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
+#else
         if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u)
         {
             SkinningInfluences skinning = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
             skinning = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
             localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
         }
+#endif
 
         float4 localPos4 = float4(localPos, 1.0f);
         float4 clipPos  = mul(localPos4, modelViewProjection);
@@ -317,17 +367,29 @@ void SWRasterCluster(
 
     GroupMemoryBarrierWithGroupSync();
 
-    RWTexture2D<uint64_t> visBuffer =
-        ResourceDescriptorHeap[NonUniformResourceIndex(rasterInfo.visibilityUAVDescriptorIndex)];
     RWTexture2D<uint2> debugVisTex =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
     uint2 visDims;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    visDims = uint2(rasterInfo.scissorMaxX, rasterInfo.scissorMaxY);
+#else
+    RWTexture2D<uint64_t> visBuffer =
+        ResourceDescriptorHeap[NonUniformResourceIndex(rasterInfo.visibilityUAVDescriptorIndex)];
     visBuffer.GetDimensions(visDims.x, visDims.y);
+#endif
     const bool swRasterDebugMode = perFrameBuffer.outputType == OUTPUT_SW_RASTER;
 
     const bool reverseWinding = (objData.objectFlags & OBJECT_FLAG_REVERSE_WINDING) != 0u;
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+    CLodVirtualShadowClipmapInfo clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    const bool hasClipmapInfo = CLodVirtualShadowTryGetClipmapInfoForView(viewID, clipmapInfos, clipmapInfo);
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
+#endif
 
     uint globalThread = subGroup * SW_RASTER_THREADS + GI;
     uint totalThreads = SW_RASTER_GROUPS_PER_CLUSTER * SW_RASTER_THREADS;
@@ -388,6 +450,18 @@ void SWRasterCluster(
         maxPx = min(maxPx, int2(int(visDims.x) - 1, int(visDims.y) - 1));
         if (minPx.x > maxPx.x || minPx.y > maxPx.y) continue;
 
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (!hasClipmapInfo ||
+            !CLodVirtualShadowAnyRenderablePageInPixelRect(
+                uint2(minPx),
+                uint2(maxPx),
+                clipmapInfo,
+                pageTable))
+        {
+            continue;
+        }
+#endif
+
         float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
 
         float2 e12 = s2 - s1;
@@ -435,9 +509,14 @@ void SWRasterCluster(
                         WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(1u));
                     }
 
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                    float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
+                    SWRasterWriteVirtualShadow(uint2(px, py), viewID, depth);
+#else
                     float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
                     uint64_t visKey = PackVisKey(depth, unsortedClusterIndex, t);
                     InterlockedMin(visBuffer[uint2(px, py)], visKey);
+#endif
                 }
 
                 b0 += dx_b0;
@@ -474,7 +553,7 @@ void WG_SWRaster(
     uint unsortedClusterIndex = batch.clusterIndices[clusterIdx];
     globallycoherent RWByteAddressBuffer visibleClusters =
         ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-    const uint3 packedCluster = CLodLoadVisibleClusterPackedGloballyCoherent(visibleClusters, unsortedClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPackedGloballyCoherent(visibleClusters, unsortedClusterIndex);
 
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
         ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
@@ -505,7 +584,7 @@ void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Group
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
         ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
 
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(compactedVisibleClusters, sortedClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(compactedVisibleClusters, sortedClusterIndex);
     const uint unsortedClusterIndex = sortedToUnsortedMapping[sortedClusterIndex];
     SWRasterCluster(packedCluster, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
 }

@@ -48,6 +48,7 @@ public:
                               "Builtin::VisUtil::MaterialOffsetBuffer")
          .WithUnorderedAccess("Builtin::VisUtil::MaterialWriteCursorBuffer",
                               "Builtin::VisUtil::PixelListBuffer");
+		b->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

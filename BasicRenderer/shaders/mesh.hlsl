@@ -9,11 +9,30 @@
 #include "include/meshletCommon.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
+#include "include/clodVirtualShadowClipmap.hlsli"
 #include "include/visibleClusterPacking.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_NORMALS 4u
+
+#ifndef CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
+#define CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW 0
+#endif
+
+#if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
+static const uint kClodInvalidTriangleOutputIndex = 0xFFFFFFFFu;
+
+groupshared float4 gs_clodVsmVertexPosition[MS_MESHLET_SIZE];
+groupshared float gs_clodVsmLinearDepth[MS_MESHLET_SIZE];
+#if defined(PSO_ALPHA_TEST)
+groupshared float2 gs_clodVsmTexcoord[MS_MESHLET_SIZE];
+#endif
+groupshared uint gs_clodVsmTriangleOutputIndex[MS_MESHLET_SIZE];
+groupshared uint gs_clodVsmKeptTriangleCount;
+groupshared uint gs_clodVsmHasClipmapInfo;
+groupshared CLodVirtualShadowClipmapInfo gs_clodVsmClipmapInfo;
+#endif
 
 uint ReadPackedBits32(StructuredBuffer<uint> words, uint startBit, uint bitCount)
 {
@@ -157,6 +176,14 @@ SkinningInfluences DecodePackedWeights(uint meshletLocalVertex, MeshletSetup set
 
 void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inout Vertex vertex)
 {
+#if defined(PSO_SKINNED)
+    SkinningInfluences skinning = DecodePackedJoints(meshletLocalVertex, setup);
+    skinning = DecodePackedWeights(meshletLocalVertex, setup, skinning);
+    float4x4 skinMatrix = BuildSkinMatrix(setup.meshInstanceBuffer.skinningInstanceSlot, skinning);
+    vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
+    vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
+    vertex.skinning = skinning;
+#else
     if ((setup.meshBuffer.vertexFlags & VERTEX_SKINNED) == 0u)
     {
         return;
@@ -168,6 +195,7 @@ void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inou
     vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
     vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
     vertex.skinning = skinning;
+#endif
 }
 
 float2 DecodeCompressedUV(
@@ -203,6 +231,7 @@ VisBufferPSInput BuildVisBufferVertexAttributesForView(
     uint3 vGroupID,
     PerObjectBuffer objectBuffer,
     uint viewID,
+    uint shadowClipmapIndex,
     uint clusterIndex,
     uint materialDataIndex,
     ClodViewRasterInfo rasterInfo)
@@ -221,6 +250,7 @@ VisBufferPSInput BuildVisBufferVertexAttributesForView(
     result.visibleClusterIndex = clusterIndex;
     result.linearDepth = -viewPosition.z;
     result.viewID = viewID;
+    result.shadowClipmapIndex = shadowClipmapIndex;
 #if defined(PSO_ALPHA_TEST)
     result.texcoord = vertex.texcoord;
     result.materialDataIndex = materialDataIndex;
@@ -234,7 +264,7 @@ PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     Vertex vertex = LoadVertex(byteOffset, vertexBuffer, flags);
     
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     float4 pos = float4(vertex.position.xyz, 1.0f);
     float4 prevPos;
     if (flags & VERTEX_SKINNED)
@@ -330,6 +360,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForView(
     uint3 vGroupID,
     PerObjectBuffer objectBuffer,
     uint viewID,
+    uint shadowClipmapIndex,
     uint clusterIndex,
     uint materialDataIndex,
     ClodViewRasterInfo rasterInfo)
@@ -342,6 +373,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForView(
         vGroupID,
         objectBuffer,
         viewID,
+        shadowClipmapIndex,
         clusterIndex,
         materialDataIndex,
         rasterInfo);
@@ -380,6 +412,7 @@ void EmitMeshletVisBufferForView(
     uint uGroupThreadID,
     MeshletSetup setup,
     uint viewID,
+    uint shadowClipmapIndex,
     uint clusterIndex,
     ClodViewRasterInfo rasterInfo,
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
@@ -395,6 +428,7 @@ void EmitMeshletVisBufferForView(
             setup.meshletIndex,
             setup.objectBuffer,
             viewID,
+            shadowClipmapIndex,
             clusterIndex,
             setup.meshBuffer.materialDataIndex,
             rasterInfo
@@ -409,6 +443,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
     MeshletSetup setup,
     uint3 vGroupID,
     uint viewID,
+    uint shadowClipmapIndex,
     uint clusterIndex,
     ClodViewRasterInfo rasterInfo)
 {
@@ -440,6 +475,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
         vGroupID,
         setup.objectBuffer,
         viewID,
+        shadowClipmapIndex,
         clusterIndex,
         setup.meshBuffer.materialDataIndex,
         rasterInfo);
@@ -449,6 +485,7 @@ void EmitMeshletVisBufferForViewCLod(
     uint uGroupThreadID,
     MeshletSetup setup,
     uint viewID,
+    uint shadowClipmapIndex,
     uint clusterIndex,
     ClodViewRasterInfo rasterInfo,
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
@@ -458,7 +495,7 @@ void EmitMeshletVisBufferForViewCLod(
     {
         // Vertex i is meshlet-local (0..vertexCount-1)
         outputVertices[i] = GetVisBufferVertexAttributesForViewCLod(
-            i, setup, setup.meshletIndex, viewID, clusterIndex, rasterInfo);
+            i, setup, setup.meshletIndex, viewID, shadowClipmapIndex, clusterIndex, rasterInfo);
     }
 
     WriteTriangles(uGroupThreadID, setup, outputTriangles);
@@ -469,6 +506,166 @@ struct VisibilityPerPrimitive
     uint triangleIndex : SV_PrimitiveID;
     //uint viewID : TEXCOORD0;
 };
+
+#if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
+void CacheMeshletVisBufferVerticesForViewCLod(
+    uint uGroupThreadID,
+    MeshletSetup setup,
+    uint viewID,
+    uint shadowClipmapIndex,
+    uint clusterIndex,
+    ClodViewRasterInfo rasterInfo)
+{
+    for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
+    {
+        const VisBufferPSInput vertex = GetVisBufferVertexAttributesForViewCLod(
+            i, setup, setup.meshletIndex, viewID, shadowClipmapIndex, clusterIndex, rasterInfo);
+        gs_clodVsmVertexPosition[i] = vertex.position;
+        gs_clodVsmLinearDepth[i] = vertex.linearDepth;
+#if defined(PSO_ALPHA_TEST)
+        gs_clodVsmTexcoord[i] = vertex.texcoord;
+#endif
+    }
+}
+
+void EmitCachedMeshletVisBufferVerticesForViewCLod(
+    uint uGroupThreadID,
+    MeshletSetup setup,
+    uint viewID,
+    uint shadowClipmapIndex,
+    uint clusterIndex,
+    out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE])
+{
+    for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
+    {
+        VisBufferPSInput vertex;
+        vertex.position = gs_clodVsmVertexPosition[i];
+        vertex.linearDepth = gs_clodVsmLinearDepth[i];
+#if defined(PSO_ALPHA_TEST)
+        vertex.texcoord = gs_clodVsmTexcoord[i];
+        vertex.materialDataIndex = setup.meshBuffer.materialDataIndex;
+#endif
+        vertex.visibleClusterIndex = clusterIndex;
+        vertex.viewID = viewID;
+        vertex.shadowClipmapIndex = shadowClipmapIndex;
+        outputVertices[i] = vertex;
+    }
+}
+
+bool ClodTriangleTouchesRenderableVirtualShadowPages(
+    uint3 tri,
+    ClodViewRasterInfo rasterInfo,
+    uint shadowVsmPayload,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWTexture2DArray<uint> pageTable)
+{
+    const float4 p0 = gs_clodVsmVertexPosition[tri.x];
+    const float4 p1 = gs_clodVsmVertexPosition[tri.y];
+    const float4 p2 = gs_clodVsmVertexPosition[tri.z];
+
+    // Keep triangles that straddle the near plane rather than risking false rejects from
+    // a bbox built from invalid post-divide coordinates.
+    if (p0.w <= 0.0f || p1.w <= 0.0f || p2.w <= 0.0f)
+    {
+        return true;
+    }
+
+    const float visWidth = float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX);
+    const float visHeight = float(rasterInfo.scissorMaxY - rasterInfo.scissorMinY);
+    const float scissorMinX = float(rasterInfo.scissorMinX);
+    const float scissorMinY = float(rasterInfo.scissorMinY);
+
+    const float2 ndc0 = p0.xy / p0.w;
+    const float2 ndc1 = p1.xy / p1.w;
+    const float2 ndc2 = p2.xy / p2.w;
+
+    const float2 s0 = float2(
+        (ndc0.x + 1.0f) * 0.5f * visWidth + scissorMinX,
+        (1.0f - ndc0.y) * 0.5f * visHeight + scissorMinY);
+    const float2 s1 = float2(
+        (ndc1.x + 1.0f) * 0.5f * visWidth + scissorMinX,
+        (1.0f - ndc1.y) * 0.5f * visHeight + scissorMinY);
+    const float2 s2 = float2(
+        (ndc2.x + 1.0f) * 0.5f * visWidth + scissorMinX,
+        (1.0f - ndc2.y) * 0.5f * visHeight + scissorMinY);
+
+    int2 minPx = int2(floor(min(min(s0, s1), s2)));
+    int2 maxPx = int2(floor(max(max(s0, s1), s2)));
+
+    minPx = max(minPx, int2(rasterInfo.scissorMinX, rasterInfo.scissorMinY));
+    maxPx = min(maxPx, int2(int(rasterInfo.scissorMaxX) - 1, int(rasterInfo.scissorMaxY) - 1));
+    minPx = max(minPx, int2(0, 0));
+    maxPx = min(maxPx, int2(int(clipmapInfo.virtualResolution) - 1, int(clipmapInfo.virtualResolution) - 1));
+    if (minPx.x > maxPx.x || minPx.y > maxPx.y)
+    {
+        return false;
+    }
+
+    uint2 minPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(minPx), clipmapInfo);
+    uint2 maxPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(maxPx), clipmapInfo);
+
+    if (CLodVisibleClusterHasVsmBlockDataFromPayload(shadowVsmPayload))
+    {
+        const uint2 blockCoord = CLodVisibleClusterVsmBlockCoordFromPayload(shadowVsmPayload);
+        const uint2 minTouchedBlockCoord = CLodVirtualShadowBlockCoordFromPageCoord(minPageCoords);
+        const uint2 maxTouchedBlockCoord = CLodVirtualShadowBlockCoordFromPageCoord(maxPageCoords);
+        if (any(blockCoord < minTouchedBlockCoord) || any(blockCoord > maxTouchedBlockCoord))
+        {
+            return false;
+        }
+
+        const uint packedActiveRect = CLodVisibleClusterVsmActiveRectFromPayload(shadowVsmPayload);
+        const uint2 blockOriginPageCoord = CLodVisibleClusterVsmBlockOriginPageCoordFromPayload(shadowVsmPayload);
+        const uint2 blockMaxPageCoord = blockOriginPageCoord + uint2(kCLodVirtualShadowBlockPagesPerAxis - 1u, kCLodVirtualShadowBlockPagesPerAxis - 1u);
+        const uint2 activeMinLocalPageCoord = CLodVirtualShadowUnpackBlockActiveRectMin(packedActiveRect);
+        const uint2 activeMaxLocalPageCoord = CLodVirtualShadowUnpackBlockActiveRectMax(packedActiveRect);
+        const uint2 activeMinPageCoord = blockOriginPageCoord + activeMinLocalPageCoord;
+        const uint2 activeMaxPageCoord = blockOriginPageCoord + activeMaxLocalPageCoord;
+
+        if (minPageCoords.x > blockMaxPageCoord.x || minPageCoords.y > blockMaxPageCoord.y ||
+            maxPageCoords.x < blockOriginPageCoord.x || maxPageCoords.y < blockOriginPageCoord.y)
+        {
+            return false;
+        }
+
+        if (minPageCoords.x > activeMaxPageCoord.x || minPageCoords.y > activeMaxPageCoord.y ||
+            maxPageCoords.x < activeMinPageCoord.x || maxPageCoords.y < activeMinPageCoord.y)
+        {
+            return false;
+        }
+
+        minPageCoords = max(minPageCoords, activeMinPageCoord);
+        maxPageCoords = min(maxPageCoords, activeMaxPageCoord);
+    }
+
+    return CLodVirtualShadowAnyRenderablePageInPageRect(
+        minPageCoords,
+        maxPageCoords,
+        clipmapInfo,
+        pageTable);
+}
+
+void EmitFilteredMeshletTriangles(
+    uint uGroupThreadID,
+    MeshletSetup setup,
+    out indices uint3 outputTriangles[MS_MESHLET_SIZE],
+    out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
+{
+    const bool reverseWinding = (setup.objectBuffer.objectFlags & OBJECT_FLAG_REVERSE_WINDING) != 0;
+    for (uint t = uGroupThreadID; t < setup.triCount; t += MS_THREAD_GROUP_SIZE)
+    {
+        const uint outputIndex = gs_clodVsmTriangleOutputIndex[t];
+        if (outputIndex == kClodInvalidTriangleOutputIndex)
+        {
+            continue;
+        }
+
+        const uint3 tri = DecodeTriangle(t, setup);
+        outputTriangles[outputIndex] = reverseWinding ? tri.xzy : tri;
+        primitiveInfo[outputIndex].triangleIndex = t;
+    }
+}
+#endif
 
 void EmitPrimitiveIDs(uint uGroupThreadID, MeshletSetup setup, out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
 {
@@ -521,17 +718,27 @@ void VisibilityBufferMSMain(
     }
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
-    EmitMeshletVisBufferForView(uGroupThreadID, setup, setup.viewID, 0, viewRasterInfo, outputVertices, outputTriangles);
+    EmitMeshletVisBufferForView(
+        uGroupThreadID,
+        setup,
+        setup.viewID,
+        setup.shadowClipmapIndex,
+        0,
+        viewRasterInfo,
+        outputVertices,
+        outputTriangles);
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }
 
-bool InitializeMeshletFromCompactedCluster(uint3 packedCluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
+bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
 {
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
     setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
     setup.meshInstanceBuffer = meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
     setup.viewID = CLodVisibleClusterViewID(packedCluster);
+    setup.shadowClipmapIndex = CLodVisibleClusterShadowClipmapIndex(packedCluster);
+    setup.virtualShadowPayload = CLodVisibleClusterVsmPayload(packedCluster);
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -624,10 +831,13 @@ void ClusterLODBucketMSMain(
     uint count = histogram[bucketIndex];
 
     bool draw = linearizedID < count;
-    uint3 packedCluster = uint3(0, 0, 0);
+    uint4 packedCluster = uint4(0, 0, 0, CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX);
     MeshletSetup setup;
     uint visibleClusterIndex = baseOffset + linearizedID;
     uint unsortedClusterIndex = 0;
+    uint outputVertCount = 0;
+    uint outputTriCount = 0;
+    ClodViewRasterInfo viewRasterInfo = (ClodViewRasterInfo)0;
 
     if (draw) {   
         ByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
@@ -638,11 +848,106 @@ void ClusterLODBucketMSMain(
         setup.vertCount = 0;
         setup.triCount = 0;
     }
-    SetMeshOutputCounts(setup.vertCount, setup.triCount); // DXC won't accept SetMeshOutputCounts in non-uniform flow-control
+
     if (draw)
     {
-        ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
-        EmitMeshletVisBufferForViewCLod(uGroupThreadID, setup, setup.viewID, unsortedClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
+        viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
+
+#if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (uGroupThreadID == 0u)
+        {
+            gs_clodVsmKeptTriangleCount = 0u;
+            gs_clodVsmHasClipmapInfo = 0u;
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        CacheMeshletVisBufferVerticesForViewCLod(
+            uGroupThreadID,
+            setup,
+            setup.viewID,
+            setup.virtualShadowPayload,
+            unsortedClusterIndex,
+            viewRasterInfo);
+        GroupMemoryBarrierWithGroupSync();
+
+        if (uGroupThreadID == 0u)
+        {
+            const uint clipmapIndex = setup.shadowClipmapIndex;
+            if (clipmapIndex < kCLodVirtualShadowClipmapCount)
+            {
+                StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+                    ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+                const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
+                if (CLodVirtualShadowClipmapIsValid(clipmapInfo) &&
+                    clipmapInfo.shadowCameraBufferIndex == setup.viewID)
+                {
+                    gs_clodVsmHasClipmapInfo = 1u;
+                    gs_clodVsmClipmapInfo = clipmapInfo;
+                }
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
+        for (uint t = uGroupThreadID; t < setup.triCount; t += MS_THREAD_GROUP_SIZE)
+        {
+            gs_clodVsmTriangleOutputIndex[t] = kClodInvalidTriangleOutputIndex;
+
+            uint3 tri = DecodeTriangle(t, setup);
+            if ((setup.objectBuffer.objectFlags & OBJECT_FLAG_REVERSE_WINDING) != 0u)
+            {
+                tri = tri.xzy;
+            }
+
+            if (gs_clodVsmHasClipmapInfo != 0u &&
+                ClodTriangleTouchesRenderableVirtualShadowPages(
+                    tri,
+                    viewRasterInfo,
+                    setup.virtualShadowPayload,
+                    gs_clodVsmClipmapInfo,
+                    pageTable))
+            {
+                uint outputIndex = 0u;
+                InterlockedAdd(gs_clodVsmKeptTriangleCount, 1u, outputIndex);
+                gs_clodVsmTriangleOutputIndex[t] = outputIndex;
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        outputTriCount = gs_clodVsmKeptTriangleCount;
+        outputVertCount = outputTriCount > 0u ? setup.vertCount : 0u;
+#else
+        outputVertCount = setup.vertCount;
+        outputTriCount = setup.triCount;
+#endif
+    }
+
+    SetMeshOutputCounts(outputVertCount, outputTriCount); // DXC won't accept SetMeshOutputCounts in non-uniform flow-control
+    if (draw)
+    {
+#if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (outputVertCount != 0u)
+        {
+            EmitCachedMeshletVisBufferVerticesForViewCLod(
+                uGroupThreadID,
+                setup,
+                setup.viewID,
+                setup.virtualShadowPayload,
+                unsortedClusterIndex,
+                outputVertices);
+            EmitFilteredMeshletTriangles(uGroupThreadID, setup, outputTriangles, primitiveInfo);
+        }
+#else
+        EmitMeshletVisBufferForViewCLod(
+            uGroupThreadID,
+            setup,
+            setup.viewID,
+            setup.virtualShadowPayload,
+            unsortedClusterIndex,
+            viewRasterInfo,
+            outputVertices,
+            outputTriangles);
         EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
+#endif
     }
 }

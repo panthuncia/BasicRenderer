@@ -115,7 +115,7 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
     float2 uv = (float2(clampedPix) + 0.5) / float2(dim);
 
     // Camera
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera cam = cameras[perFrame.mainCameraIndex];
 

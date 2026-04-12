@@ -25,6 +25,7 @@ public:
             "Builtin::VisUtil::MaterialOffsetBuffer")
             .WithUnorderedAccess(
                 "Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
+		b->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

@@ -1260,6 +1260,7 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
 		stats.queuedRequests = static_cast<uint32_t>(m_clodDiskStreamingRequests.size());
+		stats.queuedOrInFlightGroups = static_cast<uint32_t>(m_clodDiskStreamingQueuedGroups.size());
 	}
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);

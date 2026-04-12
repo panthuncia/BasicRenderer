@@ -299,9 +299,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (!hGetPixDLL) {
         spdlog::warn("could not load the PIX library");
     }
-
-    // Aftermath
-
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
     HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
     if (!pixLoaded) {
@@ -335,7 +332,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto carScene = LoadModel("models/porche.glb");
     //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
     //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
-    //auto sphereScene = LoadModel("models/sphere.glb");
+    auto sphereScene = LoadModel("models/sphere.glb");
 
 
 	//auto mountainScene = LoadModel("models/terrain.glb");
@@ -350,7 +347,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto usdScene = LoadModel("models/sponza.usdz");
     
     //auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
-    //auto bistro = LoadModel("models/bistroExterior.glb");
+    auto bistro = LoadModel("models/bistroExterior.glb");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -360,16 +357,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//auto island = LoadModel("models/island/usd/elements/isMountainB/instance.usda");
 
-	//auto quad = LoadModel("models/quad.usdz");
+	auto quad = LoadModel("models/quad.usdz");
 
-	auto cubes = LoadModel("models/cubes/suspicious_cubes.usda");
+	//auto cubes = LoadModel("models/cubes/suspicious_cubes.usda");
 
     renderer.SetCurrentScene(baseScene);
 
-	renderer.GetCurrentScene()->AppendScene(cubes->Clone());
+	//renderer.GetCurrentScene()->AppendScene(cubes->Clone());
     
 	//renderer.GetCurrentScene()->AppendScene(carScene->Clone());
 
+	//renderer.GetCurrentScene()->AppendScene(quad->Clone());
+	//quad->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//renderer.GetCurrentScene()->AppendScene(quad->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(island->Clone());
@@ -387,8 +386,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
 
+	sphereScene->GetRoot().set<Components::Position>({ 0.0, 2.0, 0.0 });
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 
     //for (int i = 0; i < 5; i++) {
@@ -424,12 +424,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		auto color = XMFLOAT3(randomFloat(0.0, 1.0), randomFloat(0.0, 1.0), randomFloat(0.0, 1.0));
         auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light"+std::to_wstring(i), XMFLOAT3(point.x, point.y, point.z), color, 3.0, 0.0, 0.0, 1.0, false);
     }
-
-    if (light.has<Components::DepthMap>()) {
-        auto& depthMap = light.get<Components::DepthMap>();
-        renderer.SetDebugTexture(depthMap.linearDepthMap);
-    }
-
 
     MSG msg = {};
     unsigned int frameIndex = 0;

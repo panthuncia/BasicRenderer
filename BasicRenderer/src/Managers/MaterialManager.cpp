@@ -48,9 +48,6 @@ void MaterialManager::IncrementMaterialUsageCount(Material& material) {
 	material.SetCompileFlagsID(flagsSlot);
 	unsigned int materialSlot = GetMaterialSlot(materialID, material.GetData());
 
-	unsigned int rasterSlot = GetRasterFlagsSlot(material.Technique().rasterFlags);
-	material.SetRasterBucketIndex(rasterSlot); // Base index, before fixed flags offsetting
-
 	m_materialUsageCounts[materialSlot]++;
 }
 
@@ -139,25 +136,67 @@ unsigned int MaterialManager::GetCompileFlagsSlot(MaterialCompileFlags flags) {
 	return slot;
 }
 
-unsigned int MaterialManager::GetRasterFlagsSlot(MaterialRasterFlags rasterFlags) {
-	unsigned int slot; // Each material raster bucket is followed by m_numFixedRasterCombinations slots for fixed flags
+unsigned int MaterialManager::AcquireRasterBucket(MaterialRasterFlags rasterFlags) {
+	unsigned int slot;
 	auto it = m_rasterFlagToBucketMapping.find(static_cast<uint32_t>(rasterFlags));
 	if (it != m_rasterFlagToBucketMapping.end()) {
-		slot = it->second; // Base slot for this raster flags combination
+		slot = it->second;
+		m_rasterBucketUsageCounts[slot]++;
 		return slot;
 	}
 	if (!m_freeRasterBuckets.empty()) {
 		slot = m_freeRasterBuckets.back();
 		m_freeRasterBuckets.pop_back();
 		m_bucketToRasterFlagMapping[slot] = rasterFlags;
+		m_rasterBucketUsageCounts[slot] = 1u;
 	}
 	else {
 		slot = m_rasterBucketsUsed++;
 		m_bucketToRasterFlagMapping.push_back(rasterFlags);
+		m_rasterBucketUsageCounts.push_back(1u);
 	}
 
 	m_rasterFlagToBucketMapping[static_cast<uint32_t>(rasterFlags)] = slot;
 	return slot;
+}
+
+void MaterialManager::ReleaseRasterBucket(MaterialRasterFlags rasterFlags) {
+	const auto it = m_rasterFlagToBucketMapping.find(static_cast<uint32_t>(rasterFlags));
+	if (it == m_rasterFlagToBucketMapping.end()) {
+		spdlog::error("Raster flags not found in mapping during release!");
+		return;
+	}
+
+	const unsigned int slot = it->second;
+	if (slot >= m_rasterBucketUsageCounts.size() || m_rasterBucketUsageCounts[slot] == 0u) {
+		spdlog::error("Raster bucket usage underflow for slot {}!", slot);
+		return;
+	}
+
+	m_rasterBucketUsageCounts[slot]--;
+	if (m_rasterBucketUsageCounts[slot] != 0u) {
+		return;
+	}
+
+	m_rasterFlagToBucketMapping.erase(it);
+	m_bucketToRasterFlagMapping[slot] = MaterialRasterFlagsNone;
+	m_freeRasterBuckets.push_back(slot);
+
+	while (m_rasterBucketsUsed > 0u) {
+		const unsigned int tailSlot = m_rasterBucketsUsed - 1u;
+		if (tailSlot >= m_rasterBucketUsageCounts.size() ||
+			m_rasterBucketUsageCounts[tailSlot] != 0u ||
+			m_bucketToRasterFlagMapping[tailSlot] != MaterialRasterFlagsNone) {
+			break;
+		}
+
+		m_rasterBucketsUsed--;
+		m_bucketToRasterFlagMapping.pop_back();
+		m_rasterBucketUsageCounts.pop_back();
+		m_freeRasterBuckets.erase(
+			std::remove(m_freeRasterBuckets.begin(), m_freeRasterBuckets.end(), tailSlot),
+			m_freeRasterBuckets.end());
+	}
 }
 
 std::shared_ptr<Resource> MaterialManager::ProvideResource(ResourceIdentifier const& key) {

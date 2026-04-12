@@ -6,6 +6,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -28,7 +29,10 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<Buffer> deepVisibilityNodesBuffer,
     std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
     std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
-    std::shared_ptr<ResourceGroup> slabResourceGroup)
+    std::shared_ptr<ResourceGroup> slabResourceGroup,
+    std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
+    std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
+    std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
@@ -36,6 +40,9 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_deepVisibilityNodesBuffer(std::move(deepVisibilityNodesBuffer))
     , m_deepVisibilityCounterBuffer(std::move(deepVisibilityCounterBuffer))
     , m_deepVisibilityOverflowCounterBuffer(std::move(deepVisibilityOverflowCounterBuffer))
+    , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
+    , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
+    , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_wireframe = inputs.wireframe;
     m_clearGbuffer = inputs.clearGbuffer;
@@ -102,11 +109,17 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             m_deepVisibilityCounterBuffer,
             m_deepVisibilityOverflowCounterBuffer);
     }
+    else if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        builder->WithShaderResource(m_virtualShadowClipmapInfoBuffer)
+            .WithUnorderedAccess(m_virtualShadowPageTableTexture, m_virtualShadowPhysicalPagesTexture);
+    }
 
     // Declare page pool slabs for bindless access (auto-invalidates when new slabs are added).
     if (m_slabResourceGroup) {
         builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void ClusterRasterizationPass::Setup() {
@@ -115,6 +128,7 @@ void ClusterRasterizationPass::Setup() {
 void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
+    const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
     auto numViews = context.viewManager->GetCameraBufferSize();
     std::vector<std::shared_ptr<PixelBuffer>> visibilityBuffers;
@@ -124,9 +138,25 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     uint32_t maxViewHeight = 1;
     uint64_t totalViewPixels = 0;
 
+    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        maxViewWidth = virtualShadowConfig.virtualResolution;
+        maxViewHeight = maxViewWidth;
+    }
+
     context.viewManager->ForEachView([&](uint64_t v) {
         auto viewInfo = context.viewManager->Get(v);
-        if (!viewInfo || !viewInfo->gpu.visibilityBuffer) {
+        if (!viewInfo) {
+            return;
+        }
+
+        if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+            if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+                totalViewPixels += static_cast<uint64_t>(maxViewWidth) * static_cast<uint64_t>(maxViewHeight);
+            }
+            return;
+        }
+
+        if (!viewInfo->gpu.visibilityBuffer) {
             return;
         }
 
@@ -150,7 +180,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
     context.viewManager->ForEachView([&](uint64_t v) {
         auto viewInfo = context.viewManager->Get(v);
-        if (!viewInfo || !viewInfo->gpu.visibilityBuffer) {
+        if (!viewInfo) {
             return;
         }
 
@@ -158,6 +188,21 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
         CLodViewRasterInfo info{};
         info.scissorMinX = 0;
         info.scissorMinY = 0;
+
+        if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+            if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+                info.scissorMaxX = maxViewWidth;
+                info.scissorMaxY = maxViewHeight;
+                info.viewportScaleX = 1.0f;
+                info.viewportScaleY = 1.0f;
+            }
+            viewRasterInfo[cameraIndex] = info;
+            return;
+        }
+
+        if (!viewInfo->gpu.visibilityBuffer) {
+            return;
+        }
 
         if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
             info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -249,6 +294,15 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
+    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowConfig.virtualResolution;
+    }
     if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
         misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_BUFFER_DESCRIPTOR_INDEX] = m_deepVisibilityNodesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -268,7 +322,9 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
         auto flags = context.materialManager->GetRasterFlagsForBucket(i);
         const auto& pso = (m_outputKind == CLodRasterOutputKind::VisibilityBuffer)
             ? psoManager.GetClusterLODRasterPSO(flags, m_wireframe)
-            : psoManager.GetClusterLODDeepVisibilityRasterPSO(flags, m_wireframe);
+            : (m_outputKind == CLodRasterOutputKind::VirtualShadow)
+                ? psoManager.GetClusterLODVirtualShadowRasterPSO(flags, m_wireframe)
+                : psoManager.GetClusterLODDeepVisibilityRasterPSO(flags, m_wireframe);
 
         BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
         commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());

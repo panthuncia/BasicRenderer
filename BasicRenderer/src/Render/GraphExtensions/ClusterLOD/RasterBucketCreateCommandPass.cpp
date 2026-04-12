@@ -5,6 +5,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "BuiltinResources.h"
 #include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
 
 RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
@@ -29,6 +30,7 @@ RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
 void RasterBucketCreateCommandPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     builder->WithShaderResource(m_visibleClustersCounterBuffer, m_occlusionReplayStateBuffer)
         .WithUnorderedAccess(m_histogramIndirectCommand, m_occlusionNodeGpuInputsBuffer);
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void RasterBucketCreateCommandPass::Setup() {}

@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
 #include "Managers/MeshManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
@@ -17,6 +18,9 @@
 #include "Render/GraphExtensions/ClusterLOD/ClearDeepVisibilityPass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
+#include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobBuildArgsPass.h"
+#include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobExpandPass.h"
+#include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobRasterPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterizationPass.h"
 #include "Render/GraphExtensions/ClusterLOD/DeepVisibilityResolvePass.h"
 #include "Render/GraphExtensions/ClusterLOD/HierarchialCullingPass.h"
@@ -38,12 +42,32 @@
 #include "Render/GraphExtensions/ClusterLOD/ReyesSplitPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTable.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTableUploadPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapAllocatePagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowBlockExpandPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowBuildRasterArgsPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapBuildPageListsPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapBuildMarkTilesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearDirtyBitsPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapConsumePredictedPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapFreeWrappedPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapGatherStatsPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapDirtyHierarchyPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapDeduplicatePredictedPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapExpandPredictedPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapInvalidatePagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapMarkPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapSetupPass.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RenderPhase.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
+#include "Resources/PixelBuffer.h"
+#include "Resources/Buffers/Buffer.h"
 #include "Resources/Buffers/PagePool.h"
 #include "Resources/components.h"
 #include "ShaderBuffers.h"
+#include "Utilities/ProportionalBudgetAllocator.h"
+#include "BuiltinResources.h"
 
 namespace {
 
@@ -128,11 +152,11 @@ const CLodVariantTraits& GetVariantTraits(CLodExtensionType type)
             &EnsureShadowTag,
             "CLodShadow::",
             "CLod[Shadow] ",
-            Engine::Primary::GBufferPass,
-            CLodRasterOutputKind::VisibilityBuffer,
+            Engine::Primary::ShadowMapsPass,
+            CLodRasterOutputKind::VirtualShadow,
             CLodVariantTraits::ScheduleMode::TwoPassVisibility,
             false,
-            true,
+            false,
             false,
             true
         },
@@ -155,6 +179,66 @@ std::string MakeVariantPassName(const CLodVariantTraits& traits, std::string_vie
 std::string MakeVariantResourceName(const CLodVariantTraits& traits, std::string_view suffix)
 {
     return std::string(traits.resourcePrefix) + std::string(suffix);
+}
+
+TextureDescription CreateVirtualShadowPageTableDescription()
+{
+    TextureDescription desc;
+    ImageDimensions dims;
+    dims.width = CLodVirtualShadowMaxPageTableResolution;
+    dims.height = CLodVirtualShadowMaxPageTableResolution;
+    dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
+    dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
+    desc.imageDimensions.push_back(dims);
+    desc.channels = 1;
+    desc.format = rhi::Format::R32_UInt;
+    desc.hasSRV = true;
+    desc.srvFormat = rhi::Format::R32_UInt;
+    desc.hasUAV = true;
+    desc.uavFormat = rhi::Format::R32_UInt;
+    desc.isArray = true;
+    desc.arraySize = CLodVirtualShadowMaxSupportedClipmapCount;
+    return desc;
+}
+
+TextureDescription CreateVirtualShadowPhysicalPagesDescription(uint32_t backingResolution)
+{
+    TextureDescription desc;
+    ImageDimensions dims;
+    const uint32_t sanitizedBackingResolution = CLodVirtualShadowSanitizeBackingResolution(backingResolution);
+    dims.width = sanitizedBackingResolution;
+    dims.height = sanitizedBackingResolution;
+    dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
+    dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
+    desc.imageDimensions.push_back(dims);
+    desc.channels = 1;
+    desc.format = rhi::Format::R32_UInt;
+    desc.hasSRV = true;
+    desc.srvFormat = rhi::Format::R32_UInt;
+    desc.hasUAV = true;
+    desc.uavFormat = rhi::Format::R32_UInt;
+    return desc;
+}
+
+TextureDescription CreateVirtualShadowDirtyHierarchyDescription()
+{
+    TextureDescription desc;
+    ImageDimensions dims;
+    dims.width = CLodVirtualShadowMaxPageTableResolution;
+    dims.height = CLodVirtualShadowMaxPageTableResolution;
+    dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
+    dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
+    desc.imageDimensions.push_back(dims);
+    desc.channels = 1;
+    desc.format = rhi::Format::R32_UInt;
+    desc.hasSRV = true;
+    desc.srvFormat = rhi::Format::R32_UInt;
+    desc.hasUAV = true;
+    desc.uavFormat = rhi::Format::R32_UInt;
+    desc.isArray = true;
+    desc.arraySize = CLodVirtualShadowMaxSupportedClipmapCount;
+    desc.generateMipMaps = true;
+    return desc;
 }
 
 HierarchialCullingWorkGraphMode GetCullingWorkGraphMode(CLodSoftwareRasterMode softwareRasterMode)
@@ -203,6 +287,150 @@ void SyncTaggedBufferEntity(const std::shared_ptr<Buffer>& buffer, const flecs::
     }
 }
 
+struct ReyesResourceSizing {
+    uint32_t fullClusterOutputCapacity = 0u;
+    uint32_t ownedClusterCapacity = 0u;
+    uint32_t splitQueueCapacity = 0u;
+    uint32_t diceQueueCapacity = 0u;
+    uint32_t diceQueuePhysicalCapacity = 0u;
+    uint32_t rasterWorkCapacity = 0u;
+    uint32_t ownershipBitsetWordCount = 0u;
+    uint64_t requestedBudgetBytes = 0u;
+    uint64_t allocatedBudgetBytes = 0u;
+    bool budgetLimited = false;
+};
+
+uint64_t BufferBytes(uint32_t elementCount, size_t elementSize)
+{
+    return static_cast<uint64_t>(elementCount) * static_cast<uint64_t>(elementSize);
+}
+
+uint32_t BytesToElementCount(uint64_t allocatedBytes, size_t elementSize)
+{
+    if (elementSize == 0u) {
+        throw std::runtime_error("Element size must be non-zero when converting budgeted bytes to element count.");
+    }
+
+    return static_cast<uint32_t>(allocatedBytes / static_cast<uint64_t>(elementSize));
+}
+
+ReyesResourceSizing BuildReyesResourceSizing(const CLodVariantTraits& traits, uint32_t maxVisibleClusters)
+{
+    const bool usesPhase2ReyesResources = traits.usesPhase2OcclusionReplay;
+    const uint32_t ownershipBitsetWordCount = CLodBitsetWordCount(maxVisibleClusters);
+    const uint32_t idealFullClusterOutputCapacity = maxVisibleClusters;
+    const uint32_t idealOwnedClusterCapacity = maxVisibleClusters;
+    const uint32_t idealSplitQueueCapacity = CLodReyesSplitQueueCapacity(maxVisibleClusters);
+    const uint32_t idealDiceQueueCapacity = CLodReyesDiceQueueCapacity(maxVisibleClusters);
+    const uint32_t idealRasterWorkCapacity = CLodReyesRasterWorkCapacity(maxVisibleClusters);
+    const uint32_t diceQueuePhaseMultiplier = usesPhase2ReyesResources ? 2u : 1u;
+    const ReyesTessellationTableData& reyesTessellationTableData = GetReyesTessellationTableData();
+
+    std::vector<budget::ProportionalBudgetItem> budgetItems;
+    budgetItems.reserve(24);
+
+    auto addFixedItem = [&budgetItems](std::string_view id, uint64_t bytes) {
+        budgetItems.push_back(budget::ProportionalBudgetItem{
+            .id = id,
+            .idealBytes = bytes,
+            .minBytes = bytes,
+            .maxBytes = bytes,
+            .quantumBytes = 1u,
+        });
+    };
+
+    auto addFlexibleItem = [&budgetItems](std::string_view id, uint64_t idealBytes, uint64_t quantumBytes) {
+        budgetItems.push_back(budget::ProportionalBudgetItem{
+            .id = id,
+            .idealBytes = idealBytes,
+            .minBytes = quantumBytes,
+            .maxBytes = idealBytes,
+            .quantumBytes = quantumBytes,
+        });
+    };
+
+    addFlexibleItem("fullClusterOutputs", BufferBytes(idealFullClusterOutputCapacity, sizeof(CLodReyesFullClusterOutput)), sizeof(CLodReyesFullClusterOutput));
+    addFixedItem("fullClusterOutputCounter", sizeof(uint32_t));
+    addFlexibleItem("ownedClusters", BufferBytes(idealOwnedClusterCapacity, sizeof(CLodReyesOwnedClusterEntry)), sizeof(CLodReyesOwnedClusterEntry));
+    addFixedItem("ownedClusterCounter", sizeof(uint32_t));
+    addFixedItem("ownershipBitset", BufferBytes(ownershipBitsetWordCount, sizeof(uint32_t)));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("ownershipBitsetPhase2", BufferBytes(ownershipBitsetWordCount, sizeof(uint32_t)));
+    }
+
+    addFixedItem("classifyIndirectArgs", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("classifyIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+
+    addFixedItem("splitIndirectArgs", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("splitIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+
+    addFlexibleItem("splitQueueA", BufferBytes(idealSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry)), sizeof(CLodReyesSplitQueueEntry));
+    addFixedItem("splitQueueCounterA", sizeof(uint32_t));
+    addFixedItem("splitQueueOverflowA", sizeof(uint32_t));
+    addFlexibleItem("splitQueueB", BufferBytes(idealSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry)), sizeof(CLodReyesSplitQueueEntry));
+    addFixedItem("splitQueueCounterB", sizeof(uint32_t));
+    addFixedItem("splitQueueOverflowB", sizeof(uint32_t));
+
+    addFlexibleItem(
+        "diceQueue",
+        BufferBytes(idealDiceQueueCapacity * diceQueuePhaseMultiplier, sizeof(CLodReyesDiceQueueEntry)),
+        static_cast<uint64_t>(sizeof(CLodReyesDiceQueueEntry)) * static_cast<uint64_t>(diceQueuePhaseMultiplier));
+    addFixedItem("diceQueueCounter", sizeof(uint32_t));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("diceQueuePhase1Count", sizeof(uint32_t));
+    }
+    addFixedItem("diceQueueOverflow", sizeof(uint32_t));
+
+    addFlexibleItem("rasterWorkPhase1", BufferBytes(idealRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry)), sizeof(CLodReyesRasterWorkEntry));
+    addFixedItem("rasterWorkCounterPhase1", sizeof(uint32_t));
+    addFixedItem("rasterWorkIndirectArgsPhase1", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFlexibleItem("rasterWorkPhase2", BufferBytes(idealRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry)), sizeof(CLodReyesRasterWorkEntry));
+        addFixedItem("rasterWorkCounterPhase2", sizeof(uint32_t));
+        addFixedItem("rasterWorkIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+
+    addFixedItem("tessTableConfigs", BufferBytes(static_cast<uint32_t>(reyesTessellationTableData.configs.size()), sizeof(CLodReyesTessTableConfigEntry)));
+    addFixedItem("tessTableVertices", BufferBytes(static_cast<uint32_t>(reyesTessellationTableData.vertices.size()), sizeof(uint32_t)));
+    addFixedItem("tessTableTriangles", BufferBytes(static_cast<uint32_t>(reyesTessellationTableData.triangles.size()), sizeof(uint32_t)));
+    addFixedItem("diceIndirectArgsPhase1", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("diceIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+    addFixedItem("telemetryPhase1", sizeof(CLodReyesTelemetry));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("telemetryPhase2", sizeof(CLodReyesTelemetry));
+    }
+
+    uint64_t idealBudgetBytes = 0u;
+    for (const budget::ProportionalBudgetItem& item : budgetItems) {
+        idealBudgetBytes += item.idealBytes;
+    }
+
+    const uint64_t configuredBudgetBytes = static_cast<uint64_t>(SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodReyesResourceBudgetBytesSettingName)());
+    const uint64_t effectiveBudgetBytes = configuredBudgetBytes == 0u ? idealBudgetBytes : configuredBudgetBytes;
+    const budget::ProportionalBudgetResult budgetResult = budget::AllocateProportionalBudget(budgetItems, effectiveBudgetBytes);
+
+    ReyesResourceSizing sizing{};
+    sizing.fullClusterOutputCapacity = BytesToElementCount(budgetResult.Find("fullClusterOutputs").allocatedBytes, sizeof(CLodReyesFullClusterOutput));
+    sizing.ownedClusterCapacity = BytesToElementCount(budgetResult.Find("ownedClusters").allocatedBytes, sizeof(CLodReyesOwnedClusterEntry));
+    sizing.splitQueueCapacity = BytesToElementCount(budgetResult.Find("splitQueueA").allocatedBytes, sizeof(CLodReyesSplitQueueEntry));
+    sizing.diceQueueCapacity = static_cast<uint32_t>(
+        budgetResult.Find("diceQueue").allocatedBytes /
+        (static_cast<uint64_t>(sizeof(CLodReyesDiceQueueEntry)) * static_cast<uint64_t>(diceQueuePhaseMultiplier)));
+    sizing.diceQueuePhysicalCapacity = sizing.diceQueueCapacity * diceQueuePhaseMultiplier;
+    sizing.rasterWorkCapacity = BytesToElementCount(budgetResult.Find("rasterWorkPhase1").allocatedBytes, sizeof(CLodReyesRasterWorkEntry));
+    sizing.ownershipBitsetWordCount = ownershipBitsetWordCount;
+    sizing.requestedBudgetBytes = budgetResult.requestedTotalBytes;
+    sizing.allocatedBudgetBytes = budgetResult.allocatedTotalBytes;
+    sizing.budgetLimited = budgetResult.allocatedTotalBytes < budgetResult.requestedTotalBytes;
+    return sizing;
+}
+
 } // namespace
 
 CLodExtension::~CLodExtension() = default;
@@ -210,6 +438,892 @@ CLodExtension::~CLodExtension() = default;
 bool CLodExtension::IsReyesTessellationDisabled() const
 {
     return SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
+}
+
+void CLodExtension::RefreshShadowConfiguredSettings()
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return;
+    }
+
+    m_shadowConfiguredBackingResolution = CLodVirtualShadowGetConfiguredMaxBackingResolution();
+    m_shadowConfiguredMaxPhysicalPageCount = CLodVirtualShadowGetConfiguredMaxPhysicalPageCapacity();
+    m_shadowConfiguredPageJobMaxPages = std::max(
+        1u,
+        std::min(
+            SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName)(),
+            255u));
+    m_shadowConfiguredPageJobRecordCapacity = std::max(
+        1u,
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodPageJobRecordCapacitySettingName)());
+    m_shadowConfiguredComputeClusterCapacity = CLodVirtualShadowGetConfiguredComputeClusterCapacity(m_maxVisibleClusters);
+    m_shadowConfiguredExpandedRecordCapacity =
+        std::max(1u, m_shadowConfiguredComputeClusterCapacity * (m_shadowConfiguredPageJobMaxPages + 1u));
+}
+
+uint32_t CLodExtension::GetVisibleClusterCapacity() const
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return m_maxVisibleClusters;
+    }
+
+    return std::max(m_maxVisibleClusters, m_shadowConfiguredExpandedRecordCapacity);
+}
+
+void CLodExtension::RefreshCoreVisibleClusterCapacity()
+{
+    const uint32_t desiredVisibleClusterCapacity = GetVisibleClusterCapacity();
+    if (m_visibleClusterCapacity == desiredVisibleClusterCapacity) {
+        return;
+    }
+
+    m_visibleClusterCapacity = desiredVisibleClusterCapacity;
+
+    if (m_visibleClustersBuffer) {
+        m_visibleClustersBuffer->ResizeBytes(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes);
+        m_visibleClustersBuffer->GetECSEntity().set<CLodVisibleClusterCapacity>({ m_visibleClusterCapacity });
+    }
+
+    if (m_compactedVisibleClustersBuffer) {
+        m_compactedVisibleClustersBuffer->ResizeBytes(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes);
+    }
+
+    if (m_sortedToUnsortedMappingBuffer) {
+        m_sortedToUnsortedMappingBuffer->ResizeStructured(m_visibleClusterCapacity);
+    }
+}
+
+void CLodExtension::InitializeCoreResources()
+{
+    const auto& traits = GetVariantTraits(m_type);
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+
+    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes, true, false, true);
+    m_visibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Buffer (uncompacted)"));
+
+    m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false, true, true);
+    m_histogramIndirectCommand->SetName(MakeVariantResourceName(traits, "Raster Buckets Histogram Indirect Command Buffer"));
+
+    m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket histogram"));
+
+    m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_visibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer"));
+    m_visibleClustersCounterBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_visibleClustersCounterBuffer })
+        .add<VisibleClustersCounterTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
+    m_workGraphTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Work Graph Telemetry Buffer"));
+    m_workGraphTelemetryBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_workGraphTelemetryBuffer })
+        .add<CLodWorkGraphTelemetryBufferTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false); // TODO: Alias this when we don't need the gpu address in node input during setup
+    m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
+
+    m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);
+    m_occlusionReplayStateBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay State Buffer"));
+
+    m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, false);
+    m_occlusionNodeGpuInputsBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Node GPU Inputs Buffer"));
+
+    m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
+    m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
+
+    m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
+
+    m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_rasterBucketsBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket block sums"));
+
+    m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_rasterBucketsScannedBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket scanned block sums"));
+
+    m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
+
+    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
+
+    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
+
+    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes, true, false);
+    m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
+
+    m_visibleClustersBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_visibleClustersBuffer })
+        .set<CLodVisibleClusterCapacity>({ m_visibleClusterCapacity })
+        .add<VisibleClustersBufferTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
+
+    m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
+    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase1"));
+
+    m_rasterBucketsIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
+    m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase2"));
+
+    m_rasterBucketsIndirectArgsBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
+    m_rasterBucketsIndirectArgsBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args SW phase1"));
+
+    m_rasterBucketsIndirectArgsBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
+    m_rasterBucketsIndirectArgsBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args SW phase2"));
+
+    m_rasterBucketsIndirectArgsBufferPageJob = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
+    m_rasterBucketsIndirectArgsBufferPageJob->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args Page Job phase1"));
+
+    m_rasterBucketsIndirectArgsBufferPhase2PageJob = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
+    m_rasterBucketsIndirectArgsBufferPhase2PageJob->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args Page Job phase2"));
+
+    m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_visibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer Phase2"));
+
+    m_rasterBucketsHistogramBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket histogram phase2"));
+
+    m_rasterBucketsHistogramBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+    m_rasterBucketsHistogramBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase1"));
+
+    m_rasterBucketsHistogramBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+    m_rasterBucketsHistogramBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase2"));
+
+    m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor phase2"));
+
+    m_rasterBucketsWriteCursorBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+    m_rasterBucketsWriteCursorBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase1"));
+
+    m_rasterBucketsWriteCursorBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+    m_rasterBucketsWriteCursorBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase2"));
+
+    m_swVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_swVisibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase1"));
+
+    m_swVisibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_swVisibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase2"));
+
+    m_sortedToUnsortedMappingBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_visibleClusterCapacity, sizeof(uint32_t), true, false, false, true);
+    m_sortedToUnsortedMappingBuffer->SetName(MakeVariantResourceName(traits, "Sorted-to-Unsorted Mapping Buffer"));
+
+    m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
+    m_viewRasterInfoBuffer->SetName(MakeVariantResourceName(traits, "View Raster Info Buffer"));
+}
+
+void CLodExtension::InitializeDeepVisibilityResources()
+{
+    const auto& traits = GetVariantTraits(m_type);
+    if (traits.rasterOutputKind != CLodRasterOutputKind::DeepVisibility) {
+        return;
+    }
+
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+
+    m_deepVisibilityNodesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodDeepVisibilityNode),
+        true,
+        false,
+        false,
+        true);
+    m_deepVisibilityNodesBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Nodes Buffer"));
+
+    m_deepVisibilityCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_deepVisibilityCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Counter Buffer"));
+    m_deepVisibilityCounterBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_deepVisibilityCounterBuffer })
+        .add<CLodDeepVisibilityCounterTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_deepVisibilityOverflowCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
+    m_deepVisibilityOverflowCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Overflow Counter Buffer"));
+    m_deepVisibilityOverflowCounterBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_deepVisibilityOverflowCounterBuffer })
+        .add<CLodDeepVisibilityOverflowCounterTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_deepVisibilityStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodDeepVisibilityStats),
+        true,
+        false,
+        true,
+		true);
+    m_deepVisibilityStatsBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Stats Buffer"));
+    m_deepVisibilityStatsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
+        .add<CLodDeepVisibilityStatsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+}
+
+void CLodExtension::InitializeShadowResources()
+{
+    const auto& traits = GetVariantTraits(m_type);
+    if (traits.type != CLodExtensionType::Shadow) {
+        return;
+    }
+
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+    const uint32_t maxShadowPhysicalPageCount = m_shadowConfiguredMaxPhysicalPageCount;
+    const uint32_t pageJobRecordCapacity = m_shadowConfiguredPageJobRecordCapacity;
+    const uint32_t vsmExpandedRecordCapacity = m_shadowConfiguredExpandedRecordCapacity;
+
+    m_shadowPageTableTexture = PixelBuffer::CreateSharedUnmaterialized(CreateVirtualShadowPageTableDescription());
+    m_shadowPageTableTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page Table"));
+    m_shadowPageTableTexture->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPageTableTexture })
+        .add<CLodVirtualShadowPageTableTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPhysicalPagesTexture = PixelBuffer::CreateSharedUnmaterialized(
+        CreateVirtualShadowPhysicalPagesDescription(m_shadowConfiguredBackingResolution));
+    m_shadowPhysicalPagesTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Physical Pages"));
+    m_shadowPhysicalPagesTexture->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPhysicalPagesTexture })
+        .add<CLodVirtualShadowPhysicalPagesTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPageMetadataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        maxShadowPhysicalPageCount,
+        sizeof(CLodVirtualShadowPhysicalPageMeta),
+        true,
+        false,
+        false,
+        false);
+    m_shadowPageMetadataBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page Metadata Buffer"));
+    m_shadowPageMetadataBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPageMetadataBuffer })
+        .add<CLodVirtualShadowPageMetadataTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowInvalidationInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxInvalidationInputs,
+        sizeof(CLodVirtualShadowInvalidationInput),
+        false,
+        false,
+        false);
+    m_shadowInvalidationInputsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Invalidation Inputs Buffer"));
+    m_shadowInvalidationInputsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowInvalidationInputsBuffer })
+        .add<CLodVirtualShadowInvalidationInputsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowInvalidationCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), false, false, false);
+    m_shadowInvalidationCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Invalidation Count Buffer"));
+    m_shadowInvalidationCountBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowInvalidationCountBuffer })
+        .add<CLodVirtualShadowInvalidationCountTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowInvalidatedInstancesBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMovedInstanceBitWordCount(),
+        sizeof(uint32_t),
+        false,
+        false,
+        false);
+    m_shadowInvalidatedInstancesBitsetBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Invalidated Instances Bitset Buffer"));
+
+    m_shadowPredictiveInvalidationCandidatesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowPredictiveCandidateCapacity,
+        sizeof(CLodVirtualShadowPredictiveInvalidationCandidate),
+        true,
+        false,
+        false);
+    m_shadowPredictiveInvalidationCandidatesBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predictive Invalidation Candidates Buffer"));
+    m_shadowPredictiveInvalidationCandidatesBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPredictiveInvalidationCandidatesBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPredictiveInvalidationCandidateCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowPredictiveInvalidationCandidateCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predictive Invalidation Candidate Count Buffer"));
+    m_shadowPredictiveInvalidationCandidateCountBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPredictiveInvalidationCandidateCountBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPredictiveRawPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowPredictiveRawPageCapacity,
+        sizeof(CLodVirtualShadowPredictedRawPage),
+        true,
+        false,
+        false);
+    m_shadowPredictiveRawPagesBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predictive Raw Pages Buffer"));
+    m_shadowPredictiveRawPagesBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPredictiveRawPagesBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPredictiveRawPageCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowPredictiveRawPageCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predictive Raw Page Count Buffer"));
+    m_shadowPredictiveRawPageCountBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPredictiveRawPageCountBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPredictedInvalidationScratchBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowPredictedPageBitsetWordCount(),
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+		true);
+    m_shadowPredictedInvalidationScratchBitsetBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predicted Invalidation Scratch Bitset Buffer"));
+    m_shadowPredictedInvalidationScratchBitsetBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPredictedInvalidationScratchBitsetBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    // This buffer is consumed at the start of the next frame before any pass rewrites it,
+    // so it cannot participate in transient aliasing.
+    m_shadowPredictedInvalidationPagesBufferA = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowPredictedPageListCapacity(),
+        sizeof(CLodVirtualShadowPredictedPage),
+        true,
+        false,
+        false,
+        false);
+    m_shadowPredictedInvalidationPagesBufferA->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predicted Invalidation Pages Buffer"));
+    m_shadowPredictedInvalidationPagesBufferA->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPredictedInvalidationPagesBufferA })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPredictedInvalidationPageCountBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_shadowPredictedInvalidationPageCountBufferA->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predicted Invalidation Page Count Buffer"));
+    m_shadowPredictedInvalidationPageCountBufferA->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPredictedInvalidationPageCountBufferA })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowAllocationRequestsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxAllocationRequests,
+        sizeof(CLodVirtualShadowPageAllocationRequest),
+        true,
+        false,
+        false,
+		true);
+    m_shadowAllocationRequestsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Allocation Requests Buffer"));
+    m_shadowAllocationRequestsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowAllocationRequestsBuffer })
+        .add<CLodVirtualShadowAllocationRequestsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowAllocationCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowAllocationCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Allocation Count Buffer"));
+    m_shadowAllocationCountBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowAllocationCountBuffer })
+        .add<CLodVirtualShadowAllocationCountTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowAllocationIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_shadowAllocationIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Allocation Indirect Args Buffer"));
+
+    m_shadowMarkTileWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxMarkTileCount,
+        sizeof(CLodVirtualShadowMarkTileWorkItem),
+        true,
+        false,
+        false,
+        true);
+    m_shadowMarkTileWorkBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Work Buffer"));
+
+    m_shadowMarkTileCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowMarkTileCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Count Buffer"));
+
+    m_shadowMarkTileIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_shadowMarkTileIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Indirect Args Buffer"));
+
+    m_shadowFreePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        maxShadowPhysicalPageCount,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_shadowFreePhysicalPagesBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Free Physical Pages Buffer"));
+    m_shadowFreePhysicalPagesBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowFreePhysicalPagesBuffer })
+        .add<CLodVirtualShadowFreePhysicalPagesTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowReusablePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        maxShadowPhysicalPageCount,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_shadowReusablePhysicalPagesBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Reusable Physical Pages Buffer"));
+    m_shadowReusablePhysicalPagesBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowReusablePhysicalPagesBuffer })
+        .add<CLodVirtualShadowReusablePhysicalPagesTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowPageListHeaderBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVirtualShadowPageListHeader), true, false, false, false);
+    m_shadowPageListHeaderBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page List Header Buffer"));
+    m_shadowPageListHeaderBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowPageListHeaderBuffer })
+        .add<CLodVirtualShadowPageListHeaderTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowDirtyPageFlagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowDirtyWordCount(maxShadowPhysicalPageCount),
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_shadowDirtyPageFlagsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Dirty Page Flags Buffer"));
+    m_shadowDirtyPageFlagsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowDirtyPageFlagsBuffer })
+        .add<CLodVirtualShadowDirtyPageFlagsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowDirtyPageHierarchyTexture = PixelBuffer::CreateSharedUnmaterialized(CreateVirtualShadowDirtyHierarchyDescription());
+    m_shadowDirtyPageHierarchyTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Dirty Hierarchy"));
+    m_shadowDirtyPageHierarchyTexture->GetECSEntity()
+        .set<Components::Resource>({ m_shadowDirtyPageHierarchyTexture })
+        .add<CLodVirtualShadowDirtyHierarchyTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowClipmapInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxSupportedClipmapCount,
+        sizeof(CLodVirtualShadowClipmapInfo),
+        true,
+        false,
+        false,
+        false);
+    m_shadowClipmapInfoBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Clipmap Info Buffer"));
+    m_shadowClipmapInfoBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowClipmapInfoBuffer })
+        .add<CLodVirtualShadowClipmapInfoTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowMarkClipmapDataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxSupportedClipmapCount,
+        sizeof(CLodVirtualShadowMarkClipmapData),
+        true,
+        false,
+        false,
+        false);
+    m_shadowMarkClipmapDataBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Clipmap Data Buffer"));
+    m_shadowMarkClipmapDataBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowMarkClipmapDataBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowCompactMainCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodVirtualShadowMainCameraInfo),
+        true,
+        false,
+        false,
+        false);
+    m_shadowCompactMainCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Main Camera Buffer"));
+
+    m_shadowCompactShadowCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxSupportedClipmapCount,
+        sizeof(CLodVirtualShadowCompactShadowCameraInfo),
+        true,
+        false,
+        false,
+        false);
+    m_shadowCompactShadowCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Shadow Camera Buffer"));
+
+    m_shadowDirectionalPageViewInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxDirectionalPageViewInfoEntryCount(),
+        sizeof(float) * 4u,
+        true,
+        false,
+        false,
+		false);
+    m_shadowDirectionalPageViewInfoBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Directional Page View Info Buffer"));
+    m_shadowDirectionalPageViewInfoBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowDirectionalPageViewInfoBuffer })
+        .add<CLodVirtualShadowDirectionalPageViewInfoTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowRuntimeStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVirtualShadowRuntimeState), true, false, false);
+    m_shadowRuntimeStateBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Runtime State Buffer"));
+    m_shadowRuntimeStateBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowRuntimeStateBuffer })
+        .add<CLodVirtualShadowRuntimeStateTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_shadowStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVirtualShadowStats), true, false, false, true);
+    m_shadowStatsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Stats Buffer"));
+    m_shadowStatsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowStatsBuffer })
+        .add<CLodVirtualShadowStatsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_swPageJobVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(m_maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false, true);
+    m_swPageJobVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Visible Clusters Buffer"));
+
+    m_swPageJobVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_swPageJobVisibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Visible Clusters Counter Buffer"));
+
+    m_swPageJobVisibleClustersBufferPhase2 = m_swPageJobVisibleClustersBuffer;
+    m_swPageJobVisibleClustersCounterBufferPhase2 = m_swPageJobVisibleClustersCounterBuffer;
+
+    m_swPageJobRecordsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        pageJobRecordCapacity,
+        sizeof(CLodSoftwareRasterPageJobRecord),
+        true,
+        false,
+        false,
+        true);
+    m_swPageJobRecordsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer"));
+    m_swPageJobRecordsBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(
+        pageJobRecordCapacity,
+        sizeof(CLodSoftwareRasterPageJobRecord),
+        true,
+        false,
+        false,
+        true);
+    m_swPageJobRecordsBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer Skinned"));
+
+    m_swPageJobRecordsBufferPhase2 = m_swPageJobRecordsBuffer;
+    m_swPageJobRecordsBufferPhase2Skinned = m_swPageJobRecordsBufferSkinned;
+
+    m_swPageJobCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_swPageJobCountBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer"));
+    m_swPageJobCountBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_swPageJobCountBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer Skinned"));
+
+    m_swPageJobCountBufferPhase2 = m_swPageJobCountBuffer;
+    m_swPageJobCountBufferPhase2Skinned = m_swPageJobCountBufferSkinned;
+
+    m_swPageJobIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
+    m_swPageJobIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase1"));
+    m_swPageJobIndirectArgsBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
+    m_swPageJobIndirectArgsBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase1 Skinned"));
+
+    m_swPageJobIndirectArgsBufferPhase2 = m_swPageJobIndirectArgsBuffer;
+    m_swPageJobIndirectArgsBufferPhase2Skinned = m_swPageJobIndirectArgsBufferSkinned;
+
+    m_swPageJobClusterTagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        m_maxVisibleClusters,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_swPageJobClusterTagsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Cluster Tags Buffer"));
+
+    m_swPageJobClusterTagsBufferPhase2 = m_swPageJobClusterTagsBuffer;
+
+    m_vsmExpandedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(
+        static_cast<uint64_t>(vsmExpandedRecordCapacity) * PackedVisibleClusterStrideBytes,
+        true,
+		false);
+    m_vsmExpandedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Visible Clusters Buffer"));
+
+    m_vsmExpandedBlockMetaBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        vsmExpandedRecordCapacity,
+        sizeof(CLodVirtualShadowBlockMeta),
+        true,
+        false,
+        false,
+        false);
+    m_vsmExpandedBlockMetaBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Block Metadata Buffer"));
+
+    m_vsmExpandedVisibleClustersBufferSw = m_vsmExpandedVisibleClustersBuffer;
+    m_vsmExpandedBlockMetaBufferSw = m_vsmExpandedBlockMetaBuffer;
+
+    m_shadowVirtualResourcesNeedReset = true;
+}
+
+void CLodExtension::TagCoreResourceUsages()
+{
+    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
+        if (buffer) {
+            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
+        }
+    };
+
+    tagBufferUsage(m_visibleClustersBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_histogramIndirectCommand, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_visibleClustersCounterBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_workGraphTelemetryBuffer, "Cluster LOD telemetry");
+    tagBufferUsage(m_occlusionReplayBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_occlusionReplayStateBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_occlusionNodeGpuInputsBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_viewDepthSrvIndicesBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsOffsetsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsBlockSumsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsScannedBlockSumsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_compactedVisibleClustersBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsWriteCursorBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPageJob, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2PageJob, "Cluster LOD rasterization");
+    tagBufferUsage(m_visibleClustersCounterBufferPhase2, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_swVisibleClustersCounterBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_swVisibleClustersCounterBufferPhase2, "Cluster LOD visibility");
+    tagBufferUsage(m_sortedToUnsortedMappingBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_viewRasterInfoBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_deepVisibilityNodesBuffer, "Cluster LOD deep visibility");
+    tagBufferUsage(m_deepVisibilityCounterBuffer, "Cluster LOD deep visibility");
+    tagBufferUsage(m_deepVisibilityOverflowCounterBuffer, "Cluster LOD deep visibility");
+    tagBufferUsage(m_deepVisibilityStatsBuffer, "Cluster LOD deep visibility");
+}
+
+void CLodExtension::TagShadowResourceUsages()
+{
+    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
+        if (buffer) {
+            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
+        }
+    };
+    auto tagTextureUsage = [](const std::shared_ptr<PixelBuffer>& texture, std::string_view usage) {
+        if (texture) {
+            rg::memory::SetResourceUsageHint(*texture, std::string(usage));
+        }
+    };
+
+    tagTextureUsage(m_shadowPageTableTexture, "Cluster LOD virtual shadow maps");
+    tagTextureUsage(m_shadowPhysicalPagesTexture, "Cluster LOD virtual shadow maps");
+    tagTextureUsage(m_shadowDirtyPageHierarchyTexture, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPageMetadataBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowInvalidationInputsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowInvalidationCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowInvalidatedInstancesBitsetBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPredictiveInvalidationCandidatesBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPredictiveInvalidationCandidateCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPredictiveRawPagesBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPredictiveRawPageCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPredictedInvalidationScratchBitsetBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPredictedInvalidationPagesBufferA, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPredictedInvalidationPageCountBufferA, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowAllocationRequestsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowAllocationCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowAllocationIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkTileWorkBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkTileCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkTileIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowFreePhysicalPagesBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowReusablePhysicalPagesBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowPageListHeaderBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowDirtyPageFlagsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowClipmapInfoBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkClipmapDataBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowCompactMainCameraBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowCompactShadowCameraBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowDirectionalPageViewInfoBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowRuntimeStateBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowStatsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobVisibleClustersBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobVisibleClustersCounterBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobVisibleClustersBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobVisibleClustersCounterBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobRecordsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobRecordsBufferSkinned, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobCountBufferSkinned, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobRecordsBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobRecordsBufferPhase2Skinned, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobCountBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobCountBufferPhase2Skinned, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobIndirectArgsBufferSkinned, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobIndirectArgsBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobIndirectArgsBufferPhase2Skinned, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobClusterTagsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobClusterTagsBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_vsmExpandedVisibleClustersBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_vsmExpandedBlockMetaBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_vsmExpandedVisibleClustersBufferSw, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_vsmExpandedBlockMetaBufferSw, "Cluster LOD virtual shadow maps");
+}
+
+void CLodExtension::ReleaseBufferBackings()
+{
+    std::unordered_set<Buffer*> releasedBuffers;
+    auto releaseBufferBacking = [&releasedBuffers](const std::shared_ptr<Buffer>& buffer) {
+        if (buffer && releasedBuffers.insert(buffer.get()).second) {
+            buffer->Dematerialize();
+        }
+    };
+
+    releaseBufferBacking(m_visibleClustersBuffer);
+    releaseBufferBacking(m_visibleClustersCounterBuffer);
+    releaseBufferBacking(m_workGraphTelemetryBuffer);
+    releaseBufferBacking(m_occlusionReplayBuffer);
+    releaseBufferBacking(m_occlusionReplayStateBuffer);
+    releaseBufferBacking(m_occlusionNodeGpuInputsBuffer);
+    releaseBufferBacking(m_viewDepthSrvIndicesBuffer);
+    releaseBufferBacking(m_histogramIndirectCommand);
+    releaseBufferBacking(m_rasterBucketsHistogramBuffer);
+    releaseBufferBacking(m_rasterBucketsOffsetsBuffer);
+    releaseBufferBacking(m_rasterBucketsBlockSumsBuffer);
+    releaseBufferBacking(m_rasterBucketsScannedBlockSumsBuffer);
+    releaseBufferBacking(m_rasterBucketsTotalCountBuffer);
+    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1);
+    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1Sw);
+    releaseBufferBacking(m_visibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferSw);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2Sw);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferSw);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2Sw);
+    releaseBufferBacking(m_compactedVisibleClustersBuffer);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBuffer);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferSw);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2Sw);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPageJob);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2PageJob);
+    releaseBufferBacking(m_reyesFullClusterOutputsBuffer);
+    releaseBufferBacking(m_reyesFullClusterOutputsCounterBuffer);
+    releaseBufferBacking(m_reyesOwnedClustersBuffer);
+    releaseBufferBacking(m_reyesOwnedClustersCounterBuffer);
+    releaseBufferBacking(m_reyesOwnershipBitsetBuffer);
+    releaseBufferBacking(m_reyesOwnershipBitsetBufferPhase2);
+    releaseBufferBacking(m_reyesClassifyIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesClassifyIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesSplitIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesSplitIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesSplitQueueBufferA);
+    releaseBufferBacking(m_reyesSplitQueueCounterBufferA);
+    releaseBufferBacking(m_reyesSplitQueueOverflowBufferA);
+    releaseBufferBacking(m_reyesSplitQueueBufferB);
+    releaseBufferBacking(m_reyesSplitQueueCounterBufferB);
+    releaseBufferBacking(m_reyesSplitQueueOverflowBufferB);
+    releaseBufferBacking(m_reyesDiceQueueBuffer);
+    releaseBufferBacking(m_reyesDiceQueueCounterBuffer);
+    releaseBufferBacking(m_reyesDiceQueuePhase1CountBuffer);
+    releaseBufferBacking(m_reyesDiceQueueOverflowBuffer);
+    releaseBufferBacking(m_reyesRasterWorkBuffer);
+    releaseBufferBacking(m_reyesRasterWorkCounterBuffer);
+    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesTessTableConfigsBuffer);
+    releaseBufferBacking(m_reyesTessTableVerticesBuffer);
+    releaseBufferBacking(m_reyesTessTableTrianglesBuffer);
+    releaseBufferBacking(m_reyesDiceIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesDiceIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesRasterWorkBufferPhase2);
+    releaseBufferBacking(m_reyesRasterWorkCounterBufferPhase2);
+    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesTelemetryBufferPhase1);
+    releaseBufferBacking(m_reyesTelemetryBufferPhase2);
+    releaseBufferBacking(m_swVisibleClustersCounterBuffer);
+    releaseBufferBacking(m_swVisibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_sortedToUnsortedMappingBuffer);
+    releaseBufferBacking(m_viewRasterInfoBuffer);
+    releaseBufferBacking(m_deepVisibilityNodesBuffer);
+    releaseBufferBacking(m_deepVisibilityCounterBuffer);
+    releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
+    releaseBufferBacking(m_deepVisibilityStatsBuffer);
+    releaseBufferBacking(m_shadowPageMetadataBuffer);
+    releaseBufferBacking(m_shadowInvalidationInputsBuffer);
+    releaseBufferBacking(m_shadowInvalidationCountBuffer);
+    releaseBufferBacking(m_shadowInvalidatedInstancesBitsetBuffer);
+    releaseBufferBacking(m_shadowPredictiveInvalidationCandidatesBuffer);
+    releaseBufferBacking(m_shadowPredictiveInvalidationCandidateCountBuffer);
+    releaseBufferBacking(m_shadowPredictiveRawPagesBuffer);
+    releaseBufferBacking(m_shadowPredictiveRawPageCountBuffer);
+    releaseBufferBacking(m_shadowPredictedInvalidationScratchBitsetBuffer);
+    releaseBufferBacking(m_shadowPredictedInvalidationPagesBufferA);
+    releaseBufferBacking(m_shadowPredictedInvalidationPageCountBufferA);
+    releaseBufferBacking(m_shadowAllocationRequestsBuffer);
+    releaseBufferBacking(m_shadowAllocationCountBuffer);
+    releaseBufferBacking(m_shadowAllocationIndirectArgsBuffer);
+    releaseBufferBacking(m_shadowMarkTileWorkBuffer);
+    releaseBufferBacking(m_shadowMarkTileCountBuffer);
+    releaseBufferBacking(m_shadowMarkTileIndirectArgsBuffer);
+    releaseBufferBacking(m_shadowFreePhysicalPagesBuffer);
+    releaseBufferBacking(m_shadowReusablePhysicalPagesBuffer);
+    releaseBufferBacking(m_shadowPageListHeaderBuffer);
+    releaseBufferBacking(m_shadowDirtyPageFlagsBuffer);
+    releaseBufferBacking(m_shadowClipmapInfoBuffer);
+    releaseBufferBacking(m_shadowMarkClipmapDataBuffer);
+    releaseBufferBacking(m_shadowCompactMainCameraBuffer);
+    releaseBufferBacking(m_shadowCompactShadowCameraBuffer);
+    releaseBufferBacking(m_shadowDirectionalPageViewInfoBuffer);
+    releaseBufferBacking(m_shadowRuntimeStateBuffer);
+    releaseBufferBacking(m_shadowStatsBuffer);
+    releaseBufferBacking(m_swPageJobVisibleClustersBuffer);
+    releaseBufferBacking(m_swPageJobVisibleClustersCounterBuffer);
+    releaseBufferBacking(m_swPageJobVisibleClustersBufferPhase2);
+    releaseBufferBacking(m_swPageJobVisibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_swPageJobRecordsBuffer);
+    releaseBufferBacking(m_swPageJobRecordsBufferSkinned);
+    releaseBufferBacking(m_swPageJobCountBuffer);
+    releaseBufferBacking(m_swPageJobCountBufferSkinned);
+    releaseBufferBacking(m_swPageJobRecordsBufferPhase2);
+    releaseBufferBacking(m_swPageJobRecordsBufferPhase2Skinned);
+    releaseBufferBacking(m_swPageJobCountBufferPhase2);
+    releaseBufferBacking(m_swPageJobCountBufferPhase2Skinned);
+    releaseBufferBacking(m_swPageJobIndirectArgsBuffer);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferSkinned);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2Skinned);
+    releaseBufferBacking(m_swPageJobClusterTagsBuffer);
+    releaseBufferBacking(m_swPageJobClusterTagsBufferPhase2);
+    releaseBufferBacking(m_vsmExpandedVisibleClustersBuffer);
+    releaseBufferBacking(m_vsmExpandedBlockMetaBuffer);
+    releaseBufferBacking(m_vsmExpandedVisibleClustersBufferSw);
+    releaseBufferBacking(m_vsmExpandedBlockMetaBufferSw);
+}
+
+void CLodExtension::ReleaseShadowResourceBackings()
+{
+    std::unordered_set<Buffer*> releasedBuffers;
+    std::unordered_set<PixelBuffer*> releasedTextures;
+    auto releaseBufferBacking = [&releasedBuffers](const std::shared_ptr<Buffer>& buffer) {
+        if (buffer && releasedBuffers.insert(buffer.get()).second) {
+            buffer->Dematerialize();
+        }
+    };
+    auto releaseTextureBacking = [&releasedTextures](const std::shared_ptr<PixelBuffer>& texture) {
+        if (texture && releasedTextures.insert(texture.get()).second) {
+            texture->Dematerialize();
+        }
+    };
+
+    releaseTextureBacking(m_shadowPageTableTexture);
+    releaseTextureBacking(m_shadowPhysicalPagesTexture);
+    releaseTextureBacking(m_shadowDirtyPageHierarchyTexture);
+    releaseBufferBacking(m_swPageJobVisibleClustersBuffer);
+    releaseBufferBacking(m_swPageJobVisibleClustersCounterBuffer);
+    releaseBufferBacking(m_swPageJobVisibleClustersBufferPhase2);
+    releaseBufferBacking(m_swPageJobVisibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_swPageJobRecordsBuffer);
+    releaseBufferBacking(m_swPageJobRecordsBufferSkinned);
+    releaseBufferBacking(m_swPageJobCountBuffer);
+    releaseBufferBacking(m_swPageJobCountBufferSkinned);
+    releaseBufferBacking(m_swPageJobRecordsBufferPhase2);
+    releaseBufferBacking(m_swPageJobRecordsBufferPhase2Skinned);
+    releaseBufferBacking(m_swPageJobCountBufferPhase2);
+    releaseBufferBacking(m_swPageJobCountBufferPhase2Skinned);
+    releaseBufferBacking(m_swPageJobIndirectArgsBuffer);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferSkinned);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2Skinned);
+    releaseBufferBacking(m_swPageJobClusterTagsBuffer);
+    releaseBufferBacking(m_swPageJobClusterTagsBufferPhase2);
+    releaseBufferBacking(m_vsmExpandedVisibleClustersBuffer);
+    releaseBufferBacking(m_vsmExpandedBlockMetaBuffer);
+    releaseBufferBacking(m_vsmExpandedVisibleClustersBufferSw);
+    releaseBufferBacking(m_vsmExpandedBlockMetaBufferSw);
+    m_shadowVirtualResourcesNeedReset = true;
 }
 
 void CLodExtension::SyncReyesResourceEntities(bool enabled)
@@ -253,87 +1367,94 @@ void CLodExtension::EnsureReyesResourcesInitialized()
     const auto& traits = GetVariantTraits(m_type);
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+    const ReyesResourceSizing reyesResourceSizing = BuildReyesResourceSizing(traits, m_maxVisibleClusters);
     const bool usesPhase2ReyesResources = traits.usesPhase2OcclusionReplay;
-    const uint32_t reyesOwnershipWordCount = CLodBitsetWordCount(m_maxVisibleClusters);
-    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(m_maxVisibleClusters);
-    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(m_maxVisibleClusters) * (usesPhase2ReyesResources ? 2u : 1u);
-    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(m_maxVisibleClusters);
+    m_reyesFullClusterOutputCapacity = reyesResourceSizing.fullClusterOutputCapacity;
+    m_reyesOwnedClusterCapacity = reyesResourceSizing.ownedClusterCapacity;
+    m_reyesSplitQueueCapacity = reyesResourceSizing.splitQueueCapacity;
+    m_reyesDiceQueueCapacity = reyesResourceSizing.diceQueueCapacity;
+    m_reyesDiceQueuePhysicalCapacity = reyesResourceSizing.diceQueuePhysicalCapacity;
+    m_reyesRasterWorkCapacity = reyesResourceSizing.rasterWorkCapacity;
+    m_reyesOwnershipBitsetWordCount = reyesResourceSizing.ownershipBitsetWordCount;
+    m_reyesRequestedBudgetBytes = reyesResourceSizing.requestedBudgetBytes;
+    m_reyesAllocatedBudgetBytes = reyesResourceSizing.allocatedBudgetBytes;
+    m_reyesBudgetLimited = reyesResourceSizing.budgetLimited;
 
-    m_reyesFullClusterOutputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters, sizeof(CLodReyesFullClusterOutput), true, false, false, false);
+    m_reyesFullClusterOutputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesFullClusterOutputCapacity, sizeof(CLodReyesFullClusterOutput), true, false, false, true);
     m_reyesFullClusterOutputsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Full Cluster Outputs Buffer"));
 
-    m_reyesFullClusterOutputsCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesFullClusterOutputsCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesFullClusterOutputsCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Full Cluster Outputs Counter Buffer"));
     m_reyesFullClusterOutputsCounterBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesFullClusterOutputsCounterBuffer })
         .add<CLodReyesFullClustersCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters, sizeof(CLodReyesOwnedClusterEntry), true, false, false, false);
+    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnedClusterCapacity, sizeof(CLodReyesOwnedClusterEntry), true, false, false, true);
     m_reyesOwnedClustersBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Buffer"));
 
-    m_reyesOwnedClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesOwnedClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesOwnedClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Counter Buffer"));
 
-    m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
+    m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false, true);
     m_reyesOwnershipBitsetBuffer->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesOwnershipBitsetBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
+        m_reyesOwnershipBitsetBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false, true);
         m_reyesOwnershipBitsetBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer Phase2"));
     }
 
-    m_reyesClassifyIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+    m_reyesClassifyIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesClassifyIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Classify Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesClassifyIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+        m_reyesClassifyIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesClassifyIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Classify Indirect Args Buffer Phase2"));
     }
 
-    m_reyesSplitIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+    m_reyesSplitIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesSplitIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Split Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesSplitIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+        m_reyesSplitIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesSplitIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Split Indirect Args Buffer Phase2"));
     }
 
-    m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
+    m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false, true);
     m_reyesSplitQueueBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer A"));
 
-    m_reyesSplitQueueCounterBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesSplitQueueCounterBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueCounterBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Counter Buffer A"));
     m_reyesSplitQueueCounterBufferA->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueCounterBufferA })
         .add<CLodReyesSplitQueueCounterATag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueOverflowBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesSplitQueueOverflowBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueOverflowBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Overflow Buffer A"));
     m_reyesSplitQueueOverflowBufferA->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueOverflowBufferA })
         .add<CLodReyesSplitQueueOverflowATag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueBufferB = CreateAliasedUnmaterializedStructuredBuffer(reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
+    m_reyesSplitQueueBufferB = CreateAliasedUnmaterializedStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false, true);
     m_reyesSplitQueueBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer B"));
 
-    m_reyesSplitQueueCounterBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesSplitQueueCounterBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueCounterBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Counter Buffer B"));
     m_reyesSplitQueueCounterBufferB->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueCounterBufferB })
         .add<CLodReyesSplitQueueCounterBTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueOverflowBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesSplitQueueOverflowBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueOverflowBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Overflow Buffer B"));
     m_reyesSplitQueueOverflowBufferB->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueOverflowBufferB })
         .add<CLodReyesSplitQueueOverflowBTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesDiceQueueBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesDiceQueueCapacity, sizeof(CLodReyesDiceQueueEntry), true, false);
+    m_reyesDiceQueueBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesDiceQueuePhysicalCapacity, sizeof(CLodReyesDiceQueueEntry), true, false, true);
     m_reyesDiceQueueBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Buffer"));
     m_reyesDiceQueueBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueBuffer })
@@ -380,7 +1501,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesTessTableTrianglesTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesDiceQueueCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesDiceQueueCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesDiceQueueCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Counter Buffer"));
     m_reyesDiceQueueCounterBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueCounterBuffer })
@@ -388,46 +1509,46 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     if (usesPhase2ReyesResources) {
-        m_reyesDiceQueuePhase1CountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), false, false, false, false);
+        m_reyesDiceQueuePhase1CountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), false, false, false);
         m_reyesDiceQueuePhase1CountBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Phase1 Count Buffer"));
     }
 
-    m_reyesDiceQueueOverflowBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesDiceQueueOverflowBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesDiceQueueOverflowBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Overflow Buffer"));
     m_reyesDiceQueueOverflowBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueOverflowBuffer })
         .add<CLodReyesDiceQueueOverflowTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
+    m_reyesRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, true);
     m_reyesRasterWorkBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer"));
 
-    m_reyesRasterWorkCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesRasterWorkCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesRasterWorkCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Counter Buffer"));
 
-    m_reyesRasterWorkIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+    m_reyesRasterWorkIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesRasterWorkIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesRasterWorkBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
+        m_reyesRasterWorkBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, true);
         m_reyesRasterWorkBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer Phase2"));
 
-        m_reyesRasterWorkCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_reyesRasterWorkCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
         m_reyesRasterWorkCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Counter Buffer Phase2"));
 
-        m_reyesRasterWorkIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+        m_reyesRasterWorkIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesRasterWorkIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Indirect Args Buffer Phase2"));
     }
 
-    m_reyesDiceIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+    m_reyesDiceIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesDiceIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesDiceIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+        m_reyesDiceIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesDiceIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Dice Indirect Args Buffer Phase2"));
     }
 
-    m_reyesTelemetryBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, false);
+    m_reyesTelemetryBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, true);
     m_reyesTelemetryBufferPhase1->SetName(MakeVariantResourceName(traits, "Reyes Telemetry Buffer Phase1"));
     m_reyesTelemetryBufferPhase1->GetECSEntity()
         .set<Components::Resource>({ m_reyesTelemetryBufferPhase1 })
@@ -435,7 +1556,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     if (usesPhase2ReyesResources) {
-        m_reyesTelemetryBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, false);
+        m_reyesTelemetryBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, true);
         m_reyesTelemetryBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Telemetry Buffer Phase2"));
         m_reyesTelemetryBufferPhase2->GetECSEntity()
             .set<Components::Resource>({ m_reyesTelemetryBufferPhase2 })
@@ -481,205 +1602,76 @@ void CLodExtension::EnsureReyesResourcesInitialized()
 CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters)
     : m_type(type)
     , m_maxVisibleClusters(maxVisibleClusters) {
-    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
-        if (buffer) {
-            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
-        }
-    };
-
     const auto& traits = GetVariantTraits(type);
-    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
 
     if (traits.ownsStreaming) {
         m_streamingSystem = std::make_unique<CLodStreamingSystem>();
     }
 
-    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
-    m_visibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Buffer (uncompacted)"));
+    if (m_type == CLodExtensionType::Shadow) {
+        RefreshShadowConfiguredSettings();
+    }
+    m_visibleClusterCapacity = GetVisibleClusterCapacity();
 
-    m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
-    m_histogramIndirectCommand->SetName(MakeVariantResourceName(traits, "Raster Buckets Histogram Indirect Command Buffer"));
-
-    m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket histogram"));
-
-    m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_visibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer"));
-    m_visibleClustersCounterBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_visibleClustersCounterBuffer })
-        .add<VisibleClustersCounterTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
-    m_workGraphTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Work Graph Telemetry Buffer"));
-    m_workGraphTelemetryBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_workGraphTelemetryBuffer })
-        .add<CLodWorkGraphTelemetryBufferTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false);
-    m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
-
-    m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);
-    m_occlusionReplayStateBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay State Buffer"));
-
-    m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, false);
-    m_occlusionNodeGpuInputsBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Node GPU Inputs Buffer"));
-
-    m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
-    m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
-
-    m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
-
-    m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket block sums"));
-
-    m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsScannedBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket scanned block sums"));
-
-    m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
-
-    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
-
-    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
-
-    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
-    m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
-
-    m_visibleClustersBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_visibleClustersBuffer })
-        .set<CLodVisibleClusterCapacity>({ maxVisibleClusters })
-        .add<VisibleClustersBufferTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
-
-    m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
-    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase1"));
-
-    m_rasterBucketsIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
-    m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase2"));
+    InitializeCoreResources();
 
     if (!IsReyesTessellationDisabled()) {
         EnsureReyesResourcesInitialized();
     }
 
-    m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_visibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer Phase2"));
+    InitializeDeepVisibilityResources();
+    InitializeShadowResources();
+    TagCoreResourceUsages();
+    TagShadowResourceUsages();
+}
 
-    m_rasterBucketsHistogramBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket histogram phase2"));
+void CLodExtension::RefreshShadowResourcesForCurrentSettings()
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return;
+    }
 
-    m_rasterBucketsHistogramBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase1"));
+    const uint32_t previousBackingResolution = m_shadowConfiguredBackingResolution;
+    const uint32_t previousMaxPhysicalPageCount = m_shadowConfiguredMaxPhysicalPageCount;
+    const uint32_t previousPageJobMaxPages = m_shadowConfiguredPageJobMaxPages;
+    const uint32_t previousPageJobRecordCapacity = m_shadowConfiguredPageJobRecordCapacity;
+    const uint32_t previousComputeClusterCapacity = m_shadowConfiguredComputeClusterCapacity;
+    const uint32_t previousVisibleClusterCapacity = m_visibleClusterCapacity;
 
-    m_rasterBucketsHistogramBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase2"));
+    RefreshShadowConfiguredSettings();
 
-    m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor phase2"));
+    if (m_shadowPhysicalPagesTexture &&
+        previousBackingResolution == m_shadowConfiguredBackingResolution &&
+        previousMaxPhysicalPageCount == m_shadowConfiguredMaxPhysicalPageCount &&
+        previousPageJobMaxPages == m_shadowConfiguredPageJobMaxPages &&
+        previousPageJobRecordCapacity == m_shadowConfiguredPageJobRecordCapacity &&
+        previousComputeClusterCapacity == m_shadowConfiguredComputeClusterCapacity &&
+        previousVisibleClusterCapacity == GetVisibleClusterCapacity()) {
+        return;
+    }
 
-    m_rasterBucketsWriteCursorBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase1"));
+    RefreshCoreVisibleClusterCapacity();
 
-    m_rasterBucketsWriteCursorBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase2"));
+    ReleaseShadowResourceBackings();
+    InitializeShadowResources();
+    TagShadowResourceUsages();
+    m_shadowVirtualResourcesNeedReset = true;
+}
 
-    m_swVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_swVisibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase1"));
+void CLodExtension::PrepareForBuild(RenderGraph& rg)
+{
+    RefreshShadowResourcesForCurrentSettings();
 
-    m_swVisibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_swVisibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase2"));
-
-    m_sortedToUnsortedMappingBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(uint32_t), true, false);
-    m_sortedToUnsortedMappingBuffer->SetName(MakeVariantResourceName(traits, "Sorted-to-Unsorted Mapping Buffer"));
-
-    m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
-    m_viewRasterInfoBuffer->SetName(MakeVariantResourceName(traits, "View Raster Info Buffer"));
-
-    tagBufferUsage(m_visibleClustersBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_histogramIndirectCommand, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsHistogramBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_visibleClustersCounterBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_workGraphTelemetryBuffer, "Cluster LOD telemetry");
-    tagBufferUsage(m_occlusionReplayBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_occlusionReplayStateBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_occlusionNodeGpuInputsBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_viewDepthSrvIndicesBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_rasterBucketsOffsetsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsBlockSumsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsScannedBlockSumsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsTotalCountBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1Sw, "Cluster LOD rasterization");
-    tagBufferUsage(m_compactedVisibleClustersBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_rasterBucketsWriteCursorBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsIndirectArgsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2, "Cluster LOD rasterization");
-    tagBufferUsage(m_visibleClustersCounterBufferPhase2, "Cluster LOD visibility");
-    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsHistogramBufferSw, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2Sw, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsWriteCursorBufferSw, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2Sw, "Cluster LOD rasterization");
-    tagBufferUsage(m_swVisibleClustersCounterBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_swVisibleClustersCounterBufferPhase2, "Cluster LOD visibility");
-    tagBufferUsage(m_sortedToUnsortedMappingBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_viewRasterInfoBuffer, "Cluster LOD rasterization");
-
-    if (traits.rasterOutputKind == CLodRasterOutputKind::DeepVisibility) {
-        m_deepVisibilityNodesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-            1,
-            sizeof(CLodDeepVisibilityNode),
-            true,
-            false,
-            false,
-            false);
-        m_deepVisibilityNodesBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Nodes Buffer"));
-
-        m_deepVisibilityCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
-        m_deepVisibilityCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Counter Buffer"));
-        m_deepVisibilityCounterBuffer->GetECSEntity()
-            .set<Components::Resource>({ m_deepVisibilityCounterBuffer })
-            .add<CLodDeepVisibilityCounterTag>()
-            .add<CLodExtensionTypeTag>(typeEntity);
-
-        m_deepVisibilityOverflowCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
-        m_deepVisibilityOverflowCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Overflow Counter Buffer"));
-        m_deepVisibilityOverflowCounterBuffer->GetECSEntity()
-            .set<Components::Resource>({ m_deepVisibilityOverflowCounterBuffer })
-            .add<CLodDeepVisibilityOverflowCounterTag>()
-            .add<CLodExtensionTypeTag>(typeEntity);
-
-        m_deepVisibilityStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-            1,
-            sizeof(CLodDeepVisibilityStats),
-            true,
-            false,
-            true,
-            false);
-        m_deepVisibilityStatsBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Stats Buffer"));
-        m_deepVisibilityStatsBuffer->GetECSEntity()
-            .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
-            .add<CLodDeepVisibilityStatsTag>()
-            .add<CLodExtensionTypeTag>(typeEntity);
-
-        tagBufferUsage(m_deepVisibilityNodesBuffer, "Cluster LOD deep visibility");
-        tagBufferUsage(m_deepVisibilityCounterBuffer, "Cluster LOD deep visibility");
-        tagBufferUsage(m_deepVisibilityOverflowCounterBuffer, "Cluster LOD deep visibility");
-        tagBufferUsage(m_deepVisibilityStatsBuffer, "Cluster LOD deep visibility");
+    if (m_type == CLodExtensionType::Shadow && !m_providerRegisteredForCurrentRegistry) {
+        rg.RegisterProvider(this);
+        m_providerRegisteredForCurrentRegistry = true;
     }
 }
 
 void CLodExtension::Initialize(RenderGraph& rg)
 {
+    PrepareForBuild(rg);
+
     if (m_streamingSystem) {
         m_streamingSystem->Initialize(rg);
     }
@@ -687,79 +1679,10 @@ void CLodExtension::Initialize(RenderGraph& rg)
 
 void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
 {
-    auto releaseBufferBacking = [](const std::shared_ptr<Buffer>& buffer) {
-        if (buffer) {
-            buffer->Dematerialize();
-        }
-    };
-
-    releaseBufferBacking(m_visibleClustersBuffer);
-    releaseBufferBacking(m_visibleClustersCounterBuffer);
-    releaseBufferBacking(m_workGraphTelemetryBuffer);
-    releaseBufferBacking(m_occlusionReplayBuffer);
-    releaseBufferBacking(m_occlusionReplayStateBuffer);
-    releaseBufferBacking(m_occlusionNodeGpuInputsBuffer);
-    releaseBufferBacking(m_viewDepthSrvIndicesBuffer);
-    releaseBufferBacking(m_histogramIndirectCommand);
-    releaseBufferBacking(m_rasterBucketsHistogramBuffer);
-    releaseBufferBacking(m_rasterBucketsOffsetsBuffer);
-    releaseBufferBacking(m_rasterBucketsBlockSumsBuffer);
-    releaseBufferBacking(m_rasterBucketsScannedBlockSumsBuffer);
-    releaseBufferBacking(m_rasterBucketsTotalCountBuffer);
-    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1);
-    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1Sw);
-    releaseBufferBacking(m_visibleClustersCounterBufferPhase2);
-    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2);
-    releaseBufferBacking(m_rasterBucketsHistogramBufferSw);
-    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2Sw);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBufferSw);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2Sw);
-    releaseBufferBacking(m_compactedVisibleClustersBuffer);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBuffer);
-    releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
-    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesFullClusterOutputsBuffer);
-    releaseBufferBacking(m_reyesFullClusterOutputsCounterBuffer);
-    releaseBufferBacking(m_reyesOwnedClustersBuffer);
-    releaseBufferBacking(m_reyesOwnedClustersCounterBuffer);
-    releaseBufferBacking(m_reyesOwnershipBitsetBuffer);
-    releaseBufferBacking(m_reyesOwnershipBitsetBufferPhase2);
-    releaseBufferBacking(m_reyesClassifyIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesClassifyIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesSplitIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesSplitIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesSplitQueueBufferA);
-    releaseBufferBacking(m_reyesSplitQueueCounterBufferA);
-    releaseBufferBacking(m_reyesSplitQueueOverflowBufferA);
-    releaseBufferBacking(m_reyesSplitQueueBufferB);
-    releaseBufferBacking(m_reyesSplitQueueCounterBufferB);
-    releaseBufferBacking(m_reyesSplitQueueOverflowBufferB);
-    releaseBufferBacking(m_reyesDiceQueueBuffer);
-    releaseBufferBacking(m_reyesDiceQueueCounterBuffer);
-    releaseBufferBacking(m_reyesDiceQueuePhase1CountBuffer);
-    releaseBufferBacking(m_reyesDiceQueueOverflowBuffer);
-    releaseBufferBacking(m_reyesRasterWorkBuffer);
-    releaseBufferBacking(m_reyesRasterWorkCounterBuffer);
-    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesTessTableConfigsBuffer);
-    releaseBufferBacking(m_reyesTessTableVerticesBuffer);
-    releaseBufferBacking(m_reyesTessTableTrianglesBuffer);
-    releaseBufferBacking(m_reyesDiceIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesDiceIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesRasterWorkBufferPhase2);
-    releaseBufferBacking(m_reyesRasterWorkCounterBufferPhase2);
-    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesTelemetryBufferPhase1);
-    releaseBufferBacking(m_reyesTelemetryBufferPhase2);
-    releaseBufferBacking(m_swVisibleClustersCounterBuffer);
-    releaseBufferBacking(m_swVisibleClustersCounterBufferPhase2);
-    releaseBufferBacking(m_sortedToUnsortedMappingBuffer);
-    releaseBufferBacking(m_viewRasterInfoBuffer);
-    releaseBufferBacking(m_deepVisibilityNodesBuffer);
-    releaseBufferBacking(m_deepVisibilityCounterBuffer);
-    releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
-    releaseBufferBacking(m_deepVisibilityStatsBuffer);
+    m_providerRegisteredForCurrentRegistry = false;
+    ReleaseBufferBackings();
+    ReleaseShadowResourceBackings();
+    m_shadowVirtualResourcesNeedReset = true;
 
     SyncReyesResourceEntities(!IsReyesTessellationDisabled());
 
@@ -768,8 +1691,59 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     }
 }
 
+std::shared_ptr<Resource> CLodExtension::ProvideResource(ResourceIdentifier const& key)
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return nullptr;
+    }
+
+    if (key == Builtin::Shadows::CLodPageTable) {
+        return m_shadowPageTableTexture;
+    }
+
+    if (key == Builtin::Shadows::CLodPhysicalPages) {
+        return m_shadowPhysicalPagesTexture;
+    }
+
+    if (key == Builtin::Shadows::CLodClipmapInfo) {
+        return m_shadowClipmapInfoBuffer;
+    }
+
+    if (key == Builtin::Shadows::CLodCompactMainCamera) {
+        return m_shadowCompactMainCameraBuffer;
+    }
+
+    if (key == Builtin::Shadows::CLodCompactShadowCameras) {
+        return m_shadowCompactShadowCameraBuffer;
+    }
+
+    if (key == Builtin::Shadows::CLodDirectionalPageViewInfo) {
+        return m_shadowDirectionalPageViewInfoBuffer;
+    }
+
+    return nullptr;
+}
+
+std::vector<ResourceIdentifier> CLodExtension::GetSupportedKeys()
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return {};
+    }
+
+    return {
+        Builtin::Shadows::CLodPageTable,
+        Builtin::Shadows::CLodPhysicalPages,
+        Builtin::Shadows::CLodClipmapInfo,
+        Builtin::Shadows::CLodCompactMainCamera,
+        Builtin::Shadows::CLodCompactShadowCameras,
+        Builtin::Shadows::CLodDirectionalPageViewInfo,
+    };
+}
+
 void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses)
 {
+    PrepareForBuild(rg);
+
     const auto& traits = GetVariantTraits(m_type);
     if (m_streamingSystem) {
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
@@ -791,9 +1765,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility;
     const bool useComputeSWRaster = !forceHardwareOnly && CLodSoftwareRasterUsesCompute(softwareRasterMode);
-    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(m_maxVisibleClusters);
-    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(m_maxVisibleClusters);
-    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(m_maxVisibleClusters);
+    const uint32_t reyesSplitQueueCapacity = m_reyesSplitQueueCapacity;
+    const uint32_t reyesDiceQueueCapacity = m_reyesDiceQueueCapacity;
+    const uint32_t reyesRasterWorkCapacity = m_reyesRasterWorkCapacity;
     const auto workGraphMode = forceHardwareOnly
         ? HierarchialCullingWorkGraphMode::HardwareOnly
         : GetCullingWorkGraphMode(softwareRasterMode);
@@ -801,14 +1775,217 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer = disableReyesTessellation ? nullptr : m_reyesOwnershipBitsetBuffer;
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBufferPhase2 = disableReyesTessellation ? nullptr : m_reyesOwnershipBitsetBufferPhase2;
 
+    std::string shadowAllocationPassName;
+    std::string shadowDirtyHierarchyPassName;
+    std::string shadowClearDirtyBitsAfterPassName;
+    if (traits.type == CLodExtensionType::Shadow) {
+        const std::string shadowSetupPassName = MakeVariantPassName(traits, "VirtualShadowSetupPass");
+        auto shadowSetupPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowSetupPassName,
+            std::make_shared<VirtualShadowMapSetupPass>(
+                m_shadowPageTableTexture,
+                m_shadowPageMetadataBuffer,
+                m_shadowAllocationCountBuffer,
+                m_shadowDirtyPageFlagsBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowMarkClipmapDataBuffer,
+                m_shadowCompactMainCameraBuffer,
+                m_shadowCompactShadowCameraBuffer,
+                m_shadowStatsBuffer,
+                m_shadowRuntimeStateBuffer,
+                m_shadowPredictiveInvalidationCandidateCountBuffer,
+                m_shadowPredictiveRawPageCountBuffer,
+                m_shadowPredictedInvalidationPageCountBufferA,
+                m_shadowVirtualResourcesNeedReset));
+        shadowSetupPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
+        outPasses.push_back(std::move(shadowSetupPassDesc));
+        m_shadowVirtualResourcesNeedReset = false;
+
+        const std::string shadowFreeWrappedPagesPassName = MakeVariantPassName(traits, "VirtualShadowFreeWrappedPagesPass");
+        auto shadowFreeWrappedPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowFreeWrappedPagesPassName,
+            std::make_shared<VirtualShadowMapFreeWrappedPagesPass>(
+                m_shadowPageTableTexture,
+                m_shadowPageMetadataBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowStatsBuffer));
+        shadowFreeWrappedPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowSetupPassName));
+        outPasses.push_back(std::move(shadowFreeWrappedPagesPassDesc));
+
+        const std::string shadowConsumePredictedPagesPassName = MakeVariantPassName(traits, "VirtualShadowConsumePredictedPagesPass");
+        auto shadowConsumePredictedPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowConsumePredictedPagesPassName,
+            std::make_shared<VirtualShadowMapConsumePredictedPagesPass>(
+                m_shadowPredictedInvalidationPagesBufferA,
+                m_shadowPredictedInvalidationPageCountBufferA,
+                m_shadowClipmapInfoBuffer,
+                m_shadowPageTableTexture,
+                m_shadowDirtyPageFlagsBuffer,
+                m_shadowPageMetadataBuffer,
+                m_shadowDirectionalPageViewInfoBuffer,
+                m_shadowStatsBuffer));
+        shadowConsumePredictedPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowFreeWrappedPagesPassName));
+        outPasses.push_back(std::move(shadowConsumePredictedPagesPassDesc));
+
+        const std::string shadowInvalidatePagesPassName = MakeVariantPassName(traits, "VirtualShadowInvalidatePagesPass");
+        auto shadowInvalidatePagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowInvalidatePagesPassName,
+            std::make_shared<VirtualShadowMapInvalidatePagesPass>(
+                m_shadowInvalidationInputsBuffer,
+                m_shadowInvalidationCountBuffer,
+                m_shadowInvalidatedInstancesBitsetBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowPageTableTexture,
+                m_shadowDirtyPageFlagsBuffer,
+                m_shadowPageMetadataBuffer,
+                m_shadowDirectionalPageViewInfoBuffer,
+                m_shadowStatsBuffer));
+        shadowInvalidatePagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowConsumePredictedPagesPassName));
+        outPasses.push_back(std::move(shadowInvalidatePagesPassDesc));
+
+        const std::string shadowMarkPagesPassName = MakeVariantPassName(traits, "VirtualShadowMarkPagesPass");
+        const std::string shadowBuildMarkTilesPassName = MakeVariantPassName(traits, "VirtualShadowBuildMarkTilesPass");
+        auto shadowBuildMarkTilesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowBuildMarkTilesPassName,
+            std::make_shared<VirtualShadowMapBuildMarkTilesPass>(
+                m_shadowMarkTileWorkBuffer,
+                m_shadowMarkTileCountBuffer));
+        shadowBuildMarkTilesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowInvalidatePagesPassName));
+        outPasses.push_back(std::move(shadowBuildMarkTilesPassDesc));
+
+        const std::string shadowBuildMarkTileDispatchArgsPassName = MakeVariantPassName(traits, "VirtualShadowBuildMarkTileDispatchArgsPass");
+        auto shadowBuildMarkTileDispatchArgsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowBuildMarkTileDispatchArgsPassName,
+            std::make_shared<ReyesCreateDispatchArgsPass>(
+                m_shadowMarkTileCountBuffer,
+                m_shadowMarkTileIndirectArgsBuffer,
+                nullptr,
+                128u,
+                CLodVirtualShadowMaxMarkTileCount));
+        shadowBuildMarkTileDispatchArgsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildMarkTilesPassName));
+        outPasses.push_back(std::move(shadowBuildMarkTileDispatchArgsPassDesc));
+
+        auto shadowMarkPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowMarkPagesPassName,
+            std::make_shared<VirtualShadowMapMarkPagesPass>(
+                m_shadowMarkTileWorkBuffer,
+                m_shadowMarkTileCountBuffer,
+                m_shadowMarkTileIndirectArgsBuffer,
+                m_shadowAllocationRequestsBuffer,
+                m_shadowAllocationCountBuffer,
+                m_shadowMarkClipmapDataBuffer,
+                m_shadowPageTableTexture,
+                m_shadowDirtyPageFlagsBuffer,
+                m_shadowDirectionalPageViewInfoBuffer,
+                m_shadowStatsBuffer));
+        shadowMarkPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildMarkTileDispatchArgsPassName));
+			shadowMarkPagesPassDesc.preferredQueueKind = QueueKind::Graphics;
+        outPasses.push_back(std::move(shadowMarkPagesPassDesc));
+
+        const std::string shadowBuildPageListsPassName = MakeVariantPassName(traits, "VirtualShadowBuildPageListsPass");
+        auto shadowBuildPageListsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowBuildPageListsPassName,
+            std::make_shared<VirtualShadowMapBuildPageListsPass>(
+                m_shadowPageTableTexture,
+                m_shadowPageMetadataBuffer,
+                m_shadowFreePhysicalPagesBuffer,
+                m_shadowReusablePhysicalPagesBuffer,
+                m_shadowPageListHeaderBuffer));
+        shadowBuildPageListsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowMarkPagesPassName));
+        outPasses.push_back(std::move(shadowBuildPageListsPassDesc));
+
+        const std::string shadowBuildDispatchArgsPassName = MakeVariantPassName(traits, "VirtualShadowBuildAllocationDispatchArgsPass");
+        auto shadowBuildDispatchArgsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowBuildDispatchArgsPassName,
+            std::make_shared<ReyesCreateDispatchArgsPass>(
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer,
+                nullptr,
+                64u,
+                m_shadowConfiguredMaxPhysicalPageCount));
+        shadowBuildDispatchArgsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildPageListsPassName));
+        outPasses.push_back(std::move(shadowBuildDispatchArgsPassDesc));
+
+        const std::string shadowPreAllocateStatsPassName = MakeVariantPassName(traits, "VirtualShadowPreAllocateStatsPass");
+        auto shadowPreAllocateStatsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowPreAllocateStatsPassName,
+            std::make_shared<VirtualShadowMapGatherStatsPass>(
+                m_shadowPageTableTexture,
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer,
+                m_shadowPageListHeaderBuffer,
+                m_shadowPageMetadataBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowStatsBuffer,
+                true));
+        shadowPreAllocateStatsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildDispatchArgsPassName));
+        outPasses.push_back(std::move(shadowPreAllocateStatsPassDesc));
+
+        shadowAllocationPassName = MakeVariantPassName(traits, "VirtualShadowAllocatePagesPass");
+        auto shadowAllocationPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowAllocationPassName,
+            std::make_shared<VirtualShadowMapAllocatePagesPass>(
+                m_shadowAllocationRequestsBuffer,
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowPageTableTexture,
+                m_shadowPageMetadataBuffer,
+                m_shadowDirtyPageFlagsBuffer,
+                m_shadowFreePhysicalPagesBuffer,
+                m_shadowReusablePhysicalPagesBuffer,
+                m_shadowDirectionalPageViewInfoBuffer,
+                m_shadowPageListHeaderBuffer));
+            shadowAllocationPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowPreAllocateStatsPassName));
+        outPasses.push_back(std::move(shadowAllocationPassDesc));
+
+        const std::string shadowGatherStatsPassName = MakeVariantPassName(traits, "VirtualShadowGatherStatsPass");
+        auto shadowGatherStatsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowGatherStatsPassName,
+            std::make_shared<VirtualShadowMapGatherStatsPass>(
+                m_shadowPageTableTexture,
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer,
+                m_shadowPageListHeaderBuffer,
+                m_shadowPageMetadataBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowStatsBuffer,
+                false));
+        shadowGatherStatsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowAllocationPassName));
+        outPasses.push_back(std::move(shadowGatherStatsPassDesc));
+
+        const std::string shadowClearPagesPassName = MakeVariantPassName(traits, "VirtualShadowClearPagesPass");
+        auto shadowClearPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowClearPagesPassName,
+            std::make_shared<VirtualShadowMapClearPagesPass>(
+                m_shadowPhysicalPagesTexture,
+                m_shadowDirtyPageFlagsBuffer,
+                m_shadowPageTableTexture,
+                m_shadowPageMetadataBuffer));
+            shadowClearPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowGatherStatsPassName));
+        outPasses.push_back(std::move(shadowClearPagesPassDesc));
+
+        shadowDirtyHierarchyPassName = MakeVariantPassName(traits, "VirtualShadowDirtyHierarchyPass");
+        auto shadowDirtyHierarchyPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowDirtyHierarchyPassName,
+            std::make_shared<VirtualShadowMapDirtyHierarchyPass>(
+                m_shadowPageTableTexture,
+                m_shadowDirtyPageHierarchyTexture,
+                m_shadowClipmapInfoBuffer));
+        shadowDirtyHierarchyPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowClearPagesPassName));
+        outPasses.push_back(std::move(shadowDirtyHierarchyPassDesc));
+
+    }
+
     std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
 
     HierarchialCullingPassInputs cullPassInputs;
     cullPassInputs.isFirstPass = true;
-    cullPassInputs.maxVisibleClusters = m_maxVisibleClusters;
+    cullPassInputs.maxVisibleClusters = m_visibleClusterCapacity;
     cullPassInputs.workGraphMode = workGraphMode;
     cullPassInputs.renderPhase = renderPhase;
     cullPassInputs.clodOnlyWorkloads = true;
+    cullPassInputs.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
     cullPassInputs.rasterOutputKind = traits.rasterOutputKind;
     auto cullPassDesc = RenderGraph::ExternalPassDesc::Compute(
         MakeVariantPassName(traits, "HierarchialCullingPass1"),
@@ -817,6 +1994,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
             m_swVisibleClustersCounterBuffer,
+            traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBuffer : nullptr,
+            traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBuffer : nullptr,
             m_histogramIndirectCommand,
             m_workGraphTelemetryBuffer,
             m_occlusionReplayBuffer,
@@ -824,13 +2003,26 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_occlusionNodeGpuInputsBuffer,
             m_viewDepthSrvIndicesBuffer,
             m_viewRasterInfoBuffer,
-            slabGroup));
+            traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+            slabGroup,
+            nullptr,
+            nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
         cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLodOpaque::LinearDepthDownsamplePass2"));
     }
     else {
-        cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
+        if (traits.type == CLodExtensionType::Shadow) {
+            cullPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowDirtyHierarchyPassName));
+        }
+        else {
+            cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
+        }
     }
     outPasses.push_back(std::move(cullPassDesc));
 
@@ -874,8 +2066,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         nullptr,
                         m_reyesFullClusterOutputsBuffer,
                         m_reyesFullClusterOutputsCounterBuffer,
+                        m_reyesFullClusterOutputCapacity,
                         m_reyesOwnedClustersBuffer,
                         m_reyesOwnedClustersCounterBuffer,
+                        m_reyesOwnedClusterCapacity,
                         reyesOwnershipBitsetBuffer,
                         m_reyesClassifyIndirectArgsBuffer,
                         m_reyesTelemetryBufferPhase1,
@@ -1058,7 +2252,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsIndirectArgsBuffer,
                 m_sortedToUnsortedMappingBuffer,
                 reyesOwnershipBitsetBuffer,
-                m_maxVisibleClusters,
+                m_visibleClusterCapacity,
                 false)));
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly) {
@@ -1130,7 +2324,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_deepVisibilityOverflowCounterBuffer,
                 m_deepVisibilityStatsBuffer,
                 CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
-        resolveDeepVisibilityPassDesc.At(RenderGraph::ExternalInsertPoint::Before("PPLLResolvePass"));
+        auto resolveInsertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
+        resolveInsertPoint.after.push_back("CLodShadow::VirtualShadowDeduplicatePredictedPagesPass");
+        resolveInsertPoint.before.push_back("Screen-Space Reflections Pass");
+        resolveInsertPoint.before.push_back("luminanceHistogramPass");
+        resolveDeepVisibilityPassDesc.At(std::move(resolveInsertPoint));
         outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         return;
     }
@@ -1140,19 +2338,30 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     rasterizePassInputs.wireframe = false;
     rasterizePassInputs.renderPhase = renderPhase;
     rasterizePassInputs.outputKind = traits.rasterOutputKind;
+    auto shadowPageTable = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPageTableTexture : nullptr;
+    auto shadowPhysicalPages = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPhysicalPagesTexture : nullptr;
+    auto shadowClipmapInfo = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowClipmapInfoBuffer : nullptr;
+    std::shared_ptr<Buffer> rasterClustersBufferPhase1 = m_compactedVisibleClustersBuffer;
+    std::shared_ptr<Buffer> rasterHistogramBufferPhase1 = m_rasterBucketsHistogramBuffer;
+    std::shared_ptr<Buffer> rasterIndirectArgsBufferPhase1 = m_rasterBucketsIndirectArgsBuffer;
+
     auto rasterizePassDesc = RenderGraph::ExternalPassDesc::Render(
         MakeVariantPassName(traits, "RasterizeClustersPass1"),
         std::make_shared<ClusterRasterizationPass>(
             rasterizePassInputs,
-            m_compactedVisibleClustersBuffer,
-            m_rasterBucketsHistogramBuffer,
-            m_rasterBucketsIndirectArgsBuffer,
+            rasterClustersBufferPhase1,
+            rasterHistogramBufferPhase1,
+            rasterIndirectArgsBufferPhase1,
             m_sortedToUnsortedMappingBuffer,
             nullptr,
             nullptr,
             nullptr,
-            slabGroup));
+            slabGroup,
+            shadowPageTable,
+            shadowPhysicalPages,
+            shadowClipmapInfo));
     rasterizePassDesc.GeometryPass();
+            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "RasterizeClustersPass1");
     outPasses.push_back(std::move(rasterizePassDesc));
 
     if (useComputeSWRaster) {
@@ -1177,7 +2386,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     reyesOwnershipBitsetBuffer,
                     nullptr,
                     true,
-                    m_maxVisibleClusters,
+                    m_visibleClusterCapacity,
                     true)));
 
         outPasses.push_back(
@@ -1211,26 +2420,226 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsOffsetsBuffer,
                     m_rasterBucketsWriteCursorBufferSw,
                     m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsIndirectArgsBuffer,
+                    m_rasterBucketsIndirectArgsBufferSw,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBuffer,
-                    m_maxVisibleClusters,
+                    m_visibleClusterCapacity,
                     false,
                     true,
                     true,
                     true)));
 
+        std::shared_ptr<Buffer> swRasterClustersBufferPhase1 = m_compactedVisibleClustersBuffer;
+        std::shared_ptr<Buffer> swRasterHistogramBufferPhase1 = m_rasterBucketsHistogramBufferSw;
+        std::shared_ptr<Buffer> swRasterIndirectArgsBufferPhase1 = m_rasterBucketsIndirectArgsBufferSw;
+        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
+            const uint32_t vsmBlockSoftCap = std::max(1u, std::min(m_shadowConfiguredPageJobMaxPages, CLodVirtualShadowBlockMaxTrackedPerCluster));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockHistogramPassSW1"),
+                    std::make_shared<VirtualShadowBlockExpandPass>(
+                        VirtualShadowBlockExpandMode::Histogram,
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsIndirectArgsBufferSw,
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_shadowConfiguredExpandedRecordCapacity,
+                        vsmBlockSoftCap,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixScanPassSW1"),
+                    std::make_shared<RasterBucketBlockScanPass>(
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixOffsetsPassSW1"),
+                    std::make_shared<RasterBucketBlockOffsetsPass>(
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        m_rasterBucketsScannedBlockSumsBuffer,
+                        m_rasterBucketsTotalCountBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockEmitPassSW1"),
+                    std::make_shared<VirtualShadowBlockExpandPass>(
+                        VirtualShadowBlockExpandMode::Emit,
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsIndirectArgsBufferSw,
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsWriteCursorBufferPhase2Sw,
+                        m_vsmExpandedVisibleClustersBufferSw,
+                        m_vsmExpandedBlockMetaBufferSw,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_shadowConfiguredExpandedRecordCapacity,
+                        vsmBlockSoftCap,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBuildArgsPassSW1"),
+                    std::make_shared<VirtualShadowBuildRasterArgsPass>(
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsIndirectArgsBufferPhase2Sw,
+                        true)));
+
+            swRasterClustersBufferPhase1 = m_vsmExpandedVisibleClustersBufferSw;
+            swRasterHistogramBufferPhase1 = m_rasterBucketsHistogramBufferPhase2Sw;
+            swRasterIndirectArgsBufferPhase1 = m_rasterBucketsIndirectArgsBufferPhase2Sw;
+        }
+
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
                 MakeVariantPassName(traits, "SoftwareRasterizeClustersPass1"),
                 std::make_shared<ClusterSoftwareRasterizationPass>(
-                    m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsHistogramBufferSw,
-                    m_rasterBucketsIndirectArgsBuffer,
+                    swRasterClustersBufferPhase1,
+                    swRasterHistogramBufferPhase1,
+                    swRasterIndirectArgsBufferPhase1,
                     m_sortedToUnsortedMappingBuffer,
                     m_viewRasterInfoBuffer,
+                    traits.rasterOutputKind,
+                    m_shadowPageTableTexture,
+                    m_shadowPhysicalPagesTexture,
+                    m_shadowClipmapInfoBuffer,
                     slabGroup,
                     true)));
+
+        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsCreateCommandPassPageJob1"),
+                    std::make_shared<RasterBucketCreateCommandPass>(
+                        m_swPageJobVisibleClustersCounterBuffer,
+                        m_histogramIndirectCommand,
+                        m_occlusionReplayStateBuffer,
+                        m_occlusionNodeGpuInputsBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsHistogramPassPageJob1"),
+                    std::make_shared<RasterBucketHistogramPass>(
+                        m_swPageJobVisibleClustersBuffer,
+                        m_swPageJobVisibleClustersCounterBuffer,
+                        m_histogramIndirectCommand,
+                        m_rasterBucketsHistogramBufferSw,
+                        nullptr,
+                        nullptr,
+                        false,
+                        m_maxVisibleClusters,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsPrefixScanPassPageJob1"),
+                    std::make_shared<RasterBucketBlockScanPass>(
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassPageJob1"),
+                    std::make_shared<RasterBucketBlockOffsetsPass>(
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        m_rasterBucketsScannedBlockSumsBuffer,
+                        m_rasterBucketsTotalCountBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassPageJob1"),
+                    std::make_shared<RasterBucketCompactAndArgsPass>(
+                        m_swPageJobVisibleClustersBuffer,
+                        m_swPageJobVisibleClustersCounterBuffer,
+                        m_swPageJobVisibleClustersCounterBuffer,
+                        m_histogramIndirectCommand,
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsWriteCursorBufferSw,
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsIndirectArgsBufferPageJob,
+                        m_sortedToUnsortedMappingBuffer,
+                        nullptr,
+                        m_maxVisibleClusters,
+                        false,
+                        false,
+                        true,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "SoftwareRasterPageJobExpandPass1"),
+                    std::make_shared<ClusterSoftwareRasterPageJobExpandPass>(
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsIndirectArgsBufferPageJob,
+                        m_viewRasterInfoBuffer,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_swPageJobRecordsBuffer,
+                        m_swPageJobCountBuffer,
+                        m_swPageJobRecordsBufferSkinned,
+                        m_swPageJobCountBufferSkinned,
+                        m_swPageJobClusterTagsBuffer,
+                        m_shadowConfiguredPageJobRecordCapacity,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "SoftwareRasterPageJobBuildArgsPass1"),
+                    std::make_shared<ClusterSoftwareRasterPageJobBuildArgsPass>(
+                        m_swPageJobCountBuffer,
+                        m_swPageJobIndirectArgsBuffer,
+                        m_swPageJobCountBufferSkinned,
+                        m_swPageJobIndirectArgsBufferSkinned,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "SoftwareRasterPageJobRasterPass1"),
+                    std::make_shared<ClusterSoftwareRasterPageJobRasterPass>(
+                        m_compactedVisibleClustersBuffer,
+                        m_viewRasterInfoBuffer,
+                        m_shadowPageTableTexture,
+                        m_shadowPhysicalPagesTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_swPageJobCountBuffer,
+                        m_swPageJobRecordsBuffer,
+                        m_swPageJobIndirectArgsBuffer,
+                        m_swPageJobCountBufferSkinned,
+                        m_swPageJobRecordsBufferSkinned,
+                        m_swPageJobIndirectArgsBufferSkinned,
+                        slabGroup,
+                        true)));
+            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterPageJobRasterPass1");
+        }
+        else {
+            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterizeClustersPass1");
+        }
     }
 
     if (traits.schedulesPerViewDepthCopy) {
@@ -1245,37 +2654,44 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             MakeVariantPassName(traits, "LinearDepthDownsamplePass1"),
             std::make_shared<DownsamplePass>()));
 
-    if (!traits.usesPhase2OcclusionReplay) {
-        return;
-    }
+    if (traits.usesPhase2OcclusionReplay) {
+        HierarchialCullingPassInputs cullPassInputs2;
+        cullPassInputs2.isFirstPass = false;
+        cullPassInputs2.maxVisibleClusters = m_visibleClusterCapacity;
+        cullPassInputs2.workGraphMode = workGraphMode;
+        cullPassInputs2.renderPhase = renderPhase;
+        cullPassInputs2.clodOnlyWorkloads = true;
+        cullPassInputs2.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
+        cullPassInputs2.rasterOutputKind = traits.rasterOutputKind;
+        auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "HierarchialCullingPass2"),
+            std::make_shared<HierarchialCullingPass>(
+                cullPassInputs2,
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBufferPhase2,
+                m_swVisibleClustersCounterBufferPhase2,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBufferPhase2 : nullptr,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBufferPhase2 : nullptr,
+                m_histogramIndirectCommand,
+                m_workGraphTelemetryBuffer,
+                m_occlusionReplayBuffer,
+                m_occlusionReplayStateBuffer,
+                m_occlusionNodeGpuInputsBuffer,
+                m_viewDepthSrvIndicesBuffer,
+                m_viewRasterInfoBuffer,
+                traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                slabGroup,
+                m_visibleClustersCounterBuffer,
+                m_swVisibleClustersCounterBuffer,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
+        cullPassDesc2.At(RenderGraph::ExternalInsertPoint::After(MakeVariantPassName(traits, "LinearDepthDownsamplePass1")));
+        outPasses.push_back(std::move(cullPassDesc2));
 
-    HierarchialCullingPassInputs cullPassInputs2;
-    cullPassInputs2.isFirstPass = false;
-    cullPassInputs2.maxVisibleClusters = m_maxVisibleClusters;
-    cullPassInputs2.workGraphMode = workGraphMode;
-    cullPassInputs2.renderPhase = renderPhase;
-    cullPassInputs2.clodOnlyWorkloads = true;
-    cullPassInputs2.rasterOutputKind = traits.rasterOutputKind;
-    auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
-        MakeVariantPassName(traits, "HierarchialCullingPass2"),
-        std::make_shared<HierarchialCullingPass>(
-            cullPassInputs2,
-            m_visibleClustersBuffer,
-            m_visibleClustersCounterBufferPhase2,
-            m_swVisibleClustersCounterBufferPhase2,
-            m_histogramIndirectCommand,
-            m_workGraphTelemetryBuffer,
-            m_occlusionReplayBuffer,
-            m_occlusionReplayStateBuffer,
-            m_occlusionNodeGpuInputsBuffer,
-            m_viewDepthSrvIndicesBuffer,
-            m_viewRasterInfoBuffer,
-            slabGroup,
-            m_visibleClustersCounterBuffer,
-            m_swVisibleClustersCounterBuffer));
-    outPasses.push_back(std::move(cullPassDesc2));
-
-    if (!disableReyesTessellation) {
+        if (!disableReyesTessellation) {
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
                 MakeVariantPassName(traits, "ReyesQueueResetPass2"),
@@ -1307,8 +2723,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClustersCounterBuffer,
                     m_reyesFullClusterOutputsBuffer,
                     m_reyesFullClusterOutputsCounterBuffer,
+                    m_reyesFullClusterOutputCapacity,
                     m_reyesOwnedClustersBuffer,
                     m_reyesOwnedClustersCounterBuffer,
+                    m_reyesOwnedClusterCapacity,
                     reyesOwnershipBitsetBufferPhase2,
                     m_reyesClassifyIndirectArgsBufferPhase2,
                     m_reyesTelemetryBufferPhase2,
@@ -1439,7 +2857,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         }
     }
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsHistogramPass2"),
             std::make_shared<RasterBucketHistogramPass>(
@@ -1450,7 +2868,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 reyesOwnershipBitsetBufferPhase2,
                 m_visibleClustersCounterBuffer)));
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsPrefixScanPass2"),
             std::make_shared<RasterBucketBlockScanPass>(
@@ -1458,7 +2876,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsOffsetsBuffer,
                 m_rasterBucketsBlockSumsBuffer)));
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPass2"),
             std::make_shared<RasterBucketBlockOffsetsPass>(
@@ -1467,7 +2885,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsScannedBlockSumsBuffer,
                 m_rasterBucketsTotalCountBuffer)));
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPass2"),
             std::make_shared<RasterBucketCompactAndArgsPass>(
@@ -1482,31 +2900,39 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsIndirectArgsBufferPhase2,
                 m_sortedToUnsortedMappingBuffer,
                 reyesOwnershipBitsetBufferPhase2,
-                m_maxVisibleClusters,
+                m_visibleClusterCapacity,
                 true)));
 
-    ClusterRasterizationPassInputs rasterizePassInputs2;
-    rasterizePassInputs2.clearGbuffer = false;
-    rasterizePassInputs2.wireframe = false;
-    rasterizePassInputs2.renderPhase = renderPhase;
-    rasterizePassInputs2.outputKind = traits.rasterOutputKind;
-    auto rasterizePassDesc2 = RenderGraph::ExternalPassDesc::Render(
-        MakeVariantPassName(traits, "RasterizeClustersPass2"),
-        std::make_shared<ClusterRasterizationPass>(
+        ClusterRasterizationPassInputs rasterizePassInputs2;
+        rasterizePassInputs2.clearGbuffer = false;
+        rasterizePassInputs2.wireframe = false;
+        rasterizePassInputs2.renderPhase = renderPhase;
+        rasterizePassInputs2.outputKind = traits.rasterOutputKind;
+        std::shared_ptr<Buffer> rasterClustersBufferPhase2 = m_compactedVisibleClustersBuffer;
+        std::shared_ptr<Buffer> rasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferPhase2;
+        std::shared_ptr<Buffer> rasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferPhase2;
+
+        auto rasterizePassDesc2 = RenderGraph::ExternalPassDesc::Render(
+            MakeVariantPassName(traits, "RasterizeClustersPass2"),
+            std::make_shared<ClusterRasterizationPass>(
             rasterizePassInputs2,
-            m_compactedVisibleClustersBuffer,
-            m_rasterBucketsHistogramBufferPhase2,
-            m_rasterBucketsIndirectArgsBufferPhase2,
+            rasterClustersBufferPhase2,
+            rasterHistogramBufferPhase2,
+            rasterIndirectArgsBufferPhase2,
             m_sortedToUnsortedMappingBuffer,
             nullptr,
             nullptr,
             nullptr,
-            slabGroup));
-    rasterizePassDesc2.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
-    rasterizePassDesc2.GeometryPass();
-    outPasses.push_back(std::move(rasterizePassDesc2));
+            slabGroup,
+            shadowPageTable,
+            shadowPhysicalPages,
+            shadowClipmapInfo));
+        rasterizePassDesc2.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
+        rasterizePassDesc2.GeometryPass();
+            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "RasterizeClustersPass2");
+        outPasses.push_back(std::move(rasterizePassDesc2));
 
-    if (useComputeSWRaster) {
+        if (useComputeSWRaster) {
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
                 MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW2"),
@@ -1528,7 +2954,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     reyesOwnershipBitsetBufferPhase2,
                     m_swVisibleClustersCounterBuffer,
                     true,
-                    m_maxVisibleClusters,
+                    m_visibleClusterCapacity,
                     true)));
 
         outPasses.push_back(
@@ -1562,34 +2988,272 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsOffsetsBuffer,
                     m_rasterBucketsWriteCursorBufferPhase2Sw,
                     m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsIndirectArgsBufferPhase2,
+                    m_rasterBucketsIndirectArgsBufferPhase2Sw,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBufferPhase2,
-                    m_maxVisibleClusters,
+                    m_visibleClusterCapacity,
                     true,
                     true,
                     true,
                     true)));
+
+        std::shared_ptr<Buffer> swRasterClustersBufferPhase2 = m_compactedVisibleClustersBuffer;
+        std::shared_ptr<Buffer> swRasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferPhase2Sw;
+        std::shared_ptr<Buffer> swRasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferPhase2Sw;
+        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
+            const uint32_t vsmBlockSoftCap = std::max(1u, std::min(m_shadowConfiguredPageJobMaxPages, CLodVirtualShadowBlockMaxTrackedPerCluster));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockHistogramPassSW2"),
+                    std::make_shared<VirtualShadowBlockExpandPass>(
+                        VirtualShadowBlockExpandMode::Histogram,
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsIndirectArgsBufferPhase2Sw,
+                        m_rasterBucketsHistogramBufferSw,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_shadowConfiguredExpandedRecordCapacity,
+                        vsmBlockSoftCap,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixScanPassSW2"),
+                    std::make_shared<RasterBucketBlockScanPass>(
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixOffsetsPassSW2"),
+                    std::make_shared<RasterBucketBlockOffsetsPass>(
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        m_rasterBucketsScannedBlockSumsBuffer,
+                        m_rasterBucketsTotalCountBufferPhase1Sw,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockEmitPassSW2"),
+                    std::make_shared<VirtualShadowBlockExpandPass>(
+                        VirtualShadowBlockExpandMode::Emit,
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsIndirectArgsBufferPhase2Sw,
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsWriteCursorBufferSw,
+                        m_vsmExpandedVisibleClustersBufferSw,
+                        m_vsmExpandedBlockMetaBufferSw,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_shadowConfiguredExpandedRecordCapacity,
+                        vsmBlockSoftCap,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBuildArgsPassSW2"),
+                    std::make_shared<VirtualShadowBuildRasterArgsPass>(
+                        m_rasterBucketsHistogramBufferSw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsIndirectArgsBufferSw,
+                        true)));
+
+            swRasterClustersBufferPhase2 = m_vsmExpandedVisibleClustersBufferSw;
+            swRasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferSw;
+            swRasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferSw;
+        }
 
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
                 MakeVariantPassName(traits, "SoftwareRasterizeClustersPass2"),
                 std::make_shared<ClusterSoftwareRasterizationPass>(
-                    m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsHistogramBufferPhase2Sw,
-                    m_rasterBucketsIndirectArgsBufferPhase2,
+                    swRasterClustersBufferPhase2,
+                    swRasterHistogramBufferPhase2,
+                    swRasterIndirectArgsBufferPhase2,
                     m_sortedToUnsortedMappingBuffer,
                     m_viewRasterInfoBuffer,
+                    traits.rasterOutputKind,
+                    m_shadowPageTableTexture,
+                    m_shadowPhysicalPagesTexture,
+                    m_shadowClipmapInfoBuffer,
                     slabGroup,
                     true)));
+
+        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsCreateCommandPassPageJob2"),
+                    std::make_shared<RasterBucketCreateCommandPass>(
+                        m_swPageJobVisibleClustersCounterBufferPhase2,
+                        m_histogramIndirectCommand,
+                        m_occlusionReplayStateBuffer,
+                        m_occlusionNodeGpuInputsBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsHistogramPassPageJob2"),
+                    std::make_shared<RasterBucketHistogramPass>(
+                        m_swPageJobVisibleClustersBufferPhase2,
+                        m_swPageJobVisibleClustersCounterBufferPhase2,
+                        m_histogramIndirectCommand,
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        nullptr,
+                        nullptr,
+                        false,
+                        m_maxVisibleClusters,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsPrefixScanPassPageJob2"),
+                    std::make_shared<RasterBucketBlockScanPass>(
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassPageJob2"),
+                    std::make_shared<RasterBucketBlockOffsetsPass>(
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        m_rasterBucketsScannedBlockSumsBuffer,
+                        m_rasterBucketsTotalCountBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassPageJob2"),
+                    std::make_shared<RasterBucketCompactAndArgsPass>(
+                        m_swPageJobVisibleClustersBufferPhase2,
+                        m_swPageJobVisibleClustersCounterBufferPhase2,
+                        m_swPageJobVisibleClustersCounterBufferPhase2,
+                        m_histogramIndirectCommand,
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsWriteCursorBufferPhase2Sw,
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsIndirectArgsBufferPhase2PageJob,
+                        m_sortedToUnsortedMappingBuffer,
+                        nullptr,
+                        m_maxVisibleClusters,
+                        false,
+                        false,
+                        true,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "SoftwareRasterPageJobExpandPass2"),
+                    std::make_shared<ClusterSoftwareRasterPageJobExpandPass>(
+                        m_compactedVisibleClustersBuffer,
+                        m_rasterBucketsHistogramBufferPhase2Sw,
+                        m_rasterBucketsIndirectArgsBufferPhase2PageJob,
+                        m_viewRasterInfoBuffer,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_swPageJobRecordsBufferPhase2,
+                        m_swPageJobCountBufferPhase2,
+                        m_swPageJobRecordsBufferPhase2Skinned,
+                        m_swPageJobCountBufferPhase2Skinned,
+                        m_swPageJobClusterTagsBufferPhase2,
+                        m_shadowConfiguredPageJobRecordCapacity,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "SoftwareRasterPageJobBuildArgsPass2"),
+                    std::make_shared<ClusterSoftwareRasterPageJobBuildArgsPass>(
+                        m_swPageJobCountBufferPhase2,
+                        m_swPageJobIndirectArgsBufferPhase2,
+                        m_swPageJobCountBufferPhase2Skinned,
+                        m_swPageJobIndirectArgsBufferPhase2Skinned,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "SoftwareRasterPageJobRasterPass2"),
+                    std::make_shared<ClusterSoftwareRasterPageJobRasterPass>(
+                        m_compactedVisibleClustersBuffer,
+                        m_viewRasterInfoBuffer,
+                        m_shadowPageTableTexture,
+                        m_shadowPhysicalPagesTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_swPageJobCountBufferPhase2,
+                        m_swPageJobRecordsBufferPhase2,
+                        m_swPageJobIndirectArgsBufferPhase2,
+                        m_swPageJobCountBufferPhase2Skinned,
+                        m_swPageJobRecordsBufferPhase2Skinned,
+                        m_swPageJobIndirectArgsBufferPhase2Skinned,
+                        slabGroup,
+                        true)));
+            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterPageJobRasterPass2");
+        }
+        else {
+            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterizeClustersPass2");
+        }
     }
 
-    if (traits.schedulesPerViewDepthCopy) {
-        auto depthCopyPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
-            MakeVariantPassName(traits, "LinearDepthCopyPass2"),
-            std::make_shared<PerViewLinearDepthCopyPass>());
-        depthCopyPassDesc2.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
-        outPasses.push_back(std::move(depthCopyPassDesc2));
+        if (traits.schedulesPerViewDepthCopy) {
+            auto depthCopyPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "LinearDepthCopyPass2"),
+                std::make_shared<PerViewLinearDepthCopyPass>());
+            depthCopyPassDesc2.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
+            outPasses.push_back(std::move(depthCopyPassDesc2));
+        }
+    }
+
+    if (traits.type == CLodExtensionType::Shadow && !shadowClearDirtyBitsAfterPassName.empty()) {
+        const std::string shadowClearDirtyBitsPassName = MakeVariantPassName(traits, "VirtualShadowClearDirtyBitsPass");
+        auto shadowClearDirtyBitsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowClearDirtyBitsPassName,
+            std::make_shared<VirtualShadowMapClearDirtyBitsPass>(
+                m_shadowPageTableTexture,
+                m_shadowAllocationRequestsBuffer,
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer));
+        shadowClearDirtyBitsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowClearDirtyBitsAfterPassName));
+        outPasses.push_back(std::move(shadowClearDirtyBitsPassDesc));
+
+        const std::string shadowExpandPredictedPagesPassName = MakeVariantPassName(traits, "VirtualShadowExpandPredictedPagesPass");
+        auto shadowExpandPredictedPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowExpandPredictedPagesPassName,
+            std::make_shared<VirtualShadowMapExpandPredictedPagesPass>(
+                m_shadowPredictiveInvalidationCandidatesBuffer,
+                m_shadowPredictiveInvalidationCandidateCountBuffer,
+                m_shadowPredictiveRawPagesBuffer,
+                m_shadowPredictiveRawPageCountBuffer,
+                m_shadowClipmapInfoBuffer));
+        shadowExpandPredictedPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowClearDirtyBitsPassName));
+        outPasses.push_back(std::move(shadowExpandPredictedPagesPassDesc));
+
+        const std::string shadowDeduplicatePredictedPagesPassName = MakeVariantPassName(traits, "VirtualShadowDeduplicatePredictedPagesPass");
+        auto shadowDeduplicatePredictedPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowDeduplicatePredictedPagesPassName,
+            std::make_shared<VirtualShadowMapDeduplicatePredictedPagesPass>(
+                m_shadowPredictiveRawPagesBuffer,
+                m_shadowPredictiveRawPageCountBuffer,
+                m_shadowPredictedInvalidationScratchBitsetBuffer,
+                m_shadowPredictedInvalidationPagesBufferA,
+                    m_shadowPredictedInvalidationPageCountBufferA));
+        shadowDeduplicatePredictedPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowExpandPredictedPagesPassName));
+        outPasses.push_back(std::move(shadowDeduplicatePredictedPagesPassDesc));
     }
 
     outPasses.push_back(

@@ -52,6 +52,23 @@ namespace
         return headPointers.GetWidth() == visibilityBuffer.GetWidth() &&
             headPointers.GetHeight() == visibilityBuffer.GetHeight();
     }
+
+    CullingCameraInfo BuildCullingCameraInfo(const CameraInfo& cameraInfo)
+    {
+        CullingCameraInfo cullInfo{};
+        cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
+        cullInfo.projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]);
+        cullInfo.zNear = cameraInfo.zNear;
+        cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
+        cullInfo.viewProjection = cameraInfo.viewProjection;
+        cullInfo.viewZ = {
+            DirectX::XMVectorGetZ(cameraInfo.view.r[0]),
+            DirectX::XMVectorGetZ(cameraInfo.view.r[1]),
+            DirectX::XMVectorGetZ(cameraInfo.view.r[2]),
+            DirectX::XMVectorGetZ(cameraInfo.view.r[3])
+        };
+        return cullInfo;
+    }
 }
 
 ViewManager::ViewManager() {
@@ -97,12 +114,7 @@ uint64_t ViewManager::CreateView(const CameraInfo& cameraInfo,
     v.gpu.cameraBufferIndex = static_cast<uint32_t>(v.gpu.cameraBufferView->GetOffset() / sizeof(CameraInfo));
     m_cameraBuffer->UpdateView(v.gpu.cameraBufferView.get(), &cameraInfo);
 
-    CullingCameraInfo cullCam{
-        .positionWorldSpace = cameraInfo.positionWorldSpace,
-        .projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]), // [1][1]
-        .zNear = cameraInfo.zNear,
-        .errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels)
-    };
+    CullingCameraInfo cullCam = BuildCullingCameraInfo(cameraInfo);
 
 	v.gpu.cullingCameraBufferView = m_cullingCameraBuffer->Add();
 	m_cullingCameraBuffer->UpdateView(v.gpu.cullingCameraBufferView.get(), &cullCam);
@@ -231,18 +243,7 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
     std::lock_guard<std::mutex> lock(m_cameraUpdateMutex);
     v->cameraInfo = cameraInfo;
     m_cameraBuffer->UpdateView(v->gpu.cameraBufferView.get(), &cameraInfo);
-	CullingCameraInfo cullInfo;
-	cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
-	cullInfo.projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]); // [1][1]
-	cullInfo.zNear = cameraInfo.zNear;
-    cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
-    cullInfo.viewProjection = cameraInfo.viewProjection;
-    cullInfo.viewZ = {
-        DirectX::XMVectorGetZ(cameraInfo.view.r[0]),
-        DirectX::XMVectorGetZ(cameraInfo.view.r[1]),
-        DirectX::XMVectorGetZ(cameraInfo.view.r[2]),
-        DirectX::XMVectorGetZ(cameraInfo.view.r[3])
-    };
+	CullingCameraInfo cullInfo = BuildCullingCameraInfo(cameraInfo);
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
     
     if (m_events.onCameraUpdated) {

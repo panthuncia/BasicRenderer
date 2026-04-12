@@ -99,7 +99,8 @@ public:
                 Builtin::GBuffer::Emissive,
                 Builtin::GBuffer::MetallicRoughness,
                 Builtin::GBuffer::MotionVectors,
-                Builtin::DebugVisualization);
+                Builtin::DebugVisualization)
+    	.WithConstantBuffer(Builtin::PerFrameBuffer);
         b->WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 

@@ -279,6 +279,16 @@ add_symlink_or_copy_per_config(
     "textures"
 )
 
+set(BUILTIN_TEXTURES_SRC_DIR "${BASICRENDERER_SOURCE_ROOT}/BuiltinTextures")
+set(BUILTIN_TEXTURES_DEST_PATH "${BASICRENDERER_OUTPUT_ROOT}/BuiltinTextures")
+
+add_symlink_or_copy_per_config(
+    "${BUILTIN_TEXTURES_SRC_DIR}"
+    "${BUILTIN_TEXTURES_DEST_PATH}"
+    TRUE  # IS_DIRECTORY
+    "builtin_textures"
+)
+
 
 set(tex_dir "${BASICRENDERER_OUTPUT_ROOT}/Textures")
 set(tex_link "${BASICRENDERER_OUTPUT_ROOT}/textures")
@@ -328,16 +338,6 @@ add_symlink_or_copy_per_config(
     "${D3D_DEST_PATH}"
     TRUE  # IS_DIRECTORY
     "d3d"
-)
-
-set(AFTERMATH_BINARY_DIR "${BASICRENDERER_SOURCE_ROOT}/GFSDK_Aftermath_Lib.x64.dll")
-set(AFTERMATH_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/GFSDK_Aftermath_Lib.x64.dll")
-
-add_symlink_or_copy_per_config(
-    "${AFTERMATH_BINARY_DIR}"
-    "${AFTERMATH_DEST_FILE}"
-    FALSE  # IS_DIRECTORY
-    "aftermath_dll"
 )
 
 set(SL_BINARY_DIR "${BASICRENDERER_SOURCE_ROOT}/sl.interposer.dll")
@@ -678,11 +678,6 @@ target_link_options(ShaderPreprocessTests PRIVATE
   $<$<AND:$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
 
-if (ENABLE_NSIGHT_AFTERMATH)
-  # This will pass -DENABLE_NSIGHT_AFTERMATH to the compiler
-  target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_NSIGHT_AFTERMATH)
-endif()
-
 target_compile_definitions(${PROJECT_NAME} PRIVATE
   # first, define integer codes for each build flavor
   BUILD_TYPE_DEBUG=0
@@ -734,7 +729,6 @@ PRIVATE
     Tracy::TracyClient
     slang::slang
     "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib" 
-    "${BASICRENDERER_SOURCE_ROOT}/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${BASICRENDERER_SOURCE_ROOT}/sl.interposer.lib" 
     "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_dx12.lib" 
     "${BASICRENDERER_SOURCE_ROOT}/ffx_backend_dx12_x64drel.lib"

@@ -12,6 +12,7 @@
         "Primary": {}
       }
     },
+      "PerFrameBuffer": {},
     "CLod": {
       "Offsets": {},
       "Groups": {},
@@ -98,8 +99,12 @@
       "OutputAOTerm": {}
     },
     "Shadows": {
-      "ShadowMaps": {},
-      "LinearShadowMaps": {}
+      "CLodClipmapInfo": {},
+      "CLodPhysicalPages": {},
+      "CLodPageTable": {},
+      "CLodDirectionalPageViewInfo": {},
+      "CLodCompactMainCamera": {},
+      "CLodCompactShadowCameras": {}
     },
     "PPLL": {
       "HeadPointerTexture": {},
@@ -113,6 +118,9 @@
     "ActiveDrawSetIndices": {},
     "BRDFLUT": {},
     "DebugTexture": {},
-    "DebugVisualization": {}
+    "DebugVisualization": {},
+    "Noise": {
+      "BlueNoise2D": {}
+    }
   }
 }

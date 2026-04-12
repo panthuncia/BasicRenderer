@@ -157,7 +157,7 @@ void MSMain(
     // Output vertices
     if (uGroupThreadID < 42) {
         
-        ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+        ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
         StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
         StructuredBuffer<PerObjectBuffer> objects = ResourceDescriptorHeap[objectBufferDescriptorIndex];
         

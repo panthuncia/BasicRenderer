@@ -45,18 +45,18 @@ cbuffer MiscUintRootConstants : register(b4) { // Used for pass-specific one-off
     uint UintRootConstant12;
     uint UintRootConstant13;
     uint UintRootConstant14;
+    uint UintRootConstant15;
+    uint UintRootConstant16;
+    uint UintRootConstant17;
+    uint UintRootConstant18;
+    uint UintRootConstant19;
+    uint UintRootConstant20;
+    uint UintRootConstant21;
+    uint UintRootConstant22;
+    uint UintRootConstant23;
 }
 
-cbuffer MiscFloatRootConstants : register(b5) { // Used for pass-specific one-off constants
-    float FloatRootConstant0;
-    float FloatRootConstant1;
-    float FloatRootConstant2;
-    float FloatRootConstant3;
-    float FloatRootConstant4;
-    float FloatRootConstant5;
-}
-
-cbuffer ResourceDescriptorIndices : register(b6) {
+cbuffer ResourceDescriptorIndices : register(b5) {
     uint ResourceDescriptorIndex0;
     uint ResourceDescriptorIndex1;
     uint ResourceDescriptorIndex2;
@@ -90,7 +90,7 @@ cbuffer ResourceDescriptorIndices : register(b6) {
     uint ResourceDescriptorIndex30;
 };
 
-cbuffer IndirectCommandSignatureRootConstants : register(b7)
+cbuffer IndirectCommandSignatureRootConstants : register(b6)
 {
     uint IndirectCommandSignatureRootConstant0;
     uint IndirectCommandSignatureRootConstant1;

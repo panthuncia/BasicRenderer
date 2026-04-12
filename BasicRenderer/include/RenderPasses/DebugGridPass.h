@@ -56,6 +56,7 @@ public:
                 Builtin::PrimaryCamera::LinearDepthMap)
             // Needs UAV, since compute will read-modify-write (manual blend)
             .WithUnorderedAccess(Builtin::PostProcessing::UpscaledHDR);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override

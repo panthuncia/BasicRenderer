@@ -29,13 +29,12 @@ float3 sample_for_upsample(Texture2D<float4> source, float2 texCoord, float x, f
 // UintRootConstant2 is src res x
 // UintRootConstant3 is src res y
 
-// FloatRootConstant0 is filter radius
-// FloatRootConstant1 is aspect ratio
+// UintRootConstant4/5 carry filter radius and aspect ratio as float bit patterns
 void blend(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
-    float filterRadius = FILTER_RADIUS;
+    float filterRadius = BLOOM_BLEND_FILTER_RADIUS;
     float x = filterRadius;
-    float y = filterRadius * ASPECT_RATIO;
+    float y = filterRadius * BLOOM_BLEND_ASPECT_RATIO;
     
     RWTexture2D<float4> HDR = ResourceDescriptorHeap[HDR_TARGET_UAV_DESCRIPTOR_INDEX];
     Texture2D<float4> bloom = ResourceDescriptorHeap[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX];

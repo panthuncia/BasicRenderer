@@ -66,7 +66,7 @@ float3 LoadNormal(int2 pos, uint normalsDescriptorIndex) {
 #endif
 
 #if 1 // compute worldspace to viewspace here if your engine stores normals in worldspace; if generating normals from depth here, they're already in viewspace
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     normal = normalize(mul(normal, (float3x3) mainCamera.view));

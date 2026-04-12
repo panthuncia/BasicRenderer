@@ -36,7 +36,7 @@ void EvaluateGBufferOptimized(uint2 pixel)
     metallicRoughnessTexture[pixel] = float2(sample.materialInputs.metallic, sample.materialInputs.roughness);
     motionVectorTexture[pixel] = sample.motionVector;
 
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     uint outputType = perFrame.outputType;
     if (outputType != OUTPUT_COLOR) {
         RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
@@ -119,8 +119,8 @@ void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
         else
         {
-            float M22 = FloatRootConstant0;
-            float M32 = FloatRootConstant1;
+            float M22 = asfloat(UintRootConstant5);
+            float M32 = asfloat(UintRootConstant6);
             projectedDepth = -M22 + M32 / depth;
         }
         RWTexture2D<float> projectedDepthTexture = ResourceDescriptorHeap[projectedDepthUAVIndex];
@@ -131,7 +131,7 @@ void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void PrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 
     uint screenW = perFrameBuffer.screenResX;
     uint screenH = perFrameBuffer.screenResY;

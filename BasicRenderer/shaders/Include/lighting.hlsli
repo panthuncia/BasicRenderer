@@ -11,6 +11,8 @@
 #include "include/shadows.hlsli"
 #include "include/constants.hlsli"
 #include "include/IBL.hlsli"
+#include "include/outputTypes.hlsli"
+#include "include/debugPayload.hlsli"
 
 struct LightFragmentData {
     uint lightType;
@@ -35,6 +37,7 @@ struct LightingParameters {
 
 struct LightingOutput { // Lighting + debug info
     float3 lighting;
+    uint2 shadowDebugPayload;
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     float3 diffuseIBL;
     float3 specularIBL;
@@ -150,6 +153,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
     float3 debugSpecular = float3(0, 0, 0);
 
     LightingOutput output;
+    output.shadowDebugPayload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
 
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     evaluateIBL(lighting,
@@ -245,23 +249,64 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             float shadow = 0.0;
             if (enableShadows)
             {
-                if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1)
+                if (light.shadowViewInfoIndex != -1)
                 {
                     switch (light.type)
                     {
                     case 0:{ // Point light
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
                             shadow = calculatePointShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
                         //return float4(shadow, shadow, shadow, 1.0);
                             break;
                         }
                     case 1:{ // Spot light
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
                             uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
                             Camera camera = cameraBuffer[spotShadowCameraIndex];
                             shadow = calculateSpotShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
                             break;
                         }
                     case 2:{// Directional light
-                            shadow = calculateCascadedShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.fragPosViewSpace, fragmentInfo.normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
+                            CLodVirtualShadowDebugInfo shadowDebugInfo;
+                            shadow = calculateDirectionalVSMShadowDetailed(
+                                fragmentInfo.pixelCoords,
+                                fragmentInfo.fragPosWorldSpace,
+                                fragmentInfo.fragPosViewSpace,
+                                fragmentInfo.normalWS,
+                                light,
+                                perFrameBuffer.numDirectionalClipmaps,
+                                perFrameBuffer.shadowCascadeSplits,
+                                directionalShadowViewInfoIndexBuffer,
+                                cameraBuffer,
+                                shadowDebugInfo);
+
+                            if (output.shadowDebugPayload.x == DEBUG_SENTINEL)
+                            {
+                                switch (perFrameBuffer.outputType)
+                                {
+                                case OUTPUT_VSM_PREFERRED_CLIPMAP:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugClipmapColor(shadowDebugInfo.preferredClipmapIndex));
+                                    break;
+                                case OUTPUT_VSM_SAMPLED_CLIPMAP:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugClipmapColor(shadowDebugInfo.sampledClipmapIndex));
+                                    break;
+                                case OUTPUT_VSM_PAGE_STATE:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugPageStateColor(shadowDebugInfo));
+                                    break;
+                                case OUTPUT_VSM_PHYSICAL_PAGE:
+                                    output.shadowDebugPayload = PackDebugUint(shadowDebugInfo.sampledPhysicalPageIndex == 0xFFFFFFFFu ? 0u : (shadowDebugInfo.sampledPhysicalPageIndex + 1u));
+                                    break;
+                                case OUTPUT_VSM_RERENDERED_THIS_FRAME:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugRerenderedThisFrameColor(shadowDebugInfo));
+                                    break;
+                                }
+                            }
                             break;
                         }
                     }
@@ -269,10 +314,10 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             }
             
             LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, fragmentInfo.fragPosWorldSpace.xyz);
-            if (shadow > 0.95)
-            {
-                continue; // skip light if shadowed
-            }
+            // if (shadow > 0.95)
+            // {
+            //     continue; // skip light if shadowed
+            // }
             if (lightFragmentInfo.distance > light.maxRange && light.type != 2)
             {
                 continue;

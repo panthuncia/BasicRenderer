@@ -36,6 +36,7 @@ public:
 
 private:
     PipelineState m_pso;
+    PipelineState m_clearPipeline;
     rhi::CommandSignaturePtr m_compactionCommandSignature;
 
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
