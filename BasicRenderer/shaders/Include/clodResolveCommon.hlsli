@@ -579,6 +579,21 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
 
     uint3 triIdx = DecodeTriangleCompact(meshletTriangleIndex, md);
 
+    if (isBackface)
+    {
+        const uint triTmp = triIdx.y;
+        triIdx.y = triIdx.z;
+        triIdx.z = triTmp;
+
+        const float3 patchDomainTmp = patchDomain1;
+        patchDomain1 = patchDomain2;
+        patchDomain2 = patchDomainTmp;
+
+        const float3 microTrianglePatchDomainTmp = microTrianglePatchDomain1;
+        microTrianglePatchDomain1 = microTrianglePatchDomain2;
+        microTrianglePatchDomain2 = microTrianglePatchDomainTmp;
+    }
+
     float3 p0 = DecodeCompressedPosition(triIdx.x, md);
     float3 p1 = DecodeCompressedPosition(triIdx.y, md);
     float3 p2 = DecodeCompressedPosition(triIdx.z, md);
