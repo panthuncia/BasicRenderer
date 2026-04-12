@@ -62,6 +62,26 @@ struct CLodDeepVisibilityStats
     uint pad2;
 };
 
+static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_SLICE_COUNT = 16u;
+static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
+static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25f;
+
+struct CLodFixedSliceScalarVBOITConfig
+{
+    uint occupancyUAVDescriptorIndex;
+    uint extinctionUAVDescriptorIndex;
+    uint integratedTransmittanceUAVDescriptorIndex;
+    uint shadingTransmittanceSRVDescriptorIndex;
+    uint sliceCount;
+    uint lowResolutionWidth;
+    uint lowResolutionHeight;
+    uint flags;
+    float viewNearDepth;
+    float viewFarDepth;
+    float inverseSliceCount;
+    float lowResolutionScale;
+};
+
 struct ClippingPlane {
     float4 plane;
 };

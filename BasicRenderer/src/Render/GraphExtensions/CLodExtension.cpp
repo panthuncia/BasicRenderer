@@ -18,6 +18,8 @@
 #include "Render/GraphExtensions/ClusterLOD/ClearDeepVisibilityPass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITSetupPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITIntegratePass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobBuildArgsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobExpandPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobRasterPass.h"
@@ -179,6 +181,50 @@ std::string MakeVariantPassName(const CLodVariantTraits& traits, std::string_vie
 std::string MakeVariantResourceName(const CLodVariantTraits& traits, std::string_view suffix)
 {
     return std::string(traits.resourcePrefix) + std::string(suffix);
+}
+
+DirectX::XMUINT2 GetFixedSliceScalarVBOITLowResolution(const DirectX::XMUINT2& renderResolution)
+{
+    const uint32_t downsampleFactor = (std::max)(1u, CLodFixedSliceScalarVBOITDefaultDownsampleFactor);
+    return {
+        (std::max)(1u, (renderResolution.x + downsampleFactor - 1u) / downsampleFactor),
+        (std::max)(1u, (renderResolution.y + downsampleFactor - 1u) / downsampleFactor),
+    };
+}
+
+TextureDescription CreateFixedSliceScalarVBOITOccupancyDescription()
+{
+    TextureDescription desc;
+    const auto renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    const auto lowResolution = GetFixedSliceScalarVBOITLowResolution(renderResolution);
+
+    desc.channels = 1;
+    desc.format = rhi::Format::R32_Float;
+    desc.hasSRV = true;
+    desc.srvFormat = rhi::Format::R32_Float;
+    desc.hasUAV = true;
+    desc.uavFormat = rhi::Format::R32_Float;
+    desc.hasNonShaderVisibleUAV = true;
+    desc.allowAlias = true;
+    desc.imageDimensions.push_back(ImageDimensions{ lowResolution.x, lowResolution.y, 0, 0 });
+    return desc;
+}
+
+TextureDescription CreateFixedSliceScalarVBOITSliceVolumeDescription()
+{
+    TextureDescription desc = CreateFixedSliceScalarVBOITOccupancyDescription();
+    desc.isArray = true;
+    desc.arraySize = CLodFixedSliceScalarVBOITDefaultSliceCount;
+    return desc;
+}
+
+CLodTransparencyMode GetTransparencyMode(CLodExtensionType type)
+{
+    if (type != CLodExtensionType::AlphaBlend) {
+        return CLodTransparencyMode::LinkedListDeepVisibility;
+    }
+
+    return SettingsManager::GetInstance().getSettingGetter<CLodTransparencyMode>(CLodTransparencyModeSettingName)();
 }
 
 TextureDescription CreateVirtualShadowPageTableDescription()
@@ -660,6 +706,48 @@ void CLodExtension::InitializeDeepVisibilityResources()
     m_deepVisibilityStatsBuffer->GetECSEntity()
         .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
         .add<CLodDeepVisibilityStatsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+}
+
+void CLodExtension::InitializeFixedSliceScalarVBOITResources()
+{
+    if (m_type != CLodExtensionType::AlphaBlend) {
+        return;
+    }
+
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const auto& traits = GetVariantTraits(m_type);
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+
+    m_fixedSliceScalarVBOITConfigBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodFixedSliceScalarVBOITConfig),
+        false,
+        false,
+        false,
+        false);
+    m_fixedSliceScalarVBOITConfigBuffer->SetName(MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Config Buffer"));
+    m_fixedSliceScalarVBOITConfigBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITConfigBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITOccupancyTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITOccupancyDescription());
+    m_fixedSliceScalarVBOITOccupancyTexture->SetName(MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Occupancy"));
+    m_fixedSliceScalarVBOITOccupancyTexture->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITOccupancyTexture })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITExtinctionTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITSliceVolumeDescription());
+    m_fixedSliceScalarVBOITExtinctionTexture->SetName(MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Extinction"));
+    m_fixedSliceScalarVBOITExtinctionTexture->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITExtinctionTexture })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITIntegratedTransmittanceTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITSliceVolumeDescription());
+    m_fixedSliceScalarVBOITIntegratedTransmittanceTexture->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Integrated Transmittance"));
+    m_fixedSliceScalarVBOITIntegratedTransmittanceTexture->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITIntegratedTransmittanceTexture })
         .add<CLodExtensionTypeTag>(typeEntity);
 }
 
@@ -1151,6 +1239,25 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_vsmExpandedBlockMetaBufferSw, "Cluster LOD virtual shadow maps");
 }
 
+void CLodExtension::TagTransparencyResourceUsages()
+{
+    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
+        if (buffer) {
+            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
+        }
+    };
+    auto tagTextureUsage = [](const std::shared_ptr<PixelBuffer>& texture, std::string_view usage) {
+        if (texture) {
+            rg::memory::SetResourceUsageHint(*texture, std::string(usage));
+        }
+    };
+
+    tagBufferUsage(m_fixedSliceScalarVBOITConfigBuffer, "Cluster LOD fixed-slice scalar VBOIT");
+    tagTextureUsage(m_fixedSliceScalarVBOITOccupancyTexture, "Cluster LOD fixed-slice scalar VBOIT");
+    tagTextureUsage(m_fixedSliceScalarVBOITExtinctionTexture, "Cluster LOD fixed-slice scalar VBOIT");
+    tagTextureUsage(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture, "Cluster LOD fixed-slice scalar VBOIT");
+}
+
 void CLodExtension::ReleaseBufferBackings()
 {
     std::unordered_set<Buffer*> releasedBuffers;
@@ -1231,6 +1338,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_deepVisibilityCounterBuffer);
     releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
     releaseBufferBacking(m_deepVisibilityStatsBuffer);
+    releaseBufferBacking(m_fixedSliceScalarVBOITConfigBuffer);
     releaseBufferBacking(m_shadowPageMetadataBuffer);
     releaseBufferBacking(m_shadowInvalidationInputsBuffer);
     releaseBufferBacking(m_shadowInvalidationCountBuffer);
@@ -1281,6 +1389,20 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_vsmExpandedBlockMetaBuffer);
     releaseBufferBacking(m_vsmExpandedVisibleClustersBufferSw);
     releaseBufferBacking(m_vsmExpandedBlockMetaBufferSw);
+}
+
+void CLodExtension::ReleaseTransparencyResourceBackings()
+{
+    std::unordered_set<PixelBuffer*> releasedTextures;
+    auto releaseTextureBacking = [&releasedTextures](const std::shared_ptr<PixelBuffer>& texture) {
+        if (texture && releasedTextures.insert(texture.get()).second) {
+            texture->Dematerialize();
+        }
+    };
+
+    releaseTextureBacking(m_fixedSliceScalarVBOITOccupancyTexture);
+    releaseTextureBacking(m_fixedSliceScalarVBOITExtinctionTexture);
+    releaseTextureBacking(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture);
 }
 
 void CLodExtension::ReleaseShadowResourceBackings()
@@ -1620,8 +1742,10 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     }
 
     InitializeDeepVisibilityResources();
+    InitializeFixedSliceScalarVBOITResources();
     InitializeShadowResources();
     TagCoreResourceUsages();
+    TagTransparencyResourceUsages();
     TagShadowResourceUsages();
 }
 
@@ -1681,6 +1805,7 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
 {
     m_providerRegisteredForCurrentRegistry = false;
     ReleaseBufferBackings();
+    ReleaseTransparencyResourceBackings();
     ReleaseShadowResourceBackings();
     m_shadowVirtualResourcesNeedReset = true;
 
@@ -1755,6 +1880,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     const auto softwareRasterMode =
         SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
+    const auto transparencyMode = GetTransparencyMode(m_type);
     const bool disableReyesTessellation =
         SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
     if (!disableReyesTessellation) {
@@ -2260,6 +2386,17 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     }
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
+        if (transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT) {
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Render(
+                    MakeVariantPassName(traits, "FixedSliceScalarVBOITSetupPass"),
+                    std::make_shared<FixedSliceScalarVBOITSetupPass>(
+                        m_fixedSliceScalarVBOITConfigBuffer,
+                        m_fixedSliceScalarVBOITOccupancyTexture,
+                        m_fixedSliceScalarVBOITExtinctionTexture,
+                        m_fixedSliceScalarVBOITIntegratedTransmittanceTexture)));
+        }
+
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Render(
                 MakeVariantPassName(traits, "ClearDeepVisibilityPass"),
@@ -2310,6 +2447,23 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 slabGroup));
         rasterizeDeepVisibilityPassDesc.GeometryPass();
         outPasses.push_back(std::move(rasterizeDeepVisibilityPassDesc));
+
+        if (transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT) {
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "FixedSliceScalarVBOITIntegratePass"),
+                    std::make_shared<FixedSliceScalarVBOITIntegratePass>(
+                        disableReyesTessellation ? nullptr : m_reyesDiceQueueBuffer,
+                        disableReyesTessellation ? nullptr : m_reyesTessTableConfigsBuffer,
+                        disableReyesTessellation ? nullptr : m_reyesTessTableVerticesBuffer,
+                        disableReyesTessellation ? nullptr : m_reyesTessTableTrianglesBuffer,
+                        m_deepVisibilityNodesBuffer,
+                        m_fixedSliceScalarVBOITConfigBuffer,
+                        m_fixedSliceScalarVBOITOccupancyTexture,
+                        m_fixedSliceScalarVBOITExtinctionTexture,
+                        m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
+                        CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters))));
+        }
 
         auto resolveDeepVisibilityPassDesc = RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "DeepVisibilityResolvePass"),

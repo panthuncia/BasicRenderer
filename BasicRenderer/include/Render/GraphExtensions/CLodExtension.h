@@ -31,11 +31,14 @@ private:
     void RefreshCoreVisibleClusterCapacity();
     void InitializeCoreResources();
     void InitializeDeepVisibilityResources();
+    void InitializeFixedSliceScalarVBOITResources();
     void InitializeShadowResources();
     void RefreshShadowResourcesForCurrentSettings();
     void TagCoreResourceUsages();
+    void TagTransparencyResourceUsages();
     void TagShadowResourceUsages();
     void ReleaseBufferBackings();
+    void ReleaseTransparencyResourceBackings();
     void ReleaseShadowResourceBackings();
     void EnsureReyesResourcesInitialized();
     void SyncReyesResourceEntities(bool enabled);
@@ -134,6 +137,10 @@ private:
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityStatsBuffer;
+    std::shared_ptr<Buffer> m_fixedSliceScalarVBOITConfigBuffer;
+    std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITOccupancyTexture;
+    std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITExtinctionTexture;
+    std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITIntegratedTransmittanceTexture;
     std::shared_ptr<PixelBuffer> m_shadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_shadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_shadowPageMetadataBuffer;

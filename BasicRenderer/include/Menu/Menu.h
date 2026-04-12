@@ -511,6 +511,10 @@ private:
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
 
+    CLodTransparencyMode m_clodTransparencyMode = CLodTransparencyMode::LinkedListDeepVisibility;
+    std::function<CLodTransparencyMode()> getCLodTransparencyMode;
+    std::function<void(CLodTransparencyMode)> setCLodTransparencyMode;
+
     bool m_clodDisableReyesRasterization = false;
     std::function<bool()> getCLodDisableReyesRasterization;
     std::function<void(bool)> setCLodDisableReyesRasterization;
@@ -801,6 +805,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
     observerSetting(m_clodSoftwareRasterMode, CLodSoftwareRasterModeSettingName);
+
+    getCLodTransparencyMode = settingsManager.getSettingGetter<CLodTransparencyMode>(CLodTransparencyModeSettingName);
+    setCLodTransparencyMode = settingsManager.getSettingSetter<CLodTransparencyMode>(CLodTransparencyModeSettingName);
+    m_clodTransparencyMode = getCLodTransparencyMode();
+    observerSetting(m_clodTransparencyMode, CLodTransparencyModeSettingName);
 
     getCLodDisableReyesRasterization = settingsManager.getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName);
     setCLodDisableReyesRasterization = settingsManager.getSettingSetter<bool>(CLodDisableReyesRasterizationSettingName);
@@ -1202,6 +1211,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
             m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
             setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
+        }
+        int clodTransparencyModeIndex = static_cast<int>(m_clodTransparencyMode);
+        if (ImGui::Combo("Transparency Mode", &clodTransparencyModeIndex, CLodTransparencyModeNames, CLodTransparencyModeCount)) {
+            clodTransparencyModeIndex = std::clamp(clodTransparencyModeIndex, 0, CLodTransparencyModeCount - 1);
+            m_clodTransparencyMode = static_cast<CLodTransparencyMode>(clodTransparencyModeIndex);
+            setCLodTransparencyMode(m_clodTransparencyMode);
         }
         if (ImGui::Checkbox("Disable Reyes Tessellation/Displacement", &m_clodDisableReyesRasterization)) {
             setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);

@@ -35,6 +35,7 @@ inline constexpr const char* CLodDirectionalVirtualShadowSmrtSamplesPerRayDirect
 inline constexpr const char* CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName = "clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees";
 inline constexpr const char* CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName = "clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional";
 inline constexpr const char* CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName = "clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld";
+inline constexpr const char* CLodTransparencyModeSettingName = "clodTransparencyMode";
 enum class CLodPriorityMode : uint8_t {
     Max, // Duplicate group requests keep the maximum reported priority
     Sum, // Duplicate group requests accumulate (sum) their priorities
@@ -52,6 +53,11 @@ enum class CLodRasterOutputKind : uint8_t {
     DeepVisibility,
 };
 
+enum class CLodTransparencyMode : uint8_t {
+    LinkedListDeepVisibility,
+    FixedSliceScalarVBOIT,
+};
+
 inline constexpr const char* CLodSoftwareRasterModeSettingName = "clodSoftwareRasterMode";
 inline constexpr const char* CLodSoftwareRasterModeNames[] = {
     "Disabled",
@@ -59,6 +65,14 @@ inline constexpr const char* CLodSoftwareRasterModeNames[] = {
     "Work Graph",
 };
 inline constexpr int CLodSoftwareRasterModeCount = static_cast<int>(sizeof(CLodSoftwareRasterModeNames) / sizeof(CLodSoftwareRasterModeNames[0]));
+inline constexpr const char* CLodTransparencyModeNames[] = {
+    "Linked-List Deep Visibility",
+    "Fixed-Slice Scalar VBOIT",
+};
+inline constexpr int CLodTransparencyModeCount = static_cast<int>(sizeof(CLodTransparencyModeNames) / sizeof(CLodTransparencyModeNames[0]));
+inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultSliceCount = 16u;
+inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultDownsampleFactor = 4u;
+inline constexpr float CLodFixedSliceScalarVBOITDefaultResolutionScale = 1.0f / static_cast<float>(CLodFixedSliceScalarVBOITDefaultDownsampleFactor);
 
 constexpr bool CLodSoftwareRasterEnabled(CLodSoftwareRasterMode mode)
 {
@@ -155,6 +169,24 @@ struct CLodDeepVisibilityStats
 };
 
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
+
+struct CLodFixedSliceScalarVBOITConfig
+{
+    uint32_t occupancyUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t extinctionUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t integratedTransmittanceUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t shadingTransmittanceSRVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t sliceCount = 0u;
+    uint32_t lowResolutionWidth = 0u;
+    uint32_t lowResolutionHeight = 0u;
+    uint32_t flags = 0u;
+    float viewNearDepth = 0.0f;
+    float viewFarDepth = 0.0f;
+    float inverseSliceCount = 0.0f;
+    float lowResolutionScale = 0.0f;
+};
+
+static_assert(sizeof(CLodFixedSliceScalarVBOITConfig) == 48u, "CLodFixedSliceScalarVBOITConfig size must match HLSL");
 
 inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 22u;
 inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 22u;
