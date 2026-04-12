@@ -1,7 +1,11 @@
 #include "include/cbuffers.hlsli"
 #include "PerPassRootConstants/clodFixedSliceScalarVBOITResolveRootConstants.h"
 
-float SampleBackgroundTransmittance(Texture2DArray<float> integratedTransmittanceTexture, CLodFixedSliceScalarVBOITConfig config, uint2 pixel)
+float SampleBackgroundTransmittance(
+    Texture2DArray<float> integratedTransmittanceTexture,
+    CLodFixedSliceScalarVBOITConfig config,
+    PerFrameBuffer perFrameBuffer,
+    uint2 pixel)
 {
     if (config.sliceCount == 0u ||
         config.lowResolutionWidth == 0u ||
@@ -24,6 +28,7 @@ float SampleBackgroundTransmittance(Texture2DArray<float> integratedTransmittanc
 [numthreads(8, 8, 1)]
 void CLodFixedSliceScalarVBOITResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     RWTexture2D<float4> hdrTarget = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Color::HDRColorTarget)];
     uint width, height;
     hdrTarget.GetDimensions(width, height);
@@ -46,7 +51,11 @@ void CLodFixedSliceScalarVBOITResolveCS(uint3 dispatchThreadId : SV_DispatchThre
     }
 
     const float4 existingHdr = hdrTarget[pixel];
-    const float residualTransmittance = saturate(SampleBackgroundTransmittance(integratedTransmittanceTexture, config, pixel));
+    const float residualTransmittance = saturate(SampleBackgroundTransmittance(
+        integratedTransmittanceTexture,
+        config,
+        perFrameBuffer,
+        pixel));
     hdrTarget[pixel] = float4(
         accumulated.rgb + existingHdr.rgb * residualTransmittance,
         saturate(accumulated.a + existingHdr.a * residualTransmittance));

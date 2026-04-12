@@ -24,7 +24,8 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
         dispatchThreadId.y >= config.lowResolutionHeight ||
         config.occupancyUAVDescriptorIndex == 0xFFFFFFFFu ||
         config.extinctionUAVDescriptorIndex == 0xFFFFFFFFu ||
-        config.integratedTransmittanceUAVDescriptorIndex == 0xFFFFFFFFu)
+        config.integratedTransmittanceUAVDescriptorIndex == 0xFFFFFFFFu ||
+        config.zeroTransmittanceSliceUAVDescriptorIndex == 0xFFFFFFFFu)
     {
         return;
     }
@@ -32,8 +33,37 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
     RWTexture2DArray<uint> extinctionTexture = ResourceDescriptorHeap[config.extinctionUAVDescriptorIndex];
     RWTexture2D<float> occupancyTexture = ResourceDescriptorHeap[config.occupancyUAVDescriptorIndex];
     RWTexture2DArray<float> integratedTransmittanceTexture = ResourceDescriptorHeap[config.integratedTransmittanceUAVDescriptorIndex];
+    RWTexture2D<uint> zeroTransmittanceSliceTexture = ResourceDescriptorHeap[config.zeroTransmittanceSliceUAVDescriptorIndex];
     const uint2 lowPixel = dispatchThreadId.xy;
+    const bool lowTileOccupied = occupancyTexture[lowPixel] > 0.0f;
 
+    if (!lowTileOccupied)
+    {
+        if (IsFixedSliceScalarVBOITDebugOutput(perFrameBuffer.outputType))
+        {
+            RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
+            const uint2 payload = perFrameBuffer.outputType == OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE
+                ? PackDebugFloat1(1.0f)
+                : PackDebugUint(0u);
+            const uint2 renderResolution = uint2(perFrameBuffer.screenResX, perFrameBuffer.screenResY);
+            const uint2 tileMin = lowPixel * CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR;
+            const uint2 tileMax = min(
+                tileMin + uint2(CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR, CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR),
+                renderResolution);
+            [loop]
+            for (uint fullY = tileMin.y; fullY < tileMax.y; ++fullY)
+            {
+                [loop]
+                for (uint fullX = tileMin.x; fullX < tileMax.x; ++fullX)
+                {
+                    WriteDebugPixel(debugVisTex, uint2(fullX, fullY), payload);
+                }
+            }
+        }
+        return;
+    }
+
+    const float zeroTransmittanceThreshold = clamp(config.zeroTransmittanceThreshold, 0.0f, 1.0f);
     float cumulativeTransmittance = 1.0f;
     [loop]
     for (uint sliceIndex = 0u; sliceIndex < config.sliceCount; ++sliceIndex)
@@ -42,6 +72,20 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
             CLOD_FIXED_SLICE_SCALAR_VBOIT_EXTINCTION_QUANTIZATION_SCALE;
         const float sliceExtinction = 1.0f - exp(-opticalDepth);
         cumulativeTransmittance *= (1.0f - sliceExtinction);
+
+        if (zeroTransmittanceThreshold > 0.0f && cumulativeTransmittance <= zeroTransmittanceThreshold)
+        {
+            cumulativeTransmittance = 0.0f;
+            zeroTransmittanceSliceTexture[lowPixel] = sliceIndex;
+            integratedTransmittanceTexture[uint3(lowPixel, sliceIndex)] = 0.0f;
+            [loop]
+            for (uint remainingSliceIndex = sliceIndex + 1u; remainingSliceIndex < config.sliceCount; ++remainingSliceIndex)
+            {
+                integratedTransmittanceTexture[uint3(lowPixel, remainingSliceIndex)] = 0.0f;
+            }
+            break;
+        }
+
         integratedTransmittanceTexture[uint3(lowPixel, sliceIndex)] = cumulativeTransmittance;
     }
 

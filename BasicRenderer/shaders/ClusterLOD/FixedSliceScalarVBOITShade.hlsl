@@ -6,11 +6,21 @@
 #include "include/visibilityPacking.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
-uint ComputeDepthSlice(CLodFixedSliceScalarVBOITConfig config, float depth)
+float ComputeDepthSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float depth)
 {
     const float depthRange = max(config.viewFarDepth - config.viewNearDepth, 1.0e-5f);
     const float normalizedDepth = saturate((depth - config.viewNearDepth) / depthRange);
-    return min(config.sliceCount - 1u, (uint)(normalizedDepth * config.sliceCount));
+    const float depthExponent = max(config.depthDistributionExponent, 1.0e-4f);
+    const float distributedDepth = pow(normalizedDepth, depthExponent);
+    return distributedDepth * (float)(max(config.sliceCount, 1u) - 1u);
+}
+
+float ComputeLookupSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float sliceCoordinate)
+{
+    return clamp(
+        sliceCoordinate - config.lookupDepthBiasInSlices,
+        0.0f,
+        (float)(max(config.sliceCount, 1u) - 1u));
 }
 
 float SampleIntegratedTransmittance(
@@ -18,9 +28,9 @@ float SampleIntegratedTransmittance(
     CLodFixedSliceScalarVBOITConfig config,
     PerFrameBuffer perFrameBuffer,
     uint2 pixel,
-    uint sliceIndex)
+    float sliceCoordinate)
 {
-    if (sliceIndex == 0u ||
+    if (config.sliceCount == 0u ||
         config.lowResolutionWidth == 0u ||
         config.lowResolutionHeight == 0u ||
         perFrameBuffer.screenResX == 0u ||
@@ -31,7 +41,14 @@ float SampleIntegratedTransmittance(
 
     const float2 uv = (float2(pixel) + 0.5f) /
         float2((float)perFrameBuffer.screenResX, (float)perFrameBuffer.screenResY);
-    return integratedTransmittanceTexture.SampleLevel(g_linearClamp, float3(uv, (float)(sliceIndex - 1u)), 0.0f);
+    const float biasedSliceCoordinate = ComputeLookupSliceCoordinate(config, sliceCoordinate);
+    const uint sliceIndex = min((uint)floor(biasedSliceCoordinate), config.sliceCount - 1u);
+    const float sliceLerpFactor = saturate(biasedSliceCoordinate - (float)sliceIndex);
+    const float previousTransmittance = sliceIndex == 0u
+        ? 1.0f
+        : integratedTransmittanceTexture.SampleLevel(g_linearClamp, float3(uv, (float)(sliceIndex - 1u)), 0.0f);
+    const float currentTransmittance = integratedTransmittanceTexture.SampleLevel(g_linearClamp, float3(uv, (float)sliceIndex), 0.0f);
+    return lerp(previousTransmittance, currentTransmittance, sliceLerpFactor);
 }
 
 [shader("pixel")]
@@ -108,15 +125,15 @@ float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace
         return 0.0f.xxxx;
     }
 
+    const float sliceCoordinate = ComputeDepthSliceCoordinate(config, sample.linearDepth);
     Texture2DArray<float> integratedTransmittanceTexture = ResourceDescriptorHeap[config.shadingTransmittanceSRVDescriptorIndex];
-    const uint sliceIndex = ComputeDepthSlice(config, sample.linearDepth);
     const float transmittance = SampleIntegratedTransmittance(
         integratedTransmittanceTexture,
         config,
         perFrameBuffer,
         pixel,
-        sliceIndex);
-    if (transmittance <= 1.0e-4f)
+        sliceCoordinate);
+    if (transmittance <= max(config.zeroTransmittanceThreshold, 1.0e-4f))
     {
         return 0.0f.xxxx;
     }

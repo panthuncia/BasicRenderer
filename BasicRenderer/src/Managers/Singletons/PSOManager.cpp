@@ -328,6 +328,7 @@ void PSOManager::Cleanup() {
     m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache.clear();
     m_clusterLODFixedSliceScalarVBOITRasterPSOCache.clear();
     m_clusterLODFixedSliceScalarVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
@@ -443,6 +444,14 @@ const PipelineState& PSOManager::GetClusterLODDeepVisibilityRasterPSO(MaterialRa
     std::scoped_lock lock(m_cacheMutex);
     return GetOrCreatePipelineState(m_clusterLODDeepVisibilityRasterPSOCache, key, [&]() {
         return CreateClusterLODDeepVisibilityRasterPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODFixedSliceScalarVBOITOccupancyPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache, key, [&]() {
+        return CreateClusterLODFixedSliceScalarVBOITOccupancyPSO(materialRasterFlags, wireframe);
     });
 }
 
@@ -1000,6 +1009,51 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITRasterPSO(
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
         throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT raster PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITOccupancyPSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+    defines.push_back(DxcDefine{ L"CLOD_FIXED_SLICE_SCALAR_VBOIT_OCCUPANCY_ONLY", L"1" });
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITCapture.hlsl", L"FixedSliceScalarVBOITCapturePSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "FixedSliceScalarVBOITCapturePSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT occupancy PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
@@ -2275,6 +2329,7 @@ void PSOManager::ReloadShaders() {
     m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache.clear();
     m_clusterLODFixedSliceScalarVBOITRasterPSOCache.clear();
     m_clusterLODFixedSliceScalarVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();

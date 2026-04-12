@@ -9,6 +9,9 @@
 
 static const uint REYES_SPLIT_GROUP_SIZE = 64u;
 static const uint REYES_SPLIT_TELEMETRY_PASS_COUNT = 4u;
+static const float REYES_SHADOW_FINE_TARGET_TEXELS_PER_MICRO_TRIANGLE = 1.0f;
+static const float REYES_SHADOW_COARSE_TARGET_TEXELS_PER_TRIANGLE =
+    0.1f * float(kCLodVirtualShadowPhysicalPageSize);
 
 float3 ReyesInterpolateTriangle(float3 p0, float3 p1, float3 p2, float3 barycentrics)
 {
@@ -28,6 +31,20 @@ float3 ComputeReyesEdgeTessFactors(float3 worldPosition0, float3 worldPosition1,
 
     const float scale = camera.projY * REYES_SCREEN_SCALE_REFERENCE * REYES_PROJECTED_PIXEL_TO_TESS_FACTOR_SCALE;
     return max(float3(1.0f, 1.0f, 1.0f), float3(edge01 / distance01, edge12 / distance12, edge20 / distance20) * scale);
+}
+
+float3 ComputeReyesShadowEdgeTessFactors(
+    float3 worldPosition0,
+    float3 worldPosition1,
+    float3 worldPosition2,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    float targetTexelsPerTriangle)
+{
+    const float edge01 = length(worldPosition0 - worldPosition1);
+    const float edge12 = length(worldPosition1 - worldPosition2);
+    const float edge20 = length(worldPosition2 - worldPosition0);
+    const float targetWorldLength = max(clipmapInfo.texelWorldSize * max(targetTexelsPerTriangle, 1.0f), 1e-5f);
+    return max(float3(1.0f, 1.0f, 1.0f), float3(edge01, edge12, edge20) / targetWorldLength);
 }
 
 // Compute per-edge split factors: how many segments to split each edge into,
@@ -69,7 +86,6 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[CLOD_REYES_SPLIT_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[CLOD_REYES_SPLIT_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[CLOD_REYES_SPLIT_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
-
     const CLodReyesSplitQueueEntry splitEntry = splitQueue[splitIndex];
     const uint splitPassTelemetryIndex = min(splitEntry.splitLevel, REYES_SPLIT_TELEMETRY_PASS_COUNT - 1u);
     InterlockedAdd(telemetryBuffer[0].splitInputCounts[splitPassTelemetryIndex], 1u);
@@ -133,7 +149,32 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 currentPosition1WS = mul(float4(currentPosition1OS, 1.0f), objectData.model).xyz;
     const float3 currentPosition2WS = mul(float4(currentPosition2OS, 1.0f), objectData.model).xyz;
 
-    const float3 edgeFactors = ComputeReyesEdgeTessFactors(currentPosition0WS, currentPosition1WS, currentPosition2WS, camera);
+    float3 edgeFactors = ComputeReyesEdgeTessFactors(currentPosition0WS, currentPosition1WS, currentPosition2WS, camera);
+    const uint routeKind = CLodReyesDecodeRouteKind(splitEntry.flags);
+    if (routeKind == CLOD_REYES_ROUTE_FINE_MICROPOLY_VSM || routeKind == CLOD_REYES_ROUTE_COARSE_HARDWARE_VSM)
+    {
+        const uint clipmapIndex = CLodVisibleClusterShadowClipmapIndex(packedCluster);
+        if (CLOD_REYES_SPLIT_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX != 0xFFFFFFFFu &&
+            clipmapIndex < kCLodVirtualShadowClipmapCount)
+        {
+            StructuredBuffer<CLodVirtualShadowClipmapInfo> shadowClipmapInfos =
+                ResourceDescriptorHeap[CLOD_REYES_SPLIT_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+            const CLodVirtualShadowClipmapInfo clipmapInfo = shadowClipmapInfos[clipmapIndex];
+            if (CLodVirtualShadowClipmapIsValid(clipmapInfo))
+            {
+                const float targetTexelsPerTriangle =
+                    routeKind == CLOD_REYES_ROUTE_FINE_MICROPOLY_VSM
+                        ? REYES_SHADOW_FINE_TARGET_TEXELS_PER_MICRO_TRIANGLE
+                        : REYES_SHADOW_COARSE_TARGET_TEXELS_PER_TRIANGLE;
+                edgeFactors = ComputeReyesShadowEdgeTessFactors(
+                    currentPosition0WS,
+                    currentPosition1WS,
+                    currentPosition2WS,
+                    clipmapInfo,
+                    targetTexelsPerTriangle);
+            }
+        }
+    }
     const float maxEdgeFactor = max(edgeFactors.x, max(edgeFactors.y, edgeFactors.z));
 
     const uint nextSplitLevel = splitEntry.splitLevel + 1u;

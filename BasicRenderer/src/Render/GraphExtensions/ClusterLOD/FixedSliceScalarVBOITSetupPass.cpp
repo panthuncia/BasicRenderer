@@ -13,11 +13,13 @@ FixedSliceScalarVBOITSetupPass::FixedSliceScalarVBOITSetupPass(
     std::shared_ptr<PixelBuffer> occupancyTexture,
     std::shared_ptr<PixelBuffer> extinctionTexture,
     std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
+    std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture,
     std::shared_ptr<PixelBuffer> accumulationTexture)
     : m_configBuffer(std::move(configBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
     , m_extinctionTexture(std::move(extinctionTexture))
     , m_integratedTransmittanceTexture(std::move(integratedTransmittanceTexture))
+    , m_zeroTransmittanceSliceTexture(std::move(zeroTransmittanceSliceTexture))
     , m_accumulationTexture(std::move(accumulationTexture))
 {
 }
@@ -31,7 +33,8 @@ void FixedSliceScalarVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* bu
     builder->WithUnorderedAccess(
         m_occupancyTexture,
         m_extinctionTexture,
-        m_integratedTransmittanceTexture);
+        m_integratedTransmittanceTexture,
+        m_zeroTransmittanceSliceTexture);
 
     if (m_accumulationTexture) {
         builder->WithRenderTarget(m_accumulationTexture);
@@ -54,6 +57,7 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
     m_occupancyTexture->EnsureVirtualDescriptorSlotsAllocated();
 	m_extinctionTexture->EnsureVirtualDescriptorSlotsAllocated();
 	m_integratedTransmittanceTexture->EnsureVirtualDescriptorSlotsAllocated();
+    m_zeroTransmittanceSliceTexture->EnsureVirtualDescriptorSlotsAllocated();
 
     CLodFixedSliceScalarVBOITConfig config{};
     config.occupancyUAVDescriptorIndex = m_occupancyTexture
@@ -68,13 +72,18 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
     config.shadingTransmittanceSRVDescriptorIndex = m_integratedTransmittanceTexture
         ? m_integratedTransmittanceTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
         : 0xFFFFFFFFu;
+    config.zeroTransmittanceSliceUAVDescriptorIndex = m_zeroTransmittanceSliceTexture
+        ? m_zeroTransmittanceSliceTexture->GetUAVShaderVisibleInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    config.zeroTransmittanceSliceSRVDescriptorIndex = m_zeroTransmittanceSliceTexture
+        ? m_zeroTransmittanceSliceTexture->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
     config.sliceCount = CLodFixedSliceScalarVBOITDefaultSliceCount;
     config.lowResolutionWidth = m_occupancyTexture ? m_occupancyTexture->GetWidth() : 0u;
     config.lowResolutionHeight = m_occupancyTexture ? m_occupancyTexture->GetHeight() : 0u;
-    config.inverseSliceCount = config.sliceCount > 0u ? 1.0f / static_cast<float>(config.sliceCount) : 0.0f;
-    config.lowResolutionScale = context.renderResolution.x > 0u
-        ? static_cast<float>(config.lowResolutionWidth) / static_cast<float>(context.renderResolution.x)
-        : CLodFixedSliceScalarVBOITDefaultResolutionScale;
+    config.depthDistributionExponent = CLodFixedSliceScalarVBOITDefaultDepthDistributionExponent;
+    config.lookupDepthBiasInSlices = CLodFixedSliceScalarVBOITDefaultLookupDepthBiasInSlices;
+    config.zeroTransmittanceThreshold = CLodFixedSliceScalarVBOITDefaultZeroTransmittanceThreshold;
 
     if (context.viewManager) {
         context.viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewID) {
@@ -99,7 +108,7 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-    const auto clearFloatResource = [&commandList](PixelBuffer* resource) {
+    const auto clearFloatResource = [&commandList](PixelBuffer* resource, float clearValueScalar = 0.0f) {
         if (!resource) {
             return;
         }
@@ -110,10 +119,10 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
         clearInfo.resource = resource->GetAPIResource();
 
         rhi::UavClearFloat clearValue{};
-        clearValue.v[0] = 0.0f;
-        clearValue.v[1] = 0.0f;
-        clearValue.v[2] = 0.0f;
-        clearValue.v[3] = 0.0f;
+        clearValue.v[0] = clearValueScalar;
+        clearValue.v[1] = clearValueScalar;
+        clearValue.v[2] = clearValueScalar;
+        clearValue.v[3] = clearValueScalar;
         commandList.ClearUavFloat(clearInfo, clearValue);
     };
 
@@ -142,7 +151,20 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
     else {
         clearFloatResource(m_extinctionTexture.get());
     }
-    clearFloatResource(m_integratedTransmittanceTexture.get());
+    clearFloatResource(m_integratedTransmittanceTexture.get(), 1.0f);
+    if (m_zeroTransmittanceSliceTexture) {
+        rhi::UavClearInfo clearInfo{};
+        clearInfo.cpuVisible = m_zeroTransmittanceSliceTexture->GetUAVNonShaderVisibleInfo(0).slot;
+        clearInfo.shaderVisible = m_zeroTransmittanceSliceTexture->GetUAVShaderVisibleInfo(0).slot;
+        clearInfo.resource = m_zeroTransmittanceSliceTexture->GetAPIResource();
+
+        rhi::UavClearUint clearValue{};
+        clearValue.v[0] = CLodFixedSliceScalarVBOITDefaultSliceCount;
+        clearValue.v[1] = CLodFixedSliceScalarVBOITDefaultSliceCount;
+        clearValue.v[2] = CLodFixedSliceScalarVBOITDefaultSliceCount;
+        clearValue.v[3] = CLodFixedSliceScalarVBOITDefaultSliceCount;
+        commandList.ClearUavUint(clearInfo, clearValue);
+    }
 
     if (m_accumulationTexture) {
         commandList.ClearRenderTargetView(

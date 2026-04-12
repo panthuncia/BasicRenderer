@@ -2,6 +2,7 @@
 
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "BuiltinResources.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Resources/Buffers/Buffer.h"
@@ -51,7 +52,9 @@ void ReyesBuildRasterWorkPass::DeclareResourceUsages(ComputePassBuilder* builder
     builder->WithShaderResource(
             m_diceQueueBuffer,
             m_diceQueueCounterBuffer,
-            m_tessTableConfigsBuffer)
+            m_tessTableConfigsBuffer,
+            Builtin::PerMeshBuffer,
+            Builtin::PerMeshInstanceBuffer)
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
             m_rasterWorkBuffer,

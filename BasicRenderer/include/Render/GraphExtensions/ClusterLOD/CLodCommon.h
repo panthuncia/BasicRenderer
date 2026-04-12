@@ -18,6 +18,7 @@ inline constexpr const char* CLodDisableReyesRasterizationSettingName = "clodDis
 inline constexpr const char* CLodReyesResourceBudgetBytesSettingName = "clodReyesResourceBudgetBytes";
 inline constexpr const char* CLodDisableVirtualShadowPageCachingSettingName = "clodDisableVirtualShadowPageCaching";
 inline constexpr const char* CLodEnablePageJobVSMSettingName = "clodEnablePageJobVSM";
+inline constexpr const char* CLodVSMRasterModeSettingName = "clodVsmRasterMode";
 inline constexpr const char* CLodPageJobDiameterThresholdSettingName = "clodPageJobDiameterThreshold";
 inline constexpr const char* CLodPageJobSparseRatioSettingName = "clodPageJobSparseRatio";
 inline constexpr const char* CLodPageJobMaxPagesPerClusterSettingName = "clodPageJobMaxPagesPerCluster";
@@ -47,10 +48,18 @@ enum class CLodSoftwareRasterMode : uint8_t {
     WorkGraph,
 };
 
+enum class CLodVSMRasterMode : uint8_t {
+    HardwareOnly,
+    Standard,
+    PageJob,
+    Reyes,
+};
+
 enum class CLodRasterOutputKind : uint8_t {
     VisibilityBuffer,
     VirtualShadow,
     DeepVisibility,
+    FixedSliceScalarVBOITOccupancy,
     FixedSliceScalarVBOIT,
     FixedSliceScalarVBOITShading,
 };
@@ -67,6 +76,13 @@ inline constexpr const char* CLodSoftwareRasterModeNames[] = {
     "Work Graph",
 };
 inline constexpr int CLodSoftwareRasterModeCount = static_cast<int>(sizeof(CLodSoftwareRasterModeNames) / sizeof(CLodSoftwareRasterModeNames[0]));
+inline constexpr const char* CLodVSMRasterModeNames[] = {
+    "Hardware Only",
+    "Standard",
+    "Page-Job",
+    "Reyes",
+};
+inline constexpr int CLodVSMRasterModeCount = static_cast<int>(sizeof(CLodVSMRasterModeNames) / sizeof(CLodVSMRasterModeNames[0]));
 inline constexpr const char* CLodTransparencyModeNames[] = {
     "Linked-List Deep Visibility",
     "Fixed-Slice Scalar VBOIT",
@@ -75,6 +91,9 @@ inline constexpr int CLodTransparencyModeCount = static_cast<int>(sizeof(CLodTra
 inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultSliceCount = 16u;
 inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultDownsampleFactor = 4u;
 inline constexpr float CLodFixedSliceScalarVBOITExtinctionQuantizationScale = 4096.0f;
+inline constexpr float CLodFixedSliceScalarVBOITDefaultDepthDistributionExponent = 1.0f;
+inline constexpr float CLodFixedSliceScalarVBOITDefaultLookupDepthBiasInSlices = 0.5f;
+inline constexpr float CLodFixedSliceScalarVBOITDefaultZeroTransmittanceThreshold = 1.0e-3f;
 inline constexpr float CLodFixedSliceScalarVBOITDefaultResolutionScale = 1.0f / static_cast<float>(CLodFixedSliceScalarVBOITDefaultDownsampleFactor);
 
 constexpr bool CLodSoftwareRasterEnabled(CLodSoftwareRasterMode mode)
@@ -90,6 +109,26 @@ constexpr bool CLodSoftwareRasterUsesCompute(CLodSoftwareRasterMode mode)
 constexpr bool CLodSoftwareRasterUsesWorkGraph(CLodSoftwareRasterMode mode)
 {
     return mode == CLodSoftwareRasterMode::WorkGraph;
+}
+
+constexpr bool CLodVSMRasterModeUsesLegacyRasterOnly(CLodVSMRasterMode mode)
+{
+    return mode == CLodVSMRasterMode::HardwareOnly;
+}
+
+constexpr bool CLodVSMRasterModeUsesLargeClusterPageJob(CLodVSMRasterMode mode)
+{
+    return mode == CLodVSMRasterMode::PageJob;
+}
+
+constexpr bool CLodVSMRasterModeUsesLargeClusterShadowRouting(CLodVSMRasterMode mode)
+{
+    return mode == CLodVSMRasterMode::PageJob || mode == CLodVSMRasterMode::Reyes;
+}
+
+constexpr bool CLodVSMRasterModeUsesReyes(CLodVSMRasterMode mode)
+{
+    return mode == CLodVSMRasterMode::Reyes;
 }
 
 struct RasterBucketsHistogramIndirectCommand
@@ -179,17 +218,21 @@ struct CLodFixedSliceScalarVBOITConfig
     uint32_t extinctionUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t integratedTransmittanceUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t shadingTransmittanceSRVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t zeroTransmittanceSliceUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t zeroTransmittanceSliceSRVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t sliceCount = 0u;
     uint32_t lowResolutionWidth = 0u;
     uint32_t lowResolutionHeight = 0u;
-    uint32_t flags = 0u;
     float viewNearDepth = 0.0f;
     float viewFarDepth = 0.0f;
-    float inverseSliceCount = 0.0f;
-    float lowResolutionScale = 0.0f;
+    float depthDistributionExponent = CLodFixedSliceScalarVBOITDefaultDepthDistributionExponent;
+    float lookupDepthBiasInSlices = CLodFixedSliceScalarVBOITDefaultLookupDepthBiasInSlices;
+    float zeroTransmittanceThreshold = CLodFixedSliceScalarVBOITDefaultZeroTransmittanceThreshold;
+    float pad0 = 0.0f;
+    float pad1 = 0.0f;
 };
 
-static_assert(sizeof(CLodFixedSliceScalarVBOITConfig) == 48u, "CLodFixedSliceScalarVBOITConfig size must match HLSL");
+static_assert(sizeof(CLodFixedSliceScalarVBOITConfig) == 64u, "CLodFixedSliceScalarVBOITConfig size must match HLSL");
 
 inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 22u;
 inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 22u;
@@ -745,10 +788,39 @@ inline constexpr uint32_t CLodReyesRasterBatchMicroTriangleCount = 16u;
 inline constexpr uint32_t CLodReyesMaxSourceTrianglesPerVisibleCluster = 128u;
 inline constexpr uint32_t CLodReyesMaxRasterWorkItemsPerPatch =
     (CLodReyesMaxVisibilityMicroTrianglesPerPatch + CLodReyesRasterBatchMicroTriangleCount - 1u) / CLodReyesRasterBatchMicroTriangleCount;
+inline constexpr float CLodReyesShadowFineTargetTexelsPerMicroTriangle = 1.0f;
+inline constexpr float CLodReyesShadowCoarseTargetPageFraction = 0.1f;
+inline constexpr float CLodReyesShadowCoarseTargetTexelsPerTriangle =
+    CLodReyesShadowCoarseTargetPageFraction * static_cast<float>(CLodVirtualShadowPhysicalPageSize);
 
 constexpr uint32_t CLodReyesPatchVisibilityIndexBase(uint32_t maxVisibleClusters)
 {
     return maxVisibleClusters;
+}
+
+enum class CLodReyesRouteKind : uint32_t
+{
+    Visibility = 0u,
+    FineMicropolyVSM = 1u,
+    CoarseHardwareVSM = 2u,
+};
+
+inline constexpr uint32_t CLodReyesFlagSkinned = 1u << 0;
+inline constexpr uint32_t CLodReyesFlagDisplacementEnabled = 1u << 1;
+inline constexpr uint32_t CLodReyesFlagRouteShift = 8u;
+inline constexpr uint32_t CLodReyesFlagRouteMask = 0x3u << CLodReyesFlagRouteShift;
+
+constexpr uint32_t CLodReyesEncodeFlags(bool skinned, bool displacementEnabled, CLodReyesRouteKind routeKind)
+{
+    return
+        (skinned ? CLodReyesFlagSkinned : 0u) |
+        (displacementEnabled ? CLodReyesFlagDisplacementEnabled : 0u) |
+        ((static_cast<uint32_t>(routeKind) << CLodReyesFlagRouteShift) & CLodReyesFlagRouteMask);
+}
+
+constexpr CLodReyesRouteKind CLodReyesDecodeRouteKind(uint32_t flags)
+{
+    return static_cast<CLodReyesRouteKind>((flags & CLodReyesFlagRouteMask) >> CLodReyesFlagRouteShift);
 }
 
 struct CLodReyesFullClusterOutput
@@ -831,7 +903,7 @@ struct CLodReyesRasterWorkEntry
     uint32_t diceQueueIndex = 0u;
     uint32_t microTriangleOffset = 0u;
     uint32_t microTriangleCount = 0u;
-    uint32_t reserved = 0u;
+    uint32_t rasterBucketIndex = 0u;
 };
 
 static_assert(sizeof(CLodReyesRasterWorkEntry) == 16u, "CLodReyesRasterWorkEntry size must match HLSL");

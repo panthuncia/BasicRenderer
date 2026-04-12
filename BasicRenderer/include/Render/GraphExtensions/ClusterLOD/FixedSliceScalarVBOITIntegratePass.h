@@ -15,7 +15,8 @@ public:
         std::shared_ptr<Buffer> configBuffer,
         std::shared_ptr<PixelBuffer> occupancyTexture,
         std::shared_ptr<PixelBuffer> extinctionTexture,
-        std::shared_ptr<PixelBuffer> integratedTransmittanceTexture);
+        std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
+        std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -29,6 +30,7 @@ private:
     std::shared_ptr<PixelBuffer> m_occupancyTexture;
     std::shared_ptr<PixelBuffer> m_extinctionTexture;
     std::shared_ptr<PixelBuffer> m_integratedTransmittanceTexture;
+    std::shared_ptr<PixelBuffer> m_zeroTransmittanceSliceTexture;
     bool m_declaredResourcesChanged = true;
     PipelineState m_pso;
 };

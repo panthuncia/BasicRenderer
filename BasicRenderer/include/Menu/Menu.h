@@ -511,6 +511,10 @@ private:
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
 
+    CLodVSMRasterMode m_clodVSMRasterMode = CLodVSMRasterMode::PageJob;
+    std::function<CLodVSMRasterMode()> getCLodVSMRasterMode;
+    std::function<void(CLodVSMRasterMode)> setCLodVSMRasterMode;
+
     CLodTransparencyMode m_clodTransparencyMode = CLodTransparencyMode::LinkedListDeepVisibility;
     std::function<CLodTransparencyMode()> getCLodTransparencyMode;
     std::function<void(CLodTransparencyMode)> setCLodTransparencyMode;
@@ -805,6 +809,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
     observerSetting(m_clodSoftwareRasterMode, CLodSoftwareRasterModeSettingName);
+
+    getCLodVSMRasterMode = settingsManager.getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName);
+    setCLodVSMRasterMode = settingsManager.getSettingSetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName);
+    m_clodVSMRasterMode = getCLodVSMRasterMode();
+    observerSetting(m_clodVSMRasterMode, CLodVSMRasterModeSettingName);
 
     getCLodTransparencyMode = settingsManager.getSettingGetter<CLodTransparencyMode>(CLodTransparencyModeSettingName);
     setCLodTransparencyMode = settingsManager.getSettingSetter<CLodTransparencyMode>(CLodTransparencyModeSettingName);
@@ -1207,10 +1216,16 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 			setMeshletCullingEnabled(meshletCulling);
 		}
         int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
-        if (ImGui::Combo("Software Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
+        if (ImGui::Combo("Visibility/Alpha SW Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
             m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
             setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
+        }
+        int clodVSMRasterModeIndex = static_cast<int>(m_clodVSMRasterMode);
+        if (ImGui::Combo("VSM Raster Mode", &clodVSMRasterModeIndex, CLodVSMRasterModeNames, CLodVSMRasterModeCount)) {
+            clodVSMRasterModeIndex = std::clamp(clodVSMRasterModeIndex, 0, CLodVSMRasterModeCount - 1);
+            m_clodVSMRasterMode = static_cast<CLodVSMRasterMode>(clodVSMRasterModeIndex);
+            setCLodVSMRasterMode(m_clodVSMRasterMode);
         }
         int clodTransparencyModeIndex = static_cast<int>(m_clodTransparencyMode);
         if (ImGui::Combo("Transparency Mode", &clodTransparencyModeIndex, CLodTransparencyModeNames, CLodTransparencyModeCount)) {
@@ -1218,16 +1233,13 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodTransparencyMode = static_cast<CLodTransparencyMode>(clodTransparencyModeIndex);
             setCLodTransparencyMode(m_clodTransparencyMode);
         }
-        if (ImGui::Checkbox("Disable Reyes Tessellation/Displacement", &m_clodDisableReyesRasterization)) {
+        if (ImGui::Checkbox("Disable Reyes Tessellation / VSM Reyes Routing", &m_clodDisableReyesRasterization)) {
             setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);
         }
         if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
             setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
         }
-        if (ImGui::Checkbox("Enable Page-Job VSM Raster", &m_clodEnablePageJobVSM)) {
-            setCLodEnablePageJobVSM(m_clodEnablePageJobVSM);
-        }
-        if (m_clodEnablePageJobVSM) {
+        if (m_clodVSMRasterMode == CLodVSMRasterMode::PageJob) {
             int diameterThreshold = static_cast<int>(m_clodPageJobDiameterThreshold);
             if (ImGui::SliderInt("Page-Job Diameter Threshold", &diameterThreshold, 1, 255)) {
                 m_clodPageJobDiameterThreshold = static_cast<uint32_t>(std::clamp(diameterThreshold, 1, 255));

@@ -345,7 +345,9 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uint32_t pageJobFlags = 0;
     {
         auto& settings = SettingsManager::GetInstance();
-        const bool pageJobEnabled = settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)();
+        const bool pageJobEnabled =
+            CLodVSMRasterModeUsesLargeClusterShadowRouting(
+                settings.getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)());
         if (pageJobEnabled && UsesVirtualShadowOutput(m_rasterOutputKind)) {
             pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_ENABLED;
         }

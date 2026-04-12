@@ -65,6 +65,9 @@ struct CLodDeepVisibilityStats
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_SLICE_COUNT = 16u;
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_EXTINCTION_QUANTIZATION_SCALE = 4096.0f;
+static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DEPTH_DISTRIBUTION_EXPONENT = 1.0f;
+static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_LOOKUP_DEPTH_BIAS_IN_SLICES = 0.5f;
+static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_ZERO_TRANSMITTANCE_THRESHOLD = 1.0e-3f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25f;
 
 struct CLodFixedSliceScalarVBOITConfig
@@ -73,14 +76,18 @@ struct CLodFixedSliceScalarVBOITConfig
     uint extinctionUAVDescriptorIndex;
     uint integratedTransmittanceUAVDescriptorIndex;
     uint shadingTransmittanceSRVDescriptorIndex;
+    uint zeroTransmittanceSliceUAVDescriptorIndex;
+    uint zeroTransmittanceSliceSRVDescriptorIndex;
     uint sliceCount;
     uint lowResolutionWidth;
     uint lowResolutionHeight;
-    uint flags;
     float viewNearDepth;
     float viewFarDepth;
-    float inverseSliceCount;
-    float lowResolutionScale;
+    float depthDistributionExponent;
+    float lookupDepthBiasInSlices;
+    float zeroTransmittanceThreshold;
+    float pad0;
+    float pad1;
 };
 
 struct ClippingPlane {
@@ -484,6 +491,19 @@ struct CLodReyesDiceQueueEntry
     uint reserved;
 };
 
+static const uint CLOD_REYES_FLAG_SKINNED = 1u << 0;
+static const uint CLOD_REYES_FLAG_DISPLACEMENT_ENABLED = 1u << 1;
+static const uint CLOD_REYES_FLAG_ROUTE_SHIFT = 8u;
+static const uint CLOD_REYES_FLAG_ROUTE_MASK = 0x3u << CLOD_REYES_FLAG_ROUTE_SHIFT;
+static const uint CLOD_REYES_ROUTE_VISIBILITY = 0u;
+static const uint CLOD_REYES_ROUTE_FINE_MICROPOLY_VSM = 1u;
+static const uint CLOD_REYES_ROUTE_COARSE_HARDWARE_VSM = 2u;
+
+uint CLodReyesDecodeRouteKind(uint flags)
+{
+    return (flags & CLOD_REYES_FLAG_ROUTE_MASK) >> CLOD_REYES_FLAG_ROUTE_SHIFT;
+}
+
 struct CLodReyesDispatchIndirectCommand
 {
     uint dispatchX;
@@ -496,7 +516,7 @@ struct CLodReyesRasterWorkEntry
     uint diceQueueIndex;
     uint microTriangleOffset;
     uint microTriangleCount;
-    uint reserved;
+    uint rasterBucketIndex;
 };
 
 struct CLodReyesTelemetry

@@ -141,6 +141,7 @@ private:
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITOccupancyTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITExtinctionTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITIntegratedTransmittanceTexture;
+    std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITAccumulationTexture;
     std::shared_ptr<PixelBuffer> m_shadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_shadowPhysicalPagesTexture;

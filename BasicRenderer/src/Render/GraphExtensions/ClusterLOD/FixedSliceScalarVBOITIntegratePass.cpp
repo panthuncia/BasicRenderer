@@ -11,11 +11,13 @@ FixedSliceScalarVBOITIntegratePass::FixedSliceScalarVBOITIntegratePass(
     std::shared_ptr<Buffer> configBuffer,
     std::shared_ptr<PixelBuffer> occupancyTexture,
     std::shared_ptr<PixelBuffer> extinctionTexture,
-    std::shared_ptr<PixelBuffer> integratedTransmittanceTexture)
+    std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
+    std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture)
     : m_configBuffer(std::move(configBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
     , m_extinctionTexture(std::move(extinctionTexture))
     , m_integratedTransmittanceTexture(std::move(integratedTransmittanceTexture))
+    , m_zeroTransmittanceSliceTexture(std::move(zeroTransmittanceSliceTexture))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -33,7 +35,8 @@ void FixedSliceScalarVBOITIntegratePass::DeclareResourceUsages(ComputePassBuilde
         Builtin::DebugVisualization,
         m_occupancyTexture,
         m_extinctionTexture,
-        m_integratedTransmittanceTexture);
+        m_integratedTransmittanceTexture,
+        m_zeroTransmittanceSliceTexture);
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
@@ -55,7 +58,7 @@ bool FixedSliceScalarVBOITIntegratePass::DeclaredResourcesChanged() const
 
 PassReturn FixedSliceScalarVBOITIntegratePass::Execute(PassExecutionContext& executionContext)
 {
-    if (!m_configBuffer || !m_extinctionTexture) {
+    if (!m_configBuffer || !m_occupancyTexture || !m_extinctionTexture || !m_zeroTransmittanceSliceTexture) {
         return {};
     }
 

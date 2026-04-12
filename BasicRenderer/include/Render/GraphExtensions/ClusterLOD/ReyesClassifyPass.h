@@ -9,6 +9,13 @@
 
 class Buffer;
 
+enum class ReyesClassifyMode : uint32_t
+{
+    Default = 0u,
+    ShadowFineDisplacedOnly = 1u,
+    ShadowCoarseLargeOnly = 2u,
+};
+
 class ReyesClassifyPass final : public ComputePass {
 public:
     ReyesClassifyPass(
@@ -24,7 +31,8 @@ public:
         std::shared_ptr<Buffer> ownershipBitsetBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> telemetryBuffer,
-        uint32_t phaseIndex);
+        uint32_t phaseIndex,
+        ReyesClassifyMode classifyMode = ReyesClassifyMode::Default);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -46,6 +54,7 @@ private:
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_phaseIndex = 0u;
+    ReyesClassifyMode m_classifyMode = ReyesClassifyMode::Default;
     PipelineState m_pso;
     rhi::CommandSignaturePtr m_commandSignature;
 };

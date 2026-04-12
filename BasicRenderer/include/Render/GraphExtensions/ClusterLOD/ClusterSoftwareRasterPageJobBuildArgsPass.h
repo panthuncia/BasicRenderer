@@ -47,7 +47,8 @@ public:
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
             return {};
         }
-        if (!SettingsManager::GetInstance().getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)()) {
+        if (!CLodVSMRasterModeUsesLargeClusterPageJob(
+                SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)())) {
             return {};
         }
 

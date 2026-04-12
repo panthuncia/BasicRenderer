@@ -22,6 +22,7 @@ ReyesSplitPass::ReyesSplitPass(
     std::shared_ptr<Buffer> tessTableConfigsBuffer,
     std::shared_ptr<Buffer> tessTableVerticesBuffer,
     std::shared_ptr<Buffer> tessTableTrianglesBuffer,
+    std::shared_ptr<Buffer> shadowClipmapInfoBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
     uint32_t maxSplitQueueEntries,
@@ -40,6 +41,7 @@ ReyesSplitPass::ReyesSplitPass(
     , m_tessTableConfigsBuffer(std::move(tessTableConfigsBuffer))
     , m_tessTableVerticesBuffer(std::move(tessTableVerticesBuffer))
     , m_tessTableTrianglesBuffer(std::move(tessTableTrianglesBuffer))
+    , m_shadowClipmapInfoBuffer(std::move(shadowClipmapInfoBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_maxSplitQueueEntries(maxSplitQueueEntries)
@@ -92,6 +94,9 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_diceQueueCounterBuffer,
             m_diceQueueOverflowBuffer,
             m_telemetryBuffer);
+    if (m_shadowClipmapInfoBuffer) {
+        builder->WithShaderResource(m_shadowClipmapInfoBuffer);
+    }
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
@@ -123,6 +128,9 @@ PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_SPLIT_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_SPLIT_QUEUE_CAPACITY] = m_maxSplitQueueEntries;
     uintRootConstants[CLOD_REYES_SPLIT_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_SPLIT_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_shadowClipmapInfoBuffer
+        ? m_shadowClipmapInfoBuffer->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
 
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_clearCountersPso.GetAPIPipelineState().GetHandle());

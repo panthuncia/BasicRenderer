@@ -22,7 +22,8 @@ ReyesClassifyPass::ReyesClassifyPass(
     std::shared_ptr<Buffer> ownershipBitsetBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
-    uint32_t phaseIndex)
+    uint32_t phaseIndex,
+    ReyesClassifyMode classifyMode)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer))
     , m_visibleClustersReadBaseCounterBuffer(std::move(visibleClustersReadBaseCounterBuffer))
@@ -35,7 +36,8 @@ ReyesClassifyPass::ReyesClassifyPass(
     , m_ownershipBitsetBuffer(std::move(ownershipBitsetBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
-    , m_phaseIndex(phaseIndex) {
+    , m_phaseIndex(phaseIndex)
+    , m_classifyMode(classifyMode) {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/reyesClassify.hlsl",
@@ -69,8 +71,10 @@ void ReyesClassifyPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_fullClusterCounterBuffer,
             m_ownedClustersBuffer,
             m_ownedClustersCounterBuffer,
-            m_ownershipBitsetBuffer,
             m_telemetryBuffer);
+    if (m_ownershipBitsetBuffer) {
+        builder->WithUnorderedAccess(m_ownershipBitsetBuffer);
+    }
     if (m_visibleClustersReadBaseCounterBuffer) {
         builder->WithShaderResource(m_visibleClustersReadBaseCounterBuffer);
     }
@@ -105,7 +109,10 @@ PassReturn ReyesClassifyPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_CAPACITY] = m_ownedClusterCapacity;
     uintRootConstants[CLOD_REYES_CLASSIFY_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_PHASE_INDEX] = m_phaseIndex;
-    uintRootConstants[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer
+        ? m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    uintRootConstants[CLOD_REYES_CLASSIFY_MODE] = static_cast<uint32_t>(m_classifyMode);
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

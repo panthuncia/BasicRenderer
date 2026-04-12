@@ -31,8 +31,10 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
     std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
     std::shared_ptr<Buffer> fixedSliceScalarVBOITConfigBuffer,
+    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITOccupancyTexture,
     std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITExtinctionTexture,
     std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITIntegratedTransmittanceTexture,
+    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
     std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITAccumulationTexture,
     std::shared_ptr<Buffer> visibleClustersResolveBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup,
@@ -47,8 +49,10 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_deepVisibilityCounterBuffer(std::move(deepVisibilityCounterBuffer))
     , m_deepVisibilityOverflowCounterBuffer(std::move(deepVisibilityOverflowCounterBuffer))
     , m_fixedSliceScalarVBOITConfigBuffer(std::move(fixedSliceScalarVBOITConfigBuffer))
+    , m_fixedSliceScalarVBOITOccupancyTexture(std::move(fixedSliceScalarVBOITOccupancyTexture))
     , m_fixedSliceScalarVBOITExtinctionTexture(std::move(fixedSliceScalarVBOITExtinctionTexture))
     , m_fixedSliceScalarVBOITIntegratedTransmittanceTexture(std::move(fixedSliceScalarVBOITIntegratedTransmittanceTexture))
+    , m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture(std::move(fixedSliceScalarVBOITZeroTransmittanceSliceTexture))
     , m_fixedSliceScalarVBOITAccumulationTexture(std::move(fixedSliceScalarVBOITAccumulationTexture))
     , m_visibleClustersResolveBuffer(std::move(visibleClustersResolveBuffer))
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
@@ -125,12 +129,21 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             m_deepVisibilityCounterBuffer,
             m_deepVisibilityOverflowCounterBuffer);
     }
+    else if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITOccupancy) {
+        for (auto& vb : m_visibilityBuffers) {
+            builder->WithShaderResource(vb);
+        }
+        builder->WithShaderResource(m_fixedSliceScalarVBOITConfigBuffer, m_visibleClustersResolveBuffer)
+            .WithUnorderedAccess(m_fixedSliceScalarVBOITOccupancyTexture);
+    }
     else if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOIT) {
         for (auto& vb : m_visibilityBuffers) {
             builder->WithShaderResource(vb);
         }
         builder->WithShaderResource(m_fixedSliceScalarVBOITConfigBuffer, m_visibleClustersResolveBuffer)
-            .WithUnorderedAccess(m_fixedSliceScalarVBOITExtinctionTexture);
+            .WithUnorderedAccess(
+                m_fixedSliceScalarVBOITOccupancyTexture,
+                m_fixedSliceScalarVBOITExtinctionTexture);
     }
     else if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading) {
         for (auto& vb : m_visibilityBuffers) {
@@ -156,6 +169,7 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 Builtin::Noise::BlueNoise2D,
                 m_fixedSliceScalarVBOITConfigBuffer,
                 m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
+                m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
                 m_visibleClustersResolveBuffer)
             .WithRenderTarget(m_fixedSliceScalarVBOITAccumulationTexture);
     }
@@ -389,6 +403,13 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
         misc[CLOD_RASTER_DEEP_VISIBILITY_OVERFLOW_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityOverflowCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_CAPACITY] = m_deepVisibilityNodeCapacity;
     }
+    if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITOccupancy) {
+        misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
+        misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
+            ? m_visibleClustersResolveBuffer->GetSRVInfo(0).slot.index
+            : 0xFFFFFFFFu;
+        misc[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    }
     if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOIT) {
         misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
         misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
@@ -418,6 +439,8 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
             ? psoManager.GetClusterLODRasterPSO(flags, m_wireframe)
             : (m_outputKind == CLodRasterOutputKind::VirtualShadow)
                 ? psoManager.GetClusterLODVirtualShadowRasterPSO(flags, m_wireframe)
+                : (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITOccupancy)
+                    ? psoManager.GetClusterLODFixedSliceScalarVBOITOccupancyPSO(flags, m_wireframe)
                 : (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOIT)
                     ? psoManager.GetClusterLODFixedSliceScalarVBOITRasterPSO(flags, m_wireframe)
                 : (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading)

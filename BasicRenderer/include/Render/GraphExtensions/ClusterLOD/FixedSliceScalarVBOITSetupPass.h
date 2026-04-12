@@ -14,6 +14,7 @@ public:
         std::shared_ptr<PixelBuffer> occupancyTexture,
         std::shared_ptr<PixelBuffer> extinctionTexture,
         std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
+        std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture,
         std::shared_ptr<PixelBuffer> accumulationTexture);
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override;
@@ -27,5 +28,6 @@ private:
     std::shared_ptr<PixelBuffer> m_occupancyTexture;
     std::shared_ptr<PixelBuffer> m_extinctionTexture;
     std::shared_ptr<PixelBuffer> m_integratedTransmittanceTexture;
+    std::shared_ptr<PixelBuffer> m_zeroTransmittanceSliceTexture;
     std::shared_ptr<PixelBuffer> m_accumulationTexture;
 };
