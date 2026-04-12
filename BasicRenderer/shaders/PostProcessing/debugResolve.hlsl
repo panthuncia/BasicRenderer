@@ -49,11 +49,16 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_VSM_PAGE_STATE:
         case OUTPUT_VSM_RERENDERED_THIS_FRAME:
         case OUTPUT_TRANSPARENT_DEPTH_COMPLEXITY:
-        case OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE:
             color = UnpackDebugFloat3(payload);
+            break;
+        case OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE:
+            color = UnpackDebugFloat1(payload).xxx;
             break;
         case OUTPUT_SW_RASTER:
             color = float3(1, 0, 0);
+            break;
+        case OUTPUT_TRANSPARENT_VBOIT_COVERAGE:
+            color = UnpackDebugUint(payload) != 0u ? float3(1, 0, 0) : float3(0, 0, 0);
             break;
         case OUTPUT_TRANSPARENT_NODE_COUNT:
         case OUTPUT_TRANSPARENT_RESOLVED_SAMPLE_COUNT:

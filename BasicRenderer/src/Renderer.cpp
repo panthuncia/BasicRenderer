@@ -816,7 +816,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
@@ -1267,6 +1267,18 @@ void Renderer::Update(float elapsedSeconds) {
     if (!IsSceneReadyForFrame()) {
         return;
     }
+
+    if (m_shaderReloadRequested) {
+        runCapturedStage("ShaderReload", [&]() {
+            ZoneScopedN("Renderer::Update::ShaderReload");
+            spdlog::info("Renderer: draining GPU work before shader reload.");
+            StallPipeline();
+            PSOManager::GetInstance().ReloadShaders();
+            rebuildRenderGraph = true;
+            m_shaderReloadRequested = false;
+        });
+    }
+
     runCapturedStage("SceneExplorerEdits", [&]() {
         ZoneScopedN("Renderer::Update::SceneExplorerEdits");
         FlushPendingSceneExplorerEdits();
@@ -1924,8 +1936,8 @@ void Renderer::SetupInputHandlers() {
         // TODO
         });
 
-	context.SetActionHandler(InputAction::Reset, [](float magnitude, const InputData& inputData) {
-        PSOManager::GetInstance().ReloadShaders();
+	context.SetActionHandler(InputAction::Reset, [this](float magnitude, const InputData& inputData) {
+        m_shaderReloadRequested = true;
 		});
 
     context.SetActionHandler(InputAction::X, [](float magnitude, const InputData& inputData) {

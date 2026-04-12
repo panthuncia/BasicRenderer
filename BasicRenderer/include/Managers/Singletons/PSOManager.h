@@ -6,6 +6,7 @@
 #include <string>
 #include <filesystem>
 #include <optional>
+#include <mutex>
 #include <boost/container_hash/hash.hpp>
 
 #include <rhi.h>
@@ -143,6 +144,8 @@ public:
     const PipelineState& GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    const PipelineState& GetClusterLODFixedSliceScalarVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    const PipelineState& GetClusterLODFixedSliceScalarVBOITShadePSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags, CLodRasterOutputKind outputKind);
     const PipelineState& GetClusterLODDeepVisibilityResolvePSO(UINT psoFlags);
 
@@ -208,6 +211,8 @@ private:
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODRasterPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODVirtualShadowRasterPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODDeepVisibilityRasterPSOCache;
+    std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODFixedSliceScalarVBOITRasterPSOCache;
+    std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODFixedSliceScalarVBOITShadePSOCache;
     std::unordered_map<uint64_t, PipelineState> m_clusterLODSoftwareRasterPSOCache;
     std::unordered_map<unsigned int, PipelineState> m_clusterLODDeepVisibilityResolvePSOCache;
 
@@ -217,6 +222,7 @@ private:
     ComPtr<IDxcCompiler3> pCompiler;
 	ComPtr<ID3D12PipelineState> debugPSO;
     ComPtr<ID3D12PipelineState> environmentConversionPSO;
+    mutable std::mutex m_cacheMutex;
 
     PipelineState CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
     PipelineState CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
@@ -235,6 +241,8 @@ private:
     PipelineState CreateClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    PipelineState CreateClusterLODFixedSliceScalarVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    PipelineState CreateClusterLODFixedSliceScalarVBOITShadePSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags, CLodRasterOutputKind outputKind);
     PipelineState CreateClusterLODDeepVisibilityResolvePSO(UINT psoFlags);
 

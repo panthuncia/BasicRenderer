@@ -157,6 +157,19 @@ std::vector<std::byte> CopyBlobBytes(ID3DBlob* blob)
     return std::vector<std::byte>(begin, begin + blob->GetBufferSize());
 }
 
+template <typename TCache, typename TKey, typename TFactory>
+const PipelineState& GetOrCreatePipelineState(
+    TCache& cache,
+    const TKey& key,
+    TFactory&& factory)
+{
+    auto it = cache.find(key);
+    if (it == cache.end()) {
+        it = cache.emplace(key, factory()).first;
+    }
+    return it->second;
+}
+
 void AppendBundleBlob(
     shadercache::CacheData& cacheData,
     shadercache::BlobKind kind,
@@ -299,6 +312,7 @@ void PSOManager::initialize() {
 }
 
 void PSOManager::Cleanup() {
+    std::scoped_lock lock(m_cacheMutex);
     m_psoCache.clear();
     m_PPLLPSOCache.clear();
     m_meshPSOCache.clear();
@@ -314,6 +328,8 @@ void PSOManager::Cleanup() {
     m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODFixedSliceScalarVBOITRasterPSOCache.clear();
+    m_clusterLODFixedSliceScalarVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
 
     debugPSO.Reset();
@@ -328,129 +344,145 @@ void PSOManager::Cleanup() {
 
 const PipelineState& PSOManager::GetPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_psoCache.find(key) == m_psoCache.end()) {
-        m_psoCache[key] = CreatePSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_psoCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_psoCache, key, [&]() {
+        return CreatePSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_shadowPSOCache.find(key) == m_shadowPSOCache.end()) {
-        m_shadowPSOCache[key] = CreateShadowPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_shadowPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_shadowPSOCache, key, [&]() {
+        return CreateShadowPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetShadowMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_shadowMeshPSOCache.find(key) == m_shadowMeshPSOCache.end()) {
-        m_shadowMeshPSOCache[key] = CreateShadowMeshPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_shadowMeshPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_shadowMeshPSOCache, key, [&]() {
+        return CreateShadowMeshPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_prePassPSOCache.find(key) == m_prePassPSOCache.end()) {
-        m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_prePassPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_prePassPSOCache, key, [&]() {
+        return CreatePrePassPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetMeshPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_meshPrePassPSOCache.find(key) == m_meshPrePassPSOCache.end()) {
-        m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_meshPrePassPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_meshPrePassPSOCache, key, [&]() {
+        return CreateMeshPrePassPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_PPLLPSOCache.find(key) == m_PPLLPSOCache.end()) {
-        m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_PPLLPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_PPLLPSOCache, key, [&]() {
+        return CreatePPLLPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_meshPSOCache.find(key) == m_meshPSOCache.end()) {
-        m_meshPSOCache[key] = CreateMeshPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_meshPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_meshPSOCache, key, [&]() {
+        return CreateMeshPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetMeshPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_meshPPLLPSOCache.find(key) == m_meshPPLLPSOCache.end()) {
-        m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_meshPPLLPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_meshPPLLPSOCache, key, [&]() {
+        return CreateMeshPPLLPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_visibilityBufferPSOCache.find(key) == m_visibilityBufferPSOCache.end()) {
-        m_visibilityBufferPSOCache[key] = CreateVisibilityBufferPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_visibilityBufferPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_visibilityBufferPSOCache, key, [&]() {
+        return CreateVisibilityBufferPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_visibilityBufferMeshPSOCache.find(key) == m_visibilityBufferMeshPSOCache.end()) {
-        m_visibilityBufferMeshPSOCache[key] = CreateVisibilityBufferMeshPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_visibilityBufferMeshPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_visibilityBufferMeshPSOCache, key, [&]() {
+        return CreateVisibilityBufferMeshPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
-    if (m_clusterLODRasterPSOCache.find(key) == m_clusterLODRasterPSOCache.end()) {
-        m_clusterLODRasterPSOCache[key] = CreateClusterLODRasterPSO(materialRasterFlags, wireframe);
-    }
-    return m_clusterLODRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODRasterPSOCache, key, [&]() {
+        return CreateClusterLODRasterPSO(materialRasterFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
-    if (m_clusterLODVirtualShadowRasterPSOCache.find(key) == m_clusterLODVirtualShadowRasterPSOCache.end()) {
-        m_clusterLODVirtualShadowRasterPSOCache[key] = CreateClusterLODVirtualShadowRasterPSO(materialRasterFlags, wireframe);
-    }
-    return m_clusterLODVirtualShadowRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODVirtualShadowRasterPSOCache, key, [&]() {
+        return CreateClusterLODVirtualShadowRasterPSO(materialRasterFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
-    if (m_clusterLODDeepVisibilityRasterPSOCache.find(key) == m_clusterLODDeepVisibilityRasterPSOCache.end()) {
-        m_clusterLODDeepVisibilityRasterPSOCache[key] = CreateClusterLODDeepVisibilityRasterPSO(materialRasterFlags, wireframe);
-    }
-    return m_clusterLODDeepVisibilityRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODDeepVisibilityRasterPSOCache, key, [&]() {
+        return CreateClusterLODDeepVisibilityRasterPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODFixedSliceScalarVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODFixedSliceScalarVBOITRasterPSOCache, key, [&]() {
+        return CreateClusterLODFixedSliceScalarVBOITRasterPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODFixedSliceScalarVBOITShadePSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODFixedSliceScalarVBOITShadePSOCache, key, [&]() {
+        return CreateClusterLODFixedSliceScalarVBOITShadePSO(materialRasterFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags, CLodRasterOutputKind outputKind) {
     const uint64_t key = static_cast<uint64_t>(materialRasterFlags) |
         (static_cast<uint64_t>(outputKind) << 32u);
-    if (m_clusterLODSoftwareRasterPSOCache.find(key) == m_clusterLODSoftwareRasterPSOCache.end()) {
-        m_clusterLODSoftwareRasterPSOCache[key] = CreateClusterLODSoftwareRasterPSO(materialRasterFlags, outputKind);
-    }
-    return m_clusterLODSoftwareRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODSoftwareRasterPSOCache, key, [&]() {
+        return CreateClusterLODSoftwareRasterPSO(materialRasterFlags, outputKind);
+    });
 }
 
 const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
-    if (m_deferredPSOCache.find(psoFlags) == m_deferredPSOCache.end()) {
-        m_deferredPSOCache[psoFlags] = CreateDeferredPSO(psoFlags);
-    }
-    return m_deferredPSOCache[psoFlags];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_deferredPSOCache, psoFlags, [&]() {
+        return CreateDeferredPSO(psoFlags);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODDeepVisibilityResolvePSO(UINT psoFlags) {
-    if (m_clusterLODDeepVisibilityResolvePSOCache.find(psoFlags) == m_clusterLODDeepVisibilityResolvePSOCache.end()) {
-        m_clusterLODDeepVisibilityResolvePSOCache[psoFlags] = CreateClusterLODDeepVisibilityResolvePSO(psoFlags);
-    }
-    return m_clusterLODDeepVisibilityResolvePSOCache[psoFlags];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODDeepVisibilityResolvePSOCache, psoFlags, [&]() {
+        return CreateClusterLODDeepVisibilityResolvePSO(psoFlags);
+    });
 }
 
 PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
@@ -924,6 +956,118 @@ PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
         throw std::runtime_error("Failed to create CLod deep visibility raster PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITRasterPSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITCapture.hlsl", L"FixedSliceScalarVBOITCapturePSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "FixedSliceScalarVBOITCapturePSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT raster PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITShade.hlsl", L"FixedSliceScalarVBOITShadePSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "FixedSliceScalarVBOITShadePSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState blend{};
+    blend.alphaToCoverage = FALSE;
+    blend.independentBlend = FALSE;
+    for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+        blend.attachments[i].enable = TRUE;
+        blend.attachments[i].srcColor = rhi::BlendFactor::One;
+        blend.attachments[i].dstColor = rhi::BlendFactor::One;
+        blend.attachments[i].colorOp = rhi::BlendOp::Add;
+        blend.attachments[i].srcAlpha = rhi::BlendFactor::One;
+        blend.attachments[i].dstAlpha = rhi::BlendFactor::One;
+        blend.attachments[i].alphaOp = rhi::BlendOp::Add;
+        blend.attachments[i].writeMask = rhi::ColorWriteEnable::All;
+    }
+    rhi::SubobjBlend soBlend{ blend };
+
+    rhi::RenderTargets rts{};
+    rts.count = 1;
+    rts.formats[0] = rhi::Format::R16G16B16A16_Float;
+    rhi::SubobjRTVs soRTV{ rts };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soRTV),
+        rhi::Make(soSmp),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT shading PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
@@ -2117,6 +2261,7 @@ const rhi::PipelineLayout& PSOManager::GetComputeRootSignature() {
 }
 
 void PSOManager::ReloadShaders() {
+    std::scoped_lock lock(m_cacheMutex);
     m_psoCache.clear();
 	m_meshPSOCache.clear();
 	m_deferredPSOCache.clear();
@@ -2130,6 +2275,8 @@ void PSOManager::ReloadShaders() {
     m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODFixedSliceScalarVBOITRasterPSOCache.clear();
+    m_clusterLODFixedSliceScalarVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
 }
 

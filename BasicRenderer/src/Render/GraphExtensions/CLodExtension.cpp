@@ -20,6 +20,7 @@
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITSetupPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITIntegratePass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITResolvePass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobBuildArgsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobExpandPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobRasterPass.h"
@@ -183,6 +184,12 @@ std::string MakeVariantResourceName(const CLodVariantTraits& traits, std::string
     return std::string(traits.resourcePrefix) + std::string(suffix);
 }
 
+constexpr std::string_view kTransparentExtinctionSetupPassName = "TransparentExtinctionSetupPass";
+constexpr std::string_view kTransparentExtinctionCapturePassName = "TransparentExtinctionCapturePass";
+constexpr std::string_view kTransparentTransmittanceIntegratePassName = "TransparentTransmittanceIntegratePass";
+constexpr std::string_view kTransparentVBOITShadePassName = "TransparentVBOITShadePass";
+constexpr std::string_view kTransparentVBOITResolvePassName = "TransparentVBOITResolvePass";
+
 DirectX::XMUINT2 GetFixedSliceScalarVBOITLowResolution(const DirectX::XMUINT2& renderResolution)
 {
     const uint32_t downsampleFactor = (std::max)(1u, CLodFixedSliceScalarVBOITDefaultDownsampleFactor);
@@ -215,6 +222,35 @@ TextureDescription CreateFixedSliceScalarVBOITSliceVolumeDescription()
     TextureDescription desc = CreateFixedSliceScalarVBOITOccupancyDescription();
     desc.isArray = true;
     desc.arraySize = CLodFixedSliceScalarVBOITDefaultSliceCount;
+    return desc;
+}
+
+TextureDescription CreateFixedSliceScalarVBOITExtinctionDescription()
+{
+    TextureDescription desc = CreateFixedSliceScalarVBOITSliceVolumeDescription();
+    desc.format = rhi::Format::R32_UInt;
+    desc.srvFormat = rhi::Format::R32_UInt;
+    desc.uavFormat = rhi::Format::R32_UInt;
+    return desc;
+}
+
+TextureDescription CreateFixedSliceScalarVBOITAccumulationDescription()
+{
+    TextureDescription desc;
+    const auto renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+
+    desc.channels = 4;
+    desc.format = rhi::Format::R16G16B16A16_Float;
+    desc.hasSRV = true;
+    desc.srvFormat = rhi::Format::R16G16B16A16_Float;
+    desc.hasRTV = true;
+    desc.rtvFormat = rhi::Format::R16G16B16A16_Float;
+    desc.clearColor[0] = 0.0f;
+    desc.clearColor[1] = 0.0f;
+    desc.clearColor[2] = 0.0f;
+    desc.clearColor[3] = 0.0f;
+    desc.allowAlias = true;
+    desc.imageDimensions.push_back(ImageDimensions{ renderResolution.x, renderResolution.y, 0, 0 });
     return desc;
 }
 
@@ -737,7 +773,7 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITOccupancyTexture })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_fixedSliceScalarVBOITExtinctionTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITSliceVolumeDescription());
+    m_fixedSliceScalarVBOITExtinctionTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITExtinctionDescription());
     m_fixedSliceScalarVBOITExtinctionTexture->SetName(MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Extinction"));
     m_fixedSliceScalarVBOITExtinctionTexture->GetECSEntity()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITExtinctionTexture })
@@ -748,6 +784,13 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
         MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Integrated Transmittance"));
     m_fixedSliceScalarVBOITIntegratedTransmittanceTexture->GetECSEntity()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITIntegratedTransmittanceTexture })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITAccumulationTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITAccumulationDescription());
+    m_fixedSliceScalarVBOITAccumulationTexture->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Accumulation"));
+    m_fixedSliceScalarVBOITAccumulationTexture->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITAccumulationTexture })
         .add<CLodExtensionTypeTag>(typeEntity);
 }
 
@@ -1256,6 +1299,7 @@ void CLodExtension::TagTransparencyResourceUsages()
     tagTextureUsage(m_fixedSliceScalarVBOITOccupancyTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITExtinctionTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture, "Cluster LOD fixed-slice scalar VBOIT");
+    tagTextureUsage(m_fixedSliceScalarVBOITAccumulationTexture, "Cluster LOD fixed-slice scalar VBOIT");
 }
 
 void CLodExtension::ReleaseBufferBackings()
@@ -1403,6 +1447,7 @@ void CLodExtension::ReleaseTransparencyResourceBackings()
     releaseTextureBacking(m_fixedSliceScalarVBOITOccupancyTexture);
     releaseTextureBacking(m_fixedSliceScalarVBOITExtinctionTexture);
     releaseTextureBacking(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture);
+    releaseTextureBacking(m_fixedSliceScalarVBOITAccumulationTexture);
 }
 
 void CLodExtension::ReleaseShadowResourceBackings()
@@ -1901,6 +1946,32 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer = disableReyesTessellation ? nullptr : m_reyesOwnershipBitsetBuffer;
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBufferPhase2 = disableReyesTessellation ? nullptr : m_reyesOwnershipBitsetBufferPhase2;
 
+    const auto makeTransparentTailInsertPoint = []() {
+        auto insertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
+        insertPoint.after.push_back("CLodShadow::VirtualShadowDeduplicatePredictedPagesPass");
+        insertPoint.before.push_back("Screen-Space Reflections Pass");
+        insertPoint.before.push_back("luminanceHistogramPass");
+        return insertPoint;
+    };
+
+    const auto makeTransparentCompositeInsertPoint = []() {
+        auto insertPoint = RenderGraph::ExternalInsertPoint::After("Specular IBL & SSR Composite Pass");
+        insertPoint.after.push_back("SkyboxPass");
+        insertPoint.after.push_back("Forward render pass");
+        insertPoint.after.push_back("Screen-Space Reflections Pass");
+        insertPoint.before.push_back("DebugGridPass");
+        insertPoint.before.push_back("luminanceHistogramPass");
+        insertPoint.before.push_back("TonemappingPass");
+        return insertPoint;
+    };
+
+    const auto makeShadowTailInsertPoint = [](const std::string& afterPassName) {
+        auto insertPoint = RenderGraph::ExternalInsertPoint::After(afterPassName);
+        insertPoint.before.push_back("Screen-Space Reflections Pass");
+        insertPoint.before.push_back("luminanceHistogramPass");
+        return insertPoint;
+    };
+
     std::string shadowAllocationPassName;
     std::string shadowDirtyHierarchyPassName;
     std::string shadowClearDirtyBitsAfterPassName;
@@ -2386,104 +2457,147 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     }
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
+        const bool useFixedSliceScalarVBOIT = transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT;
         if (transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT) {
             outPasses.push_back(
                 RenderGraph::ExternalPassDesc::Render(
-                    MakeVariantPassName(traits, "FixedSliceScalarVBOITSetupPass"),
+                    MakeVariantPassName(traits, kTransparentExtinctionSetupPassName),
                     std::make_shared<FixedSliceScalarVBOITSetupPass>(
                         m_fixedSliceScalarVBOITConfigBuffer,
                         m_fixedSliceScalarVBOITOccupancyTexture,
                         m_fixedSliceScalarVBOITExtinctionTexture,
-                        m_fixedSliceScalarVBOITIntegratedTransmittanceTexture)));
+                        m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
+                        m_fixedSliceScalarVBOITAccumulationTexture)));
         }
 
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Render(
-                MakeVariantPassName(traits, "ClearDeepVisibilityPass"),
-                std::make_shared<ClearDeepVisibilityPass>(
-                    m_deepVisibilityCounterBuffer,
-                    m_deepVisibilityOverflowCounterBuffer,
-                    m_deepVisibilityStatsBuffer)));
-
-        if (!disableReyesTessellation) {
+        if (!useFixedSliceScalarVBOIT) {
             outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "ReyesPatchRasterPass1"),
-                    std::make_shared<ReyesDeepVisibilityRasterizationPass>(
-                        m_visibleClustersBuffer,
-                        m_reyesDiceQueueBuffer,
-                        m_reyesDiceQueueCounterBuffer,
-                        m_reyesRasterWorkBuffer,
-                        m_reyesRasterWorkCounterBuffer,
-                        m_reyesTessTableConfigsBuffer,
-                        m_reyesTessTableVerticesBuffer,
-                        m_reyesTessTableTrianglesBuffer,
-                        m_reyesRasterWorkIndirectArgsBuffer,
-                        m_reyesTelemetryBufferPhase1,
-                        m_deepVisibilityNodesBuffer,
+                RenderGraph::ExternalPassDesc::Render(
+                    MakeVariantPassName(traits, "ClearDeepVisibilityPass"),
+                    std::make_shared<ClearDeepVisibilityPass>(
                         m_deepVisibilityCounterBuffer,
                         m_deepVisibilityOverflowCounterBuffer,
-                        slabGroup,
-                        MakeVariantResourceName(traits, "Reyes Deep Visibility View Raster Info Buffer"),
-                        CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters))));
+                        m_deepVisibilityStatsBuffer)));
+
+            if (!disableReyesTessellation) {
+                outPasses.push_back(
+                    RenderGraph::ExternalPassDesc::Compute(
+                        MakeVariantPassName(traits, "ReyesPatchRasterPass1"),
+                        std::make_shared<ReyesDeepVisibilityRasterizationPass>(
+                            m_visibleClustersBuffer,
+                            m_reyesDiceQueueBuffer,
+                            m_reyesDiceQueueCounterBuffer,
+                            m_reyesRasterWorkBuffer,
+                            m_reyesRasterWorkCounterBuffer,
+                            m_reyesTessTableConfigsBuffer,
+                            m_reyesTessTableVerticesBuffer,
+                            m_reyesTessTableTrianglesBuffer,
+                            m_reyesRasterWorkIndirectArgsBuffer,
+                            m_reyesTelemetryBufferPhase1,
+                            m_deepVisibilityNodesBuffer,
+                            m_deepVisibilityCounterBuffer,
+                            m_deepVisibilityOverflowCounterBuffer,
+                            slabGroup,
+                            MakeVariantResourceName(traits, "Reyes Deep Visibility View Raster Info Buffer"),
+                            CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters))));
+            }
         }
 
         ClusterRasterizationPassInputs rasterizePassInputs;
         rasterizePassInputs.clearGbuffer = false;
         rasterizePassInputs.wireframe = false;
         rasterizePassInputs.renderPhase = renderPhase;
-        rasterizePassInputs.outputKind = traits.rasterOutputKind;
+        rasterizePassInputs.outputKind = useFixedSliceScalarVBOIT
+            ? CLodRasterOutputKind::FixedSliceScalarVBOIT
+            : traits.rasterOutputKind;
         auto rasterizeDeepVisibilityPassDesc = RenderGraph::ExternalPassDesc::Render(
-            MakeVariantPassName(traits, "RasterizeClustersPass1"),
+            MakeVariantPassName(
+                traits,
+                useFixedSliceScalarVBOIT
+                    ? kTransparentExtinctionCapturePassName
+                    : std::string_view("RasterizeClustersPass1")),
             std::make_shared<ClusterRasterizationPass>(
                 rasterizePassInputs,
                 m_compactedVisibleClustersBuffer,
                 m_rasterBucketsHistogramBuffer,
                 m_rasterBucketsIndirectArgsBuffer,
                 m_sortedToUnsortedMappingBuffer,
-                m_deepVisibilityNodesBuffer,
-                m_deepVisibilityCounterBuffer,
-                m_deepVisibilityOverflowCounterBuffer,
+                useFixedSliceScalarVBOIT ? nullptr : m_deepVisibilityNodesBuffer,
+                useFixedSliceScalarVBOIT ? nullptr : m_deepVisibilityCounterBuffer,
+                useFixedSliceScalarVBOIT ? nullptr : m_deepVisibilityOverflowCounterBuffer,
+                useFixedSliceScalarVBOIT ? m_fixedSliceScalarVBOITConfigBuffer : nullptr,
+                useFixedSliceScalarVBOIT ? m_fixedSliceScalarVBOITExtinctionTexture : nullptr,
+                nullptr,
+                nullptr,
+                useFixedSliceScalarVBOIT ? m_visibleClustersBuffer : nullptr,
                 slabGroup));
         rasterizeDeepVisibilityPassDesc.GeometryPass();
         outPasses.push_back(std::move(rasterizeDeepVisibilityPassDesc));
 
         if (transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT) {
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "FixedSliceScalarVBOITIntegratePass"),
+            auto integratePassDesc = RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, kTransparentTransmittanceIntegratePassName),
                     std::make_shared<FixedSliceScalarVBOITIntegratePass>(
-                        disableReyesTessellation ? nullptr : m_reyesDiceQueueBuffer,
-                        disableReyesTessellation ? nullptr : m_reyesTessTableConfigsBuffer,
-                        disableReyesTessellation ? nullptr : m_reyesTessTableVerticesBuffer,
-                        disableReyesTessellation ? nullptr : m_reyesTessTableTrianglesBuffer,
-                        m_deepVisibilityNodesBuffer,
                         m_fixedSliceScalarVBOITConfigBuffer,
                         m_fixedSliceScalarVBOITOccupancyTexture,
                         m_fixedSliceScalarVBOITExtinctionTexture,
-                        m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
-                        CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters))));
+                        m_fixedSliceScalarVBOITIntegratedTransmittanceTexture));
+            integratePassDesc.At(makeTransparentTailInsertPoint());
+            outPasses.push_back(std::move(integratePassDesc));
+
+            ClusterRasterizationPassInputs shadePassInputs;
+            shadePassInputs.clearGbuffer = false;
+            shadePassInputs.wireframe = false;
+            shadePassInputs.renderPhase = renderPhase;
+            shadePassInputs.outputKind = CLodRasterOutputKind::FixedSliceScalarVBOITShading;
+            auto shadePassDesc = RenderGraph::ExternalPassDesc::Render(
+                MakeVariantPassName(traits, kTransparentVBOITShadePassName),
+                std::make_shared<ClusterRasterizationPass>(
+                    shadePassInputs,
+                    m_compactedVisibleClustersBuffer,
+                    m_rasterBucketsHistogramBuffer,
+                    m_rasterBucketsIndirectArgsBuffer,
+                    m_sortedToUnsortedMappingBuffer,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    nullptr,
+                    m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
+                    m_fixedSliceScalarVBOITAccumulationTexture,
+                    m_visibleClustersBuffer,
+                    slabGroup));
+            shadePassDesc.GeometryPass();
+            shadePassDesc.At(makeTransparentTailInsertPoint());
+            outPasses.push_back(std::move(shadePassDesc));
+
+            auto resolvePassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, kTransparentVBOITResolvePassName),
+                std::make_shared<FixedSliceScalarVBOITResolvePass>(
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
+                    m_fixedSliceScalarVBOITAccumulationTexture));
+            resolvePassDesc.At(makeTransparentCompositeInsertPoint());
+            outPasses.push_back(std::move(resolvePassDesc));
         }
 
-        auto resolveDeepVisibilityPassDesc = RenderGraph::ExternalPassDesc::Compute(
-            MakeVariantPassName(traits, "DeepVisibilityResolvePass"),
-            std::make_shared<DeepVisibilityResolvePass>(
-                m_visibleClustersBuffer,
-                disableReyesTessellation ? nullptr : m_reyesDiceQueueBuffer,
-                disableReyesTessellation ? nullptr : m_reyesTessTableConfigsBuffer,
-                disableReyesTessellation ? nullptr : m_reyesTessTableVerticesBuffer,
-                disableReyesTessellation ? nullptr : m_reyesTessTableTrianglesBuffer,
-                m_deepVisibilityNodesBuffer,
-                m_deepVisibilityCounterBuffer,
-                m_deepVisibilityOverflowCounterBuffer,
-                m_deepVisibilityStatsBuffer,
-                CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
-        auto resolveInsertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
-        resolveInsertPoint.after.push_back("CLodShadow::VirtualShadowDeduplicatePredictedPagesPass");
-        resolveInsertPoint.before.push_back("Screen-Space Reflections Pass");
-        resolveInsertPoint.before.push_back("luminanceHistogramPass");
-        resolveDeepVisibilityPassDesc.At(std::move(resolveInsertPoint));
-        outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
+        if (!useFixedSliceScalarVBOIT) {
+            auto resolveDeepVisibilityPassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "DeepVisibilityResolvePass"),
+                std::make_shared<DeepVisibilityResolvePass>(
+                    m_visibleClustersBuffer,
+                    disableReyesTessellation ? nullptr : m_reyesDiceQueueBuffer,
+                    disableReyesTessellation ? nullptr : m_reyesTessTableConfigsBuffer,
+                    disableReyesTessellation ? nullptr : m_reyesTessTableVerticesBuffer,
+                    disableReyesTessellation ? nullptr : m_reyesTessTableTrianglesBuffer,
+                    m_deepVisibilityNodesBuffer,
+                    m_deepVisibilityCounterBuffer,
+                    m_deepVisibilityOverflowCounterBuffer,
+                    m_deepVisibilityStatsBuffer,
+                    CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
+                    resolveDeepVisibilityPassDesc.At(makeTransparentCompositeInsertPoint());
+            outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
+        }
         return;
     }
 
@@ -2507,6 +2621,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             rasterHistogramBufferPhase1,
             rasterIndirectArgsBufferPhase1,
             m_sortedToUnsortedMappingBuffer,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
             nullptr,
             nullptr,
             nullptr,
@@ -3077,6 +3196,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             nullptr,
             nullptr,
             nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
             slabGroup,
             shadowPageTable,
             shadowPhysicalPages,
@@ -3406,7 +3530,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowPredictedInvalidationScratchBitsetBuffer,
                 m_shadowPredictedInvalidationPagesBufferA,
                     m_shadowPredictedInvalidationPageCountBufferA));
-        shadowDeduplicatePredictedPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowExpandPredictedPagesPassName));
+        shadowDeduplicatePredictedPagesPassDesc.At(makeShadowTailInsertPoint(shadowExpandPredictedPagesPassName));
         outPasses.push_back(std::move(shadowDeduplicatePredictedPagesPassDesc));
     }
 

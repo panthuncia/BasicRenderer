@@ -2,21 +2,19 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/ComputePass.h"
 
 class Buffer;
 class PixelBuffer;
 
-class FixedSliceScalarVBOITSetupPass final : public RenderPass {
+class FixedSliceScalarVBOITResolvePass final : public ComputePass {
 public:
-    FixedSliceScalarVBOITSetupPass(
+    FixedSliceScalarVBOITResolvePass(
         std::shared_ptr<Buffer> configBuffer,
-        std::shared_ptr<PixelBuffer> occupancyTexture,
-        std::shared_ptr<PixelBuffer> extinctionTexture,
         std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
         std::shared_ptr<PixelBuffer> accumulationTexture);
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override;
+    void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
     void Update(const UpdateExecutionContext& executionContext) override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
@@ -24,8 +22,7 @@ public:
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;
-    std::shared_ptr<PixelBuffer> m_occupancyTexture;
-    std::shared_ptr<PixelBuffer> m_extinctionTexture;
     std::shared_ptr<PixelBuffer> m_integratedTransmittanceTexture;
     std::shared_ptr<PixelBuffer> m_accumulationTexture;
+    PipelineState m_pso;
 };

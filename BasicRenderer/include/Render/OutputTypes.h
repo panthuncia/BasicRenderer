@@ -27,6 +27,7 @@ enum OutputType {
 	VSM_PHYSICAL_PAGE = 23,
 	VSM_RERENDERED_THIS_FRAME = 24,
 	TRANSPARENT_VBOIT_TRANSMITTANCE = 25,
+	TRANSPARENT_VBOIT_COVERAGE = 26,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -56,4 +57,5 @@ inline std::vector<std::string> OutputTypeNames = {
 	"VSM Physical Page",
 	"VSM Re-rendered This Frame",
 	"Transparent VBOIT Transmittance",
+	"Transparent VBOIT Coverage",
 };

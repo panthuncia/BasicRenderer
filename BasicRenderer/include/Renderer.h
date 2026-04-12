@@ -122,6 +122,7 @@ private:
     std::unique_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool m_renderGraphRuntimeInitialized = false;
     bool rebuildRenderGraph = true;
+    bool m_shaderReloadRequested = false;
 
     RenderContext m_context;
 

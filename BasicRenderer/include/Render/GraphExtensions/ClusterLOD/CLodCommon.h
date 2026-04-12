@@ -51,6 +51,8 @@ enum class CLodRasterOutputKind : uint8_t {
     VisibilityBuffer,
     VirtualShadow,
     DeepVisibility,
+    FixedSliceScalarVBOIT,
+    FixedSliceScalarVBOITShading,
 };
 
 enum class CLodTransparencyMode : uint8_t {
@@ -72,6 +74,7 @@ inline constexpr const char* CLodTransparencyModeNames[] = {
 inline constexpr int CLodTransparencyModeCount = static_cast<int>(sizeof(CLodTransparencyModeNames) / sizeof(CLodTransparencyModeNames[0]));
 inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultSliceCount = 16u;
 inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultDownsampleFactor = 4u;
+inline constexpr float CLodFixedSliceScalarVBOITExtinctionQuantizationScale = 4096.0f;
 inline constexpr float CLodFixedSliceScalarVBOITDefaultResolutionScale = 1.0f / static_cast<float>(CLodFixedSliceScalarVBOITDefaultDownsampleFactor);
 
 constexpr bool CLodSoftwareRasterEnabled(CLodSoftwareRasterMode mode)

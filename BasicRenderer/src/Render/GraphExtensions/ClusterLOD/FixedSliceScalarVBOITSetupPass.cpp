@@ -12,11 +12,13 @@ FixedSliceScalarVBOITSetupPass::FixedSliceScalarVBOITSetupPass(
     std::shared_ptr<Buffer> configBuffer,
     std::shared_ptr<PixelBuffer> occupancyTexture,
     std::shared_ptr<PixelBuffer> extinctionTexture,
-    std::shared_ptr<PixelBuffer> integratedTransmittanceTexture)
+    std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
+    std::shared_ptr<PixelBuffer> accumulationTexture)
     : m_configBuffer(std::move(configBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
     , m_extinctionTexture(std::move(extinctionTexture))
     , m_integratedTransmittanceTexture(std::move(integratedTransmittanceTexture))
+    , m_accumulationTexture(std::move(accumulationTexture))
 {
 }
 
@@ -30,6 +32,10 @@ void FixedSliceScalarVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* bu
         m_occupancyTexture,
         m_extinctionTexture,
         m_integratedTransmittanceTexture);
+
+    if (m_accumulationTexture) {
+        builder->WithRenderTarget(m_accumulationTexture);
+    }
 }
 
 void FixedSliceScalarVBOITSetupPass::Setup()
@@ -111,9 +117,38 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
         commandList.ClearUavFloat(clearInfo, clearValue);
     };
 
+    const auto clearUintResource = [&commandList](PixelBuffer* resource) {
+        if (!resource) {
+            return;
+        }
+
+        rhi::UavClearInfo clearInfo{};
+        clearInfo.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0).slot;
+        clearInfo.shaderVisible = resource->GetUAVShaderVisibleInfo(0).slot;
+        clearInfo.resource = resource->GetAPIResource();
+
+        rhi::UavClearUint clearValue{};
+        clearValue.v[0] = 0u;
+        clearValue.v[1] = 0u;
+        clearValue.v[2] = 0u;
+        clearValue.v[3] = 0u;
+        commandList.ClearUavUint(clearInfo, clearValue);
+    };
+
     clearFloatResource(m_occupancyTexture.get());
-    clearFloatResource(m_extinctionTexture.get());
+    if (m_extinctionTexture && m_extinctionTexture->GetFormat() == rhi::Format::R32_UInt) {
+        clearUintResource(m_extinctionTexture.get());
+    }
+    else {
+        clearFloatResource(m_extinctionTexture.get());
+    }
     clearFloatResource(m_integratedTransmittanceTexture.get());
+
+    if (m_accumulationTexture) {
+        commandList.ClearRenderTargetView(
+            m_accumulationTexture->GetRTVInfo(0).slot,
+            m_accumulationTexture->GetClearColor());
+    }
     return {};
 }
 
