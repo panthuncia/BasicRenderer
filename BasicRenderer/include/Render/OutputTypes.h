@@ -28,6 +28,9 @@ enum OutputType {
 	VSM_RERENDERED_THIS_FRAME = 24,
 	TRANSPARENT_VBOIT_TRANSMITTANCE = 25,
 	TRANSPARENT_VBOIT_COVERAGE = 26,
+	TRANSPARENT_VBOIT_ZERO_SLICE = 27,
+	TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT = 28,
+	TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT = 29,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -58,4 +61,7 @@ inline std::vector<std::string> OutputTypeNames = {
 	"VSM Re-rendered This Frame",
 	"Transparent VBOIT Transmittance",
 	"Transparent VBOIT Coverage",
+	"Transparent VBOIT Zero Slice",
+	"Transparent VBOIT Virtual Slice Count",
+	"Transparent VBOIT Physical Slice Count",
 };

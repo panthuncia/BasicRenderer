@@ -42,7 +42,8 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
     std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
     std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITOccupancySliceMaskTexture)
+    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITOccupancySliceMaskTexture,
+    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITEarlyDepthTexture)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
@@ -57,6 +58,7 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture(std::move(fixedSliceScalarVBOITZeroTransmittanceSliceTexture))
     , m_fixedSliceScalarVBOITAccumulationTexture(std::move(fixedSliceScalarVBOITAccumulationTexture))
     , m_fixedSliceScalarVBOITShadingExtinctionTexture(std::move(fixedSliceScalarVBOITShadingExtinctionTexture))
+    , m_fixedSliceScalarVBOITEarlyDepthTexture(std::move(fixedSliceScalarVBOITEarlyDepthTexture))
     , m_fixedSliceScalarVBOITOccupancySliceMaskTexture(std::move(fixedSliceScalarVBOITOccupancySliceMaskTexture))
     , m_visibleClustersResolveBuffer(std::move(visibleClustersResolveBuffer))
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
@@ -180,6 +182,9 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             .WithRenderTarget(
                 m_fixedSliceScalarVBOITAccumulationTexture,
                 m_fixedSliceScalarVBOITShadingExtinctionTexture);
+        if (m_fixedSliceScalarVBOITEarlyDepthTexture) {
+            builder->WithDepthRead(m_fixedSliceScalarVBOITEarlyDepthTexture);
+        }
     }
     else if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
         builder->WithShaderResource(m_virtualShadowClipmapInfoBuffer)
@@ -367,6 +372,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     p.debugName = "CLod raster pass";
 
     rhi::ColorAttachment shadingAttachments[2]{};
+    rhi::DepthAttachment shadingDepthAttachment{};
     if (m_outputKind == CLodRasterOutputKind::AVBOITShading &&
         m_fixedSliceScalarVBOITAccumulationTexture &&
         m_fixedSliceScalarVBOITShadingExtinctionTexture) {
@@ -379,6 +385,15 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
         shadingAttachments[1].storeOp = rhi::StoreOp::Store;
         shadingAttachments[1].clear = m_fixedSliceScalarVBOITShadingExtinctionTexture->GetClearColor();
         p.colors = { shadingAttachments, 2 };
+        if (m_fixedSliceScalarVBOITEarlyDepthTexture) {
+            shadingDepthAttachment.dsv = m_fixedSliceScalarVBOITEarlyDepthTexture->GetDSVInfo(0).slot;
+            shadingDepthAttachment.depthLoad = rhi::LoadOp::Load;
+            shadingDepthAttachment.depthStore = rhi::StoreOp::Store;
+            shadingDepthAttachment.stencilLoad = rhi::LoadOp::DontCare;
+            shadingDepthAttachment.stencilStore = rhi::StoreOp::DontCare;
+            shadingDepthAttachment.clear = m_fixedSliceScalarVBOITEarlyDepthTexture->GetClearColor();
+            p.depth = &shadingDepthAttachment;
+        }
     }
 
     executionContext.commandList.BeginPass(p);

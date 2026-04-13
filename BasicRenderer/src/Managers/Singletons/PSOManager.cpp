@@ -1155,11 +1155,18 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
     }
     rhi::SubobjBlend soBlend{ blend };
 
+    rhi::DepthStencilState depthState{};
+    depthState.depthEnable = true;
+    depthState.depthWrite = false;
+    depthState.depthFunc = rhi::CompareOp::LessEqual;
+    rhi::SubobjDepth soDepth{ depthState };
+
     rhi::RenderTargets rts{};
     rts.count = 2;
     rts.formats[0] = rhi::Format::R16G16B16A16_Float;
     rts.formats[1] = rhi::Format::R32_Float;
     rhi::SubobjRTVs soRTV{ rts };
+    rhi::SubobjDSV soDSV{ rhi::Format::D32_Float };
     rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
 
     const rhi::PipelineStreamItem items[] = {
@@ -1168,7 +1175,9 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
         rhi::Make(soPS),
         rhi::Make(soRaster),
         rhi::Make(soBlend),
+        rhi::Make(soDepth),
         rhi::Make(soRTV),
+        rhi::Make(soDSV),
         rhi::Make(soSmp),
     };
 

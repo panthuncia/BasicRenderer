@@ -199,6 +199,7 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
     clearFloatResource(m_occupancyTexture.get());
     clearFloatResource(m_coverageTexture.get());
     clearUintResource(m_occupancySliceMaskTexture.get());
+    clearUintResource(m_zeroTransmittanceSliceTexture.get(), CLodAVBOITDefaultSliceCount);
 
     if (m_accumulationTexture) {
         commandList.ClearRenderTargetView(

@@ -52,6 +52,9 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
             color = UnpackDebugFloat3(payload);
             break;
         case OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE:
+        case OUTPUT_TRANSPARENT_VBOIT_ZERO_SLICE:
+        case OUTPUT_TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT:
+        case OUTPUT_TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT:
             color = UnpackDebugFloat1(payload).xxx;
             break;
         case OUTPUT_SW_RASTER:

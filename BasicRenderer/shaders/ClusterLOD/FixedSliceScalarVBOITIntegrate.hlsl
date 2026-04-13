@@ -7,7 +7,40 @@
 bool IsFixedSliceScalarVBOITDebugOutput(uint outputType)
 {
     return outputType == OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE ||
-        outputType == OUTPUT_TRANSPARENT_VBOIT_COVERAGE;
+        outputType == OUTPUT_TRANSPARENT_VBOIT_COVERAGE ||
+        outputType == OUTPUT_TRANSPARENT_VBOIT_ZERO_SLICE ||
+        outputType == OUTPUT_TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT ||
+        outputType == OUTPUT_TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT;
+}
+
+uint2 GetFixedSliceScalarVBOITDebugPayload(
+    uint outputType,
+    CLodFixedSliceScalarVBOITConfig config,
+    float transmittance,
+    float coverage,
+    uint zeroTransmittanceSlice,
+    uint occupiedPhysicalSliceCount)
+{
+    switch (outputType)
+    {
+        case OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE:
+            return PackDebugFloat1(transmittance);
+        case OUTPUT_TRANSPARENT_VBOIT_COVERAGE:
+            return PackDebugUint(coverage > 1.0e-4f ? 1u : 0u);
+        case OUTPUT_TRANSPARENT_VBOIT_ZERO_SLICE:
+        {
+            const float normalizedZeroSlice = zeroTransmittanceSlice >= config.sliceCount || config.sliceCount <= 1u
+                ? 1.0f
+                : (float)zeroTransmittanceSlice / (float)(config.sliceCount - 1u);
+            return PackDebugFloat1(normalizedZeroSlice);
+        }
+        case OUTPUT_TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT:
+            return PackDebugFloat1((float)config.virtualSliceCount / (float)CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT);
+        case OUTPUT_TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT:
+            return PackDebugFloat1((float)occupiedPhysicalSliceCount / (float)max(config.sliceCount, 1u));
+        default:
+            return uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
+    }
 }
 
 [shader("compute")]
@@ -41,15 +74,21 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
     const uint2 lowPixel = dispatchThreadId.xy;
     const bool lowTileOccupied = occupancyTexture[lowPixel] > 0.0f;
     const uint lowTileSliceMask = occupancySliceMaskTexture[lowPixel];
+    const uint occupiedPhysicalSliceCount = countbits(lowTileSliceMask);
+    uint zeroTransmittanceSlice = zeroTransmittanceSliceTexture[lowPixel];
 
     if (!lowTileOccupied || lowTileSliceMask == 0u)
     {
         if (IsFixedSliceScalarVBOITDebugOutput(perFrameBuffer.outputType))
         {
             RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
-            const uint2 payload = perFrameBuffer.outputType == OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE
-                ? PackDebugFloat1(1.0f)
-                : PackDebugUint(0u);
+            const uint2 payload = GetFixedSliceScalarVBOITDebugPayload(
+                perFrameBuffer.outputType,
+                config,
+                1.0f,
+                0.0f,
+                config.sliceCount,
+                0u);
             const uint2 renderResolution = uint2(perFrameBuffer.screenResX, perFrameBuffer.screenResY);
             const uint2 tileMin = lowPixel * CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR;
             const uint2 tileMax = min(
@@ -97,6 +136,7 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
         {
             cumulativeTransmittance = 0.0f;
             zeroTransmittanceSliceTexture[lowPixel] = sliceIndex;
+            zeroTransmittanceSlice = sliceIndex;
             integratedTransmittanceTexture[uint3(lowPixel, sliceIndex)] = 0.0f;
             [loop]
             for (uint remainingSliceIndex = sliceIndex + 1u; remainingSliceIndex < config.sliceCount; ++remainingSliceIndex)
@@ -121,9 +161,13 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
     {
         const float coverage = 1.0f - cumulativeTransmittance;
         RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
-        const uint2 payload = perFrameBuffer.outputType == OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE
-            ? PackDebugFloat1(cumulativeTransmittance)
-            : PackDebugUint(coverage > 1.0e-4f ? 1u : 0u);
+        const uint2 payload = GetFixedSliceScalarVBOITDebugPayload(
+            perFrameBuffer.outputType,
+            config,
+            cumulativeTransmittance,
+            coverage,
+            zeroTransmittanceSlice,
+            occupiedPhysicalSliceCount);
         const uint2 renderResolution = uint2(perFrameBuffer.screenResX, perFrameBuffer.screenResY);
         const uint2 tileMin = lowPixel * CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR;
         const uint2 tileMax = min(
