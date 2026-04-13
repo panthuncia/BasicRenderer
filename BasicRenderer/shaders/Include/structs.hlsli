@@ -113,6 +113,17 @@ struct CLodFixedSliceScalarVBOITFitState
     uint pad1;
 };
 
+struct CLodFixedSliceScalarVBOITEarlyDepthTileIndirectCommand
+{
+    uint lowResolutionPixelX;
+    uint lowResolutionPixelY;
+    uint zeroTransmittanceSlice;
+    uint vertexCountPerInstance;
+    uint instanceCount;
+    uint startVertexLocation;
+    uint startInstanceLocation;
+};
+
 struct ClippingPlane {
     float4 plane;
 };

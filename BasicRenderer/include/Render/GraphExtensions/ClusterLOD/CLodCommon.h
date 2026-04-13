@@ -262,6 +262,19 @@ struct CLodAVBOITFitState
 
 static_assert(sizeof(CLodAVBOITFitState) == 16u, "CLodAVBOITFitState size must match HLSL");
 
+struct CLodAVBOITEarlyDepthTileIndirectCommand
+{
+    uint32_t lowResolutionPixelX = 0u;
+    uint32_t lowResolutionPixelY = 0u;
+    uint32_t zeroTransmittanceSlice = 0u;
+    uint32_t vertexCountPerInstance = 4u;
+    uint32_t instanceCount = 1u;
+    uint32_t startVertexLocation = 0u;
+    uint32_t startInstanceLocation = 0u;
+};
+
+static_assert(sizeof(CLodAVBOITEarlyDepthTileIndirectCommand) == 28u, "CLodAVBOITEarlyDepthTileIndirectCommand size must match HLSL");
+
 inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 22u;
 inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 22u;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageSize = 128u;

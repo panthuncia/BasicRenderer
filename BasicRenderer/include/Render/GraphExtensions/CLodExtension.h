@@ -143,6 +143,8 @@ private:
     std::shared_ptr<Buffer> m_fixedSliceScalarVBOITOccupancyHistogramBuffer;
     std::shared_ptr<Buffer> m_fixedSliceScalarVBOITDepthWarpLUTBuffer;
     std::shared_ptr<Buffer> m_fixedSliceScalarVBOITFitStateBuffer;
+    std::shared_ptr<Buffer> m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer;
+    std::shared_ptr<Buffer> m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITOccupancyTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITCoverageTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITOccupancySliceMaskTexture;

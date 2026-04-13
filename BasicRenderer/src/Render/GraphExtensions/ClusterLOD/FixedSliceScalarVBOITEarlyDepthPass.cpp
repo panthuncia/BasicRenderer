@@ -2,6 +2,7 @@
 
 #include "BuiltinResources.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
@@ -10,22 +11,24 @@
 
 FixedSliceScalarVBOITEarlyDepthPass::FixedSliceScalarVBOITEarlyDepthPass(
     std::shared_ptr<Buffer> configBuffer,
-    std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture,
+    std::shared_ptr<Buffer> tileCommandsBuffer,
+    std::shared_ptr<Buffer> tileCountBuffer,
     std::shared_ptr<PixelBuffer> earlyDepthTexture)
     : m_configBuffer(std::move(configBuffer))
-    , m_zeroTransmittanceSliceTexture(std::move(zeroTransmittanceSliceTexture))
+    , m_tileCommandsBuffer(std::move(tileCommandsBuffer))
+    , m_tileCountBuffer(std::move(tileCountBuffer))
     , m_earlyDepthTexture(std::move(earlyDepthTexture))
 {
     auto dev = DeviceManager::GetInstance().GetDevice();
 
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
+    shaderInfoBundle.vertexShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITEarlyDepth.hlsl", L"FixedSliceScalarVBOITEarlyDepthTileVSMain", L"vs_6_6" };
     shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITEarlyDepth.hlsl", L"FixedSliceScalarVBOITEarlyDepthPSMain", L"ps_6_6" };
     auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 
     auto& layout = PSOManager::GetInstance().GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiledBundle.vertexShader.Get()), "FullscreenVSNoViewRayMain" };
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiledBundle.vertexShader.Get()), "FixedSliceScalarVBOITEarlyDepthTileVSMain" };
     rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(compiledBundle.pixelShader.Get()), "FixedSliceScalarVBOITEarlyDepthPSMain" };
 
     rhi::RasterState rasterState{};
@@ -74,11 +77,24 @@ FixedSliceScalarVBOITEarlyDepthPass::FixedSliceScalarVBOITEarlyDepthPass(
 
     pso->SetName("CLod.FixedSliceScalarVBOITEarlyDepth.PSO");
     m_pso = PipelineState(std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots);
+
+    rhi::IndirectArg args[] = {
+        {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 1, 3 } } },
+        {.kind = rhi::IndirectArgKind::Draw }
+    };
+    result = dev.CreateCommandSignature(
+        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 2), sizeof(CLodAVBOITEarlyDepthTileIndirectCommand) },
+        layout.GetHandle(),
+        m_commandSignature);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT early depth command signature");
+    }
 }
 
 void FixedSliceScalarVBOITEarlyDepthPass::DeclareResourceUsages(RenderPassBuilder* builder)
 {
-    builder->WithShaderResource(Builtin::CameraBuffer, m_configBuffer, m_zeroTransmittanceSliceTexture)
+    builder->WithShaderResource(Builtin::CameraBuffer, m_configBuffer)
+        .WithIndirectArguments(m_tileCommandsBuffer, m_tileCountBuffer)
         .WithDepthReadWrite(m_earlyDepthTexture);
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
@@ -94,7 +110,7 @@ void FixedSliceScalarVBOITEarlyDepthPass::Update(const UpdateExecutionContext& e
 
 PassReturn FixedSliceScalarVBOITEarlyDepthPass::Execute(PassExecutionContext& executionContext)
 {
-    if (!m_configBuffer || !m_zeroTransmittanceSliceTexture || !m_earlyDepthTexture) {
+    if (!m_configBuffer || !m_tileCommandsBuffer || !m_tileCountBuffer || !m_earlyDepthTexture) {
         return {};
     }
 
@@ -125,17 +141,21 @@ PassReturn FixedSliceScalarVBOITEarlyDepthPass::Execute(PassExecutionContext& ex
 
     uint32_t misc[NumMiscUintRootConstants] = {};
     misc[CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_ZERO_SLICE_DESCRIPTOR_INDEX] =
-        m_zeroTransmittanceSliceTexture->GetSRVInfo(0).slot.index;
     commandList.PushConstants(
-        rhi::ShaderStage::Pixel,
+        rhi::ShaderStage::AllGraphics,
         0,
         MiscUintRootSignatureIndex,
         0,
         NumMiscUintRootConstants,
         misc);
 
-    commandList.Draw(3, 1, 0, 0);
+    commandList.ExecuteIndirect(
+        m_commandSignature->GetHandle(),
+        m_tileCommandsBuffer->GetAPIResource().GetHandle(),
+        0,
+        m_tileCountBuffer->GetAPIResource().GetHandle(),
+        0,
+        static_cast<uint32_t>(m_tileCommandsBuffer->GetSize() / sizeof(CLodAVBOITEarlyDepthTileIndirectCommand)));
     return {};
 }
 

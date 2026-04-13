@@ -21,6 +21,7 @@
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITAdaptiveFitPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITAdaptiveFitUpdatePass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITDepthWarpPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITEarlyDepthBuildPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITEarlyDepthPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITOccupancyHistogramPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITOccupancyRemapPass.h"
@@ -240,6 +241,7 @@ constexpr std::string_view kTransparentExtinctionDepthWarpPassName = "Transparen
 constexpr std::string_view kTransparentExtinctionOccupancyRemapPassName = "TransparentExtinctionOccupancyRemapPass";
 constexpr std::string_view kTransparentExtinctionSparseClearPassName = "TransparentExtinctionSparseClearPass";
 constexpr std::string_view kTransparentExtinctionCapturePassName = "TransparentExtinctionCapturePass";
+constexpr std::string_view kTransparentVBOITEarlyDepthBuildPassName = "TransparentVBOITEarlyDepthBuildPass";
 constexpr std::string_view kTransparentVBOITEarlyDepthPassName = "TransparentVBOITEarlyDepthPass";
 constexpr std::string_view kTransparentTransmittanceIntegratePassName = "TransparentTransmittanceIntegratePass";
 constexpr std::string_view kTransparentVBOITShadePassName = "TransparentVBOITShadePass";
@@ -915,6 +917,32 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITFitStateBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodAVBOITEarlyDepthTileIndirectCommand),
+        true,
+        false,
+        false,
+        true);
+    m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Early Depth Tile Commands"));
+    m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        true);
+    m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Early Depth Tile Count"));
+    m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
     m_fixedSliceScalarVBOITOccupancyTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITOccupancyDescription());
     m_fixedSliceScalarVBOITOccupancyTexture->SetName(MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Occupancy"));
     m_fixedSliceScalarVBOITOccupancyTexture->GetECSEntity()
@@ -1485,6 +1513,8 @@ void CLodExtension::TagTransparencyResourceUsages()
     tagBufferUsage(m_fixedSliceScalarVBOITOccupancyHistogramBuffer, "Cluster LOD fixed-slice scalar VBOIT adaptive histogram");
     tagBufferUsage(m_fixedSliceScalarVBOITDepthWarpLUTBuffer, "Cluster LOD fixed-slice scalar VBOIT depth warp LUT");
     tagBufferUsage(m_fixedSliceScalarVBOITFitStateBuffer, "Cluster LOD fixed-slice scalar VBOIT adaptive fit state");
+    tagBufferUsage(m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer, "Cluster LOD fixed-slice scalar VBOIT early depth");
+    tagBufferUsage(m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer, "Cluster LOD fixed-slice scalar VBOIT early depth");
     tagTextureUsage(m_fixedSliceScalarVBOITOccupancyTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITCoverageTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITOccupancySliceMaskTexture, "Cluster LOD fixed-slice scalar VBOIT");
@@ -1582,6 +1612,8 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_fixedSliceScalarVBOITOccupancyHistogramBuffer);
     releaseBufferBacking(m_fixedSliceScalarVBOITDepthWarpLUTBuffer);
     releaseBufferBacking(m_fixedSliceScalarVBOITFitStateBuffer);
+    releaseBufferBacking(m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer);
+    releaseBufferBacking(m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer);
     releaseBufferBacking(m_shadowPageMetadataBuffer);
     releaseBufferBacking(m_shadowInvalidationInputsBuffer);
     releaseBufferBacking(m_shadowInvalidationCountBuffer);
@@ -2923,15 +2955,30 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             integratePassDesc.At(makeTransparentTailInsertPoint());
             outPasses.push_back(std::move(integratePassDesc));
 
+            auto earlyDepthBuildPassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, kTransparentVBOITEarlyDepthBuildPassName),
+                std::make_shared<FixedSliceScalarVBOITEarlyDepthBuildPass>(
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
+                    m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer,
+                    m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer));
+            {
+                auto insertPoint = makeTransparentTailInsertPoint();
+                insertPoint.after.push_back(MakeVariantPassName(traits, kTransparentTransmittanceIntegratePassName));
+                earlyDepthBuildPassDesc.At(std::move(insertPoint));
+            }
+            outPasses.push_back(std::move(earlyDepthBuildPassDesc));
+
             auto earlyDepthPassDesc = RenderGraph::ExternalPassDesc::Render(
                 MakeVariantPassName(traits, kTransparentVBOITEarlyDepthPassName),
                 std::make_shared<FixedSliceScalarVBOITEarlyDepthPass>(
                     m_fixedSliceScalarVBOITConfigBuffer,
-                    m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
+                    m_fixedSliceScalarVBOITEarlyDepthTileCommandsBuffer,
+                    m_fixedSliceScalarVBOITEarlyDepthTileCountBuffer,
                     m_fixedSliceScalarVBOITEarlyDepthTexture));
             {
                 auto insertPoint = makeTransparentTailInsertPoint();
-                insertPoint.after.push_back(MakeVariantPassName(traits, kTransparentTransmittanceIntegratePassName));
+                insertPoint.after.push_back(MakeVariantPassName(traits, kTransparentVBOITEarlyDepthBuildPassName));
                 earlyDepthPassDesc.At(std::move(insertPoint));
             }
             outPasses.push_back(std::move(earlyDepthPassDesc));

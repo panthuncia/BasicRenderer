@@ -2,8 +2,40 @@
 #include "include/structs.hlsli"
 #include "include/utilities.hlsli"
 #include "include/FixedSliceScalarVBOITCommon.hlsli"
-#include "fullscreenVS.hlsli"
 #include "PerPassRootConstants/clodFixedSliceScalarVBOITEarlyDepthRootConstants.h"
+
+struct FixedSliceScalarVBOITEarlyDepthVSOutput
+{
+    float4 position : SV_Position;
+};
+
+[shader("vertex")]
+FixedSliceScalarVBOITEarlyDepthVSOutput FixedSliceScalarVBOITEarlyDepthTileVSMain(uint vertexID : SV_VertexID)
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
+
+    const uint2 lowPixel = uint2(
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_X,
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_Y);
+    const uint2 tileMin = lowPixel * CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR;
+    const uint2 tileMax = min(
+        tileMin + uint2(
+            CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR,
+            CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR),
+        uint2(perFrameBuffer.screenResX, perFrameBuffer.screenResY));
+    const float2 quadCorner = float2(
+        (vertexID == 1u || vertexID == 3u) ? 1.0f : 0.0f,
+        vertexID >= 2u ? 1.0f : 0.0f);
+    const float2 pixelPosition = lerp(float2(tileMin), float2(tileMax), quadCorner);
+
+    FixedSliceScalarVBOITEarlyDepthVSOutput output;
+    output.position = float4(
+        pixelPosition.x / max((float)perFrameBuffer.screenResX, 1.0f) * 2.0f - 1.0f,
+        1.0f - pixelPosition.y / max((float)perFrameBuffer.screenResY, 1.0f) * 2.0f,
+        0.0f,
+        1.0f);
+    return output;
+}
 
 float ComputeDepthFromBaseSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float baseSliceCoordinate)
 {
@@ -99,14 +131,12 @@ float ComputeConservativeEarlyDepthWarpedSliceCoordinate(
 }
 
 [shader("pixel")]
-float FixedSliceScalarVBOITEarlyDepthPSMain(FULLSCREEN_VS_OUTPUT input) : SV_Depth
+float FixedSliceScalarVBOITEarlyDepthPSMain(FixedSliceScalarVBOITEarlyDepthVSOutput input) : SV_Depth
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     StructuredBuffer<CLodFixedSliceScalarVBOITConfig> configBuffer =
         ResourceDescriptorHeap[CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_CONFIG_DESCRIPTOR_INDEX];
-    Texture2D<uint> zeroTransmittanceSliceTexture =
-        ResourceDescriptorHeap[CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_ZERO_SLICE_DESCRIPTOR_INDEX];
 
     const CLodFixedSliceScalarVBOITConfig config = configBuffer[0];
     const uint2 pixel = uint2(input.position.xy);
@@ -117,13 +147,15 @@ float FixedSliceScalarVBOITEarlyDepthPSMain(FULLSCREEN_VS_OUTPUT input) : SV_Dep
         discard;
     }
 
-    const uint2 lowPixel = pixel / CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR;
+    const uint2 lowPixel = uint2(
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_X,
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_Y);
     if (lowPixel.x >= config.lowResolutionWidth || lowPixel.y >= config.lowResolutionHeight)
     {
         discard;
     }
 
-    const uint zeroTransmittanceSlice = zeroTransmittanceSliceTexture[lowPixel];
+    const uint zeroTransmittanceSlice = CLOD_FIXED_SLICE_SCALAR_VBOIT_EARLY_DEPTH_TILE_ZERO_SLICE;
     if (zeroTransmittanceSlice >= config.sliceCount)
     {
         discard;
