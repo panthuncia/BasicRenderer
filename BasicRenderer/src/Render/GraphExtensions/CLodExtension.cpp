@@ -2137,6 +2137,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         auto insertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
         insertPoint.after.push_back("CLodShadow::VirtualShadowDeduplicatePredictedPagesPass");
         insertPoint.before.push_back("Screen-Space Reflections Pass");
+        insertPoint.before.push_back("UpscalingPass");
         insertPoint.before.push_back("luminanceHistogramPass");
         return insertPoint;
     };
@@ -2147,6 +2148,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         insertPoint.after.push_back("Forward render pass");
         insertPoint.after.push_back("Screen-Space Reflections Pass");
         insertPoint.before.push_back("DebugGridPass");
+        insertPoint.before.push_back("UpscalingPass");
         insertPoint.before.push_back("luminanceHistogramPass");
         insertPoint.before.push_back("TonemappingPass");
         return insertPoint;
@@ -2879,8 +2881,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_fixedSliceScalarVBOITConfigBuffer,
                     m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
                     m_fixedSliceScalarVBOITEarlyDepthTexture));
-            earlyDepthPassDesc.At(RenderGraph::ExternalInsertPoint::After(
-                MakeVariantPassName(traits, kTransparentTransmittanceIntegratePassName)));
+            {
+                auto insertPoint = makeTransparentTailInsertPoint();
+                insertPoint.after.push_back(MakeVariantPassName(traits, kTransparentTransmittanceIntegratePassName));
+                earlyDepthPassDesc.At(std::move(insertPoint));
+            }
             outPasses.push_back(std::move(earlyDepthPassDesc));
 
             ClusterRasterizationPassInputs shadePassInputs;
@@ -2914,8 +2919,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     nullptr,
                     m_fixedSliceScalarVBOITEarlyDepthTexture));
             shadePassDesc.GeometryPass();
-            shadePassDesc.At(RenderGraph::ExternalInsertPoint::After(
-                MakeVariantPassName(traits, kTransparentVBOITEarlyDepthPassName)));
+            {
+                auto insertPoint = makeTransparentTailInsertPoint();
+                insertPoint.after.push_back(MakeVariantPassName(traits, kTransparentVBOITEarlyDepthPassName));
+                shadePassDesc.At(std::move(insertPoint));
+            }
             outPasses.push_back(std::move(shadePassDesc));
 
             auto resolvePassDesc = RenderGraph::ExternalPassDesc::Compute(
@@ -2924,8 +2932,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_fixedSliceScalarVBOITConfigBuffer,
                     m_fixedSliceScalarVBOITAccumulationTexture,
                     m_fixedSliceScalarVBOITShadingExtinctionTexture));
-            resolvePassDesc.At(RenderGraph::ExternalInsertPoint::After(
-                MakeVariantPassName(traits, kTransparentVBOITShadePassName)));
+            {
+                auto insertPoint = makeTransparentCompositeInsertPoint();
+                insertPoint.after.push_back(MakeVariantPassName(traits, kTransparentVBOITShadePassName));
+                resolvePassDesc.At(std::move(insertPoint));
+            }
             outPasses.push_back(std::move(resolvePassDesc));
         }
 

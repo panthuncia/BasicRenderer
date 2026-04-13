@@ -19,6 +19,14 @@ float ComputeDepthFromBaseSliceCoordinate(CLodFixedSliceScalarVBOITConfig config
     return lerp(config.viewNearDepth, config.viewFarDepth, normalizedDepth);
 }
 
+float ComputeHardwareDepthFromLinearDepth(float linearDepth, Camera camera)
+{
+    const float nearPlane = max(camera.zNear, 1.0e-5f);
+    const float farPlane = max(camera.zFar, nearPlane + 1.0e-5f);
+    const float clampedLinearDepth = clamp(linearDepth, nearPlane, farPlane);
+    return saturate((farPlane - (nearPlane * farPlane) / clampedLinearDepth) / (farPlane - nearPlane));
+}
+
 float InvertWarpedSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float warpedSliceCoordinate)
 {
     if (config.sliceCount <= 1u)
@@ -72,6 +80,15 @@ float InvertWarpedSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float 
     return (float)(config.virtualSliceCount - 1u);
 }
 
+float ComputeConservativeEarlyDepthWarpedSliceCoordinate(
+    CLodFixedSliceScalarVBOITConfig config,
+    uint zeroTransmittanceSlice)
+{
+    const float guaranteedZeroLookupSliceCoordinate =
+        (float)zeroTransmittanceSlice + 1.0f;
+    return guaranteedZeroLookupSliceCoordinate + max(config.lookupDepthBiasInSlices, 0.0f);
+}
+
 [shader("pixel")]
 float FixedSliceScalarVBOITEarlyDepthPSMain(FULLSCREEN_VS_OUTPUT input) : SV_Depth
 {
@@ -103,9 +120,15 @@ float FixedSliceScalarVBOITEarlyDepthPSMain(FULLSCREEN_VS_OUTPUT input) : SV_Dep
         discard;
     }
 
-    const float baseSliceCoordinate = InvertWarpedSliceCoordinate(config, (float)zeroTransmittanceSlice);
+    const float conservativeWarpedSliceCoordinate =
+        ComputeConservativeEarlyDepthWarpedSliceCoordinate(config, zeroTransmittanceSlice);
+    if (conservativeWarpedSliceCoordinate > (float)(config.sliceCount - 1u))
+    {
+        discard;
+    }
+
+    const float baseSliceCoordinate = InvertWarpedSliceCoordinate(config, conservativeWarpedSliceCoordinate);
     const float linearDepth = max(ComputeDepthFromBaseSliceCoordinate(config, baseSliceCoordinate), config.viewNearDepth);
     const Camera mainCamera = cameraBuffer[perFrameBuffer.mainCameraIndex];
-    const float projectedDepth = -mainCamera.projection[2][2] + mainCamera.projection[3][2] / linearDepth;
-    return saturate(projectedDepth);
+    return ComputeHardwareDepthFromLinearDepth(linearDepth, mainCamera);
 }
