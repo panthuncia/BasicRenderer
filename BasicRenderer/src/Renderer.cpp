@@ -2095,6 +2095,7 @@ void Renderer::CreateRenderGraph() {
 
     if (m_visibilityRendering) {
         newGraph->BuildRenderPass<ClearVisibilityBufferPass>("ClearVisibilityBufferPass");
+        newGraph->SetPassTechnique("ClearVisibilityBufferPass", "Primary Visibility::GBuffer Construction");
     }
 
 	// Either visibility or standard GBuffer pass
@@ -2152,9 +2153,12 @@ void Renderer::CreateRenderGraph() {
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
     newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
+    newGraph->SetPassTechnique("luminanceHistogramPass", "Post Process::Exposure");
     newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
+    newGraph->SetPassTechnique("LuminanceAveragePass", "Post Process::Exposure");
 
     newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
+    newGraph->SetPassTechnique("UpscalingPass", "Post Process::Upscaling");
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());
@@ -2173,15 +2177,20 @@ void Renderer::CreateRenderGraph() {
     params.overallOpacity = 1.0f;
 
 	newGraph->BuildComputePass<DebugGridPass>("DebugGridPass", params);
+    newGraph->SetPassTechnique("DebugGridPass", "Debug::Overlays");
 
     newGraph->BuildRenderPass<TonemappingPass>("TonemappingPass");
+    newGraph->SetPassTechnique("TonemappingPass", "Post Process::Tonemapping");
 
     newGraph->BuildRenderPass<DebugResolvePass>("DebugResolvePass");
+    newGraph->SetPassTechnique("DebugResolvePass", "Debug::Visualization");
 
     newGraph->BuildRenderPass<MenuRenderPass>("MenuRenderPass");
+    newGraph->SetPassTechnique("MenuRenderPass", "Debug::UI");
 
     if (getDrawBoundingSpheres()) {
         newGraph->BuildRenderPass<DebugSpherePass>("DebugSpherePass");
+        newGraph->SetPassTechnique("DebugSpherePass", "Debug::Visualization");
     }
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());

@@ -195,6 +195,42 @@ std::string MakeVariantResourceName(const CLodVariantTraits& traits, std::string
     return std::string(traits.resourcePrefix) + std::string(suffix);
 }
 
+std::string GetVariantTechniquePath(const CLodVariantTraits& traits, std::string_view passName)
+{
+    switch (traits.type) {
+    case CLodExtensionType::VisiblityBuffer:
+        if (passName.find("Reyes") != std::string_view::npos) {
+            return "Primary Visibility::CLod::Reyes";
+        }
+        return "Primary Visibility::CLod";
+    case CLodExtensionType::AlphaBlend:
+        if (passName.find("Reyes") != std::string_view::npos) {
+            return "Transparency::Deep Visibility::Reyes";
+        }
+        if (passName.find("TransparentVBOIT") != std::string_view::npos ||
+            passName.find("TransparentExtinction") != std::string_view::npos) {
+            return "Transparency::VBOIT";
+        }
+        if (passName.find("DeepVisibility") != std::string_view::npos ||
+            passName.find("ClearDeepVisibility") != std::string_view::npos ||
+            passName.find("RasterizeClustersPass") != std::string_view::npos) {
+            return "Transparency::Deep Visibility";
+        }
+        return "Transparency::CLod";
+    case CLodExtensionType::Shadow:
+        if (passName.find("Reyes") != std::string_view::npos) {
+            return "Shadows::Virtual Shadow Mapping::Reyes";
+        }
+        if (passName.find("PageJob") != std::string_view::npos ||
+            passName.find("VirtualShadowBlock") != std::string_view::npos) {
+            return "Shadows::Virtual Shadow Mapping::Page Job";
+        }
+        return "Shadows::Virtual Shadow Mapping";
+    default:
+        return {};
+    }
+}
+
 constexpr std::string_view kTransparentExtinctionSetupPassName = "TransparentExtinctionSetupPass";
 constexpr std::string_view kTransparentExtinctionOccupancyPassName = "TransparentExtinctionOccupancyPass";
 constexpr std::string_view kTransparentExtinctionOccupancyHistogramPassName = "TransparentExtinctionOccupancyHistogramPass";
@@ -2099,6 +2135,16 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         return;
     }
 
+    const size_t techniqueTaggedPassStart = outPasses.size();
+    const auto applyTechniqueTags = [&]() {
+        for (size_t passIndex = techniqueTaggedPassStart; passIndex < outPasses.size(); ++passIndex) {
+            auto& passDesc = outPasses[passIndex];
+            if (passDesc.techniquePath.empty()) {
+                passDesc.Technique(GetVariantTechniquePath(traits, passDesc.name));
+            }
+        }
+    };
+
     const auto softwareRasterMode =
         SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
     const auto shadowVSMRasterMode =
@@ -2672,6 +2718,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 false)));
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly) {
+        applyTechniqueTags();
         return;
     }
 
@@ -2957,6 +3004,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     resolveDeepVisibilityPassDesc.At(makeTransparentCompositeInsertPoint());
             outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         }
+        applyTechniqueTags();
         return;
     }
 
@@ -4342,6 +4390,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "LinearDepthDownsamplePass2"),
             std::make_shared<DownsamplePass>()));
+
+    applyTechniqueTags();
 }
 
 void CLodExtension::GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses)
