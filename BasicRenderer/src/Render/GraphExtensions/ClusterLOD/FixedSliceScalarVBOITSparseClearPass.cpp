@@ -1,70 +1,54 @@
-#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITIntegratePass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITSparseClearPass.h"
 
 #include "Managers/Singletons/PSOManager.h"
-#include "BuiltinResources.h"
+#include "Render/RenderContext.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
-#include "../shaders/PerPassRootConstants/clodFixedSliceScalarVBOITIntegrateRootConstants.h"
-#include "Render/RenderContext.h"
 
-FixedSliceScalarVBOITIntegratePass::FixedSliceScalarVBOITIntegratePass(
+#include "../shaders/PerPassRootConstants/clodFixedSliceScalarVBOITIntegrateRootConstants.h"
+
+FixedSliceScalarVBOITSparseClearPass::FixedSliceScalarVBOITSparseClearPass(
     std::shared_ptr<Buffer> configBuffer,
     std::shared_ptr<PixelBuffer> occupancyTexture,
-    std::shared_ptr<PixelBuffer> coverageTexture,
     std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
     std::shared_ptr<PixelBuffer> extinctionTexture,
-    std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
     std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture)
     : m_configBuffer(std::move(configBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
-    , m_coverageTexture(std::move(coverageTexture))
     , m_occupancySliceMaskTexture(std::move(occupancySliceMaskTexture))
     , m_extinctionTexture(std::move(extinctionTexture))
-    , m_integratedTransmittanceTexture(std::move(integratedTransmittanceTexture))
     , m_zeroTransmittanceSliceTexture(std::move(zeroTransmittanceSliceTexture))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-        L"shaders/ClusterLOD/FixedSliceScalarVBOITIntegrate.hlsl",
-        L"CLodFixedSliceScalarVBOITIntegrateCS",
+        L"shaders/ClusterLOD/FixedSliceScalarVBOITSparseClear.hlsl",
+        L"CLodFixedSliceScalarVBOITSparseClearCS",
         {},
-        "CLod.FixedSliceScalarVBOITIntegrate.PSO");
+        "CLod.FixedSliceScalarVBOITSparseClear.PSO");
 }
 
-void FixedSliceScalarVBOITIntegratePass::DeclareResourceUsages(ComputePassBuilder* builder)
+void FixedSliceScalarVBOITSparseClearPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithShaderResource(m_configBuffer);
-
-    builder->WithUnorderedAccess(
-        Builtin::DebugVisualization,
-        m_occupancyTexture,
-        m_coverageTexture,
-        m_occupancySliceMaskTexture,
-        m_extinctionTexture,
-        m_integratedTransmittanceTexture,
-        m_zeroTransmittanceSliceTexture);
-
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder->WithShaderResource(m_configBuffer)
+        .WithUnorderedAccess(
+            m_occupancyTexture,
+            m_occupancySliceMaskTexture,
+            m_extinctionTexture,
+            m_zeroTransmittanceSliceTexture);
 }
 
-void FixedSliceScalarVBOITIntegratePass::Setup()
+void FixedSliceScalarVBOITSparseClearPass::Setup()
 {
 }
 
-void FixedSliceScalarVBOITIntegratePass::Update(const UpdateExecutionContext& executionContext)
+void FixedSliceScalarVBOITSparseClearPass::Update(const UpdateExecutionContext& executionContext)
 {
     (void)executionContext;
-    m_declaredResourcesChanged = false;
 }
 
-bool FixedSliceScalarVBOITIntegratePass::DeclaredResourcesChanged() const
+PassReturn FixedSliceScalarVBOITSparseClearPass::Execute(PassExecutionContext& executionContext)
 {
-    return m_declaredResourcesChanged;
-}
-
-PassReturn FixedSliceScalarVBOITIntegratePass::Execute(PassExecutionContext& executionContext)
-{
-    if (!m_configBuffer || !m_occupancyTexture || !m_coverageTexture || !m_occupancySliceMaskTexture || !m_extinctionTexture || !m_zeroTransmittanceSliceTexture) {
+    if (!m_configBuffer || !m_occupancyTexture || !m_occupancySliceMaskTexture || !m_extinctionTexture || !m_zeroTransmittanceSliceTexture) {
         return {};
     }
 
@@ -93,6 +77,6 @@ PassReturn FixedSliceScalarVBOITIntegratePass::Execute(PassExecutionContext& exe
     return {};
 }
 
-void FixedSliceScalarVBOITIntegratePass::Cleanup()
+void FixedSliceScalarVBOITSparseClearPass::Cleanup()
 {
 }

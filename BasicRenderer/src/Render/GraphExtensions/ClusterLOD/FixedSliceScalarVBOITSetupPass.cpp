@@ -10,13 +10,19 @@
 
 FixedSliceScalarVBOITSetupPass::FixedSliceScalarVBOITSetupPass(
     std::shared_ptr<Buffer> configBuffer,
+    std::shared_ptr<Buffer> depthWarpLUTBuffer,
     std::shared_ptr<PixelBuffer> occupancyTexture,
+    std::shared_ptr<PixelBuffer> coverageTexture,
+    std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
     std::shared_ptr<PixelBuffer> extinctionTexture,
     std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
     std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture,
     std::shared_ptr<PixelBuffer> accumulationTexture)
     : m_configBuffer(std::move(configBuffer))
+    , m_depthWarpLUTBuffer(std::move(depthWarpLUTBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
+    , m_coverageTexture(std::move(coverageTexture))
+    , m_occupancySliceMaskTexture(std::move(occupancySliceMaskTexture))
     , m_extinctionTexture(std::move(extinctionTexture))
     , m_integratedTransmittanceTexture(std::move(integratedTransmittanceTexture))
     , m_zeroTransmittanceSliceTexture(std::move(zeroTransmittanceSliceTexture))
@@ -29,9 +35,14 @@ void FixedSliceScalarVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* bu
     if (m_configBuffer) {
         builder->WithShaderResource(m_configBuffer);
     }
+    if (m_depthWarpLUTBuffer) {
+        builder->WithShaderResource(m_depthWarpLUTBuffer);
+    }
 
     builder->WithUnorderedAccess(
         m_occupancyTexture,
+        m_coverageTexture,
+        m_occupancySliceMaskTexture,
         m_extinctionTexture,
         m_integratedTransmittanceTexture,
         m_zeroTransmittanceSliceTexture);
@@ -55,13 +66,27 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
     auto& context = *updateContext;
 
     m_occupancyTexture->EnsureVirtualDescriptorSlotsAllocated();
+	m_coverageTexture->EnsureVirtualDescriptorSlotsAllocated();
+    m_occupancySliceMaskTexture->EnsureVirtualDescriptorSlotsAllocated();
+    if (m_depthWarpLUTBuffer) {
+        m_depthWarpLUTBuffer->EnsureVirtualDescriptorSlotsAllocated();
+    }
 	m_extinctionTexture->EnsureVirtualDescriptorSlotsAllocated();
 	m_integratedTransmittanceTexture->EnsureVirtualDescriptorSlotsAllocated();
     m_zeroTransmittanceSliceTexture->EnsureVirtualDescriptorSlotsAllocated();
 
-    CLodFixedSliceScalarVBOITConfig config{};
+    CLodAVBOITConfig config{};
     config.occupancyUAVDescriptorIndex = m_occupancyTexture
         ? m_occupancyTexture->GetUAVShaderVisibleInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    config.coverageUAVDescriptorIndex = m_coverageTexture
+        ? m_coverageTexture->GetUAVShaderVisibleInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    config.occupancySliceMaskUAVDescriptorIndex = m_occupancySliceMaskTexture
+        ? m_occupancySliceMaskTexture->GetUAVShaderVisibleInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    config.depthWarpLUTSRVDescriptorIndex = m_depthWarpLUTBuffer
+        ? m_depthWarpLUTBuffer->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
     config.extinctionUAVDescriptorIndex = m_extinctionTexture
         ? m_extinctionTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index
@@ -78,12 +103,13 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
     config.zeroTransmittanceSliceSRVDescriptorIndex = m_zeroTransmittanceSliceTexture
         ? m_zeroTransmittanceSliceTexture->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
-    config.sliceCount = CLodFixedSliceScalarVBOITDefaultSliceCount;
+    config.sliceCount = CLodAVBOITDefaultSliceCount;
+    config.virtualSliceCount = CLodAVBOITDefaultVirtualSliceCount;
     config.lowResolutionWidth = m_occupancyTexture ? m_occupancyTexture->GetWidth() : 0u;
     config.lowResolutionHeight = m_occupancyTexture ? m_occupancyTexture->GetHeight() : 0u;
-    config.depthDistributionExponent = CLodFixedSliceScalarVBOITDefaultDepthDistributionExponent;
-    config.lookupDepthBiasInSlices = CLodFixedSliceScalarVBOITDefaultLookupDepthBiasInSlices;
-    config.zeroTransmittanceThreshold = CLodFixedSliceScalarVBOITDefaultZeroTransmittanceThreshold;
+    config.depthDistributionExponent = CLodAVBOITDefaultDepthDistributionExponent;
+    config.lookupDepthBiasInSlices = CLodAVBOITDefaultLookupDepthBiasInSlices;
+    config.zeroTransmittanceThreshold = CLodAVBOITDefaultZeroTransmittanceThreshold;
 
     if (context.viewManager) {
         context.viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewID) {
@@ -97,7 +123,7 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
         });
     }
 
-    BUFFER_UPLOAD(&config, sizeof(CLodFixedSliceScalarVBOITConfig), rg::runtime::UploadTarget::FromShared(m_configBuffer), 0);
+    BUFFER_UPLOAD(&config, sizeof(CLodAVBOITConfig), rg::runtime::UploadTarget::FromShared(m_configBuffer), 0);
 }
 
 PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executionContext)
@@ -151,16 +177,8 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
     };
 
     clearFloatResource(m_occupancyTexture.get());
-    if (m_extinctionTexture && m_extinctionTexture->GetFormat() == rhi::Format::R32_UInt) {
-        clearUintResource(m_extinctionTexture.get());
-    }
-    else {
-        clearFloatResource(m_extinctionTexture.get());
-    }
-    clearFloatResource(m_integratedTransmittanceTexture.get(), 1.0f);
-    if (m_zeroTransmittanceSliceTexture) {
-        clearUintResource(m_zeroTransmittanceSliceTexture.get(), CLodFixedSliceScalarVBOITDefaultSliceCount);
-    }
+    clearFloatResource(m_coverageTexture.get());
+    clearUintResource(m_occupancySliceMaskTexture.get());
 
     if (m_accumulationTexture) {
         commandList.ClearRenderTargetView(

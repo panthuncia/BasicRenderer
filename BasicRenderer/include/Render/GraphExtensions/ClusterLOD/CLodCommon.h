@@ -59,14 +59,14 @@ enum class CLodRasterOutputKind : uint8_t {
     VisibilityBuffer,
     VirtualShadow,
     DeepVisibility,
-    FixedSliceScalarVBOITOccupancy,
-    FixedSliceScalarVBOIT,
-    FixedSliceScalarVBOITShading,
+    AVBOITOccupancy,
+    AVBOIT,
+    AVBOITShading,
 };
 
 enum class CLodTransparencyMode : uint8_t {
     LinkedListDeepVisibility,
-    FixedSliceScalarVBOIT,
+    AVBOIT,
 };
 
 inline constexpr const char* CLodSoftwareRasterModeSettingName = "clodSoftwareRasterMode";
@@ -85,16 +85,18 @@ inline constexpr const char* CLodVSMRasterModeNames[] = {
 inline constexpr int CLodVSMRasterModeCount = static_cast<int>(sizeof(CLodVSMRasterModeNames) / sizeof(CLodVSMRasterModeNames[0]));
 inline constexpr const char* CLodTransparencyModeNames[] = {
     "Linked-List Deep Visibility",
-    "Fixed-Slice Scalar VBOIT",
+    "AVBOIT",
 };
 inline constexpr int CLodTransparencyModeCount = static_cast<int>(sizeof(CLodTransparencyModeNames) / sizeof(CLodTransparencyModeNames[0]));
-inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultSliceCount = 16u;
-inline constexpr uint32_t CLodFixedSliceScalarVBOITDefaultDownsampleFactor = 4u;
-inline constexpr float CLodFixedSliceScalarVBOITExtinctionQuantizationScale = 4096.0f;
-inline constexpr float CLodFixedSliceScalarVBOITDefaultDepthDistributionExponent = 1.0f;
-inline constexpr float CLodFixedSliceScalarVBOITDefaultLookupDepthBiasInSlices = 0.5f;
-inline constexpr float CLodFixedSliceScalarVBOITDefaultZeroTransmittanceThreshold = 1.0e-3f;
-inline constexpr float CLodFixedSliceScalarVBOITDefaultResolutionScale = 1.0f / static_cast<float>(CLodFixedSliceScalarVBOITDefaultDownsampleFactor);
+inline constexpr uint32_t CLodAVBOITDefaultSliceCount = 16u;
+inline constexpr uint32_t CLodAVBOITDefaultVirtualSliceCount = 32u;
+inline constexpr uint32_t CLodAVBOITDefaultDownsampleFactor = 4u;
+inline constexpr float CLodAVBOITExtinctionQuantizationScale = 4096.0f;
+inline constexpr float CLodAVBOITDefaultDepthDistributionExponent = 1.0f;
+inline constexpr float CLodAVBOITDefaultLookupDepthBiasInSlices = 0.5f;
+inline constexpr float CLodAVBOITDefaultZeroTransmittanceThreshold = 1.0e-3f;
+inline constexpr float CLodAVBOITDefaultResolutionScale = 1.0f / static_cast<float>(CLodAVBOITDefaultDownsampleFactor);
+static_assert(CLodAVBOITDefaultVirtualSliceCount <= 32u, "AVBOIT occupancy slice mask supports up to 32 virtual slices");
 
 constexpr bool CLodSoftwareRasterEnabled(CLodSoftwareRasterMode mode)
 {
@@ -212,27 +214,31 @@ struct CLodDeepVisibilityStats
 
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
 
-struct CLodFixedSliceScalarVBOITConfig
+struct CLodAVBOITConfig
 {
     uint32_t occupancyUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t coverageUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t occupancySliceMaskUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t depthWarpLUTSRVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t extinctionUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t integratedTransmittanceUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t shadingTransmittanceSRVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t zeroTransmittanceSliceUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t zeroTransmittanceSliceSRVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t sliceCount = 0u;
+    uint32_t virtualSliceCount = 0u;
     uint32_t lowResolutionWidth = 0u;
     uint32_t lowResolutionHeight = 0u;
     float viewNearDepth = 0.0f;
     float viewFarDepth = 0.0f;
-    float depthDistributionExponent = CLodFixedSliceScalarVBOITDefaultDepthDistributionExponent;
-    float lookupDepthBiasInSlices = CLodFixedSliceScalarVBOITDefaultLookupDepthBiasInSlices;
-    float zeroTransmittanceThreshold = CLodFixedSliceScalarVBOITDefaultZeroTransmittanceThreshold;
+    float depthDistributionExponent = CLodAVBOITDefaultDepthDistributionExponent;
+    float lookupDepthBiasInSlices = CLodAVBOITDefaultLookupDepthBiasInSlices;
+    float zeroTransmittanceThreshold = CLodAVBOITDefaultZeroTransmittanceThreshold;
     float pad0 = 0.0f;
     float pad1 = 0.0f;
 };
 
-static_assert(sizeof(CLodFixedSliceScalarVBOITConfig) == 64u, "CLodFixedSliceScalarVBOITConfig size must match HLSL");
+static_assert(sizeof(CLodAVBOITConfig) == 80u, "CLodAVBOITConfig size must match HLSL");
 
 inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 22u;
 inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 22u;

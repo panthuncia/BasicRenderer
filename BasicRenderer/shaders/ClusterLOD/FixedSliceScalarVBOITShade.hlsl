@@ -4,24 +4,8 @@
 #include "include/clodResolveCommon.hlsli"
 #include "include/utilities.hlsli"
 #include "include/visibilityPacking.hlsli"
+#include "include/FixedSliceScalarVBOITCommon.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
-
-float ComputeDepthSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float depth)
-{
-    const float depthRange = max(config.viewFarDepth - config.viewNearDepth, 1.0e-5f);
-    const float normalizedDepth = saturate((depth - config.viewNearDepth) / depthRange);
-    const float depthExponent = max(config.depthDistributionExponent, 1.0e-4f);
-    const float distributedDepth = pow(normalizedDepth, depthExponent);
-    return distributedDepth * (float)(max(config.sliceCount, 1u) - 1u);
-}
-
-float ComputeLookupSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float sliceCoordinate)
-{
-    return clamp(
-        sliceCoordinate - config.lookupDepthBiasInSlices,
-        0.0f,
-        (float)(max(config.sliceCount, 1u) - 1u));
-}
 
 float SampleIntegratedTransmittance(
     Texture2DArray<float> integratedTransmittanceTexture,

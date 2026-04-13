@@ -63,6 +63,7 @@ struct CLodDeepVisibilityStats
 };
 
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_SLICE_COUNT = 16u;
+static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT = 32u;
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_EXTINCTION_QUANTIZATION_SCALE = 4096.0f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DEPTH_DISTRIBUTION_EXPONENT = 1.0f;
@@ -73,12 +74,16 @@ static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25
 struct CLodFixedSliceScalarVBOITConfig
 {
     uint occupancyUAVDescriptorIndex;
+    uint coverageUAVDescriptorIndex;
+    uint occupancySliceMaskUAVDescriptorIndex;
+    uint depthWarpLUTSRVDescriptorIndex;
     uint extinctionUAVDescriptorIndex;
     uint integratedTransmittanceUAVDescriptorIndex;
     uint shadingTransmittanceSRVDescriptorIndex;
     uint zeroTransmittanceSliceUAVDescriptorIndex;
     uint zeroTransmittanceSliceSRVDescriptorIndex;
     uint sliceCount;
+    uint virtualSliceCount;
     uint lowResolutionWidth;
     uint lowResolutionHeight;
     float viewNearDepth;

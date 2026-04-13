@@ -140,7 +140,11 @@ private:
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityStatsBuffer;
     std::shared_ptr<Buffer> m_fixedSliceScalarVBOITConfigBuffer;
+    std::shared_ptr<Buffer> m_fixedSliceScalarVBOITOccupancyHistogramBuffer;
+    std::shared_ptr<Buffer> m_fixedSliceScalarVBOITDepthWarpLUTBuffer;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITOccupancyTexture;
+    std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITCoverageTexture;
+    std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITOccupancySliceMaskTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITExtinctionTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITIntegratedTransmittanceTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture;

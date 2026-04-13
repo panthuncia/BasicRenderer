@@ -14,6 +14,8 @@ public:
     FixedSliceScalarVBOITIntegratePass(
         std::shared_ptr<Buffer> configBuffer,
         std::shared_ptr<PixelBuffer> occupancyTexture,
+        std::shared_ptr<PixelBuffer> coverageTexture,
+        std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
         std::shared_ptr<PixelBuffer> extinctionTexture,
         std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
         std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture);
@@ -28,6 +30,8 @@ public:
 private:
     std::shared_ptr<Buffer> m_configBuffer;
     std::shared_ptr<PixelBuffer> m_occupancyTexture;
+    std::shared_ptr<PixelBuffer> m_coverageTexture;
+    std::shared_ptr<PixelBuffer> m_occupancySliceMaskTexture;
     std::shared_ptr<PixelBuffer> m_extinctionTexture;
     std::shared_ptr<PixelBuffer> m_integratedTransmittanceTexture;
     std::shared_ptr<PixelBuffer> m_zeroTransmittanceSliceTexture;

@@ -18,7 +18,11 @@
 #include "Render/GraphExtensions/ClusterLOD/ClearDeepVisibilityPass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITDepthWarpPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITOccupancyHistogramPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITOccupancyRemapPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITSetupPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITSparseClearPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITIntegratePass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITResolvePass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobBuildArgsPass.h"
@@ -190,14 +194,18 @@ std::string MakeVariantResourceName(const CLodVariantTraits& traits, std::string
 
 constexpr std::string_view kTransparentExtinctionSetupPassName = "TransparentExtinctionSetupPass";
 constexpr std::string_view kTransparentExtinctionOccupancyPassName = "TransparentExtinctionOccupancyPass";
+constexpr std::string_view kTransparentExtinctionOccupancyHistogramPassName = "TransparentExtinctionOccupancyHistogramPass";
+constexpr std::string_view kTransparentExtinctionDepthWarpPassName = "TransparentExtinctionDepthWarpPass";
+constexpr std::string_view kTransparentExtinctionOccupancyRemapPassName = "TransparentExtinctionOccupancyRemapPass";
+constexpr std::string_view kTransparentExtinctionSparseClearPassName = "TransparentExtinctionSparseClearPass";
 constexpr std::string_view kTransparentExtinctionCapturePassName = "TransparentExtinctionCapturePass";
 constexpr std::string_view kTransparentTransmittanceIntegratePassName = "TransparentTransmittanceIntegratePass";
 constexpr std::string_view kTransparentVBOITShadePassName = "TransparentVBOITShadePass";
 constexpr std::string_view kTransparentVBOITResolvePassName = "TransparentVBOITResolvePass";
 
-DirectX::XMUINT2 GetFixedSliceScalarVBOITLowResolution(const DirectX::XMUINT2& renderResolution)
+DirectX::XMUINT2 GetAVBOITLowResolution(const DirectX::XMUINT2& renderResolution)
 {
-    const uint32_t downsampleFactor = (std::max)(1u, CLodFixedSliceScalarVBOITDefaultDownsampleFactor);
+    const uint32_t downsampleFactor = (std::max)(1u, CLodAVBOITDefaultDownsampleFactor);
     return {
         (std::max)(1u, (renderResolution.x + downsampleFactor - 1u) / downsampleFactor),
         (std::max)(1u, (renderResolution.y + downsampleFactor - 1u) / downsampleFactor),
@@ -208,7 +216,7 @@ TextureDescription CreateFixedSliceScalarVBOITOccupancyDescription()
 {
     TextureDescription desc;
     const auto renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-    const auto lowResolution = GetFixedSliceScalarVBOITLowResolution(renderResolution);
+    const auto lowResolution = GetAVBOITLowResolution(renderResolution);
 
     desc.channels = 1;
     desc.format = rhi::Format::R32_Float;
@@ -226,7 +234,7 @@ TextureDescription CreateFixedSliceScalarVBOITSliceVolumeDescription()
 {
     TextureDescription desc = CreateFixedSliceScalarVBOITOccupancyDescription();
     desc.isArray = true;
-    desc.arraySize = CLodFixedSliceScalarVBOITDefaultSliceCount;
+    desc.arraySize = CLodAVBOITDefaultSliceCount;
     return desc;
 }
 
@@ -246,6 +254,11 @@ TextureDescription CreateFixedSliceScalarVBOITZeroTransmittanceSliceDescription(
     desc.srvFormat = rhi::Format::R32_UInt;
     desc.uavFormat = rhi::Format::R32_UInt;
     return desc;
+}
+
+TextureDescription CreateFixedSliceScalarVBOITOccupancySliceMaskDescription()
+{
+    return CreateFixedSliceScalarVBOITZeroTransmittanceSliceDescription();
 }
 
 TextureDescription CreateFixedSliceScalarVBOITAccumulationDescription()
@@ -771,7 +784,7 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
 
     m_fixedSliceScalarVBOITConfigBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         1,
-        sizeof(CLodFixedSliceScalarVBOITConfig),
+        sizeof(CLodAVBOITConfig),
         false,
         false,
         false,
@@ -781,10 +794,50 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITConfigBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    m_fixedSliceScalarVBOITOccupancyHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodAVBOITDefaultVirtualSliceCount,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_fixedSliceScalarVBOITOccupancyHistogramBuffer->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Occupancy Histogram"));
+    m_fixedSliceScalarVBOITOccupancyHistogramBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITOccupancyHistogramBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITDepthWarpLUTBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodAVBOITDefaultVirtualSliceCount,
+        sizeof(float),
+        true,
+        false,
+        false,
+        false);
+    m_fixedSliceScalarVBOITDepthWarpLUTBuffer->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Depth Warp LUT"));
+    m_fixedSliceScalarVBOITDepthWarpLUTBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITDepthWarpLUTBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
     m_fixedSliceScalarVBOITOccupancyTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITOccupancyDescription());
     m_fixedSliceScalarVBOITOccupancyTexture->SetName(MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Occupancy"));
     m_fixedSliceScalarVBOITOccupancyTexture->GetECSEntity()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITOccupancyTexture })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITCoverageTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITOccupancyDescription());
+    m_fixedSliceScalarVBOITCoverageTexture->SetName(MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Coverage"));
+    m_fixedSliceScalarVBOITCoverageTexture->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITCoverageTexture })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITOccupancySliceMaskTexture =
+        PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITOccupancySliceMaskDescription());
+    m_fixedSliceScalarVBOITOccupancySliceMaskTexture->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Occupancy Slice Mask"));
+    m_fixedSliceScalarVBOITOccupancySliceMaskTexture->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITOccupancySliceMaskTexture })
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_fixedSliceScalarVBOITExtinctionTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITExtinctionDescription());
@@ -1318,7 +1371,11 @@ void CLodExtension::TagTransparencyResourceUsages()
     };
 
     tagBufferUsage(m_fixedSliceScalarVBOITConfigBuffer, "Cluster LOD fixed-slice scalar VBOIT");
+    tagBufferUsage(m_fixedSliceScalarVBOITOccupancyHistogramBuffer, "Cluster LOD fixed-slice scalar VBOIT adaptive histogram");
+    tagBufferUsage(m_fixedSliceScalarVBOITDepthWarpLUTBuffer, "Cluster LOD fixed-slice scalar VBOIT depth warp LUT");
     tagTextureUsage(m_fixedSliceScalarVBOITOccupancyTexture, "Cluster LOD fixed-slice scalar VBOIT");
+    tagTextureUsage(m_fixedSliceScalarVBOITCoverageTexture, "Cluster LOD fixed-slice scalar VBOIT");
+    tagTextureUsage(m_fixedSliceScalarVBOITOccupancySliceMaskTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITExtinctionTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture, "Cluster LOD fixed-slice scalar VBOIT");
@@ -1408,6 +1465,8 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
     releaseBufferBacking(m_deepVisibilityStatsBuffer);
     releaseBufferBacking(m_fixedSliceScalarVBOITConfigBuffer);
+    releaseBufferBacking(m_fixedSliceScalarVBOITOccupancyHistogramBuffer);
+    releaseBufferBacking(m_fixedSliceScalarVBOITDepthWarpLUTBuffer);
     releaseBufferBacking(m_shadowPageMetadataBuffer);
     releaseBufferBacking(m_shadowInvalidationInputsBuffer);
     releaseBufferBacking(m_shadowInvalidationCountBuffer);
@@ -1470,6 +1529,8 @@ void CLodExtension::ReleaseTransparencyResourceBackings()
     };
 
     releaseTextureBacking(m_fixedSliceScalarVBOITOccupancyTexture);
+    releaseTextureBacking(m_fixedSliceScalarVBOITCoverageTexture);
+    releaseTextureBacking(m_fixedSliceScalarVBOITOccupancySliceMaskTexture);
     releaseTextureBacking(m_fixedSliceScalarVBOITExtinctionTexture);
     releaseTextureBacking(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture);
     releaseTextureBacking(m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture);
@@ -2532,14 +2593,17 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     }
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
-        const bool useFixedSliceScalarVBOIT = transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT;
-        if (transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT) {
+        const bool useFixedSliceScalarVBOIT = transparencyMode == CLodTransparencyMode::AVBOIT;
+        if (transparencyMode == CLodTransparencyMode::AVBOIT) {
             outPasses.push_back(
                 RenderGraph::ExternalPassDesc::Render(
                     MakeVariantPassName(traits, kTransparentExtinctionSetupPassName),
                     std::make_shared<FixedSliceScalarVBOITSetupPass>(
                         m_fixedSliceScalarVBOITConfigBuffer,
+                        m_fixedSliceScalarVBOITDepthWarpLUTBuffer,
                         m_fixedSliceScalarVBOITOccupancyTexture,
+                        m_fixedSliceScalarVBOITCoverageTexture,
+                        m_fixedSliceScalarVBOITOccupancySliceMaskTexture,
                         m_fixedSliceScalarVBOITExtinctionTexture,
                         m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
                         m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
@@ -2584,7 +2648,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             occupancyPassInputs.clearGbuffer = false;
             occupancyPassInputs.wireframe = false;
             occupancyPassInputs.renderPhase = renderPhase;
-            occupancyPassInputs.outputKind = CLodRasterOutputKind::FixedSliceScalarVBOITOccupancy;
+            occupancyPassInputs.outputKind = CLodRasterOutputKind::AVBOITOccupancy;
             auto occupancyPassDesc = RenderGraph::ExternalPassDesc::Render(
                 MakeVariantPassName(traits, kTransparentExtinctionOccupancyPassName),
                 std::make_shared<ClusterRasterizationPass>(
@@ -2603,9 +2667,57 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     nullptr,
                     nullptr,
                     m_visibleClustersBuffer,
-                    slabGroup));
+                    slabGroup,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    m_fixedSliceScalarVBOITOccupancySliceMaskTexture));
             occupancyPassDesc.GeometryPass();
             outPasses.push_back(std::move(occupancyPassDesc));
+
+            auto occupancyHistogramPassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, kTransparentExtinctionOccupancyHistogramPassName),
+                std::make_shared<FixedSliceScalarVBOITOccupancyHistogramPass>(
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    m_fixedSliceScalarVBOITOccupancyTexture,
+                    m_fixedSliceScalarVBOITOccupancySliceMaskTexture,
+                    m_fixedSliceScalarVBOITOccupancyHistogramBuffer));
+            occupancyHistogramPassDesc.At(RenderGraph::ExternalInsertPoint::After(
+                MakeVariantPassName(traits, kTransparentExtinctionOccupancyPassName)));
+            outPasses.push_back(std::move(occupancyHistogramPassDesc));
+
+            auto depthWarpPassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, kTransparentExtinctionDepthWarpPassName),
+                std::make_shared<FixedSliceScalarVBOITDepthWarpPass>(
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    m_fixedSliceScalarVBOITOccupancyHistogramBuffer,
+                    m_fixedSliceScalarVBOITDepthWarpLUTBuffer));
+            depthWarpPassDesc.At(RenderGraph::ExternalInsertPoint::After(
+                MakeVariantPassName(traits, kTransparentExtinctionOccupancyHistogramPassName)));
+            outPasses.push_back(std::move(depthWarpPassDesc));
+
+            auto occupancyRemapPassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, kTransparentExtinctionOccupancyRemapPassName),
+                std::make_shared<FixedSliceScalarVBOITOccupancyRemapPass>(
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    m_fixedSliceScalarVBOITOccupancyTexture,
+                    m_fixedSliceScalarVBOITOccupancySliceMaskTexture,
+                    m_fixedSliceScalarVBOITDepthWarpLUTBuffer));
+            occupancyRemapPassDesc.At(RenderGraph::ExternalInsertPoint::After(
+                MakeVariantPassName(traits, kTransparentExtinctionDepthWarpPassName)));
+            outPasses.push_back(std::move(occupancyRemapPassDesc));
+
+            auto sparseClearPassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, kTransparentExtinctionSparseClearPassName),
+                std::make_shared<FixedSliceScalarVBOITSparseClearPass>(
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    m_fixedSliceScalarVBOITOccupancyTexture,
+                    m_fixedSliceScalarVBOITOccupancySliceMaskTexture,
+                    m_fixedSliceScalarVBOITExtinctionTexture,
+                    m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture));
+            sparseClearPassDesc.At(RenderGraph::ExternalInsertPoint::After(
+                MakeVariantPassName(traits, kTransparentExtinctionOccupancyRemapPassName)));
+            outPasses.push_back(std::move(sparseClearPassDesc));
         }
 
         ClusterRasterizationPassInputs rasterizePassInputs;
@@ -2613,7 +2725,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         rasterizePassInputs.wireframe = false;
         rasterizePassInputs.renderPhase = renderPhase;
         rasterizePassInputs.outputKind = useFixedSliceScalarVBOIT
-            ? CLodRasterOutputKind::FixedSliceScalarVBOIT
+            ? CLodRasterOutputKind::AVBOIT
             : traits.rasterOutputKind;
         auto rasterizeDeepVisibilityPassDesc = RenderGraph::ExternalPassDesc::Render(
             MakeVariantPassName(
@@ -2641,12 +2753,14 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         rasterizeDeepVisibilityPassDesc.GeometryPass();
         outPasses.push_back(std::move(rasterizeDeepVisibilityPassDesc));
 
-        if (transparencyMode == CLodTransparencyMode::FixedSliceScalarVBOIT) {
+        if (transparencyMode == CLodTransparencyMode::AVBOIT) {
             auto integratePassDesc = RenderGraph::ExternalPassDesc::Compute(
                     MakeVariantPassName(traits, kTransparentTransmittanceIntegratePassName),
                     std::make_shared<FixedSliceScalarVBOITIntegratePass>(
                         m_fixedSliceScalarVBOITConfigBuffer,
                         m_fixedSliceScalarVBOITOccupancyTexture,
+                        m_fixedSliceScalarVBOITCoverageTexture,
+                        m_fixedSliceScalarVBOITOccupancySliceMaskTexture,
                         m_fixedSliceScalarVBOITExtinctionTexture,
                         m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
                         m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture));
@@ -2657,7 +2771,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             shadePassInputs.clearGbuffer = false;
             shadePassInputs.wireframe = false;
             shadePassInputs.renderPhase = renderPhase;
-            shadePassInputs.outputKind = CLodRasterOutputKind::FixedSliceScalarVBOITShading;
+            shadePassInputs.outputKind = CLodRasterOutputKind::AVBOITShading;
             auto shadePassDesc = RenderGraph::ExternalPassDesc::Render(
                 MakeVariantPassName(traits, kTransparentVBOITShadePassName),
                 std::make_shared<ClusterRasterizationPass>(

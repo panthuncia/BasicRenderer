@@ -40,7 +40,8 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<ResourceGroup> slabResourceGroup,
     std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
     std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
-    std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer)
+    std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
+    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITOccupancySliceMaskTexture)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
@@ -54,6 +55,7 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_fixedSliceScalarVBOITIntegratedTransmittanceTexture(std::move(fixedSliceScalarVBOITIntegratedTransmittanceTexture))
     , m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture(std::move(fixedSliceScalarVBOITZeroTransmittanceSliceTexture))
     , m_fixedSliceScalarVBOITAccumulationTexture(std::move(fixedSliceScalarVBOITAccumulationTexture))
+    , m_fixedSliceScalarVBOITOccupancySliceMaskTexture(std::move(fixedSliceScalarVBOITOccupancySliceMaskTexture))
     , m_visibleClustersResolveBuffer(std::move(visibleClustersResolveBuffer))
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
     , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
@@ -129,14 +131,16 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             m_deepVisibilityCounterBuffer,
             m_deepVisibilityOverflowCounterBuffer);
     }
-    else if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITOccupancy) {
+    else if (m_outputKind == CLodRasterOutputKind::AVBOITOccupancy) {
         for (auto& vb : m_visibilityBuffers) {
             builder->WithShaderResource(vb);
         }
         builder->WithShaderResource(m_fixedSliceScalarVBOITConfigBuffer, m_visibleClustersResolveBuffer)
-            .WithUnorderedAccess(m_fixedSliceScalarVBOITOccupancyTexture);
+            .WithUnorderedAccess(
+                m_fixedSliceScalarVBOITOccupancyTexture,
+                m_fixedSliceScalarVBOITOccupancySliceMaskTexture);
     }
-    else if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOIT) {
+    else if (m_outputKind == CLodRasterOutputKind::AVBOIT) {
         for (auto& vb : m_visibilityBuffers) {
             builder->WithShaderResource(vb);
         }
@@ -145,7 +149,7 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 m_fixedSliceScalarVBOITOccupancyTexture,
                 m_fixedSliceScalarVBOITExtinctionTexture);
     }
-    else if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading) {
+    else if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
         for (auto& vb : m_visibilityBuffers) {
             builder->WithShaderResource(vb);
         }
@@ -187,7 +191,7 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
 }
 
 void ClusterRasterizationPass::Setup() {
-    if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading) {
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
         RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
     }
 }
@@ -359,7 +363,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     p.debugName = "CLod raster pass";
 
     rhi::ColorAttachment accumulationAttachment{};
-    if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading && m_fixedSliceScalarVBOITAccumulationTexture) {
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading && m_fixedSliceScalarVBOITAccumulationTexture) {
         accumulationAttachment.rtv = m_fixedSliceScalarVBOITAccumulationTexture->GetRTVInfo(0).slot;
         accumulationAttachment.loadOp = rhi::LoadOp::Load;
         accumulationAttachment.storeOp = rhi::StoreOp::Store;
@@ -375,7 +379,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
 
     auto& psoManager = PSOManager::GetInstance();
 
-    if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading) {
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
         unsigned int settings[NumSettingsRootConstants] = {};
         settings[EnableShadows] = m_getShadowsEnabled ? m_getShadowsEnabled() : 0u;
         settings[EnablePunctualLights] = m_getPunctualLightingEnabled ? m_getPunctualLightingEnabled() : 0u;
@@ -403,21 +407,21 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
         misc[CLOD_RASTER_DEEP_VISIBILITY_OVERFLOW_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityOverflowCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_CAPACITY] = m_deepVisibilityNodeCapacity;
     }
-    if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITOccupancy) {
+    if (m_outputKind == CLodRasterOutputKind::AVBOITOccupancy) {
         misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
         misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
             ? m_visibleClustersResolveBuffer->GetSRVInfo(0).slot.index
             : 0xFFFFFFFFu;
         misc[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     }
-    if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOIT) {
+    if (m_outputKind == CLodRasterOutputKind::AVBOIT) {
         misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
         misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
             ? m_visibleClustersResolveBuffer->GetSRVInfo(0).slot.index
             : 0xFFFFFFFFu;
         misc[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     }
-    if (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading) {
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
         misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
         misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
             ? m_visibleClustersResolveBuffer->GetSRVInfo(0).slot.index
@@ -439,11 +443,11 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
             ? psoManager.GetClusterLODRasterPSO(flags, m_wireframe)
             : (m_outputKind == CLodRasterOutputKind::VirtualShadow)
                 ? psoManager.GetClusterLODVirtualShadowRasterPSO(flags, m_wireframe)
-                : (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITOccupancy)
+                : (m_outputKind == CLodRasterOutputKind::AVBOITOccupancy)
                     ? psoManager.GetClusterLODFixedSliceScalarVBOITOccupancyPSO(flags, m_wireframe)
-                : (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOIT)
+                : (m_outputKind == CLodRasterOutputKind::AVBOIT)
                     ? psoManager.GetClusterLODFixedSliceScalarVBOITRasterPSO(flags, m_wireframe)
-                : (m_outputKind == CLodRasterOutputKind::FixedSliceScalarVBOITShading)
+                : (m_outputKind == CLodRasterOutputKind::AVBOITShading)
                     ? psoManager.GetClusterLODFixedSliceScalarVBOITShadePSO(flags, m_wireframe)
                 : psoManager.GetClusterLODDeepVisibilityRasterPSO(flags, m_wireframe);
 

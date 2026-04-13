@@ -23,6 +23,8 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
         dispatchThreadId.x >= config.lowResolutionWidth ||
         dispatchThreadId.y >= config.lowResolutionHeight ||
         config.occupancyUAVDescriptorIndex == 0xFFFFFFFFu ||
+        config.coverageUAVDescriptorIndex == 0xFFFFFFFFu ||
+        config.occupancySliceMaskUAVDescriptorIndex == 0xFFFFFFFFu ||
         config.extinctionUAVDescriptorIndex == 0xFFFFFFFFu ||
         config.integratedTransmittanceUAVDescriptorIndex == 0xFFFFFFFFu ||
         config.zeroTransmittanceSliceUAVDescriptorIndex == 0xFFFFFFFFu)
@@ -32,12 +34,15 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
 
     RWTexture2DArray<uint> extinctionTexture = ResourceDescriptorHeap[config.extinctionUAVDescriptorIndex];
     RWTexture2D<float> occupancyTexture = ResourceDescriptorHeap[config.occupancyUAVDescriptorIndex];
+    RWTexture2D<float> coverageTexture = ResourceDescriptorHeap[config.coverageUAVDescriptorIndex];
+    RWTexture2D<uint> occupancySliceMaskTexture = ResourceDescriptorHeap[config.occupancySliceMaskUAVDescriptorIndex];
     RWTexture2DArray<float> integratedTransmittanceTexture = ResourceDescriptorHeap[config.integratedTransmittanceUAVDescriptorIndex];
     RWTexture2D<uint> zeroTransmittanceSliceTexture = ResourceDescriptorHeap[config.zeroTransmittanceSliceUAVDescriptorIndex];
     const uint2 lowPixel = dispatchThreadId.xy;
     const bool lowTileOccupied = occupancyTexture[lowPixel] > 0.0f;
+    const uint lowTileSliceMask = occupancySliceMaskTexture[lowPixel];
 
-    if (!lowTileOccupied)
+    if (!lowTileOccupied || lowTileSliceMask == 0u)
     {
         if (IsFixedSliceScalarVBOITDebugOutput(perFrameBuffer.outputType))
         {
@@ -64,10 +69,25 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
     }
 
     const float zeroTransmittanceThreshold = clamp(config.zeroTransmittanceThreshold, 0.0f, 1.0f);
+    const uint firstOccupiedSlice = (uint)firstbitlow(lowTileSliceMask);
+    const uint lastOccupiedSlice = (uint)firstbithigh(lowTileSliceMask);
     float cumulativeTransmittance = 1.0f;
     [loop]
-    for (uint sliceIndex = 0u; sliceIndex < config.sliceCount; ++sliceIndex)
+    for (uint leadingSliceIndex = 0u; leadingSliceIndex < firstOccupiedSlice; ++leadingSliceIndex)
     {
+        integratedTransmittanceTexture[uint3(lowPixel, leadingSliceIndex)] = cumulativeTransmittance;
+    }
+
+    [loop]
+    for (uint sliceIndex = firstOccupiedSlice; sliceIndex <= lastOccupiedSlice; ++sliceIndex)
+    {
+        const uint sliceBit = 1u << sliceIndex;
+        if ((lowTileSliceMask & sliceBit) == 0u)
+        {
+            integratedTransmittanceTexture[uint3(lowPixel, sliceIndex)] = cumulativeTransmittance;
+            continue;
+        }
+
         const float opticalDepth = (float)extinctionTexture[uint3(lowPixel, sliceIndex)] /
             CLOD_FIXED_SLICE_SCALAR_VBOIT_EXTINCTION_QUANTIZATION_SCALE;
         const float sliceExtinction = 1.0f - exp(-opticalDepth);
@@ -89,7 +109,13 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
         integratedTransmittanceTexture[uint3(lowPixel, sliceIndex)] = cumulativeTransmittance;
     }
 
-    occupancyTexture[lowPixel] = 1.0f - cumulativeTransmittance;
+    [loop]
+    for (uint trailingSliceIndex = lastOccupiedSlice + 1u; trailingSliceIndex < config.sliceCount; ++trailingSliceIndex)
+    {
+        integratedTransmittanceTexture[uint3(lowPixel, trailingSliceIndex)] = cumulativeTransmittance;
+    }
+
+    coverageTexture[lowPixel] = 1.0f - cumulativeTransmittance;
 
     if (IsFixedSliceScalarVBOITDebugOutput(perFrameBuffer.outputType))
     {

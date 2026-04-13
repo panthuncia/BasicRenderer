@@ -3,16 +3,8 @@
 #include "include/utilities.hlsli"
 #include "include/visibilityPacking.hlsli"
 #include "include/clodResolveCommon.hlsli"
+#include "include/FixedSliceScalarVBOITCommon.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
-
-float ComputeDepthSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float depth)
-{
-    const float depthRange = max(config.viewFarDepth - config.viewNearDepth, 1.0e-5f);
-    const float normalizedDepth = saturate((depth - config.viewNearDepth) / depthRange);
-    const float depthExponent = max(config.depthDistributionExponent, 1.0e-4f);
-    const float distributedDepth = pow(normalizedDepth, depthExponent);
-    return distributedDepth * (float)(max(config.sliceCount, 1u) - 1u);
-}
 
 [shader("pixel")]
 void FixedSliceScalarVBOITCapturePSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID)
@@ -25,7 +17,9 @@ void FixedSliceScalarVBOITCapturePSMain(VisBufferPSInput input, bool isFrontFace
     const CLodFixedSliceScalarVBOITConfig config = configBuffer[0];
 #if defined(CLOD_FIXED_SLICE_SCALAR_VBOIT_OCCUPANCY_ONLY)
     if (viewRasterInfo.opaqueVisibilitySRVDescriptorIndex == 0xFFFFFFFFu ||
-        config.occupancyUAVDescriptorIndex == 0xFFFFFFFFu)
+        config.virtualSliceCount == 0u ||
+        config.occupancyUAVDescriptorIndex == 0xFFFFFFFFu ||
+        config.occupancySliceMaskUAVDescriptorIndex == 0xFFFFFFFFu)
 #else
     if (viewRasterInfo.opaqueVisibilitySRVDescriptorIndex == 0xFFFFFFFFu ||
         config.sliceCount == 0u ||
@@ -101,18 +95,29 @@ void FixedSliceScalarVBOITCapturePSMain(VisBufferPSInput input, bool isFrontFace
     }
 
 #if defined(CLOD_FIXED_SLICE_SCALAR_VBOIT_OCCUPANCY_ONLY)
+    const float virtualSliceCoordinate = ComputeBaseDepthSliceCoordinate(config, sample.linearDepth);
+    const uint virtualSliceIndex0 = min((uint)floor(virtualSliceCoordinate), config.virtualSliceCount - 1u);
+    const uint virtualSliceIndex1 = min(virtualSliceIndex0 + 1u, config.virtualSliceCount - 1u);
     RWTexture2D<float> occupancyTexture = ResourceDescriptorHeap[config.occupancyUAVDescriptorIndex];
+    RWTexture2D<uint> occupancySliceMaskTexture = ResourceDescriptorHeap[config.occupancySliceMaskUAVDescriptorIndex];
     occupancyTexture[lowPixel] = 1.0f;
+
+    const uint sliceBit0 = 1u << virtualSliceIndex0;
+    const uint sliceBit1 = 1u << virtualSliceIndex1;
+    const uint occupancySliceMask = virtualSliceIndex0 == virtualSliceIndex1 ? sliceBit0 : (sliceBit0 | sliceBit1);
+    uint ignoredOccupancyMask;
+    InterlockedOr(occupancySliceMaskTexture[lowPixel], occupancySliceMask, ignoredOccupancyMask);
     return;
 #endif
+
+    const float sliceCoordinate = ComputeDepthSliceCoordinate(config, sample.linearDepth);
+    const uint sliceIndex0 = min((uint)floor(sliceCoordinate), config.sliceCount - 1u);
+    const uint sliceIndex1 = min(sliceIndex0 + 1u, config.sliceCount - 1u);
 
     const float lowResolutionPixelCoverage = rcp((float)(
         CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR *
         CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR));
     const float opticalDepth = -log(max(1.0f - alpha, 1.0e-4f)) * lowResolutionPixelCoverage;
-    const float sliceCoordinate = ComputeDepthSliceCoordinate(config, sample.linearDepth);
-    const uint sliceIndex0 = min((uint)floor(sliceCoordinate), config.sliceCount - 1u);
-    const uint sliceIndex1 = min(sliceIndex0 + 1u, config.sliceCount - 1u);
     const float sliceWeight1 = saturate(sliceCoordinate - (float)sliceIndex0);
     const float sliceWeight0 = 1.0f - sliceWeight1;
 
