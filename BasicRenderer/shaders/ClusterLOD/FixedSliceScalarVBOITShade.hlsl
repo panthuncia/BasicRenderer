@@ -21,34 +21,6 @@ FixedSliceScalarVBOITShadeOutput MakeFixedSliceScalarVBOITShadeOutput(float4 acc
     return output;
 }
 
-float SampleIntegratedTransmittance(
-    Texture2DArray<float> integratedTransmittanceTexture,
-    CLodFixedSliceScalarVBOITConfig config,
-    PerFrameBuffer perFrameBuffer,
-    uint2 pixel,
-    float sliceCoordinate)
-{
-    if (config.sliceCount == 0u ||
-        config.lowResolutionWidth == 0u ||
-        config.lowResolutionHeight == 0u ||
-        perFrameBuffer.screenResX == 0u ||
-        perFrameBuffer.screenResY == 0u)
-    {
-        return 1.0f;
-    }
-
-    const float2 uv = (float2(pixel) + 0.5f) /
-        float2((float)perFrameBuffer.screenResX, (float)perFrameBuffer.screenResY);
-    const float biasedSliceCoordinate = ComputeLookupSliceCoordinate(config, sliceCoordinate);
-    const uint sliceIndex = min((uint)floor(biasedSliceCoordinate), config.sliceCount - 1u);
-    const float sliceLerpFactor = saturate(biasedSliceCoordinate - (float)sliceIndex);
-    const float previousTransmittance = sliceIndex == 0u
-        ? 1.0f
-        : integratedTransmittanceTexture.SampleLevel(g_linearClamp, float3(uv, (float)(sliceIndex - 1u)), 0.0f);
-    const float currentTransmittance = integratedTransmittanceTexture.SampleLevel(g_linearClamp, float3(uv, (float)sliceIndex), 0.0f);
-    return lerp(previousTransmittance, currentTransmittance, sliceLerpFactor);
-}
-
 [shader("pixel")]
 FixedSliceScalarVBOITShadeOutput FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID)
 {
@@ -125,7 +97,7 @@ FixedSliceScalarVBOITShadeOutput FixedSliceScalarVBOITShadePSMain(VisBufferPSInp
 
     const float sliceCoordinate = ComputeDepthSliceCoordinate(config, sample.linearDepth);
     Texture2DArray<float> integratedTransmittanceTexture = ResourceDescriptorHeap[config.shadingTransmittanceSRVDescriptorIndex];
-    const float transmittance = SampleIntegratedTransmittance(
+    const float transmittance = SampleIntegratedTransmittanceAtSliceCoordinate(
         integratedTransmittanceTexture,
         config,
         perFrameBuffer,

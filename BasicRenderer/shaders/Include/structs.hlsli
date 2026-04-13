@@ -67,7 +67,7 @@ static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT = 32
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_EXTINCTION_QUANTIZATION_SCALE = 4096.0f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DEPTH_DISTRIBUTION_EXPONENT = 1.0f;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_LOOKUP_DEPTH_BIAS_IN_SLICES = 0.5f;
+static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_LOOKUP_DEPTH_BIAS_IN_SLICES = 2.0f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_ZERO_TRANSMITTANCE_THRESHOLD = 1.0e-3f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25f;
 
@@ -93,6 +93,22 @@ struct CLodFixedSliceScalarVBOITConfig
     float zeroTransmittanceThreshold;
     float pad0;
     float pad1;
+};
+
+static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT = 1u;
+
+struct CLodFixedSliceScalarVBOITDepthWarpLUTEntry
+{
+    float warpedSliceCoordinate;
+    uint flags;
+};
+
+struct CLodFixedSliceScalarVBOITFitState
+{
+    uint fittedVirtualSliceCount;
+    uint occupiedVirtualSliceCount;
+    uint pad0;
+    uint pad1;
 };
 
 struct ClippingPlane {

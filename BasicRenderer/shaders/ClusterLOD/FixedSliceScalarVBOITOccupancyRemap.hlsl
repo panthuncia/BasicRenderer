@@ -8,7 +8,7 @@ void CLodFixedSliceScalarVBOITOccupancyRemapCS(uint3 dispatchThreadId : SV_Dispa
 {
     StructuredBuffer<CLodFixedSliceScalarVBOITConfig> configBuffer =
         ResourceDescriptorHeap[CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_CONFIG_DESCRIPTOR_INDEX];
-    StructuredBuffer<float> depthWarpLUTBuffer =
+    StructuredBuffer<CLodFixedSliceScalarVBOITDepthWarpLUTEntry> depthWarpLUTBuffer =
         ResourceDescriptorHeap[CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_LUT_DESCRIPTOR_INDEX];
     const CLodFixedSliceScalarVBOITConfig config = configBuffer[0];
 
@@ -47,11 +47,24 @@ void CLodFixedSliceScalarVBOITOccupancyRemapCS(uint3 dispatchThreadId : SV_Dispa
             continue;
         }
 
-        const float warpedSliceCoordinate = depthWarpLUTBuffer[sourceSliceIndex];
-        const uint warpedSliceIndex0 = min((uint)floor(warpedSliceCoordinate), config.sliceCount - 1u);
-        const uint warpedSliceIndex1 = min(warpedSliceIndex0 + 1u, config.sliceCount - 1u);
-        remappedSliceMask |= 1u << warpedSliceIndex0;
-        remappedSliceMask |= 1u << warpedSliceIndex1;
+        const CLodFixedSliceScalarVBOITDepthWarpLUTEntry depthWarpEntry = depthWarpLUTBuffer[sourceSliceIndex];
+        float minWarpedSliceCoordinate = depthWarpEntry.warpedSliceCoordinate;
+        float maxWarpedSliceCoordinate = depthWarpEntry.warpedSliceCoordinate;
+        if (sourceSliceIndex + 1u < config.virtualSliceCount &&
+            (depthWarpEntry.flags & CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT) != 0u)
+        {
+            const CLodFixedSliceScalarVBOITDepthWarpLUTEntry nextDepthWarpEntry = depthWarpLUTBuffer[sourceSliceIndex + 1u];
+            minWarpedSliceCoordinate = min(minWarpedSliceCoordinate, nextDepthWarpEntry.warpedSliceCoordinate);
+            maxWarpedSliceCoordinate = max(maxWarpedSliceCoordinate, nextDepthWarpEntry.warpedSliceCoordinate);
+        }
+
+        const uint remappedSliceIndexMin = min((uint)floor(minWarpedSliceCoordinate), config.sliceCount - 1u);
+        const uint remappedSliceIndexMax = min((uint)ceil(maxWarpedSliceCoordinate), config.sliceCount - 1u);
+        [loop]
+        for (uint remappedSliceIndex = remappedSliceIndexMin; remappedSliceIndex <= remappedSliceIndexMax; ++remappedSliceIndex)
+        {
+            remappedSliceMask |= 1u << remappedSliceIndex;
+        }
     }
 
     occupancySliceMaskTexture[lowPixel] = remappedSliceMask;

@@ -10,6 +10,7 @@
 
 FixedSliceScalarVBOITSetupPass::FixedSliceScalarVBOITSetupPass(
     std::shared_ptr<Buffer> configBuffer,
+    std::shared_ptr<Buffer> fitStateBuffer,
     std::shared_ptr<Buffer> depthWarpLUTBuffer,
     std::shared_ptr<PixelBuffer> occupancyTexture,
     std::shared_ptr<PixelBuffer> coverageTexture,
@@ -20,6 +21,7 @@ FixedSliceScalarVBOITSetupPass::FixedSliceScalarVBOITSetupPass(
     std::shared_ptr<PixelBuffer> accumulationTexture,
     std::shared_ptr<PixelBuffer> shadingExtinctionTexture)
     : m_configBuffer(std::move(configBuffer))
+    , m_fitStateBuffer(std::move(fitStateBuffer))
     , m_depthWarpLUTBuffer(std::move(depthWarpLUTBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
     , m_coverageTexture(std::move(coverageTexture))
@@ -36,6 +38,9 @@ void FixedSliceScalarVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* bu
 {
     if (m_configBuffer) {
         builder->WithShaderResource(m_configBuffer);
+    }
+    if (m_fitStateBuffer) {
+        builder->WithShaderResource(m_fitStateBuffer);
     }
     if (m_depthWarpLUTBuffer) {
         builder->WithShaderResource(m_depthWarpLUTBuffer);
@@ -70,9 +75,13 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
 
+    m_configBuffer->EnsureVirtualDescriptorSlotsAllocated();
     m_occupancyTexture->EnsureVirtualDescriptorSlotsAllocated();
 	m_coverageTexture->EnsureVirtualDescriptorSlotsAllocated();
     m_occupancySliceMaskTexture->EnsureVirtualDescriptorSlotsAllocated();
+    if (m_fitStateBuffer) {
+        m_fitStateBuffer->EnsureVirtualDescriptorSlotsAllocated();
+    }
     if (m_depthWarpLUTBuffer) {
         m_depthWarpLUTBuffer->EnsureVirtualDescriptorSlotsAllocated();
     }
@@ -129,6 +138,12 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
     }
 
     BUFFER_UPLOAD(&config, sizeof(CLodAVBOITConfig), rg::runtime::UploadTarget::FromShared(m_configBuffer), 0);
+
+    if (m_fitStateBuffer && !m_fitStateInitialized) {
+        const CLodAVBOITFitState fitState{};
+        BUFFER_UPLOAD(&fitState, sizeof(CLodAVBOITFitState), rg::runtime::UploadTarget::FromShared(m_fitStateBuffer), 0);
+        m_fitStateInitialized = true;
+    }
 }
 
 PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executionContext)

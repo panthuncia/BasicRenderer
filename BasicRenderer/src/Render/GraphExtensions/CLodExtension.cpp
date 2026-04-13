@@ -18,6 +18,8 @@
 #include "Render/GraphExtensions/ClusterLOD/ClearDeepVisibilityPass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITAdaptiveFitPass.h"
+#include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITAdaptiveFitUpdatePass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITDepthWarpPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITOccupancyHistogramPass.h"
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITOccupancyRemapPass.h"
@@ -195,6 +197,8 @@ std::string MakeVariantResourceName(const CLodVariantTraits& traits, std::string
 constexpr std::string_view kTransparentExtinctionSetupPassName = "TransparentExtinctionSetupPass";
 constexpr std::string_view kTransparentExtinctionOccupancyPassName = "TransparentExtinctionOccupancyPass";
 constexpr std::string_view kTransparentExtinctionOccupancyHistogramPassName = "TransparentExtinctionOccupancyHistogramPass";
+constexpr std::string_view kTransparentExtinctionAdaptiveFitPassName = "TransparentExtinctionAdaptiveFitPass";
+constexpr std::string_view kTransparentExtinctionAdaptiveFitUpdatePassName = "TransparentExtinctionAdaptiveFitUpdatePass";
 constexpr std::string_view kTransparentExtinctionDepthWarpPassName = "TransparentExtinctionDepthWarpPass";
 constexpr std::string_view kTransparentExtinctionOccupancyRemapPassName = "TransparentExtinctionOccupancyRemapPass";
 constexpr std::string_view kTransparentExtinctionSparseClearPassName = "TransparentExtinctionSparseClearPass";
@@ -805,7 +809,7 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
     m_fixedSliceScalarVBOITConfigBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         1,
         sizeof(CLodAVBOITConfig),
-        false,
+        true,
         false,
         false,
         false);
@@ -829,7 +833,7 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
 
     m_fixedSliceScalarVBOITDepthWarpLUTBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodAVBOITDefaultVirtualSliceCount,
-        sizeof(float),
+        sizeof(CLodAVBOITDepthWarpLUTEntry),
         true,
         false,
         false,
@@ -838,6 +842,19 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
         MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Depth Warp LUT"));
     m_fixedSliceScalarVBOITDepthWarpLUTBuffer->GetECSEntity()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITDepthWarpLUTBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITFitStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodAVBOITFitState),
+        true,
+        false,
+        false,
+        false);
+    m_fixedSliceScalarVBOITFitStateBuffer->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Adaptive Fit State"));
+    m_fixedSliceScalarVBOITFitStateBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITFitStateBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_fixedSliceScalarVBOITOccupancyTexture = PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITOccupancyDescription());
@@ -1401,6 +1418,7 @@ void CLodExtension::TagTransparencyResourceUsages()
     tagBufferUsage(m_fixedSliceScalarVBOITConfigBuffer, "Cluster LOD fixed-slice scalar VBOIT");
     tagBufferUsage(m_fixedSliceScalarVBOITOccupancyHistogramBuffer, "Cluster LOD fixed-slice scalar VBOIT adaptive histogram");
     tagBufferUsage(m_fixedSliceScalarVBOITDepthWarpLUTBuffer, "Cluster LOD fixed-slice scalar VBOIT depth warp LUT");
+    tagBufferUsage(m_fixedSliceScalarVBOITFitStateBuffer, "Cluster LOD fixed-slice scalar VBOIT adaptive fit state");
     tagTextureUsage(m_fixedSliceScalarVBOITOccupancyTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITCoverageTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITOccupancySliceMaskTexture, "Cluster LOD fixed-slice scalar VBOIT");
@@ -1496,6 +1514,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_fixedSliceScalarVBOITConfigBuffer);
     releaseBufferBacking(m_fixedSliceScalarVBOITOccupancyHistogramBuffer);
     releaseBufferBacking(m_fixedSliceScalarVBOITDepthWarpLUTBuffer);
+    releaseBufferBacking(m_fixedSliceScalarVBOITFitStateBuffer);
     releaseBufferBacking(m_shadowPageMetadataBuffer);
     releaseBufferBacking(m_shadowInvalidationInputsBuffer);
     releaseBufferBacking(m_shadowInvalidationCountBuffer);
@@ -2630,6 +2649,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     MakeVariantPassName(traits, kTransparentExtinctionSetupPassName),
                     std::make_shared<FixedSliceScalarVBOITSetupPass>(
                         m_fixedSliceScalarVBOITConfigBuffer,
+                        m_fixedSliceScalarVBOITFitStateBuffer,
                         m_fixedSliceScalarVBOITDepthWarpLUTBuffer,
                         m_fixedSliceScalarVBOITOccupancyTexture,
                         m_fixedSliceScalarVBOITCoverageTexture,
@@ -2639,6 +2659,15 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
                         m_fixedSliceScalarVBOITAccumulationTexture,
                         m_fixedSliceScalarVBOITShadingExtinctionTexture)));
+
+                auto adaptiveFitPassDesc = RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, kTransparentExtinctionAdaptiveFitPassName),
+                    std::make_shared<FixedSliceScalarVBOITAdaptiveFitPass>(
+                        m_fixedSliceScalarVBOITConfigBuffer,
+                        m_fixedSliceScalarVBOITFitStateBuffer));
+                adaptiveFitPassDesc.At(RenderGraph::ExternalInsertPoint::After(
+                    MakeVariantPassName(traits, kTransparentExtinctionSetupPassName)));
+                outPasses.push_back(std::move(adaptiveFitPassDesc));
         }
 
         if (!useFixedSliceScalarVBOIT) {
@@ -2705,6 +2734,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     nullptr,
                     m_fixedSliceScalarVBOITOccupancySliceMaskTexture));
             occupancyPassDesc.GeometryPass();
+            occupancyPassDesc.At(RenderGraph::ExternalInsertPoint::After(
+                MakeVariantPassName(traits, kTransparentExtinctionAdaptiveFitPassName)));
             outPasses.push_back(std::move(occupancyPassDesc));
 
             auto occupancyHistogramPassDesc = RenderGraph::ExternalPassDesc::Compute(
@@ -2718,6 +2749,16 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 MakeVariantPassName(traits, kTransparentExtinctionOccupancyPassName)));
             outPasses.push_back(std::move(occupancyHistogramPassDesc));
 
+            auto adaptiveFitUpdatePassDesc = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, kTransparentExtinctionAdaptiveFitUpdatePassName),
+                std::make_shared<FixedSliceScalarVBOITAdaptiveFitUpdatePass>(
+                    m_fixedSliceScalarVBOITConfigBuffer,
+                    m_fixedSliceScalarVBOITOccupancyHistogramBuffer,
+                    m_fixedSliceScalarVBOITFitStateBuffer));
+            adaptiveFitUpdatePassDesc.At(RenderGraph::ExternalInsertPoint::After(
+                MakeVariantPassName(traits, kTransparentExtinctionOccupancyHistogramPassName)));
+            outPasses.push_back(std::move(adaptiveFitUpdatePassDesc));
+
             auto depthWarpPassDesc = RenderGraph::ExternalPassDesc::Compute(
                 MakeVariantPassName(traits, kTransparentExtinctionDepthWarpPassName),
                 std::make_shared<FixedSliceScalarVBOITDepthWarpPass>(
@@ -2725,7 +2766,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_fixedSliceScalarVBOITOccupancyHistogramBuffer,
                     m_fixedSliceScalarVBOITDepthWarpLUTBuffer));
             depthWarpPassDesc.At(RenderGraph::ExternalInsertPoint::After(
-                MakeVariantPassName(traits, kTransparentExtinctionOccupancyHistogramPassName)));
+                MakeVariantPassName(traits, kTransparentExtinctionAdaptiveFitUpdatePassName)));
             outPasses.push_back(std::move(depthWarpPassDesc));
 
             auto occupancyRemapPassDesc = RenderGraph::ExternalPassDesc::Compute(

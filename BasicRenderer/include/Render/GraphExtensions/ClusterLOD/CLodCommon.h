@@ -93,7 +93,7 @@ inline constexpr uint32_t CLodAVBOITDefaultVirtualSliceCount = 32u;
 inline constexpr uint32_t CLodAVBOITDefaultDownsampleFactor = 4u;
 inline constexpr float CLodAVBOITExtinctionQuantizationScale = 4096.0f;
 inline constexpr float CLodAVBOITDefaultDepthDistributionExponent = 1.0f;
-inline constexpr float CLodAVBOITDefaultLookupDepthBiasInSlices = 0.5f;
+inline constexpr float CLodAVBOITDefaultLookupDepthBiasInSlices = 2.0f;
 inline constexpr float CLodAVBOITDefaultZeroTransmittanceThreshold = 1.0e-3f;
 inline constexpr float CLodAVBOITDefaultResolutionScale = 1.0f / static_cast<float>(CLodAVBOITDefaultDownsampleFactor);
 static_assert(CLodAVBOITDefaultVirtualSliceCount <= 32u, "AVBOIT occupancy slice mask supports up to 32 virtual slices");
@@ -239,6 +239,26 @@ struct CLodAVBOITConfig
 };
 
 static_assert(sizeof(CLodAVBOITConfig) == 80u, "CLodAVBOITConfig size must match HLSL");
+
+inline constexpr uint32_t CLodAVBOITDepthWarpFlagFilterToNext = 1u;
+
+struct CLodAVBOITDepthWarpLUTEntry
+{
+    float warpedSliceCoordinate = 0.0f;
+    uint32_t flags = 0u;
+};
+
+static_assert(sizeof(CLodAVBOITDepthWarpLUTEntry) == 8u, "CLodAVBOITDepthWarpLUTEntry size must match HLSL");
+
+struct CLodAVBOITFitState
+{
+    uint32_t fittedVirtualSliceCount = CLodAVBOITDefaultVirtualSliceCount;
+    uint32_t occupiedVirtualSliceCount = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodAVBOITFitState) == 16u, "CLodAVBOITFitState size must match HLSL");
 
 inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 22u;
 inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 22u;

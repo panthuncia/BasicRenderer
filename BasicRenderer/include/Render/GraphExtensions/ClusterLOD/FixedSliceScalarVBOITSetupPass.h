@@ -11,6 +11,7 @@ class FixedSliceScalarVBOITSetupPass final : public RenderPass {
 public:
     FixedSliceScalarVBOITSetupPass(
         std::shared_ptr<Buffer> configBuffer,
+        std::shared_ptr<Buffer> fitStateBuffer,
         std::shared_ptr<Buffer> depthWarpLUTBuffer,
         std::shared_ptr<PixelBuffer> occupancyTexture,
         std::shared_ptr<PixelBuffer> coverageTexture,
@@ -29,6 +30,7 @@ public:
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;
+    std::shared_ptr<Buffer> m_fitStateBuffer;
     std::shared_ptr<Buffer> m_depthWarpLUTBuffer;
     std::shared_ptr<PixelBuffer> m_occupancyTexture;
     std::shared_ptr<PixelBuffer> m_coverageTexture;
@@ -38,4 +40,5 @@ private:
     std::shared_ptr<PixelBuffer> m_zeroTransmittanceSliceTexture;
     std::shared_ptr<PixelBuffer> m_accumulationTexture;
     std::shared_ptr<PixelBuffer> m_shadingExtinctionTexture;
+    bool m_fitStateInitialized = false;
 };
