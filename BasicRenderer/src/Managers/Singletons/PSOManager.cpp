@@ -1156,8 +1156,9 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
     rhi::SubobjBlend soBlend{ blend };
 
     rhi::RenderTargets rts{};
-    rts.count = 1;
+    rts.count = 2;
     rts.formats[0] = rhi::Format::R16G16B16A16_Float;
+    rts.formats[1] = rhi::Format::R32_Float;
     rhi::SubobjRTVs soRTV{ rts };
     rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
 

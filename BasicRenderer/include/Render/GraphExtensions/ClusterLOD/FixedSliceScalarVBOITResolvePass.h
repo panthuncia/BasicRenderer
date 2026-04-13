@@ -11,8 +11,8 @@ class FixedSliceScalarVBOITResolvePass final : public ComputePass {
 public:
     FixedSliceScalarVBOITResolvePass(
         std::shared_ptr<Buffer> configBuffer,
-        std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
-        std::shared_ptr<PixelBuffer> accumulationTexture);
+        std::shared_ptr<PixelBuffer> accumulationTexture,
+        std::shared_ptr<PixelBuffer> shadingExtinctionTexture);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -22,7 +22,7 @@ public:
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;
-    std::shared_ptr<PixelBuffer> m_integratedTransmittanceTexture;
     std::shared_ptr<PixelBuffer> m_accumulationTexture;
+    std::shared_ptr<PixelBuffer> m_shadingExtinctionTexture;
     PipelineState m_pso;
 };

@@ -44,6 +44,7 @@ public:
         std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITIntegratedTransmittanceTexture = nullptr,
         std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITZeroTransmittanceSliceTexture = nullptr,
         std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITAccumulationTexture = nullptr,
+        std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITShadingExtinctionTexture = nullptr,
         std::shared_ptr<Buffer> visibleClustersResolveBuffer = nullptr,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
         std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture = nullptr,
@@ -82,6 +83,7 @@ private:
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITIntegratedTransmittanceTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITAccumulationTexture;
+    std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITShadingExtinctionTexture;
     std::shared_ptr<PixelBuffer> m_fixedSliceScalarVBOITOccupancySliceMaskTexture;
     std::shared_ptr<Buffer> m_visibleClustersResolveBuffer;
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;

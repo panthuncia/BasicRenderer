@@ -9,11 +9,11 @@
 
 FixedSliceScalarVBOITResolvePass::FixedSliceScalarVBOITResolvePass(
     std::shared_ptr<Buffer> configBuffer,
-    std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
-    std::shared_ptr<PixelBuffer> accumulationTexture)
+    std::shared_ptr<PixelBuffer> accumulationTexture,
+    std::shared_ptr<PixelBuffer> shadingExtinctionTexture)
     : m_configBuffer(std::move(configBuffer))
-    , m_integratedTransmittanceTexture(std::move(integratedTransmittanceTexture))
     , m_accumulationTexture(std::move(accumulationTexture))
+    , m_shadingExtinctionTexture(std::move(shadingExtinctionTexture))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -27,10 +27,9 @@ void FixedSliceScalarVBOITResolvePass::DeclareResourceUsages(ComputePassBuilder*
 {
     builder->WithShaderResource(
             m_configBuffer,
-            m_integratedTransmittanceTexture,
-            m_accumulationTexture)
-        .WithUnorderedAccess(Builtin::Color::HDRColorTarget)
-        .WithConstantBuffer(Builtin::PerFrameBuffer);
+            m_accumulationTexture,
+            m_shadingExtinctionTexture)
+        .WithUnorderedAccess(Builtin::Color::HDRColorTarget);
 }
 
 void FixedSliceScalarVBOITResolvePass::Setup()
@@ -44,7 +43,7 @@ void FixedSliceScalarVBOITResolvePass::Update(const UpdateExecutionContext& exec
 
 PassReturn FixedSliceScalarVBOITResolvePass::Execute(PassExecutionContext& executionContext)
 {
-    if (!m_configBuffer || !m_integratedTransmittanceTexture || !m_accumulationTexture) {
+    if (!m_configBuffer || !m_accumulationTexture || !m_shadingExtinctionTexture) {
         return {};
     }
 
@@ -60,6 +59,8 @@ PassReturn FixedSliceScalarVBOITResolvePass::Execute(PassExecutionContext& execu
     uint32_t misc[NumMiscUintRootConstants] = {};
     misc[CLOD_FIXED_SLICE_SCALAR_VBOIT_RESOLVE_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_FIXED_SLICE_SCALAR_VBOIT_RESOLVE_ACCUMULATION_DESCRIPTOR_INDEX] = m_accumulationTexture->GetSRVInfo(0).slot.index;
+    misc[CLOD_FIXED_SLICE_SCALAR_VBOIT_RESOLVE_SHADING_EXTINCTION_DESCRIPTOR_INDEX] =
+        m_shadingExtinctionTexture->GetSRVInfo(0).slot.index;
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,

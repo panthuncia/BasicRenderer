@@ -17,7 +17,8 @@ FixedSliceScalarVBOITSetupPass::FixedSliceScalarVBOITSetupPass(
     std::shared_ptr<PixelBuffer> extinctionTexture,
     std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
     std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture,
-    std::shared_ptr<PixelBuffer> accumulationTexture)
+    std::shared_ptr<PixelBuffer> accumulationTexture,
+    std::shared_ptr<PixelBuffer> shadingExtinctionTexture)
     : m_configBuffer(std::move(configBuffer))
     , m_depthWarpLUTBuffer(std::move(depthWarpLUTBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
@@ -27,6 +28,7 @@ FixedSliceScalarVBOITSetupPass::FixedSliceScalarVBOITSetupPass(
     , m_integratedTransmittanceTexture(std::move(integratedTransmittanceTexture))
     , m_zeroTransmittanceSliceTexture(std::move(zeroTransmittanceSliceTexture))
     , m_accumulationTexture(std::move(accumulationTexture))
+    , m_shadingExtinctionTexture(std::move(shadingExtinctionTexture))
 {
 }
 
@@ -49,6 +51,9 @@ void FixedSliceScalarVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* bu
 
     if (m_accumulationTexture) {
         builder->WithRenderTarget(m_accumulationTexture);
+    }
+    if (m_shadingExtinctionTexture) {
+        builder->WithRenderTarget(m_shadingExtinctionTexture);
     }
 }
 
@@ -184,6 +189,11 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
         commandList.ClearRenderTargetView(
             m_accumulationTexture->GetRTVInfo(0).slot,
             m_accumulationTexture->GetClearColor());
+    }
+    if (m_shadingExtinctionTexture) {
+        commandList.ClearRenderTargetView(
+            m_shadingExtinctionTexture->GetRTVInfo(0).slot,
+            m_shadingExtinctionTexture->GetClearColor());
     }
     return {};
 }

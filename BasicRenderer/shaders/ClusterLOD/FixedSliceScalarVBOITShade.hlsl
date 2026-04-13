@@ -7,6 +7,20 @@
 #include "include/FixedSliceScalarVBOITCommon.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
+struct FixedSliceScalarVBOITShadeOutput
+{
+    float4 accumulation : SV_Target0;
+    float shadingExtinction : SV_Target1;
+};
+
+FixedSliceScalarVBOITShadeOutput MakeFixedSliceScalarVBOITShadeOutput(float4 accumulation, float shadingExtinction)
+{
+    FixedSliceScalarVBOITShadeOutput output;
+    output.accumulation = accumulation;
+    output.shadingExtinction = shadingExtinction;
+    return output;
+}
+
 float SampleIntegratedTransmittance(
     Texture2DArray<float> integratedTransmittanceTexture,
     CLodFixedSliceScalarVBOITConfig config,
@@ -36,7 +50,7 @@ float SampleIntegratedTransmittance(
 }
 
 [shader("pixel")]
-float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_Target0
+FixedSliceScalarVBOITShadeOutput FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID)
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
@@ -48,7 +62,7 @@ float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace
         config.shadingTransmittanceSRVDescriptorIndex == 0xFFFFFFFFu ||
         config.sliceCount == 0u)
     {
-        return 0.0f.xxxx;
+        return MakeFixedSliceScalarVBOITShadeOutput(0.0f.xxxx, 0.0f);
     }
 
     const uint2 pixel = input.position.xy;
@@ -57,7 +71,7 @@ float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace
         pixel.x >= viewRasterInfo.scissorMaxX ||
         pixel.y >= viewRasterInfo.scissorMaxY)
     {
-        return 0.0f.xxxx;
+        return MakeFixedSliceScalarVBOITShadeOutput(0.0f.xxxx, 0.0f);
     }
 
 #if defined(PSO_ALPHA_TEST)
@@ -75,14 +89,14 @@ float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace
         UnpackVisKey(opaqueVisKey, opaqueDepth, opaqueClusterIndex, opaquePrimID);
         if (input.linearDepth >= opaqueDepth)
         {
-            return 0.0f.xxxx;
+            return MakeFixedSliceScalarVBOITShadeOutput(0.0f.xxxx, 0.0f);
         }
     }
 
     ClodResolvedSample sample;
     if (!ResolveClodSampleFromVisKeyWithFace(PackVisKey(input.linearDepth, input.visibleClusterIndex, primID), pixel, !isFrontFace, sample))
     {
-        return 0.0f.xxxx;
+        return MakeFixedSliceScalarVBOITShadeOutput(0.0f.xxxx, 0.0f);
     }
 
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
@@ -106,7 +120,7 @@ float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace
     const float alpha = saturate(fragmentInfo.alpha);
     if (alpha <= 0.0f)
     {
-        return 0.0f.xxxx;
+        return MakeFixedSliceScalarVBOITShadeOutput(0.0f.xxxx, 0.0f);
     }
 
     const float sliceCoordinate = ComputeDepthSliceCoordinate(config, sample.linearDepth);
@@ -119,7 +133,7 @@ float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace
         sliceCoordinate);
     if (transmittance <= max(config.zeroTransmittanceThreshold, 1.0e-4f))
     {
-        return 0.0f.xxxx;
+        return MakeFixedSliceScalarVBOITShadeOutput(0.0f.xxxx, 0.0f);
     }
 
     LightingOutput lightingOutput = lightFragment(
@@ -130,5 +144,8 @@ float4 FixedSliceScalarVBOITShadePSMain(VisBufferPSInput input, bool isFrontFace
         isFrontFace);
 
     const float weight = alpha * transmittance;
-    return float4(lightingOutput.lighting * weight, weight);
+    const float shadingExtinction = -log(max(1.0f - alpha, 1.0e-4f)) * transmittance;
+    return MakeFixedSliceScalarVBOITShadeOutput(
+        float4(lightingOutput.lighting * weight, weight),
+        shadingExtinction);
 }

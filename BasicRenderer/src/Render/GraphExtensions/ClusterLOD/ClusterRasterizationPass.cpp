@@ -36,6 +36,7 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITIntegratedTransmittanceTexture,
     std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
     std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITAccumulationTexture,
+    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITShadingExtinctionTexture,
     std::shared_ptr<Buffer> visibleClustersResolveBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup,
     std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
@@ -55,6 +56,7 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_fixedSliceScalarVBOITIntegratedTransmittanceTexture(std::move(fixedSliceScalarVBOITIntegratedTransmittanceTexture))
     , m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture(std::move(fixedSliceScalarVBOITZeroTransmittanceSliceTexture))
     , m_fixedSliceScalarVBOITAccumulationTexture(std::move(fixedSliceScalarVBOITAccumulationTexture))
+    , m_fixedSliceScalarVBOITShadingExtinctionTexture(std::move(fixedSliceScalarVBOITShadingExtinctionTexture))
     , m_fixedSliceScalarVBOITOccupancySliceMaskTexture(std::move(fixedSliceScalarVBOITOccupancySliceMaskTexture))
     , m_visibleClustersResolveBuffer(std::move(visibleClustersResolveBuffer))
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
@@ -175,7 +177,9 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
                 m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
                 m_visibleClustersResolveBuffer)
-            .WithRenderTarget(m_fixedSliceScalarVBOITAccumulationTexture);
+            .WithRenderTarget(
+                m_fixedSliceScalarVBOITAccumulationTexture,
+                m_fixedSliceScalarVBOITShadingExtinctionTexture);
     }
     else if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
         builder->WithShaderResource(m_virtualShadowClipmapInfoBuffer)
@@ -362,13 +366,19 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     p.height = m_passHeight;
     p.debugName = "CLod raster pass";
 
-    rhi::ColorAttachment accumulationAttachment{};
-    if (m_outputKind == CLodRasterOutputKind::AVBOITShading && m_fixedSliceScalarVBOITAccumulationTexture) {
-        accumulationAttachment.rtv = m_fixedSliceScalarVBOITAccumulationTexture->GetRTVInfo(0).slot;
-        accumulationAttachment.loadOp = rhi::LoadOp::Load;
-        accumulationAttachment.storeOp = rhi::StoreOp::Store;
-        accumulationAttachment.clear = m_fixedSliceScalarVBOITAccumulationTexture->GetClearColor();
-        p.colors = { &accumulationAttachment, 1 };
+    rhi::ColorAttachment shadingAttachments[2]{};
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading &&
+        m_fixedSliceScalarVBOITAccumulationTexture &&
+        m_fixedSliceScalarVBOITShadingExtinctionTexture) {
+        shadingAttachments[0].rtv = m_fixedSliceScalarVBOITAccumulationTexture->GetRTVInfo(0).slot;
+        shadingAttachments[0].loadOp = rhi::LoadOp::Load;
+        shadingAttachments[0].storeOp = rhi::StoreOp::Store;
+        shadingAttachments[0].clear = m_fixedSliceScalarVBOITAccumulationTexture->GetClearColor();
+        shadingAttachments[1].rtv = m_fixedSliceScalarVBOITShadingExtinctionTexture->GetRTVInfo(0).slot;
+        shadingAttachments[1].loadOp = rhi::LoadOp::Load;
+        shadingAttachments[1].storeOp = rhi::StoreOp::Store;
+        shadingAttachments[1].clear = m_fixedSliceScalarVBOITShadingExtinctionTexture->GetClearColor();
+        p.colors = { shadingAttachments, 2 };
     }
 
     executionContext.commandList.BeginPass(p);

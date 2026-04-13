@@ -281,6 +281,26 @@ TextureDescription CreateFixedSliceScalarVBOITAccumulationDescription()
     return desc;
 }
 
+TextureDescription CreateFixedSliceScalarVBOITShadingExtinctionDescription()
+{
+    TextureDescription desc;
+    const auto renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+
+    desc.channels = 1;
+    desc.format = rhi::Format::R32_Float;
+    desc.hasSRV = true;
+    desc.srvFormat = rhi::Format::R32_Float;
+    desc.hasRTV = true;
+    desc.rtvFormat = rhi::Format::R32_Float;
+    desc.clearColor[0] = 0.0f;
+    desc.clearColor[1] = 0.0f;
+    desc.clearColor[2] = 0.0f;
+    desc.clearColor[3] = 0.0f;
+    desc.allowAlias = true;
+    desc.imageDimensions.push_back(ImageDimensions{ renderResolution.x, renderResolution.y, 0, 0 });
+    return desc;
+}
+
 CLodTransparencyMode GetTransparencyMode(CLodExtensionType type)
 {
     if (type != CLodExtensionType::AlphaBlend) {
@@ -867,6 +887,14 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
     m_fixedSliceScalarVBOITAccumulationTexture->GetECSEntity()
         .set<Components::Resource>({ m_fixedSliceScalarVBOITAccumulationTexture })
         .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_fixedSliceScalarVBOITShadingExtinctionTexture =
+        PixelBuffer::CreateSharedUnmaterialized(CreateFixedSliceScalarVBOITShadingExtinctionDescription());
+    m_fixedSliceScalarVBOITShadingExtinctionTexture->SetName(
+        MakeVariantResourceName(traits, "Fixed-Slice Scalar VBOIT Shading Extinction"));
+    m_fixedSliceScalarVBOITShadingExtinctionTexture->GetECSEntity()
+        .set<Components::Resource>({ m_fixedSliceScalarVBOITShadingExtinctionTexture })
+        .add<CLodExtensionTypeTag>(typeEntity);
 }
 
 void CLodExtension::InitializeShadowResources()
@@ -1380,6 +1408,7 @@ void CLodExtension::TagTransparencyResourceUsages()
     tagTextureUsage(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture, "Cluster LOD fixed-slice scalar VBOIT");
     tagTextureUsage(m_fixedSliceScalarVBOITAccumulationTexture, "Cluster LOD fixed-slice scalar VBOIT");
+    tagTextureUsage(m_fixedSliceScalarVBOITShadingExtinctionTexture, "Cluster LOD fixed-slice scalar VBOIT");
 }
 
 void CLodExtension::ReleaseBufferBackings()
@@ -1535,6 +1564,7 @@ void CLodExtension::ReleaseTransparencyResourceBackings()
     releaseTextureBacking(m_fixedSliceScalarVBOITIntegratedTransmittanceTexture);
     releaseTextureBacking(m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture);
     releaseTextureBacking(m_fixedSliceScalarVBOITAccumulationTexture);
+    releaseTextureBacking(m_fixedSliceScalarVBOITShadingExtinctionTexture);
 }
 
 void CLodExtension::ReleaseShadowResourceBackings()
@@ -2607,7 +2637,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_fixedSliceScalarVBOITExtinctionTexture,
                         m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
                         m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
-                        m_fixedSliceScalarVBOITAccumulationTexture)));
+                        m_fixedSliceScalarVBOITAccumulationTexture,
+                        m_fixedSliceScalarVBOITShadingExtinctionTexture)));
         }
 
         if (!useFixedSliceScalarVBOIT) {
@@ -2662,6 +2693,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     nullptr,
                     m_fixedSliceScalarVBOITConfigBuffer,
                     m_fixedSliceScalarVBOITOccupancyTexture,
+                    nullptr,
                     nullptr,
                     nullptr,
                     nullptr,
@@ -2748,6 +2780,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 nullptr,
                 nullptr,
                 nullptr,
+                nullptr,
                 useFixedSliceScalarVBOIT ? m_visibleClustersBuffer : nullptr,
                 slabGroup));
         rasterizeDeepVisibilityPassDesc.GeometryPass();
@@ -2789,6 +2822,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
                     m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
                     m_fixedSliceScalarVBOITAccumulationTexture,
+                    m_fixedSliceScalarVBOITShadingExtinctionTexture,
                     m_visibleClustersBuffer,
                     slabGroup));
             shadePassDesc.GeometryPass();
@@ -2799,8 +2833,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 MakeVariantPassName(traits, kTransparentVBOITResolvePassName),
                 std::make_shared<FixedSliceScalarVBOITResolvePass>(
                     m_fixedSliceScalarVBOITConfigBuffer,
-                    m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
-                    m_fixedSliceScalarVBOITAccumulationTexture));
+                    m_fixedSliceScalarVBOITAccumulationTexture,
+                    m_fixedSliceScalarVBOITShadingExtinctionTexture));
             resolvePassDesc.At(makeTransparentCompositeInsertPoint());
             outPasses.push_back(std::move(resolvePassDesc));
         }
@@ -2845,6 +2879,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             rasterHistogramBufferPhase1,
             rasterIndirectArgsBufferPhase1,
             m_sortedToUnsortedMappingBuffer,
+            nullptr,
             nullptr,
             nullptr,
             nullptr,
@@ -3648,6 +3683,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             rasterHistogramBufferPhase2,
             rasterIndirectArgsBufferPhase2,
             m_sortedToUnsortedMappingBuffer,
+            nullptr,
             nullptr,
             nullptr,
             nullptr,
