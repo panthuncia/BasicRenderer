@@ -48,36 +48,45 @@ float InvertWarpedSliceCoordinate(CLodFixedSliceScalarVBOITConfig config, float 
     StructuredBuffer<CLodFixedSliceScalarVBOITDepthWarpLUTEntry> depthWarpLUT =
         ResourceDescriptorHeap[config.depthWarpLUTSRVDescriptorIndex];
 
-    [loop]
-    for (uint virtualSliceIndex = 0u; virtualSliceIndex < config.virtualSliceCount; ++virtualSliceIndex)
+    uint lowerLUTIndex = 0u;
+    uint upperLUTIndex = CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_LUT_RESOLUTION - 1u;
+    [unroll(13)]
+    for (uint iterationIndex = 0u; iterationIndex < 13u; ++iterationIndex)
     {
-        const CLodFixedSliceScalarVBOITDepthWarpLUTEntry depthWarpEntry0 = depthWarpLUT[virtualSliceIndex];
-        if (depthWarpEntry0.warpedSliceCoordinate >= clampedWarpedSliceCoordinate)
+        const uint midLUTIndex = (lowerLUTIndex + upperLUTIndex) >> 1u;
+        const CLodFixedSliceScalarVBOITDepthWarpLUTEntry midDepthWarpEntry = depthWarpLUT[midLUTIndex];
+        if (midDepthWarpEntry.warpedSliceCoordinate < clampedWarpedSliceCoordinate)
         {
-            return (float)virtualSliceIndex;
+            lowerLUTIndex = min(midLUTIndex + 1u, CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_LUT_RESOLUTION - 1u);
         }
-
-        if (virtualSliceIndex + 1u >= config.virtualSliceCount ||
-            (depthWarpEntry0.flags & CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT) == 0u)
+        else
         {
-            continue;
+            upperLUTIndex = midLUTIndex;
         }
-
-        const CLodFixedSliceScalarVBOITDepthWarpLUTEntry depthWarpEntry1 = depthWarpLUT[virtualSliceIndex + 1u];
-        if (depthWarpEntry1.warpedSliceCoordinate < clampedWarpedSliceCoordinate)
-        {
-            continue;
-        }
-
-        const float segmentExtent = max(
-            depthWarpEntry1.warpedSliceCoordinate - depthWarpEntry0.warpedSliceCoordinate,
-            1.0e-5f);
-        const float interpolationFactor = saturate(
-            (clampedWarpedSliceCoordinate - depthWarpEntry0.warpedSliceCoordinate) / segmentExtent);
-        return lerp((float)virtualSliceIndex, (float)(virtualSliceIndex + 1u), interpolationFactor);
     }
 
-    return (float)(config.virtualSliceCount - 1u);
+    const uint lutIndex1 = min(upperLUTIndex, CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_LUT_RESOLUTION - 1u);
+    if (lutIndex1 == 0u)
+    {
+        return ComputeBaseSliceCoordinateFromDepthWarpLUTSampleCoordinate(config, 0.0f);
+    }
+
+    const uint lutIndex0 = lutIndex1 - 1u;
+    const CLodFixedSliceScalarVBOITDepthWarpLUTEntry depthWarpEntry0 = depthWarpLUT[lutIndex0];
+    if ((depthWarpEntry0.flags & CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT) == 0u)
+    {
+        return ComputeBaseSliceCoordinateFromDepthWarpLUTSampleCoordinate(config, (float)lutIndex1);
+    }
+
+    const CLodFixedSliceScalarVBOITDepthWarpLUTEntry depthWarpEntry1 = depthWarpLUT[lutIndex1];
+    const float segmentExtent = max(
+        depthWarpEntry1.warpedSliceCoordinate - depthWarpEntry0.warpedSliceCoordinate,
+        1.0e-5f);
+    const float interpolationFactor = saturate(
+        (clampedWarpedSliceCoordinate - depthWarpEntry0.warpedSliceCoordinate) / segmentExtent);
+    return ComputeBaseSliceCoordinateFromDepthWarpLUTSampleCoordinate(
+        config,
+        lerp((float)lutIndex0, (float)lutIndex1, interpolationFactor));
 }
 
 float ComputeConservativeEarlyDepthWarpedSliceCoordinate(

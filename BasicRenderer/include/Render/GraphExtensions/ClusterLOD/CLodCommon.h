@@ -90,9 +90,12 @@ inline constexpr const char* CLodTransparencyModeNames[] = {
 inline constexpr int CLodTransparencyModeCount = static_cast<int>(sizeof(CLodTransparencyModeNames) / sizeof(CLodTransparencyModeNames[0]));
 inline constexpr uint32_t CLodAVBOITDefaultSliceCount = 16u;
 inline constexpr uint32_t CLodAVBOITDefaultVirtualSliceCount = 32u;
+inline constexpr uint32_t CLodAVBOITDepthWarpLUTResolution = 8192u;
 inline constexpr uint32_t CLodAVBOITDefaultDownsampleFactor = 4u;
 inline constexpr float CLodAVBOITExtinctionQuantizationScale = 4096.0f;
+inline constexpr float CLodAVBOITMinDepthDistributionExponent = 0.5f;
 inline constexpr float CLodAVBOITDefaultDepthDistributionExponent = 1.0f;
+inline constexpr float CLodAVBOITMaxDepthDistributionExponent = 2.0f;
 inline constexpr float CLodAVBOITDefaultLookupDepthBiasInSlices = 2.0f;
 inline constexpr float CLodAVBOITDefaultZeroTransmittanceThreshold = 1.0e-3f;
 inline constexpr float CLodAVBOITDefaultResolutionScale = 1.0f / static_cast<float>(CLodAVBOITDefaultDownsampleFactor);
@@ -224,7 +227,6 @@ struct CLodAVBOITConfig
     uint32_t integratedTransmittanceUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t shadingTransmittanceSRVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t zeroTransmittanceSliceUAVDescriptorIndex = 0xFFFFFFFFu;
-    uint32_t zeroTransmittanceSliceSRVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t sliceCount = 0u;
     uint32_t virtualSliceCount = 0u;
     uint32_t lowResolutionWidth = 0u;
@@ -238,7 +240,7 @@ struct CLodAVBOITConfig
     float pad1 = 0.0f;
 };
 
-static_assert(sizeof(CLodAVBOITConfig) == 80u, "CLodAVBOITConfig size must match HLSL");
+static_assert(sizeof(CLodAVBOITConfig) == 76u, "CLodAVBOITConfig size must match HLSL");
 
 inline constexpr uint32_t CLodAVBOITDepthWarpFlagFilterToNext = 1u;
 
@@ -254,7 +256,7 @@ struct CLodAVBOITFitState
 {
     uint32_t fittedVirtualSliceCount = CLodAVBOITDefaultVirtualSliceCount;
     uint32_t occupiedVirtualSliceCount = 0u;
-    uint32_t pad0 = 0u;
+    float fittedDepthDistributionExponent = CLodAVBOITDefaultDepthDistributionExponent;
     uint32_t pad1 = 0u;
 };
 

@@ -1,5 +1,6 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
+#include "include/FixedSliceScalarVBOITCommon.hlsli"
 #include "PerPassRootConstants/clodFixedSliceScalarVBOITDepthWarpRootConstants.h"
 
 [shader("compute")]
@@ -47,16 +48,16 @@ void CLodFixedSliceScalarVBOITOccupancyRemapCS(uint3 dispatchThreadId : SV_Dispa
             continue;
         }
 
-        const CLodFixedSliceScalarVBOITDepthWarpLUTEntry depthWarpEntry = depthWarpLUTBuffer[sourceSliceIndex];
-        float minWarpedSliceCoordinate = depthWarpEntry.warpedSliceCoordinate;
-        float maxWarpedSliceCoordinate = depthWarpEntry.warpedSliceCoordinate;
-        if (sourceSliceIndex + 1u < config.virtualSliceCount &&
-            (depthWarpEntry.flags & CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT) != 0u)
-        {
-            const CLodFixedSliceScalarVBOITDepthWarpLUTEntry nextDepthWarpEntry = depthWarpLUTBuffer[sourceSliceIndex + 1u];
-            minWarpedSliceCoordinate = min(minWarpedSliceCoordinate, nextDepthWarpEntry.warpedSliceCoordinate);
-            maxWarpedSliceCoordinate = max(maxWarpedSliceCoordinate, nextDepthWarpEntry.warpedSliceCoordinate);
-        }
+        const float sourceSliceCoordinateMin = (float)sourceSliceIndex;
+        const float sourceSliceCoordinateMax = min((float)(sourceSliceIndex + 1u), (float)(config.virtualSliceCount - 1u));
+        const float warpedSliceCoordinateMin = SampleDepthWarpLUT(
+            depthWarpLUTBuffer,
+            ComputeDepthWarpLUTSampleCoordinate(config, sourceSliceCoordinateMin));
+        const float warpedSliceCoordinateMax = SampleDepthWarpLUT(
+            depthWarpLUTBuffer,
+            ComputeDepthWarpLUTSampleCoordinate(config, sourceSliceCoordinateMax));
+        const float minWarpedSliceCoordinate = min(warpedSliceCoordinateMin, warpedSliceCoordinateMax);
+        const float maxWarpedSliceCoordinate = max(warpedSliceCoordinateMin, warpedSliceCoordinateMax);
 
         const uint remappedSliceIndexMin = min((uint)floor(minWarpedSliceCoordinate), config.sliceCount - 1u);
         const uint remappedSliceIndexMax = min((uint)ceil(maxWarpedSliceCoordinate), config.sliceCount - 1u);

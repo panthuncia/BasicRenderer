@@ -114,9 +114,6 @@ void FixedSliceScalarVBOITSetupPass::Update(const UpdateExecutionContext& execut
     config.zeroTransmittanceSliceUAVDescriptorIndex = m_zeroTransmittanceSliceTexture
         ? m_zeroTransmittanceSliceTexture->GetUAVShaderVisibleInfo(0).slot.index
         : 0xFFFFFFFFu;
-    config.zeroTransmittanceSliceSRVDescriptorIndex = m_zeroTransmittanceSliceTexture
-        ? m_zeroTransmittanceSliceTexture->GetSRVInfo(0).slot.index
-        : 0xFFFFFFFFu;
     config.sliceCount = CLodAVBOITDefaultSliceCount;
     config.virtualSliceCount = CLodAVBOITDefaultVirtualSliceCount;
     config.lowResolutionWidth = m_occupancyTexture ? m_occupancyTexture->GetWidth() : 0u;

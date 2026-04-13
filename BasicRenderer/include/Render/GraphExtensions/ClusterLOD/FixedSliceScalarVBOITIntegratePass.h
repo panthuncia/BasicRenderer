@@ -13,6 +13,7 @@ class FixedSliceScalarVBOITIntegratePass final : public ComputePass, public IDyn
 public:
     FixedSliceScalarVBOITIntegratePass(
         std::shared_ptr<Buffer> configBuffer,
+        std::shared_ptr<Buffer> fitStateBuffer,
         std::shared_ptr<PixelBuffer> occupancyTexture,
         std::shared_ptr<PixelBuffer> coverageTexture,
         std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
@@ -29,6 +30,7 @@ public:
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;
+    std::shared_ptr<Buffer> m_fitStateBuffer;
     std::shared_ptr<PixelBuffer> m_occupancyTexture;
     std::shared_ptr<PixelBuffer> m_coverageTexture;
     std::shared_ptr<PixelBuffer> m_occupancySliceMaskTexture;

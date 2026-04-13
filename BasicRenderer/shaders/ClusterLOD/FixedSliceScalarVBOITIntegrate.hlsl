@@ -10,12 +10,31 @@ bool IsFixedSliceScalarVBOITDebugOutput(uint outputType)
         outputType == OUTPUT_TRANSPARENT_VBOIT_COVERAGE ||
         outputType == OUTPUT_TRANSPARENT_VBOIT_ZERO_SLICE ||
         outputType == OUTPUT_TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT ||
-        outputType == OUTPUT_TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT;
+        outputType == OUTPUT_TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT ||
+        outputType == OUTPUT_TRANSPARENT_VBOIT_FITTED_VIRTUAL_SLICE_COUNT ||
+        outputType == OUTPUT_TRANSPARENT_VBOIT_OCCUPIED_VIRTUAL_SLICE_COUNT ||
+        outputType == OUTPUT_TRANSPARENT_VBOIT_DEPTH_DISTRIBUTION_EXPONENT;
+}
+
+float GetNormalizedDepthDistributionExponent(CLodFixedSliceScalarVBOITConfig config)
+{
+    const float exponentRange =
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_MAX_DEPTH_DISTRIBUTION_EXPONENT -
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_MIN_DEPTH_DISTRIBUTION_EXPONENT;
+    if (exponentRange <= 1.0e-5f)
+    {
+        return 0.0f;
+    }
+
+    return saturate(
+        (config.depthDistributionExponent - CLOD_FIXED_SLICE_SCALAR_VBOIT_MIN_DEPTH_DISTRIBUTION_EXPONENT) /
+        exponentRange);
 }
 
 uint2 GetFixedSliceScalarVBOITDebugPayload(
     uint outputType,
     CLodFixedSliceScalarVBOITConfig config,
+    CLodFixedSliceScalarVBOITFitState fitState,
     float transmittance,
     float coverage,
     uint zeroTransmittanceSlice,
@@ -26,7 +45,7 @@ uint2 GetFixedSliceScalarVBOITDebugPayload(
         case OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE:
             return PackDebugFloat1(transmittance);
         case OUTPUT_TRANSPARENT_VBOIT_COVERAGE:
-            return PackDebugUint(coverage > 1.0e-4f ? 1u : 0u);
+            return PackDebugFloat1(saturate(coverage));
         case OUTPUT_TRANSPARENT_VBOIT_ZERO_SLICE:
         {
             const float normalizedZeroSlice = zeroTransmittanceSlice >= config.sliceCount || config.sliceCount <= 1u
@@ -38,6 +57,12 @@ uint2 GetFixedSliceScalarVBOITDebugPayload(
             return PackDebugFloat1((float)config.virtualSliceCount / (float)CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT);
         case OUTPUT_TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT:
             return PackDebugFloat1((float)occupiedPhysicalSliceCount / (float)max(config.sliceCount, 1u));
+        case OUTPUT_TRANSPARENT_VBOIT_FITTED_VIRTUAL_SLICE_COUNT:
+            return PackDebugFloat1((float)fitState.fittedVirtualSliceCount / (float)CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT);
+        case OUTPUT_TRANSPARENT_VBOIT_OCCUPIED_VIRTUAL_SLICE_COUNT:
+            return PackDebugFloat1((float)fitState.occupiedVirtualSliceCount / (float)CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT);
+        case OUTPUT_TRANSPARENT_VBOIT_DEPTH_DISTRIBUTION_EXPONENT:
+            return PackDebugFloat1(GetNormalizedDepthDistributionExponent(config));
         default:
             return uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
     }
@@ -50,7 +75,10 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     StructuredBuffer<CLodFixedSliceScalarVBOITConfig> configBuffer =
         ResourceDescriptorHeap[CLOD_FIXED_SLICE_SCALAR_VBOIT_INTEGRATE_CONFIG_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodFixedSliceScalarVBOITFitState> fitStateBuffer =
+        ResourceDescriptorHeap[CLOD_FIXED_SLICE_SCALAR_VBOIT_INTEGRATE_FIT_STATE_DESCRIPTOR_INDEX];
     const CLodFixedSliceScalarVBOITConfig config = configBuffer[0];
+    const CLodFixedSliceScalarVBOITFitState fitState = fitStateBuffer[0];
 
     if (config.sliceCount == 0u ||
         dispatchThreadId.x >= config.lowResolutionWidth ||
@@ -85,6 +113,7 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
             const uint2 payload = GetFixedSliceScalarVBOITDebugPayload(
                 perFrameBuffer.outputType,
                 config,
+                fitState,
                 1.0f,
                 0.0f,
                 config.sliceCount,
@@ -164,6 +193,7 @@ void CLodFixedSliceScalarVBOITIntegrateCS(uint3 dispatchThreadId : SV_DispatchTh
         const uint2 payload = GetFixedSliceScalarVBOITDebugPayload(
             perFrameBuffer.outputType,
             config,
+            fitState,
             cumulativeTransmittance,
             coverage,
             zeroTransmittanceSlice,

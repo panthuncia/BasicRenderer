@@ -1,6 +1,7 @@
 #include "Render/GraphExtensions/ClusterLOD/FixedSliceScalarVBOITDepthWarpPass.h"
 
 #include "Managers/Singletons/PSOManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Resources/Buffers/Buffer.h"
 
@@ -64,7 +65,9 @@ PassReturn FixedSliceScalarVBOITDepthWarpPass::Execute(PassExecutionContext& exe
         NumMiscUintRootConstants,
         misc);
 
-    commandList.Dispatch(1u, 1u, 1u);
+    const uint32_t groupCountX =
+        (CLodAVBOITDepthWarpLUTResolution + 63u) / 64u;
+    commandList.Dispatch(groupCountX, 1u, 1u);
     return {};
 }
 

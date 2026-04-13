@@ -31,6 +31,9 @@ enum OutputType {
 	TRANSPARENT_VBOIT_ZERO_SLICE = 27,
 	TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT = 28,
 	TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT = 29,
+	TRANSPARENT_VBOIT_FITTED_VIRTUAL_SLICE_COUNT = 30,
+	TRANSPARENT_VBOIT_OCCUPIED_VIRTUAL_SLICE_COUNT = 31,
+	TRANSPARENT_VBOIT_DEPTH_DISTRIBUTION_EXPONENT = 32,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -64,4 +67,7 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Transparent VBOIT Zero Slice",
 	"Transparent VBOIT Virtual Slice Count",
 	"Transparent VBOIT Physical Slice Count",
+	"Transparent VBOIT Fitted Virtual Slice Count",
+	"Transparent VBOIT Occupied Virtual Slice Count",
+	"Transparent VBOIT Depth Distribution Exponent",
 };

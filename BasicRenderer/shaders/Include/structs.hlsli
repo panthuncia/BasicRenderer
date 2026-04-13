@@ -64,12 +64,15 @@ struct CLodDeepVisibilityStats
 
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_SLICE_COUNT = 16u;
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT = 32u;
+static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_LUT_RESOLUTION = 8192u;
 static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_EXTINCTION_QUANTIZATION_SCALE = 4096.0f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DEPTH_DISTRIBUTION_EXPONENT = 1.0f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_LOOKUP_DEPTH_BIAS_IN_SLICES = 2.0f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_ZERO_TRANSMITTANCE_THRESHOLD = 1.0e-3f;
 static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25f;
+static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_MIN_DEPTH_DISTRIBUTION_EXPONENT = 0.5f;
+static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_MAX_DEPTH_DISTRIBUTION_EXPONENT = 2.0f;
 
 struct CLodFixedSliceScalarVBOITConfig
 {
@@ -81,7 +84,6 @@ struct CLodFixedSliceScalarVBOITConfig
     uint integratedTransmittanceUAVDescriptorIndex;
     uint shadingTransmittanceSRVDescriptorIndex;
     uint zeroTransmittanceSliceUAVDescriptorIndex;
-    uint zeroTransmittanceSliceSRVDescriptorIndex;
     uint sliceCount;
     uint virtualSliceCount;
     uint lowResolutionWidth;
@@ -107,7 +109,7 @@ struct CLodFixedSliceScalarVBOITFitState
 {
     uint fittedVirtualSliceCount;
     uint occupiedVirtualSliceCount;
-    uint pad0;
+    float fittedDepthDistributionExponent;
     uint pad1;
 };
 

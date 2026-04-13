@@ -890,7 +890,7 @@ void CLodExtension::InitializeFixedSliceScalarVBOITResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_fixedSliceScalarVBOITDepthWarpLUTBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodAVBOITDefaultVirtualSliceCount,
+        CLodAVBOITDepthWarpLUTResolution,
         sizeof(CLodAVBOITDepthWarpLUTEntry),
         true,
         false,
@@ -2913,6 +2913,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     MakeVariantPassName(traits, kTransparentTransmittanceIntegratePassName),
                     std::make_shared<FixedSliceScalarVBOITIntegratePass>(
                         m_fixedSliceScalarVBOITConfigBuffer,
+                        m_fixedSliceScalarVBOITFitStateBuffer,
                         m_fixedSliceScalarVBOITOccupancyTexture,
                         m_fixedSliceScalarVBOITCoverageTexture,
                         m_fixedSliceScalarVBOITOccupancySliceMaskTexture,

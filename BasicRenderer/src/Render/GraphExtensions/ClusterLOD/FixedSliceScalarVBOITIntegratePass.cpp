@@ -9,6 +9,7 @@
 
 FixedSliceScalarVBOITIntegratePass::FixedSliceScalarVBOITIntegratePass(
     std::shared_ptr<Buffer> configBuffer,
+    std::shared_ptr<Buffer> fitStateBuffer,
     std::shared_ptr<PixelBuffer> occupancyTexture,
     std::shared_ptr<PixelBuffer> coverageTexture,
     std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
@@ -16,6 +17,7 @@ FixedSliceScalarVBOITIntegratePass::FixedSliceScalarVBOITIntegratePass(
     std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
     std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture)
     : m_configBuffer(std::move(configBuffer))
+    , m_fitStateBuffer(std::move(fitStateBuffer))
     , m_occupancyTexture(std::move(occupancyTexture))
     , m_coverageTexture(std::move(coverageTexture))
     , m_occupancySliceMaskTexture(std::move(occupancySliceMaskTexture))
@@ -34,6 +36,7 @@ FixedSliceScalarVBOITIntegratePass::FixedSliceScalarVBOITIntegratePass(
 void FixedSliceScalarVBOITIntegratePass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(m_configBuffer);
+    builder->WithShaderResource(m_fitStateBuffer);
 
     builder->WithUnorderedAccess(
         Builtin::DebugVisualization,
@@ -64,7 +67,7 @@ bool FixedSliceScalarVBOITIntegratePass::DeclaredResourcesChanged() const
 
 PassReturn FixedSliceScalarVBOITIntegratePass::Execute(PassExecutionContext& executionContext)
 {
-    if (!m_configBuffer || !m_occupancyTexture || !m_coverageTexture || !m_occupancySliceMaskTexture || !m_extinctionTexture || !m_zeroTransmittanceSliceTexture) {
+    if (!m_configBuffer || !m_fitStateBuffer || !m_occupancyTexture || !m_coverageTexture || !m_occupancySliceMaskTexture || !m_extinctionTexture || !m_zeroTransmittanceSliceTexture) {
         return {};
     }
 
@@ -79,6 +82,7 @@ PassReturn FixedSliceScalarVBOITIntegratePass::Execute(PassExecutionContext& exe
 
     uint32_t misc[NumMiscUintRootConstants] = {};
     misc[CLOD_FIXED_SLICE_SCALAR_VBOIT_INTEGRATE_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_FIXED_SLICE_SCALAR_VBOIT_INTEGRATE_FIT_STATE_DESCRIPTOR_INDEX] = m_fitStateBuffer->GetSRVInfo(0).slot.index;
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,
