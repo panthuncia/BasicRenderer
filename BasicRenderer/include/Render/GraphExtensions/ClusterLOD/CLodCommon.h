@@ -223,7 +223,8 @@ struct CLodAVBOITConfig
     uint32_t coverageUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t occupancySliceMaskUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t depthWarpLUTSRVDescriptorIndex = 0xFFFFFFFFu;
-    uint32_t extinctionUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t scalarExtinctionUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t chromaticExtinctionUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t integratedTransmittanceUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t shadingTransmittanceSRVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t zeroTransmittanceSliceUAVDescriptorIndex = 0xFFFFFFFFu;
@@ -237,7 +238,6 @@ struct CLodAVBOITConfig
     float lookupDepthBiasInSlices = CLodAVBOITDefaultLookupDepthBiasInSlices;
     float zeroTransmittanceThreshold = CLodAVBOITDefaultZeroTransmittanceThreshold;
     float pad0 = 0.0f;
-    float pad1 = 0.0f;
 };
 
 static_assert(sizeof(CLodAVBOITConfig) == 76u, "CLodAVBOITConfig size must match HLSL");

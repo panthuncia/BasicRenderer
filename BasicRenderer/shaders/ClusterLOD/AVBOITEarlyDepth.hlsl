@@ -1,0 +1,175 @@
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
+#include "include/utilities.hlsli"
+#include "include/AVBOITCommon.hlsli"
+#include "PerPassRootConstants/clodAVBOITEarlyDepthRootConstants.h"
+
+struct AVBOITEarlyDepthVSOutput
+{
+    float4 position : SV_Position;
+};
+
+[shader("vertex")]
+AVBOITEarlyDepthVSOutput AVBOITEarlyDepthTileVSMain(uint vertexID : SV_VertexID)
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
+
+    const uint2 lowPixel = uint2(
+        CLOD_AVBOIT_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_X,
+        CLOD_AVBOIT_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_Y);
+    const uint2 tileMin = lowPixel * CLOD_AVBOIT_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR;
+    const uint2 tileMax = min(
+        tileMin + uint2(
+            CLOD_AVBOIT_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR,
+            CLOD_AVBOIT_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR),
+        uint2(perFrameBuffer.screenResX, perFrameBuffer.screenResY));
+    const float2 quadCorner = float2(
+        (vertexID == 1u || vertexID == 3u) ? 1.0f : 0.0f,
+        vertexID >= 2u ? 1.0f : 0.0f);
+    const float2 pixelPosition = lerp(float2(tileMin), float2(tileMax), quadCorner);
+
+    AVBOITEarlyDepthVSOutput output;
+    output.position = float4(
+        pixelPosition.x / max((float)perFrameBuffer.screenResX, 1.0f) * 2.0f - 1.0f,
+        1.0f - pixelPosition.y / max((float)perFrameBuffer.screenResY, 1.0f) * 2.0f,
+        0.0f,
+        1.0f);
+    return output;
+}
+
+float ComputeDepthFromBaseSliceCoordinate(CLodAVBOITConfig config, float baseSliceCoordinate)
+{
+    const uint domainSliceCount = max(config.virtualSliceCount, max(config.sliceCount, 1u));
+    if (domainSliceCount <= 1u)
+    {
+        return config.viewNearDepth;
+    }
+
+    const float normalizedDistributedDepth = saturate(baseSliceCoordinate / (float)(domainSliceCount - 1u));
+    const float inverseExponent = rcp(max(config.depthDistributionExponent, 1.0e-4f));
+    const float normalizedDepth = pow(normalizedDistributedDepth, inverseExponent);
+    return lerp(config.viewNearDepth, config.viewFarDepth, normalizedDepth);
+}
+
+float ComputeHardwareDepthFromLinearDepth(float linearDepth, Camera camera)
+{
+    const float nearPlane = max(camera.zNear, 1.0e-5f);
+    const float farPlane = max(camera.zFar, nearPlane + 1.0e-5f);
+    const float clampedLinearDepth = clamp(linearDepth, nearPlane, farPlane);
+    return saturate((farPlane - (nearPlane * farPlane) / clampedLinearDepth) / (farPlane - nearPlane));
+}
+
+float InvertWarpedSliceCoordinate(CLodAVBOITConfig config, float warpedSliceCoordinate)
+{
+    if (config.sliceCount <= 1u)
+    {
+        return 0.0f;
+    }
+
+    const float clampedWarpedSliceCoordinate = clamp(
+        warpedSliceCoordinate,
+        0.0f,
+        (float)(config.sliceCount - 1u));
+
+    if (config.depthWarpLUTSRVDescriptorIndex == 0xFFFFFFFFu || config.virtualSliceCount == 0u)
+    {
+        return clampedWarpedSliceCoordinate *
+            ((float)(max(config.virtualSliceCount, max(config.sliceCount, 1u)) - 1u) / (float)(config.sliceCount - 1u));
+    }
+
+    StructuredBuffer<CLodAVBOITDepthWarpLUTEntry> depthWarpLUT =
+        ResourceDescriptorHeap[config.depthWarpLUTSRVDescriptorIndex];
+
+    uint lowerLUTIndex = 0u;
+    uint upperLUTIndex = CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_RESOLUTION - 1u;
+    [unroll(13)]
+    for (uint iterationIndex = 0u; iterationIndex < 13u; ++iterationIndex)
+    {
+        const uint midLUTIndex = (lowerLUTIndex + upperLUTIndex) >> 1u;
+        const CLodAVBOITDepthWarpLUTEntry midDepthWarpEntry = depthWarpLUT[midLUTIndex];
+        if (midDepthWarpEntry.warpedSliceCoordinate < clampedWarpedSliceCoordinate)
+        {
+            lowerLUTIndex = min(midLUTIndex + 1u, CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_RESOLUTION - 1u);
+        }
+        else
+        {
+            upperLUTIndex = midLUTIndex;
+        }
+    }
+
+    const uint lutIndex1 = min(upperLUTIndex, CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_RESOLUTION - 1u);
+    if (lutIndex1 == 0u)
+    {
+        return ComputeBaseSliceCoordinateFromDepthWarpLUTSampleCoordinate(config, 0.0f);
+    }
+
+    const uint lutIndex0 = lutIndex1 - 1u;
+    const CLodAVBOITDepthWarpLUTEntry depthWarpEntry0 = depthWarpLUT[lutIndex0];
+    if ((depthWarpEntry0.flags & CLOD_AVBOIT_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT) == 0u)
+    {
+        return ComputeBaseSliceCoordinateFromDepthWarpLUTSampleCoordinate(config, (float)lutIndex1);
+    }
+
+    const CLodAVBOITDepthWarpLUTEntry depthWarpEntry1 = depthWarpLUT[lutIndex1];
+    const float segmentExtent = max(
+        depthWarpEntry1.warpedSliceCoordinate - depthWarpEntry0.warpedSliceCoordinate,
+        1.0e-5f);
+    const float interpolationFactor = saturate(
+        (clampedWarpedSliceCoordinate - depthWarpEntry0.warpedSliceCoordinate) / segmentExtent);
+    return ComputeBaseSliceCoordinateFromDepthWarpLUTSampleCoordinate(
+        config,
+        lerp((float)lutIndex0, (float)lutIndex1, interpolationFactor));
+}
+
+float ComputeConservativeEarlyDepthWarpedSliceCoordinate(
+    CLodAVBOITConfig config,
+    uint zeroTransmittanceSlice)
+{
+    const float guaranteedZeroLookupSliceCoordinate =
+        (float)zeroTransmittanceSlice + 1.0f;
+    return guaranteedZeroLookupSliceCoordinate + max(config.lookupDepthBiasInSlices, 0.0f);
+}
+
+[shader("pixel")]
+float AVBOITEarlyDepthPSMain(AVBOITEarlyDepthVSOutput input) : SV_Depth
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
+    StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    StructuredBuffer<CLodAVBOITConfig> configBuffer =
+        ResourceDescriptorHeap[CLOD_AVBOIT_VBOIT_EARLY_DEPTH_CONFIG_DESCRIPTOR_INDEX];
+
+    const CLodAVBOITConfig config = configBuffer[0];
+    const uint2 pixel = uint2(input.position.xy);
+    if (config.sliceCount == 0u ||
+        pixel.x >= perFrameBuffer.screenResX ||
+        pixel.y >= perFrameBuffer.screenResY)
+    {
+        discard;
+    }
+
+    const uint2 lowPixel = uint2(
+        CLOD_AVBOIT_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_X,
+        CLOD_AVBOIT_VBOIT_EARLY_DEPTH_TILE_LOW_PIXEL_Y);
+    if (lowPixel.x >= config.lowResolutionWidth || lowPixel.y >= config.lowResolutionHeight)
+    {
+        discard;
+    }
+
+    const uint zeroTransmittanceSlice = CLOD_AVBOIT_VBOIT_EARLY_DEPTH_TILE_ZERO_SLICE;
+    if (zeroTransmittanceSlice >= config.sliceCount)
+    {
+        discard;
+    }
+
+    const float conservativeWarpedSliceCoordinate =
+        ComputeConservativeEarlyDepthWarpedSliceCoordinate(config, zeroTransmittanceSlice);
+    if (conservativeWarpedSliceCoordinate > (float)(config.sliceCount - 1u))
+    {
+        discard;
+    }
+
+    const float baseSliceCoordinate = InvertWarpedSliceCoordinate(config, conservativeWarpedSliceCoordinate);
+    const float linearDepth = max(ComputeDepthFromBaseSliceCoordinate(config, baseSliceCoordinate), config.viewNearDepth);
+    const Camera mainCamera = cameraBuffer[perFrameBuffer.mainCameraIndex];
+    return ComputeHardwareDepthFromLinearDepth(linearDepth, mainCamera);
+}

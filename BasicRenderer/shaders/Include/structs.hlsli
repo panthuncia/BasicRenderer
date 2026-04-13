@@ -62,25 +62,26 @@ struct CLodDeepVisibilityStats
     uint pad2;
 };
 
-static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_SLICE_COUNT = 16u;
-static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT = 32u;
-static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_LUT_RESOLUTION = 8192u;
-static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_EXTINCTION_QUANTIZATION_SCALE = 4096.0f;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DEPTH_DISTRIBUTION_EXPONENT = 1.0f;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_LOOKUP_DEPTH_BIAS_IN_SLICES = 2.0f;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_ZERO_TRANSMITTANCE_THRESHOLD = 1.0e-3f;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25f;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_MIN_DEPTH_DISTRIBUTION_EXPONENT = 0.5f;
-static const float CLOD_FIXED_SLICE_SCALAR_VBOIT_MAX_DEPTH_DISTRIBUTION_EXPONENT = 2.0f;
+static const uint CLOD_AVBOIT_VBOIT_DEFAULT_SLICE_COUNT = 16u;
+static const uint CLOD_AVBOIT_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT = 32u;
+static const uint CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_RESOLUTION = 8192u;
+static const uint CLOD_AVBOIT_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
+static const float CLOD_AVBOIT_VBOIT_EXTINCTION_QUANTIZATION_SCALE = 4096.0f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_DEPTH_DISTRIBUTION_EXPONENT = 1.0f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_LOOKUP_DEPTH_BIAS_IN_SLICES = 2.0f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_ZERO_TRANSMITTANCE_THRESHOLD = 1.0e-3f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25f;
+static const float CLOD_AVBOIT_VBOIT_MIN_DEPTH_DISTRIBUTION_EXPONENT = 0.5f;
+static const float CLOD_AVBOIT_VBOIT_MAX_DEPTH_DISTRIBUTION_EXPONENT = 2.0f;
 
-struct CLodFixedSliceScalarVBOITConfig
+struct CLodAVBOITConfig
 {
     uint occupancyUAVDescriptorIndex;
     uint coverageUAVDescriptorIndex;
     uint occupancySliceMaskUAVDescriptorIndex;
     uint depthWarpLUTSRVDescriptorIndex;
-    uint extinctionUAVDescriptorIndex;
+    uint scalarExtinctionUAVDescriptorIndex;
+    uint chromaticExtinctionUAVDescriptorIndex;
     uint integratedTransmittanceUAVDescriptorIndex;
     uint shadingTransmittanceSRVDescriptorIndex;
     uint zeroTransmittanceSliceUAVDescriptorIndex;
@@ -94,18 +95,17 @@ struct CLodFixedSliceScalarVBOITConfig
     float lookupDepthBiasInSlices;
     float zeroTransmittanceThreshold;
     float pad0;
-    float pad1;
 };
 
-static const uint CLOD_FIXED_SLICE_SCALAR_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT = 1u;
+static const uint CLOD_AVBOIT_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT = 1u;
 
-struct CLodFixedSliceScalarVBOITDepthWarpLUTEntry
+struct CLodAVBOITDepthWarpLUTEntry
 {
     float warpedSliceCoordinate;
     uint flags;
 };
 
-struct CLodFixedSliceScalarVBOITFitState
+struct CLodAVBOITFitState
 {
     uint fittedVirtualSliceCount;
     uint occupiedVirtualSliceCount;
@@ -113,7 +113,7 @@ struct CLodFixedSliceScalarVBOITFitState
     uint pad1;
 };
 
-struct CLodFixedSliceScalarVBOITEarlyDepthTileIndirectCommand
+struct CLodAVBOITEarlyDepthTileIndirectCommand
 {
     uint lowResolutionPixelX;
     uint lowResolutionPixelY;

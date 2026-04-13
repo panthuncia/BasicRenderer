@@ -329,9 +329,9 @@ void PSOManager::Cleanup() {
     m_clusterLODVirtualShadowReyesRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
-    m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache.clear();
-    m_clusterLODFixedSliceScalarVBOITRasterPSOCache.clear();
-    m_clusterLODFixedSliceScalarVBOITShadePSOCache.clear();
+    m_clusterLODAVBOITOccupancyPSOCache.clear();
+    m_clusterLODAVBOITRasterPSOCache.clear();
+    m_clusterLODAVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
 
     debugPSO.Reset();
@@ -456,27 +456,27 @@ const PipelineState& PSOManager::GetClusterLODDeepVisibilityRasterPSO(MaterialRa
     });
 }
 
-const PipelineState& PSOManager::GetClusterLODFixedSliceScalarVBOITOccupancyPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+const PipelineState& PSOManager::GetClusterLODAVBOITOccupancyPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
     std::scoped_lock lock(m_cacheMutex);
-    return GetOrCreatePipelineState(m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache, key, [&]() {
-        return CreateClusterLODFixedSliceScalarVBOITOccupancyPSO(materialRasterFlags, wireframe);
+    return GetOrCreatePipelineState(m_clusterLODAVBOITOccupancyPSOCache, key, [&]() {
+        return CreateClusterLODAVBOITOccupancyPSO(materialRasterFlags, wireframe);
     });
 }
 
-const PipelineState& PSOManager::GetClusterLODFixedSliceScalarVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+const PipelineState& PSOManager::GetClusterLODAVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
     std::scoped_lock lock(m_cacheMutex);
-    return GetOrCreatePipelineState(m_clusterLODFixedSliceScalarVBOITRasterPSOCache, key, [&]() {
-        return CreateClusterLODFixedSliceScalarVBOITRasterPSO(materialRasterFlags, wireframe);
+    return GetOrCreatePipelineState(m_clusterLODAVBOITRasterPSOCache, key, [&]() {
+        return CreateClusterLODAVBOITRasterPSO(materialRasterFlags, wireframe);
     });
 }
 
-const PipelineState& PSOManager::GetClusterLODFixedSliceScalarVBOITShadePSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+const PipelineState& PSOManager::GetClusterLODAVBOITShadePSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
     std::scoped_lock lock(m_cacheMutex);
-    return GetOrCreatePipelineState(m_clusterLODFixedSliceScalarVBOITShadePSOCache, key, [&]() {
-        return CreateClusterLODFixedSliceScalarVBOITShadePSO(materialRasterFlags, wireframe);
+    return GetOrCreatePipelineState(m_clusterLODAVBOITShadePSOCache, key, [&]() {
+        return CreateClusterLODAVBOITShadePSO(materialRasterFlags, wireframe);
     });
 }
 
@@ -1024,7 +1024,7 @@ PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
-PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITRasterPSO(
+PipelineState PSOManager::CreateClusterLODAVBOITRasterPSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
 
@@ -1033,7 +1033,7 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITRasterPSO(
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITCapture.hlsl", L"FixedSliceScalarVBOITCapturePSMain", L"ps_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/AVBOITCapture.hlsl", L"AVBOITCapturePSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
     auto compiledBundle = CompileShaders(shaderInfoBundle);
@@ -1043,7 +1043,7 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITRasterPSO(
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
     rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "FixedSliceScalarVBOITCapturePSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "AVBOITCapturePSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -1062,23 +1062,23 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITRasterPSO(
     rhi::PipelinePtr pso;
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
-        throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT raster PSO");
+        throw std::runtime_error("Failed to create CLod AVBOIT raster PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
-PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITOccupancyPSO(
+PipelineState PSOManager::CreateClusterLODAVBOITOccupancyPSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
-    defines.push_back(DxcDefine{ L"CLOD_FIXED_SLICE_SCALAR_VBOIT_OCCUPANCY_ONLY", L"1" });
+    defines.push_back(DxcDefine{ L"CLOD_AVBOIT_VBOIT_OCCUPANCY_ONLY", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITCapture.hlsl", L"FixedSliceScalarVBOITCapturePSMain", L"ps_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/AVBOITCapture.hlsl", L"AVBOITCapturePSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
     auto compiledBundle = CompileShaders(shaderInfoBundle);
@@ -1088,7 +1088,7 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITOccupancyPSO(
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
     rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "FixedSliceScalarVBOITCapturePSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "AVBOITCapturePSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -1107,13 +1107,13 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITOccupancyPSO(
     rhi::PipelinePtr pso;
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
-        throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT occupancy PSO");
+        throw std::runtime_error("Failed to create CLod AVBOIT occupancy PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
-PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
+PipelineState PSOManager::CreateClusterLODAVBOITShadePSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
 
@@ -1122,7 +1122,7 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/FixedSliceScalarVBOITShade.hlsl", L"FixedSliceScalarVBOITShadePSMain", L"ps_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/AVBOITShade.hlsl", L"AVBOITShadePSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
     auto compiledBundle = CompileShaders(shaderInfoBundle);
@@ -1132,7 +1132,7 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
     rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "FixedSliceScalarVBOITShadePSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "AVBOITShadePSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -1162,9 +1162,10 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
     rhi::SubobjDepth soDepth{ depthState };
 
     rhi::RenderTargets rts{};
-    rts.count = 2;
+    rts.count = 3;
     rts.formats[0] = rhi::Format::R16G16B16A16_Float;
-    rts.formats[1] = rhi::Format::R32_Float;
+    rts.formats[1] = rhi::Format::R16G16B16A16_Float;
+    rts.formats[2] = rhi::Format::R16G16B16A16_Float;
     rhi::SubobjRTVs soRTV{ rts };
     rhi::SubobjDSV soDSV{ rhi::Format::D32_Float };
     rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
@@ -1185,7 +1186,7 @@ PipelineState PSOManager::CreateClusterLODFixedSliceScalarVBOITShadePSO(
     rhi::PipelinePtr pso;
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
-        throw std::runtime_error("Failed to create CLod fixed-slice scalar VBOIT shading PSO");
+        throw std::runtime_error("Failed to create CLod AVBOIT shading PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
@@ -2393,9 +2394,9 @@ void PSOManager::ReloadShaders() {
     m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
-    m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache.clear();
-    m_clusterLODFixedSliceScalarVBOITRasterPSOCache.clear();
-    m_clusterLODFixedSliceScalarVBOITShadePSOCache.clear();
+    m_clusterLODAVBOITOccupancyPSOCache.clear();
+    m_clusterLODAVBOITRasterPSOCache.clear();
+    m_clusterLODAVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
 }
 

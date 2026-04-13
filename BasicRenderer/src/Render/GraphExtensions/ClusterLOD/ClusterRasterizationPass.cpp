@@ -30,20 +30,22 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<Buffer> deepVisibilityNodesBuffer,
     std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
     std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
-    std::shared_ptr<Buffer> fixedSliceScalarVBOITConfigBuffer,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITOccupancyTexture,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITExtinctionTexture,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITIntegratedTransmittanceTexture,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITAccumulationTexture,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITShadingExtinctionTexture,
+    std::shared_ptr<Buffer> AVBOITConfigBuffer,
+    std::shared_ptr<PixelBuffer> AVBOITOccupancyTexture,
+    std::shared_ptr<PixelBuffer> AVBOITScalarExtinctionTexture,
+    std::shared_ptr<PixelBuffer> AVBOITChromaticExtinctionTexture,
+    std::shared_ptr<PixelBuffer> AVBOITIntegratedTransmittanceTexture,
+    std::shared_ptr<PixelBuffer> AVBOITZeroTransmittanceSliceTexture,
+    std::shared_ptr<PixelBuffer> AVBOITAccumulationTexture,
+    std::shared_ptr<PixelBuffer> AVBOITNormalizationTexture,
+    std::shared_ptr<PixelBuffer> AVBOITShadingExtinctionTexture,
     std::shared_ptr<Buffer> visibleClustersResolveBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup,
     std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
     std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
     std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITOccupancySliceMaskTexture,
-    std::shared_ptr<PixelBuffer> fixedSliceScalarVBOITEarlyDepthTexture)
+    std::shared_ptr<PixelBuffer> AVBOITOccupancySliceMaskTexture,
+    std::shared_ptr<PixelBuffer> AVBOITEarlyDepthTexture)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
@@ -51,15 +53,17 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_deepVisibilityNodesBuffer(std::move(deepVisibilityNodesBuffer))
     , m_deepVisibilityCounterBuffer(std::move(deepVisibilityCounterBuffer))
     , m_deepVisibilityOverflowCounterBuffer(std::move(deepVisibilityOverflowCounterBuffer))
-    , m_fixedSliceScalarVBOITConfigBuffer(std::move(fixedSliceScalarVBOITConfigBuffer))
-    , m_fixedSliceScalarVBOITOccupancyTexture(std::move(fixedSliceScalarVBOITOccupancyTexture))
-    , m_fixedSliceScalarVBOITExtinctionTexture(std::move(fixedSliceScalarVBOITExtinctionTexture))
-    , m_fixedSliceScalarVBOITIntegratedTransmittanceTexture(std::move(fixedSliceScalarVBOITIntegratedTransmittanceTexture))
-    , m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture(std::move(fixedSliceScalarVBOITZeroTransmittanceSliceTexture))
-    , m_fixedSliceScalarVBOITAccumulationTexture(std::move(fixedSliceScalarVBOITAccumulationTexture))
-    , m_fixedSliceScalarVBOITShadingExtinctionTexture(std::move(fixedSliceScalarVBOITShadingExtinctionTexture))
-    , m_fixedSliceScalarVBOITEarlyDepthTexture(std::move(fixedSliceScalarVBOITEarlyDepthTexture))
-    , m_fixedSliceScalarVBOITOccupancySliceMaskTexture(std::move(fixedSliceScalarVBOITOccupancySliceMaskTexture))
+    , m_AVBOITConfigBuffer(std::move(AVBOITConfigBuffer))
+    , m_AVBOITOccupancyTexture(std::move(AVBOITOccupancyTexture))
+    , m_AVBOITScalarExtinctionTexture(std::move(AVBOITScalarExtinctionTexture))
+    , m_AVBOITChromaticExtinctionTexture(std::move(AVBOITChromaticExtinctionTexture))
+    , m_AVBOITIntegratedTransmittanceTexture(std::move(AVBOITIntegratedTransmittanceTexture))
+    , m_AVBOITZeroTransmittanceSliceTexture(std::move(AVBOITZeroTransmittanceSliceTexture))
+    , m_AVBOITAccumulationTexture(std::move(AVBOITAccumulationTexture))
+    , m_AVBOITNormalizationTexture(std::move(AVBOITNormalizationTexture))
+    , m_AVBOITShadingExtinctionTexture(std::move(AVBOITShadingExtinctionTexture))
+    , m_AVBOITEarlyDepthTexture(std::move(AVBOITEarlyDepthTexture))
+    , m_AVBOITOccupancySliceMaskTexture(std::move(AVBOITOccupancySliceMaskTexture))
     , m_visibleClustersResolveBuffer(std::move(visibleClustersResolveBuffer))
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
     , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
@@ -139,19 +143,20 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
         for (auto& vb : m_visibilityBuffers) {
             builder->WithShaderResource(vb);
         }
-        builder->WithShaderResource(m_fixedSliceScalarVBOITConfigBuffer, m_visibleClustersResolveBuffer)
+        builder->WithShaderResource(m_AVBOITConfigBuffer, m_visibleClustersResolveBuffer)
             .WithUnorderedAccess(
-                m_fixedSliceScalarVBOITOccupancyTexture,
-                m_fixedSliceScalarVBOITOccupancySliceMaskTexture);
+                m_AVBOITOccupancyTexture,
+                m_AVBOITOccupancySliceMaskTexture);
     }
     else if (m_outputKind == CLodRasterOutputKind::AVBOIT) {
         for (auto& vb : m_visibilityBuffers) {
             builder->WithShaderResource(vb);
         }
-        builder->WithShaderResource(m_fixedSliceScalarVBOITConfigBuffer, m_visibleClustersResolveBuffer)
+        builder->WithShaderResource(m_AVBOITConfigBuffer, m_visibleClustersResolveBuffer)
             .WithUnorderedAccess(
-                m_fixedSliceScalarVBOITOccupancyTexture,
-                m_fixedSliceScalarVBOITExtinctionTexture);
+                m_AVBOITOccupancyTexture,
+                m_AVBOITScalarExtinctionTexture,
+                m_AVBOITChromaticExtinctionTexture);
     }
     else if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
         for (auto& vb : m_visibilityBuffers) {
@@ -175,15 +180,16 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 Builtin::Light::ClusterBuffer,
                 Builtin::Light::PagesBuffer,
                 Builtin::Noise::BlueNoise2D,
-                m_fixedSliceScalarVBOITConfigBuffer,
-                m_fixedSliceScalarVBOITIntegratedTransmittanceTexture,
-                m_fixedSliceScalarVBOITZeroTransmittanceSliceTexture,
+                m_AVBOITConfigBuffer,
+                m_AVBOITIntegratedTransmittanceTexture,
+                m_AVBOITZeroTransmittanceSliceTexture,
                 m_visibleClustersResolveBuffer)
             .WithRenderTarget(
-                m_fixedSliceScalarVBOITAccumulationTexture,
-                m_fixedSliceScalarVBOITShadingExtinctionTexture);
-        if (m_fixedSliceScalarVBOITEarlyDepthTexture) {
-            builder->WithDepthRead(m_fixedSliceScalarVBOITEarlyDepthTexture);
+                m_AVBOITAccumulationTexture,
+                m_AVBOITNormalizationTexture,
+                m_AVBOITShadingExtinctionTexture);
+        if (m_AVBOITEarlyDepthTexture) {
+            builder->WithDepthRead(m_AVBOITEarlyDepthTexture);
         }
     }
     else if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
@@ -371,27 +377,32 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     p.height = m_passHeight;
     p.debugName = "CLod raster pass";
 
-    rhi::ColorAttachment shadingAttachments[2]{};
+    rhi::ColorAttachment shadingAttachments[3]{};
     rhi::DepthAttachment shadingDepthAttachment{};
     if (m_outputKind == CLodRasterOutputKind::AVBOITShading &&
-        m_fixedSliceScalarVBOITAccumulationTexture &&
-        m_fixedSliceScalarVBOITShadingExtinctionTexture) {
-        shadingAttachments[0].rtv = m_fixedSliceScalarVBOITAccumulationTexture->GetRTVInfo(0).slot;
+        m_AVBOITAccumulationTexture &&
+        m_AVBOITNormalizationTexture &&
+        m_AVBOITShadingExtinctionTexture) {
+        shadingAttachments[0].rtv = m_AVBOITAccumulationTexture->GetRTVInfo(0).slot;
         shadingAttachments[0].loadOp = rhi::LoadOp::Load;
         shadingAttachments[0].storeOp = rhi::StoreOp::Store;
-        shadingAttachments[0].clear = m_fixedSliceScalarVBOITAccumulationTexture->GetClearColor();
-        shadingAttachments[1].rtv = m_fixedSliceScalarVBOITShadingExtinctionTexture->GetRTVInfo(0).slot;
+        shadingAttachments[0].clear = m_AVBOITAccumulationTexture->GetClearColor();
+        shadingAttachments[1].rtv = m_AVBOITNormalizationTexture->GetRTVInfo(0).slot;
         shadingAttachments[1].loadOp = rhi::LoadOp::Load;
         shadingAttachments[1].storeOp = rhi::StoreOp::Store;
-        shadingAttachments[1].clear = m_fixedSliceScalarVBOITShadingExtinctionTexture->GetClearColor();
-        p.colors = { shadingAttachments, 2 };
-        if (m_fixedSliceScalarVBOITEarlyDepthTexture) {
-            shadingDepthAttachment.dsv = m_fixedSliceScalarVBOITEarlyDepthTexture->GetDSVInfo(0).slot;
+        shadingAttachments[1].clear = m_AVBOITNormalizationTexture->GetClearColor();
+        shadingAttachments[2].rtv = m_AVBOITShadingExtinctionTexture->GetRTVInfo(0).slot;
+        shadingAttachments[2].loadOp = rhi::LoadOp::Load;
+        shadingAttachments[2].storeOp = rhi::StoreOp::Store;
+        shadingAttachments[2].clear = m_AVBOITShadingExtinctionTexture->GetClearColor();
+        p.colors = { shadingAttachments, 3 };
+        if (m_AVBOITEarlyDepthTexture) {
+            shadingDepthAttachment.dsv = m_AVBOITEarlyDepthTexture->GetDSVInfo(0).slot;
             shadingDepthAttachment.depthLoad = rhi::LoadOp::Load;
             shadingDepthAttachment.depthStore = rhi::StoreOp::Store;
             shadingDepthAttachment.stencilLoad = rhi::LoadOp::DontCare;
             shadingDepthAttachment.stencilStore = rhi::StoreOp::DontCare;
-            shadingDepthAttachment.clear = m_fixedSliceScalarVBOITEarlyDepthTexture->GetClearColor();
+            shadingDepthAttachment.clear = m_AVBOITEarlyDepthTexture->GetClearColor();
             p.depth = &shadingDepthAttachment;
         }
     }
@@ -433,21 +444,21 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
         misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_CAPACITY] = m_deepVisibilityNodeCapacity;
     }
     if (m_outputKind == CLodRasterOutputKind::AVBOITOccupancy) {
-        misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_AVBOIT_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_AVBOITConfigBuffer->GetSRVInfo(0).slot.index;
         misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
             ? m_visibleClustersResolveBuffer->GetSRVInfo(0).slot.index
             : 0xFFFFFFFFu;
         misc[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     }
     if (m_outputKind == CLodRasterOutputKind::AVBOIT) {
-        misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_AVBOIT_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_AVBOITConfigBuffer->GetSRVInfo(0).slot.index;
         misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
             ? m_visibleClustersResolveBuffer->GetSRVInfo(0).slot.index
             : 0xFFFFFFFFu;
         misc[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     }
     if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
-        misc[CLOD_RASTER_FIXED_SLICE_SCALAR_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_fixedSliceScalarVBOITConfigBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_AVBOIT_VBOIT_CONFIG_DESCRIPTOR_INDEX] = m_AVBOITConfigBuffer->GetSRVInfo(0).slot.index;
         misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersResolveBuffer
             ? m_visibleClustersResolveBuffer->GetSRVInfo(0).slot.index
             : 0xFFFFFFFFu;
@@ -469,11 +480,11 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
             : (m_outputKind == CLodRasterOutputKind::VirtualShadow)
                 ? psoManager.GetClusterLODVirtualShadowRasterPSO(flags, m_wireframe)
                 : (m_outputKind == CLodRasterOutputKind::AVBOITOccupancy)
-                    ? psoManager.GetClusterLODFixedSliceScalarVBOITOccupancyPSO(flags, m_wireframe)
+                    ? psoManager.GetClusterLODAVBOITOccupancyPSO(flags, m_wireframe)
                 : (m_outputKind == CLodRasterOutputKind::AVBOIT)
-                    ? psoManager.GetClusterLODFixedSliceScalarVBOITRasterPSO(flags, m_wireframe)
+                    ? psoManager.GetClusterLODAVBOITRasterPSO(flags, m_wireframe)
                 : (m_outputKind == CLodRasterOutputKind::AVBOITShading)
-                    ? psoManager.GetClusterLODFixedSliceScalarVBOITShadePSO(flags, m_wireframe)
+                    ? psoManager.GetClusterLODAVBOITShadePSO(flags, m_wireframe)
                 : psoManager.GetClusterLODDeepVisibilityRasterPSO(flags, m_wireframe);
 
         BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
