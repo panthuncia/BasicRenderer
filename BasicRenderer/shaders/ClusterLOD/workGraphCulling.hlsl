@@ -236,8 +236,10 @@ bool CLodWorkGraphUseDedicatedComputePageJobBuffer()
     StructuredBuffer<uint4> pageJobDescriptorBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
     const uint2 descriptorPair = pageJobDescriptorBuffer[0].xy;
+    // Shadow PageJob/Reyes large-cluster routing consumes the dedicated side-channel
+    // buffer after culling regardless of whether visibility SW raster runs in compute
+    // or work-graph mode. If descriptors are present, keep emitting into that buffer.
     return
-        CLodWorkGraphUseComputeSWRaster() &&
         descriptorPair.x != 0xFFFFFFFFu &&
         descriptorPair.y != 0xFFFFFFFFu;
 #else

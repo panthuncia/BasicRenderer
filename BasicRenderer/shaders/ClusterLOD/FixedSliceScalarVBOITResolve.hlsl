@@ -56,7 +56,10 @@ void CLodFixedSliceScalarVBOITResolveCS(uint3 dispatchThreadId : SV_DispatchThre
         config,
         perFrameBuffer,
         pixel));
+    const float transparentCoverage = saturate(1.0f - residualTransmittance);
+    const float normalizationWeight = max(accumulated.a, 1.0e-5f);
+    const float3 transparentColor = accumulated.rgb / normalizationWeight;
     hdrTarget[pixel] = float4(
-        accumulated.rgb + existingHdr.rgb * residualTransmittance,
-        saturate(accumulated.a + existingHdr.a * residualTransmittance));
+        transparentColor * transparentCoverage + existingHdr.rgb * residualTransmittance,
+        saturate(transparentCoverage + existingHdr.a * residualTransmittance));
 }

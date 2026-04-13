@@ -113,35 +113,41 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
             return;
         }
 
-        rhi::UavClearInfo clearInfo{};
-        clearInfo.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0).slot;
-        clearInfo.shaderVisible = resource->GetUAVShaderVisibleInfo(0).slot;
-        clearInfo.resource = resource->GetAPIResource();
-
         rhi::UavClearFloat clearValue{};
         clearValue.v[0] = clearValueScalar;
         clearValue.v[1] = clearValueScalar;
         clearValue.v[2] = clearValueScalar;
         clearValue.v[3] = clearValueScalar;
-        commandList.ClearUavFloat(clearInfo, clearValue);
+
+        const unsigned int sliceCount = resource->GetNumUAVSlices();
+        for (unsigned int sliceIndex = 0; sliceIndex < sliceCount; ++sliceIndex) {
+            rhi::UavClearInfo clearInfo{};
+            clearInfo.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0, sliceIndex).slot;
+            clearInfo.shaderVisible = resource->GetUAVShaderVisibleInfo(0, sliceIndex).slot;
+            clearInfo.resource = resource->GetAPIResource();
+            commandList.ClearUavFloat(clearInfo, clearValue);
+        }
     };
 
-    const auto clearUintResource = [&commandList](PixelBuffer* resource) {
+    const auto clearUintResource = [&commandList](PixelBuffer* resource, uint32_t clearValueScalar = 0u) {
         if (!resource) {
             return;
         }
 
-        rhi::UavClearInfo clearInfo{};
-        clearInfo.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0).slot;
-        clearInfo.shaderVisible = resource->GetUAVShaderVisibleInfo(0).slot;
-        clearInfo.resource = resource->GetAPIResource();
-
         rhi::UavClearUint clearValue{};
-        clearValue.v[0] = 0u;
-        clearValue.v[1] = 0u;
-        clearValue.v[2] = 0u;
-        clearValue.v[3] = 0u;
-        commandList.ClearUavUint(clearInfo, clearValue);
+        clearValue.v[0] = clearValueScalar;
+        clearValue.v[1] = clearValueScalar;
+        clearValue.v[2] = clearValueScalar;
+        clearValue.v[3] = clearValueScalar;
+
+        const unsigned int sliceCount = resource->GetNumUAVSlices();
+        for (unsigned int sliceIndex = 0; sliceIndex < sliceCount; ++sliceIndex) {
+            rhi::UavClearInfo clearInfo{};
+            clearInfo.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0, sliceIndex).slot;
+            clearInfo.shaderVisible = resource->GetUAVShaderVisibleInfo(0, sliceIndex).slot;
+            clearInfo.resource = resource->GetAPIResource();
+            commandList.ClearUavUint(clearInfo, clearValue);
+        }
     };
 
     clearFloatResource(m_occupancyTexture.get());
@@ -153,17 +159,7 @@ PassReturn FixedSliceScalarVBOITSetupPass::Execute(PassExecutionContext& executi
     }
     clearFloatResource(m_integratedTransmittanceTexture.get(), 1.0f);
     if (m_zeroTransmittanceSliceTexture) {
-        rhi::UavClearInfo clearInfo{};
-        clearInfo.cpuVisible = m_zeroTransmittanceSliceTexture->GetUAVNonShaderVisibleInfo(0).slot;
-        clearInfo.shaderVisible = m_zeroTransmittanceSliceTexture->GetUAVShaderVisibleInfo(0).slot;
-        clearInfo.resource = m_zeroTransmittanceSliceTexture->GetAPIResource();
-
-        rhi::UavClearUint clearValue{};
-        clearValue.v[0] = CLodFixedSliceScalarVBOITDefaultSliceCount;
-        clearValue.v[1] = CLodFixedSliceScalarVBOITDefaultSliceCount;
-        clearValue.v[2] = CLodFixedSliceScalarVBOITDefaultSliceCount;
-        clearValue.v[3] = CLodFixedSliceScalarVBOITDefaultSliceCount;
-        commandList.ClearUavUint(clearInfo, clearValue);
+        clearUintResource(m_zeroTransmittanceSliceTexture.get(), CLodFixedSliceScalarVBOITDefaultSliceCount);
     }
 
     if (m_accumulationTexture) {

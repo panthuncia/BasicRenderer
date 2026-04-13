@@ -106,7 +106,10 @@ void FixedSliceScalarVBOITCapturePSMain(VisBufferPSInput input, bool isFrontFace
     return;
 #endif
 
-    const float opticalDepth = -log(max(1.0f - alpha, 1.0e-4f));
+    const float lowResolutionPixelCoverage = rcp((float)(
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR *
+        CLOD_FIXED_SLICE_SCALAR_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR));
+    const float opticalDepth = -log(max(1.0f - alpha, 1.0e-4f)) * lowResolutionPixelCoverage;
     const float sliceCoordinate = ComputeDepthSliceCoordinate(config, sample.linearDepth);
     const uint sliceIndex0 = min((uint)floor(sliceCoordinate), config.sliceCount - 1u);
     const uint sliceIndex1 = min(sliceIndex0 + 1u, config.sliceCount - 1u);

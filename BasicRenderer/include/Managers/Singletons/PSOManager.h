@@ -143,6 +143,7 @@ public:
 
     const PipelineState& GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    const PipelineState& GetClusterLODVirtualShadowReyesRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODFixedSliceScalarVBOITOccupancyPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODFixedSliceScalarVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
@@ -211,6 +212,7 @@ private:
 
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODRasterPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODVirtualShadowRasterPSOCache;
+    std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODVirtualShadowReyesRasterPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODDeepVisibilityRasterPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODFixedSliceScalarVBOITRasterPSOCache;
@@ -242,6 +244,7 @@ private:
 
     PipelineState CreateClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    PipelineState CreateClusterLODVirtualShadowReyesRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODFixedSliceScalarVBOITOccupancyPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODFixedSliceScalarVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);

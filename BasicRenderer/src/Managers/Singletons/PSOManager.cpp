@@ -326,6 +326,7 @@ void PSOManager::Cleanup() {
     m_deferredPSOCache.clear();
     m_clusterLODRasterPSOCache.clear();
     m_clusterLODVirtualShadowRasterPSOCache.clear();
+    m_clusterLODVirtualShadowReyesRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
     m_clusterLODFixedSliceScalarVBOITOccupancyPSOCache.clear();
@@ -436,6 +437,14 @@ const PipelineState& PSOManager::GetClusterLODVirtualShadowRasterPSO(MaterialRas
     std::scoped_lock lock(m_cacheMutex);
     return GetOrCreatePipelineState(m_clusterLODVirtualShadowRasterPSOCache, key, [&]() {
         return CreateClusterLODVirtualShadowRasterPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODVirtualShadowReyesRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODVirtualShadowReyesRasterPSOCache, key, [&]() {
+        return CreateClusterLODVirtualShadowReyesRasterPSO(materialRasterFlags, wireframe);
     });
 }
 
@@ -921,6 +930,51 @@ PipelineState PSOManager::CreateClusterLODVirtualShadowRasterPSO(
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
         throw std::runtime_error("Failed to create CLod virtual shadow raster PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODVirtualShadowReyesRasterPSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+    defines.push_back({ L"CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW", L"1" });
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODReyesVirtualShadowMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/VirtualShadowOutput.hlsl", L"VirtualShadowBufferPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODReyesVirtualShadowMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "VirtualShadowBufferPSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod Reyes virtual shadow raster PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
