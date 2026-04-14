@@ -281,7 +281,10 @@ private:
     ComPtr<IDxcResult> InvokeCompile(
         const DxcBuffer& srcBuffer,
         std::vector<LPCWSTR>& arguments,
-        IDxcIncludeHandler* includeHandler);
+        IDxcIncludeHandler* includeHandler,
+        const std::wstring& filename,
+        const std::wstring& entryPoint,
+        const std::wstring& target);
 
     ComPtr<IDxcBlob> ExtractObject(
         IDxcResult* result,

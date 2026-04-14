@@ -43,7 +43,15 @@ float2 WrapFloat2(float2 input) {
 
 // Contact-refinement parallax 
 // https://www.artstation.com/blogs/andreariccardi/3VPo/a-new-approach-for-parallax-mapping-presenting-the-contact-refinement-parallax-mapping-technique
-float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 viewDir, float heightmapScale) {
+float3 getContactRefinementParallaxCoordsAndHeight(
+    Texture2D<float> parallaxTexture,
+    SamplerState parallaxSampler,
+    float3x3 TBN,
+    float2 uv,
+    float3 viewDir,
+    float heightmapScale,
+    float2 dUVdx,
+    float2 dUVdy) {
     // Get view direction in tangent space
     uv.y = 1.0 - uv.y;
     viewDir = normalize(mul(TBN, viewDir));
@@ -72,7 +80,7 @@ float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxText
         float currentRayDepth = lastRayDepth - stepSize;
 
         // Sample height map at this offset
-        float currentHeight = parallaxTexture.Sample(parallaxSampler, candidateOffset); //texture(u_heightMap, candidateOffset).r;
+        float currentHeight = parallaxTexture.SampleGrad(parallaxSampler, candidateOffset, dUVdx, dUVdy); //texture(u_heightMap, candidateOffset).r;
         currentHeight = viewCorrection * currentHeight;
         // Test our candidate depth
         if (currentHeight > currentRayDepth) {

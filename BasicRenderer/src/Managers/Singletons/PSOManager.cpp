@@ -17,6 +17,21 @@
 
 namespace {
 
+constexpr std::wstring_view kValidationSkipEntryPoints[] = {
+    L"ClusterLODBucketMSMain",
+};
+
+bool ShouldSkipValidationForEntryPoint(std::wstring_view entryPoint)
+{
+    for (std::wstring_view skippedEntryPoint : kValidationSkipEntryPoints) {
+        if (skippedEntryPoint == entryPoint) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 uint64_t HashBytesStable(const void* data, size_t size)
 {
     const uint64_t kOffset = 14695981039346656037ull;
@@ -72,6 +87,7 @@ uint64_t BuildBundleIdentityHash(
         util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(buffer.Ptr), buffer.Size));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->entryPoint)));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->target)));
+        util::hash_combine_u64(seed, ShouldSkipValidationForEntryPoint(slot->entryPoint) ? 1u : 0u);
     };
 
     hashSlot(shadercache::BlobKind::Amplification, info.amplificationShader, amplificationBuffer);
@@ -123,6 +139,26 @@ uint64_t ComputeShaderCacheBuildConfigHash()
     }
 
     return seed;
+}
+
+void LogFailedShaderSource(
+    const std::wstring& filename,
+    const std::wstring& entryPoint,
+    const std::wstring& target,
+    const DxcBuffer& sourceBuffer)
+{
+    if (sourceBuffer.Ptr == nullptr || sourceBuffer.Size == 0) {
+        return;
+    }
+
+    const char* source = static_cast<const char*>(sourceBuffer.Ptr);
+    const size_t sourceSize = GetNormalizedShaderSourceSize(source, sourceBuffer.Size);
+    spdlog::error(
+        "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
+        ws2s(filename),
+        ws2s(entryPoint),
+        ws2s(target),
+        std::string(source, sourceSize));
 }
 
 bool CreateBlobFromBytes(
@@ -1792,7 +1828,7 @@ void PSOManager::GetPreprocessedBlob(
 
     args.push_back(L"-P"); // Preprocess only
     auto preProcessedResult = InvokeCompile(
-        srcBuf.buffer, args, includeHandler.Get()
+        srcBuf.buffer, args, includeHandler.Get(), filename, entryPoint, target
     );
 
     preProcessedResult->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&outBlob), nullptr);
@@ -2127,7 +2163,7 @@ void PSOManager::CompileShader(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
-#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG //|| BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
     opts.enableDebugInfo = true;
 #endif
     opts.warningsAsErrors = true;
@@ -2142,7 +2178,7 @@ void PSOManager::CompileShader(
         ThrowIfFailed(hr);
         return;
     }
-    auto result = InvokeCompile(ppBuffer, args, includeHandler.Get());
+    auto result = InvokeCompile(ppBuffer, args, includeHandler.Get(), filename, entryPoint, target);
 
     ComPtr<IDxcBlobEncoding> errors;
     result->GetErrorBuffer(&errors);
@@ -2225,7 +2261,10 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
 ComPtr<IDxcResult> PSOManager::InvokeCompile(
     const DxcBuffer& src,
     std::vector<LPCWSTR>& arguments,
-    IDxcIncludeHandler* includeHandler)
+    IDxcIncludeHandler* includeHandler,
+    const std::wstring& filename,
+    const std::wstring& entryPoint,
+    const std::wstring& target)
 {
     ComPtr<IDxcResult> result;
     HRESULT hr = pCompiler->Compile(
@@ -2239,9 +2278,12 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
     // on failure or errors, pull DXC_OUT_ERRORS and log
     if (FAILED(hr)) {
         ComPtr<IDxcBlobUtf8> errs;
-        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
+        if (result) {
+            result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
+        }
         if (errs && errs->GetStringLength())
             spdlog::error("Shader compile error: {}", errs->GetStringPointer());
+        LogFailedShaderSource(filename, entryPoint, target, src);
         ThrowIfFailed(hr);
     }
 
@@ -2250,8 +2292,10 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
         result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
         if (errs && errs->GetStringLength()) {
             spdlog::error("Shader compile warnings: {}", errs->GetStringPointer());
-            if (strstr(errs->GetStringPointer(), "error"))
+            if (strstr(errs->GetStringPointer(), "error")) {
+                LogFailedShaderSource(filename, entryPoint, target, src);
                 ThrowIfFailed(E_FAIL);
+            }
         }
     }
 

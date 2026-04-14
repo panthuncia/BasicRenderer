@@ -23,6 +23,8 @@
 
 #include "Utilities/CachePathUtilities.h"
 
+#include "../shaders/Common/defines.h"
+
 namespace CLodCache {
 
 	namespace {
@@ -599,7 +601,7 @@ namespace CLodCache {
 	{
 		size_t seed = 0;
 		boost::hash_combine(seed, static_cast<uint32_t>(kSchemaVersion));
-		boost::hash_combine(seed, static_cast<uint32_t>(64)); // MS_MESHLET_SIZE expectation
+		boost::hash_combine(seed, static_cast<uint32_t>(MS_MESHLET_SIZE));
 		boost::hash_combine(seed, static_cast<uint32_t>(32)); // target bucket clusters
 		boost::hash_combine(seed, static_cast<uint32_t>(4));  // max group children
 		boost::hash_combine(seed, static_cast<uint32_t>(4));  // traversal node fanout

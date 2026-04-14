@@ -942,6 +942,10 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     setup.meshlet = (Meshlet)0;
     setup.vertCount = CLodDescVertexCount(desc);
     setup.triCount = CLodDescTriangleCount(desc);
+    if (!HasValidMeshShaderOutputCounts(setup.vertCount, setup.triCount))
+    {
+        return false;
+    }
     setup.vertOffset = 0;
 
     // Per-meshlet compression from descriptor
@@ -1012,21 +1016,18 @@ void ClusterLODBucketMSMain(
     uint outputTriCount = 0;
     ClodViewRasterInfo viewRasterInfo = (ClodViewRasterInfo)0;
 
-    if (draw) {   
+    if (draw) {
         ByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         packedCluster = CLodLoadVisibleClusterPacked(compactedClusters, visibleClusterIndex);
         unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
         draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, linearizedID, count);
-    } else {
-        setup.vertCount = 0;
-        setup.triCount = 0;
     }
 
+#if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
     if (draw)
     {
         viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
 
-#if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
         if (uGroupThreadID == 0u)
         {
             gs_clodVsmKeptTriangleCount = 0u;
@@ -1089,40 +1090,37 @@ void ClusterLODBucketMSMain(
 
         outputTriCount = gs_clodVsmKeptTriangleCount;
         outputVertCount = outputTriCount > 0u ? setup.vertCount : 0u;
-#else
-        outputVertCount = setup.vertCount;
-        outputTriCount = setup.triCount;
-#endif
     }
 
-    SetMeshOutputCounts(outputVertCount, outputTriCount); // DXC won't accept SetMeshOutputCounts in non-uniform flow-control
+    SetMeshOutputCounts(outputVertCount, outputTriCount);
+    EmitCachedMeshletVisBufferVerticesForViewCLod(
+        uGroupThreadID,
+        setup,
+        setup.viewID,
+        setup.virtualShadowPayload,
+        unsortedClusterIndex,
+        outputVertices);
+    EmitFilteredMeshletTriangles(uGroupThreadID, setup, outputTriangles, primitiveInfo);
+#else
     if (draw)
     {
-#if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
-        if (outputVertCount != 0u)
-        {
-            EmitCachedMeshletVisBufferVerticesForViewCLod(
-                uGroupThreadID,
-                setup,
-                setup.viewID,
-                setup.virtualShadowPayload,
-                unsortedClusterIndex,
-                outputVertices);
-            EmitFilteredMeshletTriangles(uGroupThreadID, setup, outputTriangles, primitiveInfo);
-        }
-#else
-        EmitMeshletVisBufferForViewCLod(
-            uGroupThreadID,
-            setup,
-            setup.viewID,
-            setup.virtualShadowPayload,
-            unsortedClusterIndex,
-            viewRasterInfo,
-            outputVertices,
-            outputTriangles);
-        EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
-#endif
+        viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
+        outputVertCount = setup.vertCount;
+        outputTriCount = setup.triCount;
     }
+
+    SetMeshOutputCounts(outputVertCount, outputTriCount);
+    EmitMeshletVisBufferForViewCLod(
+        uGroupThreadID,
+        setup,
+        setup.viewID,
+        setup.virtualShadowPayload,
+        unsortedClusterIndex,
+        viewRasterInfo,
+        outputVertices,
+        outputTriangles);
+    EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
+#endif
 }
 
 #if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW

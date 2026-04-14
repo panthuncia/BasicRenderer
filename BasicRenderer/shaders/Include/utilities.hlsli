@@ -103,14 +103,16 @@ void TestAlpha(in float2 texcoords, in uint materialDataIndex)
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
+    float2 dTexcoordsDx = ddx(texcoords);
+    float2 dTexcoordsDy = ddy(texcoords);
         
     float4 baseColor = materialInfo.baseColorFactor;
 
     if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE)
     {
-        Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
-        SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
-        float4 sampledColor = baseColorTexture.Sample(baseColorSamplerState, texcoords);
+        Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorTextureIndex)];
+        SamplerState baseColorSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorSamplerIndex)];
+        float4 sampledColor = baseColorTexture.SampleGrad(baseColorSamplerState, texcoords, dTexcoordsDx, dTexcoordsDy);
 #if defined(PSO_ALPHA_TEST) || defined (PSO_BLEND)
         if (baseColor.a * sampledColor.a < materialInfo.alphaCutoff){
             discard;
@@ -120,9 +122,9 @@ void TestAlpha(in float2 texcoords, in uint materialDataIndex)
     
     if (materialFlags & MATERIAL_OPACITY_TEXTURE)
     {
-        Texture2D<float4> opacityTexture = ResourceDescriptorHeap[materialInfo.opacityTextureIndex];
-        SamplerState opacitySamplerState = SamplerDescriptorHeap[materialInfo.opacitySamplerIndex];
-        float4 opacitySample = opacityTexture.Sample(opacitySamplerState, texcoords);
+        Texture2D<float4> opacityTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.opacityTextureIndex)];
+        SamplerState opacitySamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.opacitySamplerIndex)];
+        float4 opacitySample = opacityTexture.SampleGrad(opacitySamplerState, texcoords, dTexcoordsDx, dTexcoordsDy);
         float opacity = opacitySample.a;
         baseColor.a *= opacity;
         if (baseColor.a < materialInfo.alphaCutoff)
@@ -403,7 +405,9 @@ void SampleMaterialFromUvCache(
             TBN,
             heightUv.uv,
             viewDir,
-            materialInfo.heightMapScale);
+            materialInfo.heightMapScale,
+            heightUv.dUVdx,
+            heightUv.dUVdy);
 
         parallaxUv = uvh.xy;
         parallaxDUdx = heightUv.dUVdx;
@@ -608,7 +612,9 @@ void SampleMaterialFromUvCacheRuntime(
             TBN,
             heightUv.uv,
             viewDir,
-            materialInfo.heightMapScale);
+            materialInfo.heightMapScale,
+            heightUv.dUVdx,
+            heightUv.dUVdy);
 
         parallaxUv = uvh.xy;
         parallaxDUdx = heightUv.dUVdx;

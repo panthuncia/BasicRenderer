@@ -294,49 +294,6 @@ void Renderer::ApplyPrimaryCameraInput(float elapsedSeconds) {
     horizontalAngle = 0.0f;
 }
 
-void Renderer::ApplyPrimaryCameraInputToRenderBridge(float elapsedSeconds) {
-    if (!m_sceneRenderOverlapEnabled || elapsedSeconds <= 0.0f) {
-        return;
-    }
-
-    const bool hasMovementInput =
-        movementState.forwardMagnitude != 0.0f ||
-        movementState.backwardMagnitude != 0.0f ||
-        movementState.rightMagnitude != 0.0f ||
-        movementState.leftMagnitude != 0.0f ||
-        movementState.upMagnitude != 0.0f ||
-        movementState.downMagnitude != 0.0f;
-    const bool hasRotationInput = verticalAngle != 0.0f || horizontalAngle != 0.0f;
-    if (!hasMovementInput && !hasRotationInput) {
-        return;
-    }
-
-    auto primaryCamera = m_sceneRenderBridge.GetPrimaryCameraEntity();
-    if (!primaryCamera || !primaryCamera.is_alive() || !primaryCamera.has<Components::Matrix>()) {
-        return;
-    }
-
-    const auto currentMatrix = primaryCamera.get<Components::Matrix>();
-    DirectX::XMVECTOR scale = DirectX::XMVectorSet(1.0f, 1.0f, 1.0f, 0.0f);
-    DirectX::XMVECTOR rotation = DirectX::XMQuaternionIdentity();
-    DirectX::XMVECTOR translation = DirectX::XMVectorZero();
-    if (!DirectX::XMMatrixDecompose(&scale, &rotation, &translation, currentMatrix.matrix)) {
-        return;
-    }
-
-    Components::Position cameraPosition{ translation };
-    Components::Rotation cameraRotation{ rotation };
-    ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
-    RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
-
-    Components::Matrix updatedMatrix;
-    updatedMatrix.matrix =
-        DirectX::XMMatrixScalingFromVector(scale) *
-        DirectX::XMMatrixRotationQuaternion(cameraRotation.rot) *
-        DirectX::XMMatrixTranslationFromVector(cameraPosition.pos);
-    primaryCamera.set<Components::Matrix>(updatedMatrix);
-}
-
 void Renderer::InvalidateSceneOverlapState() {
     m_sceneOverlapEpoch.fetch_add(1, std::memory_order_relaxed);
     m_sceneTaskCompleted.store(false);
@@ -970,7 +927,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("queueSchedulingUavPressureWeight", 0.5f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
-    settingsManager.registerSetting<bool>("heavyDebug", false);
+    settingsManager.registerSetting<bool>("heavyDebug", true);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
     settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
@@ -1481,10 +1438,6 @@ void Renderer::Update(float elapsedSeconds) {
             runCapturedStage("CommitSceneSnapshot", [&]() {
                 ZoneScopedN("Renderer::Update::CommitSceneSnapshot");
                 CommitCompletedSceneSnapshot();
-            });
-            runCapturedStage("ApplyPrimaryCameraBridgeInput", [&]() {
-                ZoneScopedN("Renderer::Update::ApplyPrimaryCameraBridgeInput");
-                ApplyPrimaryCameraInputToRenderBridge(elapsedSeconds);
             });
         }
     } else {
