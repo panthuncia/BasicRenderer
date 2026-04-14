@@ -68,6 +68,7 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapFreeWrappedPagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapGatherStatsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapDirtyHierarchyPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapNonRasterableHierarchyPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapDeduplicatePredictedPagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapExpandPredictedPagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapInvalidatePagesPass.h"
@@ -1261,6 +1262,13 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowDirtyHierarchyTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    m_shadowNonRasterablePageHierarchyTexture = PixelBuffer::CreateSharedUnmaterialized(CreateVirtualShadowDirtyHierarchyDescription());
+    m_shadowNonRasterablePageHierarchyTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Non-Rasterable Hierarchy"));
+    m_shadowNonRasterablePageHierarchyTexture->GetECSEntity()
+        .set<Components::Resource>({ m_shadowNonRasterablePageHierarchyTexture })
+        .add<CLodVirtualShadowNonRasterableHierarchyTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
     m_shadowClipmapInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowClipmapInfo),
@@ -1472,6 +1480,7 @@ void CLodExtension::TagShadowResourceUsages()
     tagTextureUsage(m_shadowPageTableTexture, "Cluster LOD virtual shadow maps");
     tagTextureUsage(m_shadowPhysicalPagesTexture, "Cluster LOD virtual shadow maps");
     tagTextureUsage(m_shadowDirtyPageHierarchyTexture, "Cluster LOD virtual shadow maps");
+    tagTextureUsage(m_shadowNonRasterablePageHierarchyTexture, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowPageMetadataBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowInvalidationInputsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowInvalidationCountBuffer, "Cluster LOD virtual shadow maps");
@@ -1576,6 +1585,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_rasterBucketsHistogramBuffer);
     releaseBufferBacking(m_rasterBucketsOffsetsBuffer);
     releaseBufferBacking(m_rasterBucketsBlockSumsBuffer);
+    releaseBufferBacking(m_reyesPackedRasterWorkGroupsBuffer);
     releaseBufferBacking(m_rasterBucketsScannedBlockSumsBuffer);
     releaseBufferBacking(m_rasterBucketsTotalCountBuffer);
     releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1);
@@ -1583,6 +1593,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_visibleClustersCounterBufferPhase2);
     releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2);
     releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2);
+    releaseBufferBacking(m_reyesPackedRasterWorkGroupsBufferPhase2);
     releaseBufferBacking(m_rasterBucketsHistogramBufferSw);
     releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2Sw);
     releaseBufferBacking(m_rasterBucketsWriteCursorBufferSw);
@@ -1619,6 +1630,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_reyesRasterWorkCounterBuffer);
     releaseBufferBacking(m_reyesRasterWorkIndirectArgsBuffer);
     releaseBufferBacking(m_reyesCompactedRasterWorkIndicesBuffer);
+    releaseBufferBacking(m_reyesPackedRasterWorkGroupsBuffer);
     releaseBufferBacking(m_reyesTessTableConfigsBuffer);
     releaseBufferBacking(m_reyesTessTableVerticesBuffer);
     releaseBufferBacking(m_reyesTessTableTrianglesBuffer);
@@ -1628,6 +1640,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_reyesRasterWorkCounterBufferPhase2);
     releaseBufferBacking(m_reyesRasterWorkIndirectArgsBufferPhase2);
     releaseBufferBacking(m_reyesCompactedRasterWorkIndicesBufferPhase2);
+    releaseBufferBacking(m_reyesPackedRasterWorkGroupsBufferPhase2);
     releaseBufferBacking(m_reyesTelemetryBufferPhase1);
     releaseBufferBacking(m_reyesTelemetryBufferPhase2);
     releaseBufferBacking(m_swVisibleClustersCounterBuffer);
@@ -1736,6 +1749,7 @@ void CLodExtension::ReleaseShadowResourceBackings()
     releaseTextureBacking(m_shadowPageTableTexture);
     releaseTextureBacking(m_shadowPhysicalPagesTexture);
     releaseTextureBacking(m_shadowDirtyPageHierarchyTexture);
+    releaseTextureBacking(m_shadowNonRasterablePageHierarchyTexture);
     releaseBufferBacking(m_swPageJobVisibleClustersBuffer);
     releaseBufferBacking(m_swPageJobVisibleClustersCounterBuffer);
     releaseBufferBacking(m_swPageJobVisibleClustersBufferPhase2);
@@ -1967,6 +1981,9 @@ void CLodExtension::EnsureReyesResourcesInitialized()
     m_reyesCompactedRasterWorkIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(uint32_t), true, false, false, true);
     m_reyesCompactedRasterWorkIndicesBuffer->SetName(MakeVariantResourceName(traits, "Reyes Compacted Raster Work Indices Buffer"));
 
+    m_reyesPackedRasterWorkGroupsBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesPackedRasterWorkGroupEntry), true, false, false, true);
+    m_reyesPackedRasterWorkGroupsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Packed Raster Work Groups Buffer"));
+
     if (usesPhase2ReyesResources) {
         m_reyesRasterWorkBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, true);
         m_reyesRasterWorkBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer Phase2"));
@@ -1979,6 +1996,9 @@ void CLodExtension::EnsureReyesResourcesInitialized()
 
         m_reyesCompactedRasterWorkIndicesBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(uint32_t), true, false, false, true);
         m_reyesCompactedRasterWorkIndicesBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Compacted Raster Work Indices Buffer Phase2"));
+
+        m_reyesPackedRasterWorkGroupsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesPackedRasterWorkGroupEntry), true, false, false, true);
+        m_reyesPackedRasterWorkGroupsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Packed Raster Work Groups Buffer Phase2"));
     }
 
     m_reyesDiceIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
@@ -2032,10 +2052,12 @@ void CLodExtension::EnsureReyesResourcesInitialized()
     tagBufferUsage(m_reyesRasterWorkCounterBuffer, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesRasterWorkIndirectArgsBuffer, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesCompactedRasterWorkIndicesBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesPackedRasterWorkGroupsBuffer, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesRasterWorkBufferPhase2, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesRasterWorkCounterBufferPhase2, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesRasterWorkIndirectArgsBufferPhase2, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesCompactedRasterWorkIndicesBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesPackedRasterWorkGroupsBufferPhase2, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesDiceIndirectArgsBuffer, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesDiceIndirectArgsBufferPhase2, "Cluster LOD Reyes");
     tagBufferUsage(m_reyesTelemetryBufferPhase1, "Cluster LOD telemetry");
@@ -2273,6 +2295,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     std::string shadowAllocationPassName;
     std::string shadowDirtyHierarchyPassName;
+    std::string shadowNonRasterableHierarchyPassName;
     std::string shadowClearDirtyBitsAfterPassName;
     if (traits.type == CLodExtensionType::Shadow) {
         const std::string shadowSetupPassName = MakeVariantPassName(traits, "VirtualShadowSetupPass");
@@ -2471,6 +2494,16 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         shadowDirtyHierarchyPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowClearPagesPassName));
         outPasses.push_back(std::move(shadowDirtyHierarchyPassDesc));
 
+        shadowNonRasterableHierarchyPassName = MakeVariantPassName(traits, "VirtualShadowNonRasterableHierarchyPass");
+        auto shadowNonRasterableHierarchyPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowNonRasterableHierarchyPassName,
+            std::make_shared<VirtualShadowMapNonRasterableHierarchyPass>(
+                m_shadowPageTableTexture,
+                m_shadowNonRasterablePageHierarchyTexture,
+                m_shadowClipmapInfoBuffer));
+        shadowNonRasterableHierarchyPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowDirtyHierarchyPassName));
+        outPasses.push_back(std::move(shadowNonRasterableHierarchyPassDesc));
+
     }
 
     std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
@@ -2514,7 +2547,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     }
     else {
         if (traits.type == CLodExtensionType::Shadow) {
-            cullPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowDirtyHierarchyPassName));
+            cullPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowNonRasterableHierarchyPassName));
         }
         else {
             cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
@@ -2627,6 +2660,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                             m_reyesTessTableVerticesBuffer,
                             m_reyesTessTableTrianglesBuffer,
                             traits.type == CLodExtensionType::Shadow ? m_shadowClipmapInfoBuffer : nullptr,
+                            traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                            traits.type == CLodExtensionType::Shadow ? m_shadowNonRasterablePageHierarchyTexture : nullptr,
                             m_reyesSplitIndirectArgsBuffer,
                             m_reyesTelemetryBufferPhase1,
                             reyesSplitQueueCapacity,
@@ -3507,6 +3542,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_reyesTessTableVerticesBuffer,
                         m_reyesTessTableTrianglesBuffer,
                         m_shadowClipmapInfoBuffer,
+                        m_shadowDirtyPageHierarchyTexture,
+                        m_shadowNonRasterablePageHierarchyTexture,
                         m_reyesSplitIndirectArgsBuffer,
                         m_reyesTelemetryBufferPhase1,
                         reyesSplitQueueCapacity,
@@ -3595,6 +3632,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsOffsetsBuffer,
                     m_rasterBucketsWriteCursorBufferSw,
                     m_reyesCompactedRasterWorkIndicesBuffer,
+                    m_reyesPackedRasterWorkGroupsBuffer,
                     m_rasterBucketsIndirectArgsBufferPageJob)));
 
         const std::string reyesLargeShadowRasterPassName = MakeVariantPassName(traits, "ReyesLargeVirtualShadowHardwareRasterPass1");
@@ -3604,6 +3642,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_swPageJobVisibleClustersBuffer,
                 m_rasterBucketsHistogramBufferSw,
                 m_rasterBucketsIndirectArgsBufferPageJob,
+                m_reyesPackedRasterWorkGroupsBuffer,
                 m_reyesCompactedRasterWorkIndicesBuffer,
                 m_reyesRasterWorkBuffer,
                 m_reyesDiceQueueBuffer,
@@ -3613,6 +3652,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowPageTableTexture,
                 m_shadowPhysicalPagesTexture,
                 m_shadowClipmapInfoBuffer,
+                m_reyesTelemetryBufferPhase1,
                 slabGroup));
         reyesLargeShadowRasterPassDesc.GeometryPass();
         outPasses.push_back(std::move(reyesLargeShadowRasterPassDesc));
@@ -3765,6 +3805,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_reyesTessTableVerticesBuffer,
                         m_reyesTessTableTrianglesBuffer,
                         traits.type == CLodExtensionType::Shadow ? m_shadowClipmapInfoBuffer : nullptr,
+                        traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                        traits.type == CLodExtensionType::Shadow ? m_shadowNonRasterablePageHierarchyTexture : nullptr,
                         m_reyesSplitIndirectArgsBufferPhase2,
                         m_reyesTelemetryBufferPhase2,
                         reyesSplitQueueCapacity,
@@ -4322,6 +4364,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                             m_reyesTessTableVerticesBuffer,
                             m_reyesTessTableTrianglesBuffer,
                             m_shadowClipmapInfoBuffer,
+                            m_shadowDirtyPageHierarchyTexture,
+                            m_shadowNonRasterablePageHierarchyTexture,
                             m_reyesSplitIndirectArgsBufferPhase2,
                             m_reyesTelemetryBufferPhase2,
                             reyesSplitQueueCapacity,
@@ -4410,6 +4454,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_rasterBucketsOffsetsBuffer,
                         m_rasterBucketsWriteCursorBufferPhase2Sw,
                         m_reyesCompactedRasterWorkIndicesBufferPhase2,
+                        m_reyesPackedRasterWorkGroupsBufferPhase2,
                         m_rasterBucketsIndirectArgsBufferPhase2PageJob)));
 
             const std::string reyesLargeShadowRasterPassName = MakeVariantPassName(traits, "ReyesLargeVirtualShadowHardwareRasterPass2");
@@ -4419,6 +4464,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_swPageJobVisibleClustersBufferPhase2,
                     m_rasterBucketsHistogramBufferPhase2Sw,
                     m_rasterBucketsIndirectArgsBufferPhase2PageJob,
+                    m_reyesPackedRasterWorkGroupsBufferPhase2,
                     m_reyesCompactedRasterWorkIndicesBufferPhase2,
                     m_reyesRasterWorkBufferPhase2,
                     m_reyesDiceQueueBuffer,
@@ -4428,6 +4474,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_shadowPageTableTexture,
                     m_shadowPhysicalPagesTexture,
                     m_shadowClipmapInfoBuffer,
+                    m_reyesTelemetryBufferPhase2,
                     slabGroup));
             reyesLargeShadowRasterPassDesc.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
             reyesLargeShadowRasterPassDesc.GeometryPass();

@@ -119,6 +119,7 @@ private:
     std::shared_ptr<Buffer> m_reyesRasterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_reyesRasterWorkIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_reyesCompactedRasterWorkIndicesBuffer;
+    std::shared_ptr<Buffer> m_reyesPackedRasterWorkGroupsBuffer;
     std::shared_ptr<Buffer> m_reyesTessTableConfigsBuffer;
     std::shared_ptr<Buffer> m_reyesTessTableVerticesBuffer;
     std::shared_ptr<Buffer> m_reyesTessTableTrianglesBuffer;
@@ -128,6 +129,7 @@ private:
     std::shared_ptr<Buffer> m_reyesRasterWorkCounterBufferPhase2;
     std::shared_ptr<Buffer> m_reyesRasterWorkIndirectArgsBufferPhase2;
     std::shared_ptr<Buffer> m_reyesCompactedRasterWorkIndicesBufferPhase2;
+    std::shared_ptr<Buffer> m_reyesPackedRasterWorkGroupsBufferPhase2;
     std::shared_ptr<Buffer> m_reyesTelemetryBufferPhase1;
     std::shared_ptr<Buffer> m_reyesTelemetryBufferPhase2;
 
@@ -180,6 +182,7 @@ private:
     std::shared_ptr<Buffer> m_shadowPageListHeaderBuffer;
     std::shared_ptr<Buffer> m_shadowDirtyPageFlagsBuffer;
     std::shared_ptr<PixelBuffer> m_shadowDirtyPageHierarchyTexture;
+    std::shared_ptr<PixelBuffer> m_shadowNonRasterablePageHierarchyTexture;
     std::shared_ptr<Buffer> m_shadowClipmapInfoBuffer;
     std::shared_ptr<Buffer> m_shadowMarkClipmapDataBuffer;
     std::shared_ptr<Buffer> m_shadowCompactMainCameraBuffer;

@@ -77,5 +77,6 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         InterlockedAdd(telemetryBuffer[0].patchRasterizedPatchCount, 1u);
         InterlockedAdd(telemetryBuffer[0].patchRasterizedMicroTriangleCount, emittedMicroTriangleCount);
+        InterlockedAdd(telemetryBuffer[0].rasterWorkEntryCount, availableRasterWorkCount);
     }
 }

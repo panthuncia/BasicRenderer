@@ -8,6 +8,8 @@
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodReyesSplitRootConstants.h"
 #include "Resources/Buffers/Buffer.h"
+#include "Resources/PixelBuffer.h"
+#include "Utilities/Utilities.h"
 
 ReyesSplitPass::ReyesSplitPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -23,6 +25,8 @@ ReyesSplitPass::ReyesSplitPass(
     std::shared_ptr<Buffer> tessTableVerticesBuffer,
     std::shared_ptr<Buffer> tessTableTrianglesBuffer,
     std::shared_ptr<Buffer> shadowClipmapInfoBuffer,
+    std::shared_ptr<PixelBuffer> shadowDirtyHierarchyTexture,
+    std::shared_ptr<PixelBuffer> shadowNonRasterableHierarchyTexture,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
     uint32_t maxSplitQueueEntries,
@@ -42,6 +46,8 @@ ReyesSplitPass::ReyesSplitPass(
     , m_tessTableVerticesBuffer(std::move(tessTableVerticesBuffer))
     , m_tessTableTrianglesBuffer(std::move(tessTableTrianglesBuffer))
     , m_shadowClipmapInfoBuffer(std::move(shadowClipmapInfoBuffer))
+    , m_shadowDirtyHierarchyTexture(std::move(shadowDirtyHierarchyTexture))
+    , m_shadowNonRasterableHierarchyTexture(std::move(shadowNonRasterableHierarchyTexture))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_maxSplitQueueEntries(maxSplitQueueEntries)
@@ -84,7 +90,11 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_tessTableTrianglesBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
-            Builtin::CullingCameraBuffer)
+            Builtin::PerMeshBuffer,
+            Builtin::PerMaterialDataBuffer,
+            Builtin::CullingCameraBuffer,
+            Builtin::CameraBuffer,
+			Builtin::Shadows::CLodCompactShadowCameras)
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
             m_outputSplitQueueBuffer,
@@ -95,7 +105,13 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_diceQueueOverflowBuffer,
             m_telemetryBuffer);
     if (m_shadowClipmapInfoBuffer) {
-        builder->WithShaderResource(m_shadowClipmapInfoBuffer);
+        builder->WithShaderResource(m_shadowClipmapInfoBuffer, Builtin::Shadows::CLodCompactShadowCameras);
+    }
+    if (m_shadowDirtyHierarchyTexture) {
+        builder->WithShaderResource(m_shadowDirtyHierarchyTexture);
+    }
+    if (m_shadowNonRasterableHierarchyTexture) {
+        builder->WithShaderResource(m_shadowNonRasterableHierarchyTexture);
     }
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
@@ -131,6 +147,15 @@ PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_SPLIT_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_shadowClipmapInfoBuffer
         ? m_shadowClipmapInfoBuffer->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
+    uintRootConstants[CLOD_REYES_SPLIT_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX] = m_shadowDirtyHierarchyTexture
+        ? m_shadowDirtyHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
+        : 0xFFFFFFFFu;
+    uintRootConstants[CLOD_REYES_SPLIT_SHADOW_NON_RASTERABLE_HIERARCHY_DESCRIPTOR_INDEX] = m_shadowNonRasterableHierarchyTexture
+        ? m_shadowNonRasterableHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
+        : 0xFFFFFFFFu;
+    uintRootConstants[UintRootConstant18] = as_uint(std::max(
+        SettingsManager::GetInstance().getSettingGetter<float>(CLodReyesShadowCoarseTargetPagesPerTriangleSettingName)(),
+        CLodReyesShadowCoarseTargetPagesPerTriangleMin));
 
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_clearCountersPso.GetAPIPipelineState().GetHandle());

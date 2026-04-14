@@ -8,6 +8,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 
 class Buffer;
+class PixelBuffer;
 
 class ReyesSplitPass final : public ComputePass {
 public:
@@ -25,6 +26,8 @@ public:
         std::shared_ptr<Buffer> tessTableVerticesBuffer,
         std::shared_ptr<Buffer> tessTableTrianglesBuffer,
         std::shared_ptr<Buffer> shadowClipmapInfoBuffer,
+        std::shared_ptr<PixelBuffer> shadowDirtyHierarchyTexture,
+        std::shared_ptr<PixelBuffer> shadowNonRasterableHierarchyTexture,
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> telemetryBuffer,
         uint32_t maxSplitQueueEntries,
@@ -53,6 +56,8 @@ private:
     std::shared_ptr<Buffer> m_tessTableVerticesBuffer;
     std::shared_ptr<Buffer> m_tessTableTrianglesBuffer;
     std::shared_ptr<Buffer> m_shadowClipmapInfoBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowDirtyHierarchyTexture;
+    std::shared_ptr<PixelBuffer> m_shadowNonRasterableHierarchyTexture;
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_maxSplitQueueEntries = 0u;
     uint32_t m_splitPassIndex = 0u;

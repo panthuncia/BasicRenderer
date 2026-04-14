@@ -852,12 +852,12 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
             float depthForComparison;
             if (bBehind)
             {
-                // Shadow map doesn't show the tracked surface — extrapolate
+                // Shadow map doesn't show the tracked surface: extrapolate
                 depthForComparison = depthHistory + depthSlope * stepDist;
             }
             else
             {
-                // Shadow map shows a surface near the ray — use it directly
+                // Shadow map shows a surface near the ray: use it directly
                 depthForComparison = closestDepth;
                 if (abs(closestDepth - depthHistory) > 1.0e-6f)
                 {

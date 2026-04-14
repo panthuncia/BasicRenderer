@@ -1947,6 +1947,57 @@ void CLodVirtualShadowBuildDirtyHierarchyCSMain(uint3 dispatchThreadId : SV_Disp
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
+void CLodVirtualShadowBuildNonRasterableHierarchyCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.z >= CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_COUNT)
+    {
+        return;
+    }
+
+    const uint dstResolution = (CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_IS_PAGE_TABLE != 0u)
+        ? CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_RESOLUTION
+        : max(CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_RESOLUTION >> 1u, 1u);
+    if (dispatchThreadId.x >= dstResolution || dispatchThreadId.y >= dstResolution)
+    {
+        return;
+    }
+
+    RWTexture2DArray<uint> destTexture = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_DEST_DESCRIPTOR_INDEX];
+    uint nonRasterableValue = 0u;
+
+    if (CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_IS_PAGE_TABLE != 0u)
+    {
+        Texture2DArray<uint> sourceTexture = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_DESCRIPTOR_INDEX];
+        StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+            ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+        const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[dispatchThreadId.z];
+        const uint2 wrappedCoords = CLodVirtualShadowWrappedPageCoords(dispatchThreadId.xy, clipmapInfo);
+        const uint srcValue = sourceTexture.Load(int4(wrappedCoords, dispatchThreadId.z, 0));
+        nonRasterableValue = CLodVirtualShadowPageEntryCanRaster(srcValue) ? 0u : 1u;
+    }
+    else
+    {
+        RWTexture2DArray<uint> sourceTexture = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_DESCRIPTOR_INDEX];
+        const uint2 srcBase = dispatchThreadId.xy * 2u;
+        [unroll]
+        for (uint offsetY = 0u; offsetY < 2u; ++offsetY)
+        {
+            [unroll]
+            for (uint offsetX = 0u; offsetX < 2u; ++offsetX)
+            {
+                const uint srcX = min(srcBase.x + offsetX, CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_RESOLUTION - 1u);
+                const uint srcY = min(srcBase.y + offsetY, CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_RESOLUTION - 1u);
+                const uint srcValue = sourceTexture[uint3(srcX, srcY, dispatchThreadId.z)];
+                nonRasterableValue = max(nonRasterableValue, srcValue != 0u ? 1u : 0u);
+            }
+        }
+    }
+
+    destTexture[dispatchThreadId] = nonRasterableValue;
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
 void CLodVirtualShadowClearDirtyBitsCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.z >= kCLodVirtualShadowClipmapCount ||

@@ -178,6 +178,7 @@ void ViewManager::AttachDepth(uint64_t viewID,
     v->gpu.depthMap = depth;
     v->gpu.linearDepthMap = linearDepth;
     v->gpu.lastFrameLinearDepthMap.reset();
+    v->gpu.lastFrameLinearDepthValid = false;
 
     if (linearDepth) {
         const uint64_t sourceID = linearDepth->GetGlobalResourceID();

@@ -18,6 +18,7 @@ ReyesRasterWorkCompactAndArgsPass::ReyesRasterWorkCompactAndArgsPass(
     std::shared_ptr<Buffer> offsetsBuffer,
     std::shared_ptr<Buffer> writeCursorBuffer,
     std::shared_ptr<Buffer> compactedRasterWorkIndicesBuffer,
+    std::shared_ptr<Buffer> packedRasterWorkGroupsBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer)
     : m_rasterWorkBuffer(std::move(rasterWorkBuffer))
     , m_rasterWorkCounterBuffer(std::move(rasterWorkCounterBuffer))
@@ -26,13 +27,26 @@ ReyesRasterWorkCompactAndArgsPass::ReyesRasterWorkCompactAndArgsPass(
     , m_offsetsBuffer(std::move(offsetsBuffer))
     , m_writeCursorBuffer(std::move(writeCursorBuffer))
     , m_compactedRasterWorkIndicesBuffer(std::move(compactedRasterWorkIndicesBuffer))
+    , m_packedRasterWorkGroupsBuffer(std::move(packedRasterWorkGroupsBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer)) {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/reyesRasterWorkBuckets.hlsl",
-        L"CompactReyesRasterWorkAndBuildIndirectArgsCS",
+        L"CompactReyesRasterWorkCS",
         {},
         "CLod.ReyesRasterWorkCompactAndArgs.PSO");
+    m_packPipeline = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"Shaders/ClusterLOD/reyesRasterWorkBuckets.hlsl",
+        L"EmitPackedReyesRasterWorkGroupsCS",
+        {},
+        "CLod.ReyesRasterWorkEmitPackedGroups.PSO");
+    m_finalizePackPipeline = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"Shaders/ClusterLOD/reyesRasterWorkBuckets.hlsl",
+        L"PackReyesRasterWorkGroupsAndBuildIndirectArgsCS",
+        {},
+        "CLod.ReyesRasterWorkFinalizePackedGroups.PSO");
     m_clearPipeline = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"shaders/ClusterLOD/clodUtil.hlsl",
@@ -56,11 +70,12 @@ void ReyesRasterWorkCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder
     builder->WithShaderResource(
             m_rasterWorkBuffer,
             m_rasterWorkCounterBuffer,
-            m_histogramBuffer,
             m_offsetsBuffer)
         .WithUnorderedAccess(
+            m_histogramBuffer,
             m_writeCursorBuffer,
             m_compactedRasterWorkIndicesBuffer,
+            m_packedRasterWorkGroupsBuffer,
             m_indirectArgsBuffer)
         .WithIndirectArguments(m_indirectCommand)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
@@ -115,11 +130,12 @@ PassReturn ReyesRasterWorkCompactAndArgsPass::Execute(PassExecutionContext& exec
     uint32_t rc[NumMiscUintRootConstants] = {};
     rc[CLOD_REYES_RASTER_BUCKET_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_REYES_RASTER_BUCKET_WORK_COUNTER_DESCRIPTOR_INDEX] = m_rasterWorkCounterBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_REYES_RASTER_BUCKET_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_REYES_RASTER_BUCKET_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_REYES_RASTER_BUCKET_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_REYES_RASTER_BUCKET_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_REYES_RASTER_BUCKET_COMPACTED_WORK_INDICES_DESCRIPTOR_INDEX] = m_compactedRasterWorkIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_REYES_RASTER_BUCKET_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_REYES_RASTER_BUCKET_PACKED_WORK_GROUPS_DESCRIPTOR_INDEX] = m_packedRasterWorkGroupsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_REYES_RASTER_BUCKET_NUM_BUCKETS] = numBuckets;
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -136,6 +152,54 @@ PassReturn ReyesRasterWorkCompactAndArgsPass::Execute(PassExecutionContext& exec
         {},
         0,
         1);
+
+    rhi::BufferBarrier compactedWorkBarrier{};
+    compactedWorkBarrier.buffer = m_compactedRasterWorkIndicesBuffer->GetAPIResource().GetHandle();
+    compactedWorkBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    compactedWorkBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    compactedWorkBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+    compactedWorkBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+
+    barrierBatch.buffers = { &compactedWorkBarrier };
+    commandList.Barriers(barrierBatch);
+
+    commandList.BindPipeline(m_packPipeline.GetAPIPipelineState().GetHandle());
+    BindResourceDescriptorIndices(commandList, m_packPipeline.GetResourceDescriptorSlots());
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        rc);
+    commandList.ExecuteIndirect(
+        m_compactionCommandSignature->GetHandle(),
+        m_indirectCommand->GetAPIResource().GetHandle(),
+        0,
+        {},
+        0,
+        1);
+
+    rhi::BufferBarrier packedGroupsBarrier{};
+    packedGroupsBarrier.buffer = m_packedRasterWorkGroupsBuffer->GetAPIResource().GetHandle();
+    packedGroupsBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    packedGroupsBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    packedGroupsBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+    packedGroupsBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+
+    barrierBatch.buffers = { &packedGroupsBarrier };
+    commandList.Barriers(barrierBatch);
+
+    commandList.BindPipeline(m_finalizePackPipeline.GetAPIPipelineState().GetHandle());
+    BindResourceDescriptorIndices(commandList, m_finalizePackPipeline.GetResourceDescriptorSlots());
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        rc);
+    commandList.Dispatch((numBuckets + 63u) / 64u, 1u, 1u);
 
     return {};
 }

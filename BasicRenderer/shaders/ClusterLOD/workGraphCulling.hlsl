@@ -26,7 +26,7 @@
 #endif
 
 // Set to 1 to enable occlusion culling for VSM / shadow cameras (ortho).
-// Defaults to 0 (off) — ortho cameras skip occlusion culling entirely.
+// Defaults to 0 (off): ortho cameras skip occlusion culling entirely.
 #ifndef CLOD_VSM_OCCLUSION_CULLING
 #define CLOD_VSM_OCCLUSION_CULLING 0
 #endif
@@ -265,7 +265,7 @@ float CLodSWRasterDiameterThreshold()
 #endif
 }
 
-// Page-job VSM flags helpers — decode from CLOD_WG_PAGE_JOB_FLAGS root constant.
+// Page-job VSM flags helpers: decode from CLOD_WG_PAGE_JOB_FLAGS root constant.
 bool CLodPageJobEnabled()
 {
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW

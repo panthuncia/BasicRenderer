@@ -181,6 +181,10 @@ private:
     void RunAnimationUpdateStage(float elapsedSeconds);
     void RunTransformPropagationStage();
     void RunSceneBridgeSyncStage();
+    void ApplyPrimaryCameraInput(float elapsedSeconds);
+    void ApplyPrimaryCameraInputToRenderBridge(float elapsedSeconds);
+    void SetSceneRenderOverlapEnabled(bool enabled);
+    void InvalidateSceneOverlapState();
     void RunRenderResourceSyncStage();
     void FlushPendingSceneExplorerEdits();
     void QueueSceneNodePositionEdit(uint64_t stableSceneID, DirectX::XMFLOAT3 position);
@@ -237,6 +241,8 @@ private:
     int32_t m_lastFrameTaskNodeIndex = -1;
     br::render::SceneRenderBridge m_sceneRenderBridge;
     bool m_sceneRenderOverlapEnabled = true;
+    bool m_swapChainReady = true;
+    bool m_loggedSwapChainNotReady = false;
 
     // Cached renderer ECS queries for RunRenderResourceSyncStage
     flecs::query<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo> m_renderSyncObjectQuery;
@@ -249,6 +255,7 @@ private:
     mutable std::mutex m_sceneSnapshotMutex;
     std::atomic<bool> m_sceneTaskInFlight = false;
     std::atomic<bool> m_sceneTaskCompleted = false;
+    std::atomic<uint64_t> m_sceneOverlapEpoch = 1;
     uint64_t m_nextSceneSnapshotSequence = 1;
     uint64_t m_lastCommittedSceneSnapshotSequence = 0;
     uint64_t m_lastCompletedSceneSnapshotSequence = 0;
@@ -293,7 +300,6 @@ private:
 			return {
                 Builtin::GBuffer::MotionVectors,
                 Builtin::Color::HDRColorTarget,
-                Builtin::DebugTexture,
 				Builtin::PostProcessing::UpscaledHDR,
 			};
         }

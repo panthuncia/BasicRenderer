@@ -19,6 +19,7 @@ public:
         std::shared_ptr<Buffer> offsetsBuffer,
         std::shared_ptr<Buffer> writeCursorBuffer,
         std::shared_ptr<Buffer> compactedRasterWorkIndicesBuffer,
+        std::shared_ptr<Buffer> packedRasterWorkGroupsBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -29,6 +30,8 @@ public:
 
 private:
     PipelineState m_pso;
+    PipelineState m_packPipeline;
+    PipelineState m_finalizePackPipeline;
     PipelineState m_clearPipeline;
     rhi::CommandSignaturePtr m_compactionCommandSignature;
 
@@ -39,5 +42,6 @@ private:
     std::shared_ptr<Buffer> m_offsetsBuffer;
     std::shared_ptr<Buffer> m_writeCursorBuffer;
     std::shared_ptr<Buffer> m_compactedRasterWorkIndicesBuffer;
+    std::shared_ptr<Buffer> m_packedRasterWorkGroupsBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
 };

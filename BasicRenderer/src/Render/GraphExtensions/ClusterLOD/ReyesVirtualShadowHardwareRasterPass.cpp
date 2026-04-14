@@ -18,6 +18,7 @@ ReyesVirtualShadowHardwareRasterPass::ReyesVirtualShadowHardwareRasterPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
     std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
+    std::shared_ptr<Buffer> packedRasterWorkGroupsBuffer,
     std::shared_ptr<Buffer> compactedRasterWorkIndicesBuffer,
     std::shared_ptr<Buffer> rasterWorkBuffer,
     std::shared_ptr<Buffer> diceQueueBuffer,
@@ -27,10 +28,12 @@ ReyesVirtualShadowHardwareRasterPass::ReyesVirtualShadowHardwareRasterPass(
     std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
     std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
     std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
+    std::shared_ptr<Buffer> telemetryBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
+    , m_packedRasterWorkGroupsBuffer(std::move(packedRasterWorkGroupsBuffer))
     , m_compactedRasterWorkIndicesBuffer(std::move(compactedRasterWorkIndicesBuffer))
     , m_rasterWorkBuffer(std::move(rasterWorkBuffer))
     , m_diceQueueBuffer(std::move(diceQueueBuffer))
@@ -40,6 +43,7 @@ ReyesVirtualShadowHardwareRasterPass::ReyesVirtualShadowHardwareRasterPass(
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
     , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
     , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
+    , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
     m_viewRasterInfoBuffer->SetName("CLodReyesVirtualShadowHardwareViewRasterInfo");
@@ -71,6 +75,7 @@ void ReyesVirtualShadowHardwareRasterPass::DeclareResourceUsages(RenderPassBuild
             Builtin::SkeletonResources::SkinningInstanceInfo,
             m_visibleClustersBuffer,
             m_rasterBucketsHistogramBuffer,
+            m_packedRasterWorkGroupsBuffer,
             m_compactedRasterWorkIndicesBuffer,
             m_rasterWorkBuffer,
             m_diceQueueBuffer,
@@ -80,7 +85,7 @@ void ReyesVirtualShadowHardwareRasterPass::DeclareResourceUsages(RenderPassBuild
             m_viewRasterInfoBuffer,
             m_virtualShadowClipmapInfoBuffer)
         .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
-        .WithUnorderedAccess(m_virtualShadowPageTableTexture, m_virtualShadowPhysicalPagesTexture)
+        .WithUnorderedAccess(m_virtualShadowPageTableTexture, m_virtualShadowPhysicalPagesTexture, m_telemetryBuffer)
         .IsGeometryPass();
 
     if (m_slabResourceGroup) {
@@ -162,6 +167,7 @@ PassReturn ReyesVirtualShadowHardwareRasterPass::Execute(PassExecutionContext& e
     misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_REYES_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
         m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
@@ -170,6 +176,7 @@ PassReturn ReyesVirtualShadowHardwareRasterPass::Execute(PassExecutionContext& e
     misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
     misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
     misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowConfig.virtualResolution;
+    misc[CLOD_RASTER_REYES_PACKED_RASTER_WORK_GROUPS_DESCRIPTOR_INDEX] = m_packedRasterWorkGroupsBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_REYES_COMPACTED_RASTER_WORK_INDICES_DESCRIPTOR_INDEX] = m_compactedRasterWorkIndicesBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_REYES_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;

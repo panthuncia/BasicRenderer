@@ -153,4 +153,7 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     ownedClusters[dst].instanceID = instanceID;
     ownedClusters[dst].materialIndex = materialIndex;
     ownedClusters[dst].flags = commonFlags;
+
+    RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_TELEMETRY_DESCRIPTOR_INDEX];
+    InterlockedAdd(telemetryBuffer[0].ownedClusterOutputCount, 1u);
 }

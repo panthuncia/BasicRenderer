@@ -58,6 +58,7 @@ struct ViewResources {
 	std::shared_ptr<PixelBuffer> depthMap = nullptr;
     std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
     std::shared_ptr<PixelBuffer> lastFrameLinearDepthMap = nullptr;
+    bool lastFrameLinearDepthValid = false;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
     std::shared_ptr<PixelBuffer> clodDeepVisibilityHeadPointers = nullptr;
 };

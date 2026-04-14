@@ -20,6 +20,7 @@ public:
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
         std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
+        std::shared_ptr<Buffer> packedRasterWorkGroupsBuffer,
         std::shared_ptr<Buffer> compactedRasterWorkIndicesBuffer,
         std::shared_ptr<Buffer> rasterWorkBuffer,
         std::shared_ptr<Buffer> diceQueueBuffer,
@@ -29,6 +30,7 @@ public:
         std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
         std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
         std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
+        std::shared_ptr<Buffer> telemetryBuffer,
         std::shared_ptr<ResourceGroup> slabResourceGroup);
     ~ReyesVirtualShadowHardwareRasterPass();
 
@@ -43,6 +45,7 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_packedRasterWorkGroupsBuffer;
     std::shared_ptr<Buffer> m_compactedRasterWorkIndicesBuffer;
     std::shared_ptr<Buffer> m_rasterWorkBuffer;
     std::shared_ptr<Buffer> m_diceQueueBuffer;
@@ -52,6 +55,7 @@ private:
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_virtualShadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
+    std::shared_ptr<Buffer> m_telemetryBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
 
