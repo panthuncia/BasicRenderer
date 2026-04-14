@@ -2368,7 +2368,7 @@ void PSOManager::createRootSignature() {
     { rhi::ShaderStage::All, NumViewRootConstants,      0, 2 },
     { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 3 },
     { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4 },
-    { rhi::ShaderStage::All, rg::shaderapi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter },
+    { rhi::ShaderStage::All, rg::shaderapi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter, rhi::PushConstantRangeType::EmulatedRootConstants },
     { rhi::ShaderStage::All, rg::shaderapi::kNumIndirectCommandSignatureRootConstants, 0, rg::shaderapi::kIndirectCommandSignatureRootParameter },
     };
 
@@ -2405,6 +2405,19 @@ void PSOManager::createRootSignature() {
         },
         m_rootSignature);
 
+    if (Failed(result) || !m_rootSignature || !m_rootSignature->IsValid()) {
+        spdlog::error(
+            "Failed to create graphics root signature / pipeline layout: {} ({})",
+            rhi::ResultName(result),
+            static_cast<uint32_t>(result));
+        throw std::runtime_error(
+            std::string("Failed to create graphics root signature / pipeline layout: ") +
+            rhi::ResultName(result) +
+            " (" +
+            std::to_string(static_cast<uint32_t>(result)) +
+            ")");
+    }
+
     result = device.CreatePipelineLayout(
         rhi::PipelineLayoutDesc{
             .ranges = {},
@@ -2413,13 +2426,32 @@ void PSOManager::createRootSignature() {
             .flags = rhi::PipelineLayoutFlags::PF_None
         },
         m_computeRootSignature);
+
+    if (Failed(result) || !m_computeRootSignature || !m_computeRootSignature->IsValid()) {
+        spdlog::error(
+            "Failed to create compute root signature / pipeline layout: {} ({})",
+            rhi::ResultName(result),
+            static_cast<uint32_t>(result));
+        throw std::runtime_error(
+            std::string("Failed to create compute root signature / pipeline layout: ") +
+            rhi::ResultName(result) +
+            " (" +
+            std::to_string(static_cast<uint32_t>(result)) +
+            ")");
+    }
 }
 
 const rhi::PipelineLayout& PSOManager::GetRootSignature() {
+	if (!m_rootSignature || !m_rootSignature->IsValid()) {
+		throw std::runtime_error("Graphics root signature / pipeline layout is not initialized");
+	}
     return m_rootSignature.Get();
 }
 
 const rhi::PipelineLayout& PSOManager::GetComputeRootSignature() {
+	if (!m_computeRootSignature || !m_computeRootSignature->IsValid()) {
+		throw std::runtime_error("Compute root signature / pipeline layout is not initialized");
+	}
 	return m_computeRootSignature.Get();
 }
 

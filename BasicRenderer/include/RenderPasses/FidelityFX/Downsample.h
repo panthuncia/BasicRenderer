@@ -57,7 +57,7 @@ public:
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         // Set the root signature
-        commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+        commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
 
         SyncMapInfos(context);
 
@@ -249,7 +249,7 @@ private:
     void CreateDownsampleComputePSO()
     {
 		auto& psoManager = PSOManager::GetInstance();
-        auto& layout = psoManager.GetRootSignature();
+        auto& layout = psoManager.GetComputeRootSignature();
 
         // Plain downsample
         downsamplePassPSO = psoManager.MakeComputePipeline(

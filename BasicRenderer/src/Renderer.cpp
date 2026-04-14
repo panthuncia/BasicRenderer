@@ -891,7 +891,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
     settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::PageJob);
-    settingsManager.registerSetting<CLodTransparencyMode>(CLodTransparencyModeSettingName, CLodTransparencyMode::LinkedListDeepVisibility);
+    settingsManager.registerSetting<CLodTransparencyMode>(CLodTransparencyModeSettingName, CLodTransparencyMode::AVBOIT);
     settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);
     settingsManager.registerSetting<float>(
         CLodReyesShadowCoarseTargetPagesPerTriangleSettingName,
@@ -927,7 +927,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("queueSchedulingUavPressureWeight", 0.5f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
-    settingsManager.registerSetting<bool>("heavyDebug", true);
+    settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
     settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
@@ -1484,9 +1484,10 @@ void Renderer::Update(float elapsedSeconds) {
     }
     unsigned int cameraIndex = m_pViewManager->Get(camera.get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
 
-    auto& commandAllocator = m_commandAllocators[m_frameIndex];
-    auto& commandList = m_commandLists[m_frameIndex];
-    commandAllocator->Recycle();
+    runCapturedStage("WaitForFrame", [&]() {
+        ZoneScopedN("Renderer::Update::WaitForFrame");
+        WaitForFrame(m_frameIndex);
+        });
 
     auto& resourceManager = ResourceManager::GetInstance();
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -1559,10 +1560,6 @@ void Renderer::Update(float elapsedSeconds) {
         ScheduleSceneUpdateTask(elapsedSeconds);
     });
 
-    runCapturedStage("WaitForFrame", [&]() {
-        ZoneScopedN("Renderer::Update::WaitForFrame");
-        WaitForFrame(m_frameIndex); // Wait for the previous use of this frame slot to complete before reusing uploads or allocators.
-        });
     runCapturedStage("BeginUploadPolicyFrame", [&]() {
         ZoneScopedN("Renderer::Update::BeginUploadPolicyFrame");
         rg::runtime::BeginUploadPolicyFrame();
@@ -1586,8 +1583,6 @@ void Renderer::Update(float elapsedSeconds) {
             }
         }
         });
-
-    commandList->Recycle(commandAllocator.Get());
 }
 
 void Renderer::PostUpdate() {
@@ -1721,15 +1716,8 @@ void Renderer::Render() {
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
     passExecutionContext.hostData = &hostFrameData;
-   
-    commandList->End();
 
-    // Execute the command list
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
-    runCapturedStage("SubmitSetup", [&]() {
-        ZoneScopedN("Renderer::Render::SubmitSetup");
-        graphicsQueue.Submit({ &commandList.Get() });
-    });
 
     // Sync SettingsManager values into OpenRenderGraphSettings so the
     // DefaultRenderGraphSettingsService reads up-to-date values.
@@ -1811,6 +1799,7 @@ void Renderer::Render() {
     });
 
 	// Transition backbuffer to Common for present
+    commandAllocator->Recycle();
 	commandList->Recycle(commandAllocator.Get());
 	rhi::TextureBarrier rtvBarrier = {};
 	rtvBarrier.afterAccess = rhi::ResourceAccessType::Common;

@@ -129,7 +129,7 @@ void CreateDebugVisualizationResources(RenderGraph* graph) {
 void BuildBRDFIntegrationPass(RenderGraph* graph) {
 	TextureDescription brdfDesc;
     brdfDesc.arraySize = 1;
-    brdfDesc.channels = 1;
+    brdfDesc.channels = 2;
     brdfDesc.isCubemap = false;
     brdfDesc.hasRTV = true;
     brdfDesc.format = rhi::Format::R16G16_Float;
