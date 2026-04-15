@@ -66,6 +66,7 @@ LightFragmentData getLightParametersForFragment(LightInfo light, float3 fragPos)
     result.lightPos = light.posWorldSpace.xyz;
     result.lightColor = light.color.xyz;
     result.intensity = light.color.w;
+    result.distance = 0.0;
     
     switch (light.type) {
         case 2:{
@@ -273,7 +274,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                             break;
                         }
                     case 2:{// Directional light
-                            CLodVirtualShadowDebugInfo shadowDebugInfo;
+                            CLodVirtualShadowDebugInfo shadowDebugInfo = CLodVirtualShadowInitDebugInfo(0xFFFFFFFFu);
                             // shadow = calculateDirectionalVSMShadowDetailed(
                             //     fragmentInfo.pixelCoords,
                             //     fragmentInfo.fragPosWorldSpace,
@@ -318,7 +319,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             // {
             //     continue; // skip light if shadowed
             // }
-            if (lightFragmentInfo.distance > light.maxRange && light.type != 2)
+            if (light.type != 2 && lightFragmentInfo.distance > light.maxRange)
             {
                 continue;
             }

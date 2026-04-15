@@ -15,6 +15,8 @@
 
 #pragma comment(lib, "dxcompiler.lib")
 
+#define WRITE_DEBUG_FILES BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+
 namespace {
 
 constexpr std::wstring_view kValidationSkipEntryPoints[] = {
@@ -114,7 +116,7 @@ uint64_t ComputeShaderCacheBuildConfigHash()
     uint64_t seed = 0;
     util::hash_combine_u64(seed, shadercache::kSchemaVersion);
     util::hash_combine_u64(seed, kBRSLPreprocessVersion);
-#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+#if WRITE_DEBUG_FILES
     util::hash_combine_u64(seed, 1u);
 #else
     util::hash_combine_u64(seed, 0u);
@@ -1818,8 +1820,8 @@ void PSOManager::GetPreprocessedBlob(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-    opts.enableDebugInfo = false;
+#if WRITE_DEBUG_FILES
+    opts.enableDebugInfo = true;
 #endif
     opts.warningsAsErrors = true;
 
@@ -2163,7 +2165,7 @@ void PSOManager::CompileShader(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
-#if BUILD_TYPE == BUILD_TYPE_DEBUG //|| BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+#if WRITE_DEBUG_FILES
     opts.enableDebugInfo = true;
 #endif
     opts.warningsAsErrors = true;
@@ -2238,7 +2240,7 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
         args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
     }
 
-    for (auto& def : opts.defines) {
+    for (auto& def : opts.defines) { 
         args.push_back(L"-D");
         if (def.Value && def.Value[0] != L'\0') {
             ownedArgs.emplace_back(def.Name);

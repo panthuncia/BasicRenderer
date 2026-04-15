@@ -111,8 +111,8 @@ private:
         uint workGroupOffset[2];
         float invInputSize[2];
         
-        unsigned int mipUavDescriptorIndices[11];
-        uint pad[1];
+        unsigned int mipUavDescriptorIndices[12];
+        uint pad[4];
     };
 
     struct PerMapInfo {
@@ -182,7 +182,8 @@ private:
         unsigned int threadGroupCountXY[2];
         SpdSetup(threadGroupCountXY, workGroupOffset, numWorkGroupsAndMips, rectInfo);
 
-		numWorkGroupsAndMips[1] = linearDepthMap->GetNumUAVMipLevels() - 1;
+        const uint32_t maxGen = 12u;
+        numWorkGroupsAndMips[1] = (std::min)(linearDepthMap->GetNumUAVMipLevels() - 1, maxGen);
 
         spdConstants constants = {};
 		constants.srcSize[0] = linearDepthMap->GetInternalWidth();
@@ -194,7 +195,7 @@ private:
         constants.workGroupOffset[0] = workGroupOffset[0];
         constants.workGroupOffset[1] = workGroupOffset[1];
 
-		for (unsigned i = 0; i < (std::min)(11u, linearDepthMap->GetNumUAVMipLevels() - 1); i++) {
+		for (uint32_t i = 0; i < constants.mips; ++i) {
 			constants.mipUavDescriptorIndices[i] = linearDepthMap->GetUAVShaderVisibleInfo(i + 1).slot.index;
 		}
 

@@ -44,6 +44,9 @@ PassReturn RasterBucketBlockScanPass::Execute(PassExecutionContext& executionCon
     auto& pm = PSOManager::GetInstance();
 
     auto numBuckets = context.materialManager->GetRasterBucketCount();
+    if (numBuckets == 0) {
+        return {};
+    }
     const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
