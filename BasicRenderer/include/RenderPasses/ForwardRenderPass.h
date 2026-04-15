@@ -64,16 +64,20 @@ public:
             Builtin::PerObjectBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
-            Builtin::PostSkinningVertices,
-            Builtin::Shadows::CLodClipmapInfo,
-            Builtin::Shadows::CLodCompactMainCamera,
-            Builtin::Shadows::CLodCompactShadowCameras,
-            Builtin::Shadows::CLodDirectionalPageViewInfo,
-            Builtin::Shadows::CLodPageTable,
-            Builtin::Shadows::CLodPhysicalPages)
+            Builtin::PostSkinningVertices)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .IsGeometryPass();
+
+        if (getShadowsEnabled()) {
+            builder->WithShaderResource(Builtin::Shadows::CLodClipmapInfo,
+                Builtin::Shadows::CLodCompactMainCamera,
+                Builtin::Shadows::CLodCompactShadowCameras,
+                Builtin::Shadows::CLodDirectionalPageViewInfo,
+                Builtin::Shadows::CLodPageTable,
+                Builtin::Shadows::CLodPhysicalPages);
+        }
+
         builder->WithUnorderedAccess(Builtin::DebugVisualization);
         if (m_clusteredLightingEnabled) {
             builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
@@ -99,7 +103,9 @@ public:
     }
 
     void Setup() override {
-        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+        if (getShadowsEnabled()) {
+            RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+        }
 
         auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()

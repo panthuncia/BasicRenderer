@@ -48,6 +48,13 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
 	}
 
 	// No suitable block found, need to grow the buffer
+    spdlog::info(
+        "DynamicBuffer '{}' id={} growing allocation request={} elementSize={} currentCapacity={}",
+        m_name,
+        GetGlobalResourceID(),
+        requiredSize,
+        elementSize,
+        m_capacity);
 
 	// Absorb the last block if it is free
     size_t previousCapacity = m_capacity;
@@ -219,15 +226,45 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
 }
 
 void DynamicBuffer::GrowBuffer(size_t newSize) {
+    spdlog::info(
+        "DynamicBuffer '{}' id={} GrowBuffer begin oldCapacity={} newCapacity={} hasBacking={}",
+        m_name,
+        GetGlobalResourceID(),
+        m_capacity,
+        newSize,
+        m_dataBuffer != nullptr);
     auto device = DeviceManager::GetInstance().GetDevice();
+    spdlog::info(
+        "DynamicBuffer '{}' id={} GrowBuffer creating new GPU backing",
+        m_name,
+        GetGlobalResourceID());
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize, GetGlobalResourceID(), m_UAV);
+    spdlog::info(
+        "DynamicBuffer '{}' id={} GrowBuffer created new GPU backing",
+        m_name,
+        GetGlobalResourceID());
     if (m_dataBuffer) {
+        spdlog::info(
+            "DynamicBuffer '{}' id={} GrowBuffer queueing copy from old backing bytes={}",
+            m_name,
+            GetGlobalResourceID(),
+            m_capacity);
         auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
         if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
             uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity);
         }
     }
+	spdlog::info(
+		"DynamicBuffer '{}' id={} GrowBuffer SetBacking begin",
+		m_name,
+		GetGlobalResourceID());
 	SetBacking(std::move(newDataBuffer), newSize);
+    spdlog::info(
+        "DynamicBuffer '{}' id={} GrowBuffer SetBacking complete bufferSize={} backingGeneration={} ",
+        m_name,
+        GetGlobalResourceID(),
+        GetBufferSize(),
+        GetBackingGeneration());
     m_uploadPolicyState.OnBufferResized(GetBufferSize());
 
     m_capacity = newSize;
@@ -236,7 +273,20 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
         ApplyMetadataToBacking(bundle);
     }
 
+    spdlog::info(
+        "DynamicBuffer '{}' id={} GrowBuffer AssignDescriptorSlots begin",
+        m_name,
+        GetGlobalResourceID());
     AssignDescriptorSlots();
+    spdlog::info(
+        "DynamicBuffer '{}' id={} GrowBuffer AssignDescriptorSlots complete",
+        m_name,
+        GetGlobalResourceID());
 
 	SetName(m_name);
+    spdlog::info(
+        "DynamicBuffer '{}' id={} GrowBuffer complete finalCapacity={}",
+        m_name,
+        GetGlobalResourceID(),
+        m_capacity);
 }

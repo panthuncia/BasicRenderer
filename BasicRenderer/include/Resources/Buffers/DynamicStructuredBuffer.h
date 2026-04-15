@@ -6,6 +6,8 @@
 #include <rhi.h>
 #include <memory>
 
+#include <spdlog/spdlog.h>
+
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Interfaces/IHasMemoryMetadata.h"
@@ -182,6 +184,15 @@ private:
 
 
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
+        spdlog::info(
+            "DynamicStructuredBuffer::CreateBuffer name='{}' id={} capacity={} previousCapacity={} stride={} bytes={} uav={}",
+            name,
+            GetGlobalResourceID(),
+            capacity,
+            previousCapacity,
+            sizeof(T),
+            sizeof(T) * capacity,
+            m_UAV);
         if (m_dataBuffer != nullptr) {
 			// If shrinking, copy only up to new capacity. If growing, copy up to previous capacity.
             auto sizeToCopy = capacity < previousCapacity ? capacity : previousCapacity;

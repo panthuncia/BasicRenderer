@@ -102,6 +102,47 @@ void D3D12DebugCallback(
 
 namespace {
 
+bool IsStreamlineDisabledByEnvironment() {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, "BASICRENDERER_DISABLE_STREAMLINE") != 0 || value == nullptr) {
+        return false;
+    }
+    const bool disabled = value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y';
+    free(value);
+    return disabled;
+}
+
+void ProbeGraphicsCommandListCreation(rhi::Device device, std::string_view phase) {
+    const std::string_view label = phase.empty() ? std::string_view("<unknown>") : phase;
+    spdlog::info("Renderer command-list probe begin phase={}", label);
+
+    rhi::CommandAllocatorPtr allocator;
+    const auto allocResult = device.CreateCommandAllocator(rhi::QueueKind::Graphics, allocator);
+    spdlog::info(
+        "Renderer command-list probe phase={} allocator result={} valid={}",
+        label,
+        static_cast<int>(allocResult),
+        static_cast<bool>(allocator));
+    if (allocResult != rhi::Result::Ok || !allocator) {
+        return;
+    }
+
+    rhi::CommandListPtr list;
+    const auto listResult = device.CreateCommandList(rhi::QueueKind::Graphics, allocator.Get(), list);
+    spdlog::info(
+        "Renderer command-list probe phase={} list result={} valid={}",
+        label,
+        static_cast<int>(listResult),
+        static_cast<bool>(list));
+    if (listResult != rhi::Result::Ok || !list) {
+        return;
+    }
+
+    list->End();
+    spdlog::info("Renderer command-list probe end phase={}", label);
+}
+
 flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stableSceneID) {
     if (!node.is_alive()) {
         return {};
@@ -131,13 +172,16 @@ flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stable
 
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     auto& settingsManager = SettingsManager::GetInstance();
+    const bool enableStreamline = false;// !IsStreamlineDisabledByEnvironment();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
-    settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", false);
+    settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
+    settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", true);
     LoadPipeline(hwnd, x_res, y_res);
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
     UpscalingManager::GetInstance().InitFFX(); // Needs device
     FFXManager::GetInstance().InitFFX();
@@ -197,6 +241,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     PSOManager::GetInstance().initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after PSO and command signatures");
     Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
     if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
         readbackService->Initialize(m_readbackFence.Get());
@@ -209,8 +254,10 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     }
 
     UpscalingManager::GetInstance().Setup();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after UpscalingManager::Setup");
 
     CreateTextures();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after CreateTextures");
 
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
@@ -236,6 +283,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pTextureFactory = TextureFactory::CreateUnique();
 
     CreateGlobalResources();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after CreateGlobalResources");
 
 	m_managerInterface.SetManagers(
         m_pMeshManager.get(), 
@@ -857,7 +905,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
-	settingsManager.registerSetting<bool>("enableShadows", true);
+	settingsManager.registerSetting<bool>("enableShadows", false);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
     settingsManager.registerSetting<uint16_t>("reflectionCubemapResolution", 512);
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
@@ -1467,6 +1515,7 @@ void Renderer::Update(float elapsedSeconds) {
             ZoneScopedN("Renderer::Update::RenderGraphBuild");
 		    CreateRenderGraph();
         });
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after RenderGraphBuild");
     }
     runCapturedStage("RenderResourceSync", [&]() {
         RunRenderResourceSyncStage();
@@ -1546,6 +1595,7 @@ void Renderer::Update(float elapsedSeconds) {
         ZoneScopedN("Renderer::Update::RenderGraphUpdate");
         currentRenderGraph->Update(context, deviceManager.GetDevice());
     });
+    ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "after RenderGraphUpdate");
 
     // Clear transform-update tags only after render-graph update so passes such as
     // virtual shadow invalidation can still consume same-frame movement signals.
@@ -1583,6 +1633,7 @@ void Renderer::Update(float elapsedSeconds) {
             }
         }
         });
+    ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "after FrameMaintenance");
 }
 
 void Renderer::PostUpdate() {
@@ -1783,6 +1834,7 @@ void Renderer::Render() {
     runCapturedStage("RenderGraphExecute", [&]() {
         ZoneScopedN("Renderer::Render::RenderGraphExecute");
         if (renderGraphBatchTraceEnabled) {
+            ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "before RenderGraph::Execute");
             spdlog::info("Renderer: frame {} entering RenderGraph::Execute", m_totalFramesRendered);
         }
         m_dynamicBackbuffer->SetResource(m_backbufferResources[renderedFrameIndex]);
@@ -2228,9 +2280,14 @@ void Renderer::CreateRenderGraph() {
     }
 
     auto& newGraph = currentRenderGraph;
+    const auto probeGraphBuildPhase = [&](const char* phase) {
+        spdlog::info("Renderer::CreateRenderGraph reached phase={}", phase ? phase : "<unknown>");
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), phase);
+    };
 
     newGraph->ResetForRebuild();
     DeletionManager::GetInstance().DrainAll();
+    probeGraphBuildPhase("CreateRenderGraph after ResetForRebuild");
 
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
@@ -2242,6 +2299,7 @@ void Renderer::CreateRenderGraph() {
 	newGraph->RegisterProvider(m_pSkeletonManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
     newGraph->PrepareExtensionsForBuild();
+    probeGraphBuildPhase("CreateRenderGraph after PrepareExtensionsForBuild");
 
     auto& depth = primaryCameraEntity.get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth.depthMap;
@@ -2300,6 +2358,7 @@ void Renderer::CreateRenderGraph() {
 
 	// Either visibility or standard GBuffer pass
     BuildGBufferPipeline(newGraph.get());
+    probeGraphBuildPhase("CreateRenderGraph after BuildGBufferPipeline");
 
     // GTAO pass
     if (m_gtaoEnabled) {
@@ -2336,6 +2395,7 @@ void Renderer::CreateRenderGraph() {
     }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
+    probeGraphBuildPhase("CreateRenderGraph after BuildPrimaryPass");
 
 	// Start of post-processing passes
 
@@ -2394,11 +2454,36 @@ void Renderer::CreateRenderGraph() {
     }
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
+    probeGraphBuildPhase("CreateRenderGraph before CompileStructural");
+
+    newGraph->SetStructuralMaterializeCheckpointCallback([](std::string_view passName) {
+        if (!passName.starts_with("CLodShadow::")) {
+            return;
+        }
+
+        std::string phase = "CreateRenderGraph after structural pass ";
+        phase += passName;
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), phase);
+    });
+
+    newGraph->SetStructuralMaterializeResourceCheckpointCallback([](std::string_view passName, std::string_view resourceName) {
+        if (passName != "CLodShadow::VirtualShadowSetupPass") {
+            return;
+        }
+
+        std::string phase = "CreateRenderGraph after structural resource ";
+        phase += passName;
+        phase += " :: ";
+        phase += resourceName;
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), phase);
+    });
 
     //newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
 
     newGraph->CompileStructural();
+    probeGraphBuildPhase("CreateRenderGraph after CompileStructural");
     newGraph->Setup();
+    probeGraphBuildPhase("CreateRenderGraph after Setup");
 
 	rebuildRenderGraph = false;
 }

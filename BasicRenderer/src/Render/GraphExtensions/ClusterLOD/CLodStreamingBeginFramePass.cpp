@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <spdlog/spdlog.h>
+
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
@@ -30,10 +32,19 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     , m_scheduleStreamingReadbacks(std::move(scheduleStreamingReadbacks))
     , m_processStreamingRequests(std::move(processStreamingRequests))
     , m_getUploadInstance(std::move(getUploadInstance)) {
+    spdlog::info(
+        "CLodStreamingBeginFramePass::CLodStreamingBeginFramePass loadCounter={} usedGroupsCounter={} nonResidentBits={} activeGroupsBits={} runtimeState={}",
+        m_loadCounter ? m_loadCounter->GetGlobalResourceID() : 0ull,
+        m_usedGroupsCounter ? m_usedGroupsCounter->GetGlobalResourceID() : 0ull,
+        m_nonResidentBits ? m_nonResidentBits->GetGlobalResourceID() : 0ull,
+        m_activeGroupsBits ? m_activeGroupsBits->GetGlobalResourceID() : 0ull,
+        m_runtimeState ? m_runtimeState->GetGlobalResourceID() : 0ull);
 }
 
 void CLodStreamingBeginFramePass::DeclareResourceUsages(ComputePassBuilder* builder) {
+    spdlog::info("CLodStreamingBeginFramePass::DeclareResourceUsages begin");
     builder->WithUnorderedAccess(m_loadCounter, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
+    spdlog::info("CLodStreamingBeginFramePass::DeclareResourceUsages complete");
 }
 
 void CLodStreamingBeginFramePass::Setup() {}

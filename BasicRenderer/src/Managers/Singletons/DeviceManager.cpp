@@ -7,6 +7,19 @@
 
 namespace br {
 
+namespace {
+bool IsStreamlineDisabledByEnvironment() {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, "BASICRENDERER_DISABLE_STREAMLINE") != 0 || value == nullptr) {
+        return false;
+    }
+    const bool disabled = value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y';
+    free(value);
+    return disabled;
+}
+}
+
 DeviceManager& DeviceManager::GetInstance() {
     static DeviceManager instance;
     return instance;
@@ -14,16 +27,28 @@ DeviceManager& DeviceManager::GetInstance() {
 
 void DeviceManager::Initialize() {
     auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+    bool enableStreamline = !IsStreamlineDisabledByEnvironment();
+    try {
+        enableStreamline = SettingsManager::GetInstance().getSettingGetter<bool>("enableStreamline")();
+    }
+    catch (const std::exception&) {
+        enableStreamline = !IsStreamlineDisabledByEnvironment();
+    }
+    if (IsStreamlineDisabledByEnvironment()) {
+        enableStreamline = false;
+    }
 
     bool enableDebug = false;
 //#if BUILD_TYPE == BUILD_DEBUG
     enableDebug = true;
 //#endif
 
+    spdlog::info("DeviceManager::Initialize enableStreamline={} enableDebug={} framesInFlight={}", enableStreamline, enableDebug, numFramesInFlight);
+
     rhi::CreateD3D12Device(
         rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug },
         m_device,
-        true);
+        enableStreamline);
 
     m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
     m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);

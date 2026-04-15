@@ -159,6 +159,7 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 m_AVBOITChromaticExtinctionTexture);
     }
     else if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
+        const bool shadowsEnabled = m_getShadowsEnabled ? m_getShadowsEnabled() : false;
         for (auto& vb : m_visibilityBuffers) {
             builder->WithShaderResource(vb);
         }
@@ -171,12 +172,6 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 Builtin::Light::PointLightCubemapBuffer,
                 Builtin::Light::SpotLightMatrixBuffer,
                 Builtin::Light::DirectionalLightCascadeBuffer,
-                Builtin::Shadows::CLodClipmapInfo,
-                Builtin::Shadows::CLodDirectionalPageViewInfo,
-                Builtin::Shadows::CLodPageTable,
-                Builtin::Shadows::CLodPhysicalPages,
-                Builtin::Shadows::CLodCompactMainCamera,
-                Builtin::Shadows::CLodCompactShadowCameras,
                 Builtin::Light::ClusterBuffer,
                 Builtin::Light::PagesBuffer,
                 Builtin::Noise::BlueNoise2D,
@@ -188,6 +183,15 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 m_AVBOITAccumulationTexture,
                 m_AVBOITNormalizationTexture,
                 m_AVBOITShadingExtinctionTexture);
+        if (shadowsEnabled) {
+            builder->WithShaderResource(
+                Builtin::Shadows::CLodClipmapInfo,
+                Builtin::Shadows::CLodDirectionalPageViewInfo,
+                Builtin::Shadows::CLodPageTable,
+                Builtin::Shadows::CLodPhysicalPages,
+                Builtin::Shadows::CLodCompactMainCamera,
+                Builtin::Shadows::CLodCompactShadowCameras);
+        }
         if (m_AVBOITEarlyDepthTexture) {
             builder->WithDepthRead(m_AVBOITEarlyDepthTexture);
         }
@@ -206,7 +210,7 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
 }
 
 void ClusterRasterizationPass::Setup() {
-    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading && m_getShadowsEnabled && m_getShadowsEnabled()) {
         RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
     }
 }

@@ -56,7 +56,8 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
             Builtin::Shadows::CLodCompactMainCamera,
             m_tileWorkBuffer,
             m_tileCountBuffer,
-            m_markClipmapDataBuffer)
+            m_markClipmapDataBuffer
+    )
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
             m_allocationCountBuffer,
