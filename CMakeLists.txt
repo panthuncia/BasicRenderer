@@ -1,7 +1,7 @@
 ﻿# CMakeList.txt : Top-level CMake project file, do global configuration
 # and include sub-projects here.
 #
-cmake_minimum_required (VERSION 3.8)
+cmake_minimum_required (VERSION 3.10)
 
 set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
 
@@ -29,12 +29,15 @@ endif()
 
 project ("BasicRenderer")
 
+option(BASICRHI_ENABLE_RESHAPE "Enable GPU-Reshape-backed debug instrumentation in BasicRHI" OFF)
+
 if (WIN32)
   add_compile_definitions(NOMINMAX)
 endif()
 
 if (MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  add_compile_definitions(_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
 endif()
@@ -96,6 +99,21 @@ endif()
 set(_usd_selected_dir "${CMAKE_SOURCE_DIR}/ThirdParty/usd_${BASICRENDERER_USD_VARIANT}")
 list(APPEND CMAKE_PREFIX_PATH "${_usd_selected_dir}")
 set(PXR_DIR "${_usd_selected_dir}/lib/cmake/pxr")
+
+if(BASICRHI_ENABLE_RESHAPE)
+  if(NOT WIN32)
+    message(FATAL_ERROR "BASICRHI_ENABLE_RESHAPE currently requires Windows.")
+  endif()
+
+  set(ENABLE_BACKEND_DX12 ON CACHE BOOL "" FORCE)
+  set(ENABLE_BACKEND_VULKAN OFF CACHE BOOL "" FORCE)
+  set(ENABLE_UIX OFF CACHE BOOL "" FORCE)
+  set(ENABLE_NUGET_RESTORE OFF CACHE BOOL "" FORCE)
+  set(ENABLE_X86_BOOTSTRAPPER OFF CACHE BOOL "" FORCE)
+  set(ENABLE_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+
+  add_subdirectory("GPU-Reshape" EXCLUDE_FROM_ALL)
+endif()
 
 add_subdirectory("ThirdParty")
 add_subdirectory("BasicRHI")

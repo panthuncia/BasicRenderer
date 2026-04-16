@@ -63,6 +63,15 @@
       }
     },
     {
+      "name": "debug-reshape",
+      "displayName": "Debug + ReShape",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BASICRHI_ENABLE_RESHAPE": "ON"
+      }
+    },
+    {
       "name": "debug with address sanitizer",
       "displayName": "DebugAddressSanitizer",
       "inherits": "windows-base",
@@ -187,6 +196,12 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug-reshape",
+      "configurePreset": "debug-reshape"
     }
   ]
 }

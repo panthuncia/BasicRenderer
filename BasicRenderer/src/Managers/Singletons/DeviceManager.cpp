@@ -1,6 +1,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 
 #include <spdlog/spdlog.h>
+#include <rhi_debug.h>
 #include <rhi_interop_dx12.h>
 
 #include "Managers/Singletons/SettingsManager.h"
@@ -26,10 +27,11 @@ DeviceManager& DeviceManager::GetInstance() {
 }
 
 void DeviceManager::Initialize() {
-    auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+    auto& settingsManager = SettingsManager::GetInstance();
+    auto numFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight")();
     bool enableStreamline = !IsStreamlineDisabledByEnvironment();
     try {
-        enableStreamline = SettingsManager::GetInstance().getSettingGetter<bool>("enableStreamline")();
+        enableStreamline = settingsManager.getSettingGetter<bool>("enableStreamline")();
     }
     catch (const std::exception&) {
         enableStreamline = !IsStreamlineDisabledByEnvironment();
@@ -43,16 +45,57 @@ void DeviceManager::Initialize() {
     enableDebug = true;
 //#endif
 
-    spdlog::info("DeviceManager::Initialize enableStreamline={} enableDebug={} framesInFlight={}", enableStreamline, enableDebug, numFramesInFlight);
+    bool enableRuntimeInstrumentation = false;
+    bool enableSynchronousRecording = false;
+    try {
+        enableRuntimeInstrumentation = settingsManager.getSettingGetter<bool>("enableReShape")();
+    }
+    catch (const std::exception&) {
+        enableRuntimeInstrumentation = false;
+    }
+
+    try {
+        enableSynchronousRecording = settingsManager.getSettingGetter<bool>("reshapeSynchronousRecording")();
+    }
+    catch (const std::exception&) {
+        enableSynchronousRecording = false;
+    }
+
+    spdlog::info(
+        "DeviceManager::Initialize enableStreamline={} enableDebug={} enableReShape={} reshapeSync={} framesInFlight={}",
+        enableStreamline,
+        enableDebug,
+        enableRuntimeInstrumentation,
+        enableSynchronousRecording,
+        numFramesInFlight);
 
     rhi::CreateD3D12Device(
-        rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug },
+        rhi::DeviceCreateInfo{
+            .backend = rhi::Backend::D3D12,
+            .framesInFlight = numFramesInFlight,
+            .enableDebug = enableDebug,
+            .instrumentation = {
+                .enableRuntimeInstrumentation = enableRuntimeInstrumentation,
+                .enableSynchronousRecording = enableSynchronousRecording,
+            },
+        },
         m_device,
         enableStreamline);
 
     m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
     m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
     m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);
+
+    rhi::DebugInstrumentationCapabilities instrumentationCapabilities{};
+    if (rhi::IsOk(rhi::debug::GetInstrumentationCapabilities(m_device.Get(), instrumentationCapabilities))) {
+        spdlog::info(
+            "DeviceManager::Initialize ReShape caps buildEnabled={} installSupported={} globalSupported={} syncSupported={} featureCount={}",
+            instrumentationCapabilities.backendBuildEnabled,
+            instrumentationCapabilities.installSupported,
+            instrumentationCapabilities.globalInstrumentationSupported,
+            instrumentationCapabilities.synchronousRecordingSupported,
+            instrumentationCapabilities.featureCount);
+    }
 
     CheckGPUFeatures();
 }

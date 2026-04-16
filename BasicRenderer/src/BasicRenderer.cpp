@@ -368,8 +368,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//renderer.GetCurrentScene()->AppendScene(carScene->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(quad->Clone());
-	//quad->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
-	//renderer.GetCurrentScene()->AppendScene(quad->Clone());
+	quad->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+	renderer.GetCurrentScene()->AppendScene(quad->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(island->Clone());
 

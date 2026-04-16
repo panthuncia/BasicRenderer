@@ -736,6 +736,48 @@ PRIVATE
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )
 
+if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
+    target_link_directories(${PROJECT_NAME} PRIVATE
+        "${CMAKE_BINARY_DIR}/External/lib"
+    )
+
+    set(_basicrenderer_reshape_plugins
+        GRS.Features.Descriptor.Backend
+        GRS.Features.ResourceBounds.Backend
+        GRS.Features.Initialization.Backend
+    )
+
+    add_dependencies(${PROJECT_NAME}
+        GRS.Backends.DX12.Layer
+        ${_basicrenderer_reshape_plugins}
+    )
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:GRS.Features.Descriptor.Backend>"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/$<TARGET_FILE_NAME:GRS.Features.Descriptor.Backend>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:GRS.Features.ResourceBounds.Backend>"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/$<TARGET_FILE_NAME:GRS.Features.ResourceBounds.Backend>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:GRS.Features.Initialization.Backend>"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/$<TARGET_FILE_NAME:GRS.Features.Initialization.Backend>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Descriptor/Descriptor.xml"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Descriptor.xml"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/ResourceBounds/ResourceBounds.xml"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/ResourceBounds.xml"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Initialization/Initialization.xml"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Initialization.xml"
+    )
+endif()
+
 target_link_libraries(ShaderPreprocessTests
 PRIVATE
     unofficial::tree-sitter::tree-sitter

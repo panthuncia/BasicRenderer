@@ -13,6 +13,7 @@
 #include <typeindex>
 #include <utility>
 
+#include <rhi_debug.h>
 #include <rhi_interop_dx12.h>
 #include <tracy/Tracy.hpp>
 #include <spdlog/spdlog.h>
@@ -179,6 +180,9 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
+    settingsManager.registerSetting<bool>("enableReShape", false);
+    settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
+    settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
     settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", true);
     LoadPipeline(hwnd, x_res, y_res);
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
@@ -1115,6 +1119,24 @@ void Renderer::SetSettings() {
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
         m_jitter = newValue;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableReShape", [this](const bool& newValue) {
+        (void)newValue;
+        if (m_isInitialized) {
+            spdlog::warn("Changing enableReShape requires device recreation to take effect.");
+        }
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("reshapeSynchronousRecording", [this](const bool& newValue) {
+        auto result = rhi::debug::SetSynchronousRecording(m_device, newValue);
+        if (!rhi::IsOk(result) && result != rhi::Result::Unsupported) {
+            spdlog::warn("Failed to update runtime instrumentation synchronous recording state: {}", static_cast<uint32_t>(result));
+        }
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint64_t>("reshapeGlobalFeatureMask", [this](const uint64_t& newValue) {
+        auto result = rhi::debug::SetGlobalInstrumentationMask(m_device, newValue);
+        if (!rhi::IsOk(result) && result != rhi::Result::Unsupported) {
+            spdlog::warn("Failed to update runtime instrumentation feature mask: {}", static_cast<uint32_t>(result));
+        }
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<uint8_t>("numDirectionalLightCascades", [](const uint8_t& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
