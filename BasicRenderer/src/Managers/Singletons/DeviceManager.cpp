@@ -19,6 +19,14 @@ bool IsStreamlineDisabledByEnvironment() {
     free(value);
     return disabled;
 }
+
+bool IsDiagnosticsBuild() {
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+    return true;
+#else
+    return false;
+#endif
+}
 }
 
 DeviceManager& DeviceManager::GetInstance() {
@@ -40,10 +48,7 @@ void DeviceManager::Initialize() {
         enableStreamline = false;
     }
 
-    bool enableDebug = false;
-#if BUILD_TYPE == BUILD_DEBUG
-    enableDebug = true;
-#endif
+    const bool enableDebug = IsDiagnosticsBuild();
 
     bool enableRuntimeInstrumentation = false;
     bool enableSynchronousRecording = false;

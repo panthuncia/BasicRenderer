@@ -109,6 +109,15 @@
       }
     },
     {
+      "name": "relwithdebinfo-reshape",
+      "displayName": "RelWithDebInfo + ReShape",
+      "inherits": "relwithdebinfo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "BASICRHI_ENABLE_RESHAPE": "ON"
+      }
+    },
+    {
       "name": "release-aftermath",
       "displayName": "Release + Nsight Aftermath",
       "inherits": "windows-base",
@@ -202,6 +211,10 @@
     {
       "name": "debug-reshape",
       "configurePreset": "debug-reshape"
+    },
+    {
+      "name": "relwithdebinfo-reshape",
+      "configurePreset": "relwithdebinfo-reshape"
     }
   ]
 }

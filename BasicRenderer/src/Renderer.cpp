@@ -114,6 +114,14 @@ bool IsStreamlineDisabledByEnvironment() {
     return disabled;
 }
 
+bool DefaultEnableReShapeForBuild() {
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+    return true;
+#else
+    return false;
+#endif
+}
+
 void ProbeGraphicsCommandListCreation(rhi::Device device, std::string_view phase) {
     const std::string_view label = phase.empty() ? std::string_view("<unknown>") : phase;
     spdlog::info("Renderer command-list probe begin phase={}", label);
@@ -180,7 +188,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
-    settingsManager.registerSetting<bool>("enableReShape", true);
+    settingsManager.registerSetting<bool>("enableReShape", DefaultEnableReShapeForBuild());
     settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
     settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
     settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", true);
