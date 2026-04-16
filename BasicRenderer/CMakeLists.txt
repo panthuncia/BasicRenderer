@@ -754,9 +754,19 @@ if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
 
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxil.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxil.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxcompiler.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxcompiler.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxilconv.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxilconv.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:GRS.Features.Descriptor.Backend>"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/$<TARGET_FILE_NAME:GRS.Features.Descriptor.Backend>"

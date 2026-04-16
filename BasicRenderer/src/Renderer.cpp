@@ -180,7 +180,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
-    settingsManager.registerSetting<bool>("enableReShape", false);
+    settingsManager.registerSetting<bool>("enableReShape", true);
     settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
     settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
     settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", true);

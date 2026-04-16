@@ -41,9 +41,9 @@ void DeviceManager::Initialize() {
     }
 
     bool enableDebug = false;
-//#if BUILD_TYPE == BUILD_DEBUG
+#if BUILD_TYPE == BUILD_DEBUG
     enableDebug = true;
-//#endif
+#endif
 
     bool enableRuntimeInstrumentation = false;
     bool enableSynchronousRecording = false;
