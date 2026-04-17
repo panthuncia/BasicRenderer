@@ -156,7 +156,7 @@ flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stable
 
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     auto& settingsManager = SettingsManager::GetInstance();
-    const bool enableStreamline = false;// !IsStreamlineDisabledByEnvironment();
+    const bool enableStreamline = !IsStreamlineDisabledByEnvironment();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
@@ -892,7 +892,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
-	settingsManager.registerSetting<bool>("enableShadows", false);
+	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
     settingsManager.registerSetting<uint16_t>("reflectionCubemapResolution", 512);
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);

@@ -520,6 +520,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
 void EmitMeshletVisBufferForViewCLod(
     uint uGroupThreadID,
     MeshletSetup setup,
+    uint emittedVertexCount,
     uint viewID,
     uint shadowClipmapIndex,
     uint clusterIndex,
@@ -527,7 +528,7 @@ void EmitMeshletVisBufferForViewCLod(
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
     out indices uint3 outputTriangles[MS_MESHLET_SIZE])
 {
-    for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
+    for (uint i = uGroupThreadID; i < emittedVertexCount; i += MS_THREAD_GROUP_SIZE)
     {
         // Vertex i is meshlet-local (0..vertexCount-1)
         outputVertices[i] = GetVisBufferVertexAttributesForViewCLod(
@@ -567,12 +568,13 @@ void CacheMeshletVisBufferVerticesForViewCLod(
 void EmitCachedMeshletVisBufferVerticesForViewCLod(
     uint uGroupThreadID,
     MeshletSetup setup,
+    uint emittedVertexCount,
     uint viewID,
     uint shadowClipmapIndex,
     uint clusterIndex,
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE])
 {
-    for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
+    for (uint i = uGroupThreadID; i < emittedVertexCount; i += MS_THREAD_GROUP_SIZE)
     {
         VisBufferPSInput vertex;
         vertex.position = gs_clodVsmVertexPosition[i];
@@ -859,15 +861,14 @@ void MSMain(
     out vertices PSInput outputVertices[MS_MESHLET_SIZE],
     out indices uint3 outputTriangles[MS_MESHLET_SIZE])
 {
-    
     uint meshletIndex = payload.MeshletIndices[vGroupID];
-    MeshletSetup setup;
+    MeshletSetup setup = (MeshletSetup)0;
     bool draw = InitializeMeshlet(meshletIndex, setup);
-    SetMeshOutputCounts(setup.vertCount, setup.triCount);
     if (!draw)
     {
-        return;
+        setup = (MeshletSetup)0;
     }
+    SetMeshOutputCounts(setup.vertCount, setup.triCount);
     EmitMeshletGBuffer(uGroupThreadID, setup, outputVertices, outputTriangles);
 }
 
@@ -882,15 +883,19 @@ void VisibilityBufferMSMain(
     out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
 {
     uint meshletIndex = payload.MeshletIndices[vGroupID];
-    MeshletSetup setup;
+    MeshletSetup setup = (MeshletSetup)0;
     bool draw = InitializeMeshlet(meshletIndex, setup);
-    SetMeshOutputCounts(setup.vertCount, setup.triCount);
     if (!draw)
     {
-        return;
+        setup = (MeshletSetup)0;
     }
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
-    ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
+    ClodViewRasterInfo viewRasterInfo = (ClodViewRasterInfo)0;
+    if (draw)
+    {
+        StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+        viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
+    }
+    SetMeshOutputCounts(setup.vertCount, setup.triCount);
     EmitMeshletVisBufferForView(
         uGroupThreadID,
         setup,
@@ -1009,7 +1014,7 @@ void ClusterLODBucketMSMain(
 
     bool draw = linearizedID < count;
     uint4 packedCluster = uint4(0, 0, 0, CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX);
-    MeshletSetup setup;
+    MeshletSetup setup = (MeshletSetup)0;
     uint visibleClusterIndex = baseOffset + linearizedID;
     uint unsortedClusterIndex = 0;
     uint outputVertCount = 0;
@@ -1021,6 +1026,10 @@ void ClusterLODBucketMSMain(
         packedCluster = CLodLoadVisibleClusterPacked(compactedClusters, visibleClusterIndex);
         unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
         draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, linearizedID, count);
+        if (!draw)
+        {
+            setup = (MeshletSetup)0;
+        }
     }
 
 #if CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
@@ -1096,6 +1105,7 @@ void ClusterLODBucketMSMain(
     EmitCachedMeshletVisBufferVerticesForViewCLod(
         uGroupThreadID,
         setup,
+        outputVertCount,
         setup.viewID,
         setup.virtualShadowPayload,
         unsortedClusterIndex,
@@ -1113,6 +1123,7 @@ void ClusterLODBucketMSMain(
     EmitMeshletVisBufferForViewCLod(
         uGroupThreadID,
         setup,
+        outputVertCount,
         setup.viewID,
         setup.virtualShadowPayload,
         unsortedClusterIndex,
