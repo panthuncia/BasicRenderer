@@ -1244,9 +1244,9 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-    UpscalingManager::GetInstance().InitializeAdapter();
-
     auto result = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing, m_swapChain);
+
+    UpscalingManager::GetInstance().InitializeAdapter();
 
     // Create RTV descriptor heap
 	rhi::DescriptorHeapDesc rtvHeapDesc = {};
