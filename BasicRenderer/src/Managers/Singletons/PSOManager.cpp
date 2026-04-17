@@ -1154,6 +1154,15 @@ PipelineState PSOManager::CreateClusterLODAVBOITOccupancyPSO(
 PipelineState PSOManager::CreateClusterLODAVBOITShadePSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
+    DxcDefine forwardTransparentMacro;
+    forwardTransparentMacro.Value = L"1";
+    forwardTransparentMacro.Name = L"CLOD_AVBOIT_FORWARD_TRANSPARENT";
+    defines.insert(defines.begin(), forwardTransparentMacro);
+
+    DxcDefine separateReyesBatchMacro;
+    separateReyesBatchMacro.Value = L"1";
+    separateReyesBatchMacro.Name = L"CLOD_AVBOIT_REYES_SEPARATE_BATCH";
+    defines.insert(defines.begin(), separateReyesBatchMacro);
 
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -2237,7 +2246,7 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
     if (opts.enableDebugInfo) {
         args.push_back(DXC_ARG_DEBUG);
         args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
-        args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
+        //args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
     }
 
     for (auto& def : opts.defines) { 

@@ -279,7 +279,7 @@ VisBufferPSInput BuildVisBufferVertexAttributesForView(
     float4 worldPosition = mul(pos, objectBuffer.model);
     float4 viewPosition = mul(worldPosition, viewCamera.view);
 
-    VisBufferPSInput result;
+    VisBufferPSInput result = (VisBufferPSInput)0;
     result.position = mul(viewPosition, viewCamera.projection);
     result.position.x = result.position.x * rasterInfo.viewportScaleX + result.position.w * (rasterInfo.viewportScaleX - 1.0f);
     result.position.y = result.position.y * rasterInfo.viewportScaleY + result.position.w * (1.0f - rasterInfo.viewportScaleY);
@@ -287,9 +287,19 @@ VisBufferPSInput BuildVisBufferVertexAttributesForView(
     result.linearDepth = -viewPosition.z;
     result.viewID = viewID;
     result.shadowClipmapIndex = shadowClipmapIndex;
+#if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
+    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    float3x3 normalMatrix = (float3x3)normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
+    result.positionWorldSpace = worldPosition.xyz;
+    result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
+    result.color = vertex.color;
+    result.materialDataIndex = materialDataIndex;
+#endif
 #if defined(PSO_ALPHA_TEST)
     result.texcoord = vertex.texcoord;
+#if !defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
     result.materialDataIndex = materialDataIndex;
+#endif
 #endif
 
     return result;
@@ -506,7 +516,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
         : float3(1.0f, 1.0f, 1.0f);
     ApplyClodSkinningToVertex(meshletLocalVertex, setup, vertex);
 
-    return BuildVisBufferVertexAttributesForView(
+    VisBufferPSInput result = BuildVisBufferVertexAttributesForView(
         vertex,
         vGroupID,
         setup.objectBuffer,
@@ -515,6 +525,19 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
         clusterIndex,
         setup.meshBuffer.materialDataIndex,
         rasterInfo);
+
+#if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
+    result.uvSet01.xy = vertex.texcoord;
+    result.uvSet01.zw = DecodeCompressedUV(meshletLocalVertex, 1u, setup);
+    result.uvSet23.xy = DecodeCompressedUV(meshletLocalVertex, 2u, setup);
+    result.uvSet23.zw = DecodeCompressedUV(meshletLocalVertex, 3u, setup);
+    result.uvSet45.xy = DecodeCompressedUV(meshletLocalVertex, 4u, setup);
+    result.uvSet45.zw = DecodeCompressedUV(meshletLocalVertex, 5u, setup);
+    result.uvSet67.xy = DecodeCompressedUV(meshletLocalVertex, 6u, setup);
+    result.uvSet67.zw = DecodeCompressedUV(meshletLocalVertex, 7u, setup);
+#endif
+
+    return result;
 }
 
 void EmitMeshletVisBufferForViewCLod(
@@ -576,7 +599,7 @@ void EmitCachedMeshletVisBufferVerticesForViewCLod(
 {
     for (uint i = uGroupThreadID; i < emittedVertexCount; i += MS_THREAD_GROUP_SIZE)
     {
-        VisBufferPSInput vertex;
+        VisBufferPSInput vertex = (VisBufferPSInput)0;
         vertex.position = gs_clodVsmVertexPosition[i];
         vertex.linearDepth = gs_clodVsmLinearDepth[i];
 #if defined(PSO_ALPHA_TEST)
@@ -774,7 +797,7 @@ bool ClodProjectedTriangleTouchesRenderableVirtualShadowPages(
 
 VisBufferPSInput ReyesShadowVisVertexToPSInput(ReyesShadowVisVertex vertex)
 {
-    VisBufferPSInput output;
+    VisBufferPSInput output = (VisBufferPSInput)0;
     output.position = vertex.position;
     output.linearDepth = vertex.linearDepth;
 #if defined(PSO_ALPHA_TEST)

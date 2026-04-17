@@ -147,14 +147,154 @@ uint3 ComputeClusterID(float2 pixelCoords, float viewDepth,
     return uint3(tile.x, tile.y, sliceZ);
 }
 
+float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex) {
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    float3 lighting = float3(0.0, 0.0, 0.0);
+
+#if defined(PSO_IMAGE_BASED_LIGHTING)
+    float3 unusedDiffuseIBL = 0.0f.xxx;
+    float3 unusedSpecularIBL = 0.0f.xxx;
+    evaluateIBL(lighting,
+                unusedDiffuseIBL,
+                unusedSpecularIBL,
+                fragmentInfo.normalWS,
+                fragmentInfo.normalWS,
+                fragmentInfo.diffuseColor,
+                fragmentInfo.diffuseAmbientOcclusion,
+                fragmentInfo.F0,
+                fragmentInfo.reflectedWS,
+                fragmentInfo.roughness,
+                fragmentInfo.perceptualRoughness,
+                fragmentInfo.NdotV,
+                activeEnvironmentIndex,
+                environmentBufferDescriptorIndex);
+#endif
+
+    if (enablePunctualLights)
+    {
+        LightingParameters lightingParameters;
+        lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
+        lightingParameters.viewDir = fragmentInfo.viewWS;
+        lightingParameters.normal = fragmentInfo.normalWS;
+        lightingParameters.diffuseColor = fragmentInfo.diffuseColor;
+        lightingParameters.metallic = fragmentInfo.metallic;
+        lightingParameters.roughness = fragmentInfo.roughness;
+        lightingParameters.F0 = fragmentInfo.F0;
+
+        StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
+        StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
+        StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::DirectionalLightCascadeBuffer)];
+        StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+
+        StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ActiveLightIndices)];
+        StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
+
+#if defined(PSO_CLUSTERED_LIGHTING)
+        StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ClusterBuffer)];
+        StructuredBuffer<LightPage> lightPagesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesBuffer)];
+
+        float3 clusterID = ComputeClusterID(fragmentInfo.pixelCoords, fragmentInfo.fragPosViewSpace.z, perFrameBuffer, cameraBuffer[perFrameBuffer.mainCameraIndex]);
+        uint clusterIndex = clusterID.x +
+                            clusterID.y * perFrameBuffer.lightClusterGridSizeX +
+                            clusterID.z * perFrameBuffer.lightClusterGridSizeX * perFrameBuffer.lightClusterGridSizeY;
+
+        Cluster activeCluster = clusterBuffer[clusterIndex];
+
+        uint remainingLights = activeCluster.numLights;
+        uint pageIndex = activeCluster.ptrFirstPage;
+        uint maxPagesToVisit = max(1u, (remainingLights + LIGHTS_PER_PAGE - 1u) / LIGHTS_PER_PAGE);
+        uint pagesVisited = 0;
+
+        while (pageIndex != LIGHT_PAGE_ADDRESS_NULL && remainingLights > 0 && pagesVisited < maxPagesToVisit) {
+            LightPage page = lightPagesBuffer[pageIndex];
+            uint lightsInPage = min(page.numLightsInPage, LIGHTS_PER_PAGE);
+            lightsInPage = min(lightsInPage, remainingLights);
+            if (lightsInPage == 0) {
+                break;
+            }
+
+            for (uint i = 0; i < lightsInPage; i++) {
+                unsigned int index = activeLightIndices[page.lightIndices[i]];
+#else
+        for (uint i = 0; i < perFrameBuffer.numLights; i++)
+        {
+            unsigned int index = activeLightIndices[i];
+#endif
+            LightInfo light = lights[index];
+            float shadow = 0.0;
+            if (enableShadows)
+            {
+                if (light.shadowViewInfoIndex != -1)
+                {
+                    switch (light.type)
+                    {
+                    case 0:{
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
+                            shadow = calculatePointShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
+                            break;
+                        }
+                    case 1:{
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
+                            uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
+                            Camera camera = cameraBuffer[spotShadowCameraIndex];
+                            shadow = calculateSpotShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
+                            break;
+                        }
+                    case 2:{
+                            shadow = calculateDirectionalVSMShadow(
+                                fragmentInfo.pixelCoords,
+                                fragmentInfo.fragPosWorldSpace,
+                                fragmentInfo.fragPosViewSpace,
+                                fragmentInfo.normalWS,
+                                light,
+                                perFrameBuffer.numDirectionalClipmaps,
+                                perFrameBuffer.shadowCascadeSplits,
+                                directionalShadowViewInfoIndexBuffer,
+                                cameraBuffer);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, fragmentInfo.fragPosWorldSpace.xyz);
+            if (light.type != 2 && lightFragmentInfo.distance > light.maxRange)
+            {
+                continue;
+            }
+            lighting += (1.0 - shadow) * calculateLightContributionPBR(lightFragmentInfo, lightingParameters);
+        }
+#if defined(PSO_CLUSTERED_LIGHTING)
+            remainingLights -= lightsInPage;
+            pageIndex = page.ptrNextPage;
+            pagesVisited++;
+        }
+#endif
+    }
+
+    return lighting + fragmentInfo.emissive;
+}
+
 LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex, bool isFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float3 lighting = float3(0.0, 0.0, 0.0);
+
+#if defined(PSO_IMAGE_BASED_LIGHTING)
     float3 debugDiffuse = float3(0, 0, 0);
     float3 debugSpecular = float3(0, 0, 0);
+#endif
 
     LightingOutput output;
+
+#if defined(PSO_CLUSTERED_LIGHTING)
     output.shadowDebugPayload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
+#endif
 
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     evaluateIBL(lighting,
@@ -174,8 +314,10 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif // IMAGE_BASED_LIGHTING
 
     // Direct lighting
+#if defined(PSO_CLUSTERED_LIGHTING)
     uint clusterIndex = 0; // Which light cluster this fragment belongs to
     uint clusterLightCount = 0; // Number of lights in the cluster
+#endif
         
     if (enablePunctualLights)
     {

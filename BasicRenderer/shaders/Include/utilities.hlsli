@@ -164,7 +164,7 @@ float Sample2DGrad(Texture2D<float> tex, SamplerState samp, float2 uv, float2 dU
     return tex.SampleGrad(samp, uv, dUVdx, dUVdy);
 }
 
-#define MATERIAL_MAX_UNIQUE_UV_SETS 4u
+#define MATERIAL_MAX_UNIQUE_UV_SETS 8u
 #define MATERIAL_INVALID_UV_CACHE_INDEX 0xffffffffu
 
 enum MaterialTextureSlot
@@ -353,6 +353,79 @@ MaterialUvSample GetBoundUvSample(in MaterialUvCache cache, in MaterialUvBinding
 
     return cache.samples[cacheIndex];
 }
+
+#if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
+float2 GetForwardTransparentUvSet(in VisBufferPSInput input, uint uvSetIndex)
+{
+    switch (uvSetIndex)
+    {
+    case 0u:
+        return input.uvSet01.xy;
+    case 1u:
+        return input.uvSet01.zw;
+    case 2u:
+        return input.uvSet23.xy;
+    case 3u:
+        return input.uvSet23.zw;
+    case 4u:
+        return input.uvSet45.xy;
+    case 5u:
+        return input.uvSet45.zw;
+    case 6u:
+        return input.uvSet67.xy;
+    case 7u:
+        return input.uvSet67.zw;
+    default:
+        return float2(0.0f, 0.0f);
+    }
+}
+
+void AppendForwardMaterialUvSample(inout MaterialUvCache cache, uint uvSetIndex, in VisBufferPSInput input)
+{
+    if (cache.count >= MATERIAL_MAX_UNIQUE_UV_SETS)
+    {
+        return;
+    }
+
+    const float2 uv = GetForwardTransparentUvSet(input, uvSetIndex);
+
+    MaterialUvSample sample = (MaterialUvSample)0;
+    sample.uvSetIndex = uvSetIndex;
+    sample.uv = uv;
+    sample.dUVdx = ddx(uv);
+    sample.dUVdy = ddy(uv);
+    cache.samples[cache.count] = sample;
+    cache.count++;
+}
+
+MaterialUvCache BuildMaterialUvCacheFromForwardInput(
+    in VisBufferPSInput input,
+    in MaterialInfo materialInfo,
+    uint materialFlags)
+{
+    MaterialUvCache cache = (MaterialUvCache)0;
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        const MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
+        {
+            continue;
+        }
+
+        const uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (FindMaterialUvCacheIndex(cache, uvSetIndex) != MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            continue;
+        }
+
+        AppendForwardMaterialUvSample(cache, uvSetIndex, input);
+    }
+
+    return cache;
+}
+#endif
 
 void SampleMaterialFromUvCache(
     in MaterialUvCache uvCache,
@@ -574,14 +647,6 @@ void SampleMaterialFromUvCacheRuntime(
     in float3 dpdy,
     out MaterialInputs ret)
 {
-    MaterialUvSample baseColorUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_BASE_COLOR);
-    MaterialUvSample opacityUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_OPACITY);
-    MaterialUvSample metallicUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_METALLIC);
-    MaterialUvSample roughnessUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_ROUGHNESS);
-    MaterialUvSample normalUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_NORMAL);
-    MaterialUvSample aoUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_AO);
-    MaterialUvSample emissiveUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_EMISSIVE);
-
     float3x3 TBN = (float3x3)0.0f;
     if (uvBindings.hasTbnSource)
     {
@@ -626,6 +691,7 @@ void SampleMaterialFromUvCacheRuntime(
 
     if ((materialFlags & MATERIAL_BASE_COLOR_TEXTURE) != 0u)
     {
+        const MaterialUvSample baseColorUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_BASE_COLOR);
         Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorTextureIndex)];
         SamplerState baseColorSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorSamplerIndex)];
         float2 baseColorSampleUv = baseColorUv.uv;
@@ -643,6 +709,7 @@ void SampleMaterialFromUvCacheRuntime(
 
     if ((materialFlags & MATERIAL_OPACITY_TEXTURE) != 0u)
     {
+        const MaterialUvSample opacityUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_OPACITY);
         Texture2D<float4> opacityTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.opacityTextureIndex)];
         SamplerState opacitySamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.opacitySamplerIndex)];
         float2 opacitySampleUv = opacityUv.uv;
@@ -662,6 +729,8 @@ void SampleMaterialFromUvCacheRuntime(
     float roughness = materialInfo.roughnessFactor;
     if ((materialFlags & MATERIAL_PBR_MAPS) != 0u)
     {
+        const MaterialUvSample metallicUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_METALLIC);
+        const MaterialUvSample roughnessUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_ROUGHNESS);
         Texture2D<float4> metallicTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicTextureIndex)];
         SamplerState metallicSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicSamplerIndex)];
         Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessTextureIndex)];
@@ -697,6 +766,7 @@ void SampleMaterialFromUvCacheRuntime(
     float3 normalWS = normalWSBase;
     if ((materialFlags & MATERIAL_NORMAL_MAP) != 0u && uvBindings.hasTbnSource)
     {
+        const MaterialUvSample normalUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_NORMAL);
         Texture2D<float4> normalTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.normalTextureIndex)];
         SamplerState normalSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.normalSamplerIndex)];
         float2 normalSampleUv = normalUv.uv;
@@ -721,6 +791,7 @@ void SampleMaterialFromUvCacheRuntime(
     float ao = 1.0f;
     if ((materialFlags & MATERIAL_AO_TEXTURE) != 0u)
     {
+        const MaterialUvSample aoUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_AO);
         Texture2D<float4> aoTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.aoMapIndex)];
         SamplerState aoSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.aoSamplerIndex)];
         float2 aoSampleUv = aoUv.uv;
@@ -739,6 +810,7 @@ void SampleMaterialFromUvCacheRuntime(
     float3 emissive = materialInfo.emissiveFactor.rgb;
     if ((materialFlags & MATERIAL_EMISSIVE_TEXTURE) != 0u)
     {
+        const MaterialUvSample emissiveUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_EMISSIVE);
         Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.emissiveTextureIndex)];
         SamplerState emissiveSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.emissiveSamplerIndex)];
         float2 emissiveSampleUv = emissiveUv.uv;

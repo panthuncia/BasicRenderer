@@ -45,6 +45,15 @@ struct ClodResolvedSample
     MaterialInputs materialInputs;
 };
 
+struct ClodShadingSample
+{
+    float linearDepth;
+    float3 positionWS;
+    float3 positionVS;
+    uint materialFlags;
+    MaterialInputs materialInputs;
+};
+
 BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
 {
     BarycentricDeriv ret = (BarycentricDeriv)0;
@@ -600,9 +609,16 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     float3 n0 = DecodeCompressedNormal(triIdx.x, md);
     float3 n1 = DecodeCompressedNormal(triIdx.y, md);
     float3 n2 = DecodeCompressedNormal(triIdx.z, md);
-    float3 c0 = ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? DecodeCompressedColor(triIdx.x, md) : float3(1.0f, 1.0f, 1.0f);
-    float3 c1 = ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? DecodeCompressedColor(triIdx.y, md) : float3(1.0f, 1.0f, 1.0f);
-    float3 c2 = ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? DecodeCompressedColor(triIdx.z, md) : float3(1.0f, 1.0f, 1.0f);
+    const bool hasVertexColor = (md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u;
+    float3 c0 = 1.0f.xxx;
+    float3 c1 = 1.0f.xxx;
+    float3 c2 = 1.0f.xxx;
+    if (hasVertexColor)
+    {
+        c0 = DecodeCompressedColor(triIdx.x, md);
+        c1 = DecodeCompressedColor(triIdx.y, md);
+        c2 = DecodeCompressedColor(triIdx.z, md);
+    }
     ApplyClodSkinning(triIdx.x, md, p0, n0);
     ApplyClodSkinning(triIdx.y, md, p1, n1);
     ApplyClodSkinning(triIdx.z, md, p2, n2);
@@ -678,11 +694,15 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     float3 dpdyOS = float3(interpPosX.z, interpPosY.z, interpPosZ.z);
 
     float3 worldPosition = mul(float4(posOS, 1.0f), obj.model).xyz;
-    float3 positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
 
     float3x3 model3x3 = (float3x3)obj.model;
-    float3 dpdx = mul(dpdxOS, model3x3);
-    float3 dpdy = mul(dpdyOS, model3x3);
+    float3 dpdx = 0.0f.xxx;
+    float3 dpdy = 0.0f.xxx;
+    if ((materialFlags & (MATERIAL_NORMAL_MAP | MATERIAL_PARALLAX)) != 0u)
+    {
+        dpdx = mul(dpdxOS, model3x3);
+        dpdy = mul(dpdyOS, model3x3);
+    }
 
     float interpNX = InterpolateWithDeriv(bary, n0.x, n1.x, n2.x).x;
     float interpNY = InterpolateWithDeriv(bary, n0.y, n1.y, n2.y).x;
@@ -700,10 +720,14 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
             normalOS = geometricNormalOS;
         }
     }
-    float3 vertexColor = float3(
-        InterpolateWithDeriv(bary, c0.x, c1.x, c2.x).x,
-        InterpolateWithDeriv(bary, c0.y, c1.y, c2.y).x,
-        InterpolateWithDeriv(bary, c0.z, c1.z, c2.z).x);
+    float3 vertexColor = 1.0f.xxx;
+    if (hasVertexColor)
+    {
+        vertexColor = float3(
+            InterpolateWithDeriv(bary, c0.x, c1.x, c2.x).x,
+            InterpolateWithDeriv(bary, c0.y, c1.y, c2.y).x,
+            InterpolateWithDeriv(bary, c0.z, c1.z, c2.z).x);
+    }
 
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
     float3x3 normalMatrix = (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex];
@@ -724,6 +748,8 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
         dpdx,
         dpdy,
         materialInputs);
+
+    float3 positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
 
     sample.pixelCoords = pixel;
     sample.linearDepth = depth;
@@ -747,6 +773,28 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     sample.materialFlags = materialFlags;
     sample.materialInputs = materialInputs;
     return true;
+}
+
+bool ResolveClodShadingSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodShadingSample sample)
+{
+    ClodResolvedSample resolvedSample;
+    if (!ResolveClodSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
+    {
+        sample = (ClodShadingSample)0;
+        return false;
+    }
+
+    sample.linearDepth = resolvedSample.linearDepth;
+    sample.positionWS = resolvedSample.positionWS;
+    sample.positionVS = resolvedSample.positionVS;
+    sample.materialFlags = resolvedSample.materialFlags;
+    sample.materialInputs = resolvedSample.materialInputs;
+    return true;
+}
+
+bool ResolveClodShadingSampleFromVisKey(uint64_t vis, uint2 pixel, out ClodShadingSample sample)
+{
+    return ResolveClodShadingSampleFromVisKeyWithFace(vis, pixel, false, sample);
 }
 
 bool ResolveClodSampleFromVisKey(uint64_t vis, uint2 pixel, out ClodResolvedSample sample)

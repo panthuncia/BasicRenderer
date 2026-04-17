@@ -18,6 +18,22 @@ struct VisBufferPSInput
 {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
     float linearDepth : TEXCOORD0;
+#if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
+    float3 positionWorldSpace : TEXCOORD1;
+    float3 normalWorldSpace : TEXCOORD2;
+    float3 color : TEXCOORD3;
+    float4 uvSet01 : TEXCOORD4;
+    float4 uvSet23 : TEXCOORD5;
+    float4 uvSet45 : TEXCOORD6;
+    float4 uvSet67 : TEXCOORD7;
+    nointerpolation uint materialDataIndex : TEXCOORD8;
+#if defined (PSO_ALPHA_TEST)
+    float2 texcoord : TEXCOORD9;
+#endif
+    nointerpolation uint visibleClusterIndex : TEXCOORD10;
+    nointerpolation uint viewID : TEXCOORD11;
+    nointerpolation uint shadowClipmapIndex : TEXCOORD12;
+#else
 #if defined (PSO_ALPHA_TEST)
     float2 texcoord : TEXCOORD1;
     nointerpolation uint materialDataIndex : TEXCOORD2; // convenience for alpha test
@@ -25,6 +41,7 @@ struct VisBufferPSInput
     nointerpolation uint visibleClusterIndex : TEXCOORD3;
     nointerpolation uint viewID : TEXCOORD4;
     nointerpolation uint shadowClipmapIndex : TEXCOORD5;
+#endif
 };
 
 struct ClodViewRasterInfo
