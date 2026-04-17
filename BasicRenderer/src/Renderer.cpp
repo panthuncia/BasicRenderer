@@ -123,33 +123,8 @@ bool DefaultEnableReShapeForBuild() {
 }
 
 void ProbeGraphicsCommandListCreation(rhi::Device device, std::string_view phase) {
-    const std::string_view label = phase.empty() ? std::string_view("<unknown>") : phase;
-    spdlog::info("Renderer command-list probe begin phase={}", label);
-
-    rhi::CommandAllocatorPtr allocator;
-    const auto allocResult = device.CreateCommandAllocator(rhi::QueueKind::Graphics, allocator);
-    spdlog::info(
-        "Renderer command-list probe phase={} allocator result={} valid={}",
-        label,
-        static_cast<int>(allocResult),
-        static_cast<bool>(allocator));
-    if (allocResult != rhi::Result::Ok || !allocator) {
-        return;
-    }
-
-    rhi::CommandListPtr list;
-    const auto listResult = device.CreateCommandList(rhi::QueueKind::Graphics, allocator.Get(), list);
-    spdlog::info(
-        "Renderer command-list probe phase={} list result={} valid={}",
-        label,
-        static_cast<int>(listResult),
-        static_cast<bool>(list));
-    if (listResult != rhi::Result::Ok || !list) {
-        return;
-    }
-
-    list->End();
-    spdlog::info("Renderer command-list probe end phase={}", label);
+    (void)device;
+    (void)phase;
 }
 
 flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stableSceneID) {
@@ -191,7 +166,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     settingsManager.registerSetting<bool>("enableReShape", DefaultEnableReShapeForBuild());
     settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
     settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
-    settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", true);
+    settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", false);
     LoadPipeline(hwnd, x_res, y_res);
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
@@ -2311,7 +2286,6 @@ void Renderer::CreateRenderGraph() {
 
     auto& newGraph = currentRenderGraph;
     const auto probeGraphBuildPhase = [&](const char* phase) {
-        spdlog::info("Renderer::CreateRenderGraph reached phase={}", phase ? phase : "<unknown>");
         ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), phase);
     };
 

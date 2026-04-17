@@ -2221,33 +2221,18 @@ std::vector<ResourceIdentifier> CLodExtension::GetSupportedKeys()
 
 void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses)
 {
-    spdlog::info("CLodExtension::GatherStructuralPasses begin type={} outPassesBefore={} hasStreamingSystem={}",
-        static_cast<int>(m_type),
-        outPasses.size(),
-        m_streamingSystem != nullptr);
     PrepareForBuild(rg);
-    spdlog::info("CLodExtension::GatherStructuralPasses after PrepareForBuild type={}", static_cast<int>(m_type));
 
     if (m_type == CLodExtensionType::Shadow && !AreRendererShadowsEnabled()) {
-        spdlog::info("CLodExtension::GatherStructuralPasses skipping shadow variant because enableShadows=false");
         return;
     }
 
     const auto& traits = GetVariantTraits(m_type);
     if (m_streamingSystem) {
-        spdlog::info("CLodExtension::GatherStructuralPasses calling streaming GatherStructuralPasses type={} outPassesBeforeStreaming={}",
-            static_cast<int>(m_type),
-            outPasses.size());
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
-        spdlog::info("CLodExtension::GatherStructuralPasses returned from streaming GatherStructuralPasses type={} outPassesAfterStreaming={}",
-            static_cast<int>(m_type),
-            outPasses.size());
     }
 
     if (!traits.schedulesStructuralPasses) {
-        spdlog::info("CLodExtension::GatherStructuralPasses skipping structural scheduling type={} outPassesFinal={}",
-            static_cast<int>(m_type),
-            outPasses.size());
         return;
     }
 
@@ -2270,17 +2255,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     const auto transparencyMode = GetTransparencyMode(m_type);
     const bool disableReyesTessellation =
         SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
-    spdlog::info(
-        "CLodExtension::GatherStructuralPasses settings type={} softwareRasterMode={} shadowVSMRasterMode={} transparencyMode={} disableReyesTessellation={}",
-        static_cast<int>(m_type),
-        static_cast<int>(softwareRasterMode),
-        static_cast<int>(shadowVSMRasterMode),
-        static_cast<int>(transparencyMode),
-        disableReyesTessellation);
     if (!disableReyesTessellation) {
-        spdlog::info("CLodExtension::GatherStructuralPasses EnsureReyesResourcesInitialized begin type={}", static_cast<int>(m_type));
         EnsureReyesResourcesInitialized();
-        spdlog::info("CLodExtension::GatherStructuralPasses EnsureReyesResourcesInitialized complete type={}", static_cast<int>(m_type));
     }
     const bool forceHardwareOnly =
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
@@ -2303,15 +2279,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     const auto renderPhase = RenderPhase(traits.renderPhaseName.data());
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer = useReyesForThisVariant ? m_reyesOwnershipBitsetBuffer : nullptr;
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBufferPhase2 = useReyesForThisVariant ? m_reyesOwnershipBitsetBufferPhase2 : nullptr;
-    spdlog::info(
-        "CLodExtension::GatherStructuralPasses derived flags type={} forceHardwareOnly={} useComputeSWRaster={} useShadowPageJob={} useShadowReyesRouting={} useReyesForThisVariant={} outPassesCurrent={}",
-        static_cast<int>(m_type),
-        forceHardwareOnly,
-        useComputeSWRaster,
-        useShadowPageJob,
-        useShadowReyesRouting,
-        useReyesForThisVariant,
-        outPasses.size());
 
     const auto makeTransparentTailInsertPoint = []() {
         auto insertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
@@ -2346,9 +2313,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     std::string shadowNonRasterableHierarchyPassName;
     std::string shadowClearDirtyBitsAfterPassName;
     if (traits.type == CLodExtensionType::Shadow) {
-        spdlog::info("CLodExtension::GatherStructuralPasses entering shadow structural setup outPassesBeforeShadow={}", outPasses.size());
         const std::string shadowSetupPassName = MakeVariantPassName(traits, "VirtualShadowSetupPass");
-        spdlog::info("CLodExtension::GatherStructuralPasses building '{}'", shadowSetupPassName);
         auto shadowSetupPassDesc = RenderGraph::ExternalPassDesc::Compute(
             shadowSetupPassName,
             std::make_shared<VirtualShadowMapSetupPass>(
@@ -2368,7 +2333,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowVirtualResourcesNeedReset));
         shadowSetupPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
         outPasses.push_back(std::move(shadowSetupPassDesc));
-            spdlog::info("CLodExtension::GatherStructuralPasses pushed '{}' outPassesNow={}", shadowSetupPassName, outPasses.size());
         m_shadowVirtualResourcesNeedReset = false;
 
         const std::string shadowFreeWrappedPagesPassName = MakeVariantPassName(traits, "VirtualShadowFreeWrappedPagesPass");
@@ -2557,14 +2521,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     }
 
-    spdlog::info("CLodExtension::GatherStructuralPasses GetSlabResourceGroup begin type={} outPassesBeforeCull={}",
-        static_cast<int>(m_type),
-        outPasses.size());
     std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
-    spdlog::info("CLodExtension::GatherStructuralPasses GetSlabResourceGroup complete type={} slabGroup={} use_count={}",
-        static_cast<int>(m_type),
-        static_cast<const void*>(slabGroup.get()),
-        slabGroup ? slabGroup.use_count() : 0);
 
     HierarchialCullingPassInputs cullPassInputs;
     cullPassInputs.isFirstPass = true;
@@ -2575,11 +2532,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     cullPassInputs.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
     cullPassInputs.rasterOutputKind = traits.rasterOutputKind;
     const std::string cullPassName = MakeVariantPassName(traits, "HierarchialCullingPass1");
-    spdlog::info("CLodExtension::GatherStructuralPasses building '{}' type={} workGraphMode={} renderPhase='{}'",
-        cullPassName,
-        static_cast<int>(m_type),
-        static_cast<int>(workGraphMode),
-        traits.renderPhaseName.data());
     auto cullPassDesc = RenderGraph::ExternalPassDesc::Compute(
         cullPassName,
         std::make_shared<HierarchialCullingPass>(
@@ -2605,7 +2557,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
             traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
                 traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
-            spdlog::info("CLodExtension::GatherStructuralPasses built '{}'", cullPassName);
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
         cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLodOpaque::LinearDepthDownsamplePass2"));
@@ -2618,9 +2569,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
         }
     }
-    spdlog::info("CLodExtension::GatherStructuralPasses pushing '{}'", cullPassName);
     outPasses.push_back(std::move(cullPassDesc));
-    spdlog::info("CLodExtension::GatherStructuralPasses pushed '{}' outPassesNow={}", cullPassName, outPasses.size());
 
         if (traits.scheduleMode != CLodVariantTraits::ScheduleMode::SinglePassCullOnly && useReyesForThisVariant) {
             outPasses.push_back(
@@ -2838,15 +2787,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             }
         }
         else {
-            spdlog::info("CLodExtension::GatherStructuralPasses skipping Reyes path type={} scheduleMode={} useReyesForThisVariant={} outPassesCurrent={}",
-                static_cast<int>(m_type),
-                static_cast<int>(traits.scheduleMode),
-                useReyesForThisVariant,
-                outPasses.size());
         }
 
     const std::string rasterBucketsHistogramPassName = MakeVariantPassName(traits, "RasterBucketsHistogramPass1");
-    spdlog::info("CLodExtension::GatherStructuralPasses building '{}'", rasterBucketsHistogramPassName);
     outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             rasterBucketsHistogramPassName,
@@ -2856,10 +2799,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_histogramIndirectCommand,
                 m_rasterBucketsHistogramBuffer,
                 reyesOwnershipBitsetBuffer)));
-    spdlog::info("CLodExtension::GatherStructuralPasses pushed '{}' outPassesNow={}", rasterBucketsHistogramPassName, outPasses.size());
 
     const std::string rasterBucketsPrefixScanPassName = MakeVariantPassName(traits, "RasterBucketsPrefixScanPass1");
-    spdlog::info("CLodExtension::GatherStructuralPasses building '{}'", rasterBucketsPrefixScanPassName);
     outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             rasterBucketsPrefixScanPassName,
@@ -2867,10 +2808,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsHistogramBuffer,
                 m_rasterBucketsOffsetsBuffer,
                 m_rasterBucketsBlockSumsBuffer)));
-    spdlog::info("CLodExtension::GatherStructuralPasses pushed '{}' outPassesNow={}", rasterBucketsPrefixScanPassName, outPasses.size());
 
     const std::string rasterBucketsPrefixOffsetsPassName = MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPass1");
-    spdlog::info("CLodExtension::GatherStructuralPasses building '{}'", rasterBucketsPrefixOffsetsPassName);
     outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             rasterBucketsPrefixOffsetsPassName,
@@ -2879,10 +2818,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsBlockSumsBuffer,
                 m_rasterBucketsScannedBlockSumsBuffer,
                 m_rasterBucketsTotalCountBufferPhase1)));
-    spdlog::info("CLodExtension::GatherStructuralPasses pushed '{}' outPassesNow={}", rasterBucketsPrefixOffsetsPassName, outPasses.size());
 
     const std::string rasterBucketsCompactAndArgsPassName = MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPass1");
-    spdlog::info("CLodExtension::GatherStructuralPasses building '{}'", rasterBucketsCompactAndArgsPassName);
     outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             rasterBucketsCompactAndArgsPassName,
@@ -2900,7 +2837,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 reyesOwnershipBitsetBuffer,
                 m_visibleClusterCapacity,
                 false)));
-    spdlog::info("CLodExtension::GatherStructuralPasses pushed '{}' outPassesNow={}", rasterBucketsCompactAndArgsPassName, outPasses.size());
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly) {
         applyTechniqueTags();

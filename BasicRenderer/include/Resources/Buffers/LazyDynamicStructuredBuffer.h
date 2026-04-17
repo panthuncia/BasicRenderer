@@ -177,15 +177,6 @@ private:
     }
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
-        spdlog::info(
-            "LazyDynamicStructuredBuffer::CreateBuffer name='{}' id={} capacity={} previousCapacity={} stride={} bytes={} uav={}",
-            name,
-            GetGlobalResourceID(),
-            capacity,
-            previousCapacity,
-            m_elementSize,
-            m_elementSize * capacity,
-            m_UAV);
         if (m_dataBuffer != nullptr) {
             QueueResourceCopyFromOldBacking(previousCapacity * static_cast<size_t>(m_elementSize));
         }

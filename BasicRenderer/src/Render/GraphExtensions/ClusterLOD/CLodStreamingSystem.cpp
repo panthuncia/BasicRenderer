@@ -254,7 +254,6 @@ void CLodStreamingSystem::Initialize(RenderGraph& rg) {
 }
 
 void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
-	spdlog::info("CLodStreamingSystem::GatherStructuralPasses begin outPassesBefore={}", outPasses.size());
     rg.RegisterResource(Builtin::CLod::StreamingNonResidentBits, m_streamingNonResidentBits);
     rg.RegisterResource(Builtin::CLod::StreamingActiveGroupsBits, m_streamingActiveGroupsBits);
     rg.RegisterResource(Builtin::CLod::StreamingLoadRequests, m_streamingLoadRequests);
@@ -262,9 +261,7 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
     rg.RegisterResource(Builtin::CLod::StreamingRuntimeState, m_streamingRuntimeState);
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsCounter, m_usedGroupsCounter);
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroups, m_usedGroupsBuffer);
-	spdlog::info("CLodStreamingSystem::GatherStructuralPasses registered streaming resources");
 
-	spdlog::info("CLodStreamingSystem::GatherStructuralPasses creating CLod::StreamingBeginFramePass shared_ptr");
 	auto streamingBeginPass = std::make_shared<CLodStreamingBeginFramePass>(
 		[this]() -> UploadInstance* { return m_uploadInstance.get(); },
 		m_streamingLoadCounter,
@@ -291,23 +288,14 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
 		[this]() {
 			ProcessStreamingRequestsBudgeted();
 		});
-	spdlog::info(
-		"CLodStreamingSystem::GatherStructuralPasses created CLod::StreamingBeginFramePass shared_ptr={} use_count={}",
-		static_cast<const void*>(streamingBeginPass.get()),
-		streamingBeginPass.use_count());
 
-	spdlog::info("CLodStreamingSystem::GatherStructuralPasses building ExternalPassDesc::Compute for CLod::StreamingBeginFramePass");
     auto streamingBeginPassDesc = RenderGraph::ExternalPassDesc::Compute(
         "CLod::StreamingBeginFramePass",
         streamingBeginPass);
-    spdlog::info("CLodStreamingSystem::GatherStructuralPasses ExternalPassDesc::Compute complete");
     // Keep the CLod front-end behind the visibility/depth clear so the graph
     // cannot legally sink ClearVisibilityBufferPass after CLod rasterization.
-	spdlog::info("CLodStreamingSystem::GatherStructuralPasses applying insert point to CLod::StreamingBeginFramePass");
     streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("ClearVisibilityBufferPass"));
-	spdlog::info("CLodStreamingSystem::GatherStructuralPasses insert point applied; pushing pass desc");
     outPasses.push_back(std::move(streamingBeginPassDesc));
-	spdlog::info("CLodStreamingSystem::GatherStructuralPasses complete outPassesAfter={}", outPasses.size());
 }
 
 void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
@@ -1462,19 +1450,6 @@ void CLodStreamingSystem::StreamingWorkerMain() {
             }
             for (const uint32_t g : batchUsedGroups) {
                 m_decodedUsedGroupsBatch.push_back(g);
-            }
-
-            if (totalRequestCount > 0) {
-                spdlog::info(
-                    "CLod streaming worker: {} requests ({} unique groups) decoded",
-                    totalRequestCount,
-                    static_cast<uint32_t>(batchMaxPriorityByGroup.size()));
-            }
-            if (totalUsedGroupsCount > 0) {
-                spdlog::info(
-                    "CLod streaming worker: {} used groups ({} unique) decoded",
-                    totalUsedGroupsCount,
-                    static_cast<uint32_t>(batchUsedGroups.size()));
             }
         }
 

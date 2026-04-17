@@ -9,6 +9,24 @@
 namespace br {
 
 namespace {
+void LogInstrumentationDiagnostics(rhi::Device device) {
+    auto diagnostics = rhi::debug::GetInstrumentationDiagnostics(device);
+    for (const auto& diagnostic : diagnostics) {
+        switch (diagnostic.severity) {
+        case rhi::DebugInstrumentationDiagnosticSeverity::Info:
+            spdlog::info("DeviceManager ReShape diagnostic: {}", diagnostic.message);
+            break;
+        case rhi::DebugInstrumentationDiagnosticSeverity::Warning:
+            spdlog::warn("DeviceManager ReShape diagnostic: {}", diagnostic.message);
+            break;
+        case rhi::DebugInstrumentationDiagnosticSeverity::Error:
+        default:
+            spdlog::error("DeviceManager ReShape diagnostic: {}", diagnostic.message);
+            break;
+        }
+    }
+}
+
 bool IsStreamlineDisabledByEnvironment() {
     char* value = nullptr;
     size_t len = 0;
@@ -101,6 +119,32 @@ void DeviceManager::Initialize() {
             instrumentationCapabilities.synchronousRecordingSupported,
             instrumentationCapabilities.featureCount);
     }
+
+        rhi::DebugInstrumentationState instrumentationState{};
+        if (rhi::IsOk(rhi::debug::GetInstrumentationState(m_device.Get(), instrumentationState))) {
+            spdlog::info(
+                "DeviceManager::Initialize ReShape state requested={} active={} sync={} featureMask=0x{:X}",
+                instrumentationState.requested,
+                instrumentationState.active,
+                instrumentationState.synchronousRecording,
+                instrumentationState.globalFeatureMask);
+        }
+
+        auto instrumentationFeatures = rhi::debug::GetInstrumentationFeatures(m_device.Get());
+        spdlog::info("DeviceManager::Initialize ReShape queried feature count={}", instrumentationFeatures.size());
+        for (const auto& feature : instrumentationFeatures) {
+            spdlog::info(
+                "DeviceManager::Initialize ReShape feature bit=0x{:X} name='{}' description='{}'",
+                feature.featureBit,
+                feature.name,
+                feature.description);
+        }
+
+        if (enableRuntimeInstrumentation && instrumentationState.active && instrumentationFeatures.empty()) {
+            spdlog::warn("DeviceManager::Initialize requested ReShape instrumentation, but no backend features were discovered after startup queries.");
+        }
+
+        LogInstrumentationDiagnostics(m_device.Get());
 
     CheckGPUFeatures();
 }

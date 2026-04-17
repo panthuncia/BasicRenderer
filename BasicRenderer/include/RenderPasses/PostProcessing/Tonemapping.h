@@ -27,28 +27,18 @@ A_STATIC void LpmSetupOut(AU1 i, inAU4 v)
 class TonemappingPass : public RenderPass {
 public:
 	TonemappingPass() {
-        spdlog::info("TonemappingPass::TonemappingPass begin");
 		CreatePSO();
-        spdlog::info("TonemappingPass::TonemappingPass CreatePSO complete");
 		getTonemapType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("tonemapType");
-        spdlog::info("TonemappingPass::TonemappingPass tonemapType getter acquired");
         m_pLPMConstants = LazyDynamicStructuredBuffer<LPMConstants>::CreateShared(1, "AMD LPM constants", 1, true);
-        spdlog::info(
-            "TonemappingPass::TonemappingPass LPM constants buffer ready id={} name='{}'",
-            m_pLPMConstants ? m_pLPMConstants->GetGlobalResourceID() : 0ull,
-            m_pLPMConstants ? m_pLPMConstants->GetName() : std::string{});
-        spdlog::info("TonemappingPass::TonemappingPass complete");
 	}
 
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
-		spdlog::info("TonemappingPass::ProvideResource key='{}'", key.ToString());
         if (key == m_providedResources[0]) {
 			return m_pLPMConstants;
         }
 		return nullptr;
     }
     std::vector<ResourceIdentifier> GetSupportedKeys() override {
-		spdlog::info("TonemappingPass::GetSupportedKeys count={}", m_providedResources.size());
 		return m_providedResources;
     }
 

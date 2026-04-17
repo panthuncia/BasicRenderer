@@ -4,6 +4,7 @@
 #include <directx/d3d12.h>
 #include <rhi.h>
 #include <rhi_interop_dx12.h>
+#include <rhi_imgui_widgets.h>
 #include <memory>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -1174,6 +1175,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     static bool showCLodTelemetry = false;
     static bool showFrameTaskGraph = false;
     static bool showAutoAliasPlanner = false;
+    static bool showGpuInstrumentation = false;
 
     const float fps = ImGui::GetIO().Framerate;
     const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
@@ -1514,6 +1516,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
         ImGui::Checkbox("CPU frame task graph", &showFrameTaskGraph);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
+        ImGui::Checkbox("GPU instrumentation", &showGpuInstrumentation);
         std::string memoryString = "Memory usage: unavailable";
         const double KiB = 1024.0;
         const double MiB = KiB * 1024.0;
@@ -1619,6 +1622,11 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
     if (showCLodTelemetry) {
         DrawCLodTelemetryWindow();
+    }
+
+    if (showGpuInstrumentation) {
+        static rhi::debug::InstrumentationWidget g_gpuInstrumentationWidget;
+        g_gpuInstrumentationWidget.Draw(DeviceManager::GetInstance().GetDevice(), &showGpuInstrumentation);
     }
 
     if (showFrameTaskGraph) {

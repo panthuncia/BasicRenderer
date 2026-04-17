@@ -102,25 +102,12 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_isFirstPass = inputs.isFirstPass;
     m_workGraphComputePageJobDescriptorResourceId =
         std::string(CLodWorkGraphComputePageJobDescriptorBufferId) + "." + std::to_string(reinterpret_cast<uintptr_t>(this));
-    spdlog::info(
-        "HierarchialCullingPass::HierarchialCullingPass before CreatePipelines this={} workGraphMode={} rasterOutputKind={} isFirstPass={} resourceId='{}'",
-        static_cast<const void*>(this),
-        static_cast<int>(m_workGraphMode),
-        static_cast<int>(m_rasterOutputKind),
-        m_isFirstPass,
-        m_workGraphComputePageJobDescriptorResourceId);
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         m_workGraph,
         m_createCommandPipelineState,
         m_clearPipelineState);
-    spdlog::info(
-        "HierarchialCullingPass::HierarchialCullingPass after CreatePipelines this={} hasWorkGraph={} createCommandPipelineValid={} clearPipelineValid={}",
-        static_cast<const void*>(this),
-        static_cast<bool>(m_workGraph),
-        static_cast<bool>(m_createCommandPipelineState.GetAPIPipelineState()),
-        static_cast<bool>(m_clearPipelineState.GetAPIPipelineState()));
     if (!m_workGraph) {
         spdlog::error(
             "HierarchialCullingPass::HierarchialCullingPass CreatePipelines returned null work graph this={} workGraphMode={} rasterOutputKind={}",
@@ -128,11 +115,7 @@ HierarchialCullingPass::HierarchialCullingPass(
             static_cast<int>(m_workGraphMode),
             static_cast<int>(m_rasterOutputKind));
     }
-    spdlog::info("HierarchialCullingPass::HierarchialCullingPass querying required scratch memory this={} hasWorkGraph={}",
-        static_cast<const void*>(this),
-        static_cast<bool>(m_workGraph));
     auto memSize = m_workGraph->GetRequiredScratchMemorySize();
-    spdlog::info("HierarchialCullingPass::HierarchialCullingPass required scratch memory size={} this={}", memSize, static_cast<const void*>(this));
     m_scratchBuffer = Buffer::CreateShared(
         rhi::HeapType::DeviceLocal,
         memSize,
@@ -800,21 +783,8 @@ void HierarchialCullingPass::CreatePipelines(
     PipelineState& outCreateCommandPipeline,
     PipelineState& outClearPipeline)
 {
-    spdlog::info(
-        "HierarchialCullingPass::CreatePipelines begin this={} deviceValid={} workGraphMode={} rasterOutputKind={} globalRootSignatureValid={}",
-        static_cast<const void*>(this),
-        device.IsValid(),
-        static_cast<int>(m_workGraphMode),
-        static_cast<int>(m_rasterOutputKind),
-        globalRootSignature.valid());
     WorkGraphFeatureInfo workGraphFeatureInfo{};
     const rhi::Result workGraphFeatureResult = device.QueryFeatureInfo(&workGraphFeatureInfo.header);
-    spdlog::info(
-        "HierarchialCullingPass::CreatePipelines work graph feature query result={} computeNodes={} meshNodes={} level={}",
-        static_cast<int>(workGraphFeatureResult),
-        workGraphFeatureInfo.computeNodes,
-        workGraphFeatureInfo.meshNodes,
-        static_cast<int>(workGraphFeatureInfo.Level()));
     ShaderLibraryInfo libInfo(L"shaders/ClusterLOD/workGraphCulling.hlsl", L"lib_6_8");
     std::wstring pageJobDescriptorResourceIdWide(
         m_workGraphComputePageJobDescriptorResourceId.begin(),
@@ -883,31 +853,18 @@ void HierarchialCullingPass::CreatePipelines(
         break;
     }
 
-    spdlog::info(
-        "HierarchialCullingPass::CreatePipelines before CreateWorkGraph debugName='{}' program='{}' exports={} entrypoints={}",
-        wg.debugName ? wg.debugName : "",
-        wg.programName ? wg.programName : "",
-        exports.size(),
-        entrypoints.size());
     device.CreateWorkGraph(wg, outGraph);
-    spdlog::info(
-        "HierarchialCullingPass::CreatePipelines after CreateWorkGraph outGraph={}",
-        static_cast<bool>(outGraph));
 
-    spdlog::info("HierarchialCullingPass::CreatePipelines before create command pipeline");
     outCreateCommandPipeline = PSOManager::GetInstance().MakeComputePipeline(
         globalRootSignature,
         L"shaders/ClusterLOD/clodUtil.hlsl",
         L"CreateRasterBucketsHistogramCommandCSMain",
         {},
         "HierarchialLODCommandCreation");
-    spdlog::info("HierarchialCullingPass::CreatePipelines after create command pipeline valid={}", static_cast<bool>(outCreateCommandPipeline.GetAPIPipelineState()));
-    spdlog::info("HierarchialCullingPass::CreatePipelines before clear pipeline");
     outClearPipeline = PSOManager::GetInstance().MakeComputePipeline(
         globalRootSignature,
         L"shaders/ClusterLOD/clodUtil.hlsl",
         L"ClearUintStructuredBufferCSMain",
         {},
         "HierarchialCullingClearUintPSO");
-    spdlog::info("HierarchialCullingPass::CreatePipelines after clear pipeline valid={}", static_cast<bool>(outClearPipeline.GetAPIPipelineState()));
 }
