@@ -16,13 +16,10 @@ public:
         std::shared_ptr<Buffer> tileWorkBuffer,
         std::shared_ptr<Buffer> tileCountBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
-        std::shared_ptr<Buffer> allocationRequestsBuffer,
-        std::shared_ptr<Buffer> allocationCountBuffer,
         std::shared_ptr<Buffer> markClipmapDataBuffer,
-        std::shared_ptr<PixelBuffer> pageTableTexture,
-        std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
-        std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
-        std::shared_ptr<Buffer> statsBuffer);
+        std::shared_ptr<Buffer> markedBlocksMaskBuffer,
+        std::shared_ptr<Buffer> markedBlocksListBuffer,
+        std::shared_ptr<Buffer> markedBlocksCountBuffer);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -32,16 +29,14 @@ public:
 
 private:
     PipelineState m_pso;
+    PipelineState m_clearPso;
     rhi::CommandSignaturePtr m_commandSignature;
     std::shared_ptr<Buffer> m_tileWorkBuffer;
     std::shared_ptr<Buffer> m_tileCountBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    std::shared_ptr<Buffer> m_allocationRequestsBuffer;
-    std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_markClipmapDataBuffer;
-    std::shared_ptr<PixelBuffer> m_pageTableTexture;
-    std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
-    std::shared_ptr<Buffer> m_directionalPageViewInfoBuffer;
-    std::shared_ptr<Buffer> m_statsBuffer;
+    std::shared_ptr<Buffer> m_markedBlocksMaskBuffer;
+    std::shared_ptr<Buffer> m_markedBlocksListBuffer;
+    std::shared_ptr<Buffer> m_markedBlocksCountBuffer;
     uint32_t m_activeClipmapCount = 0u;
 };

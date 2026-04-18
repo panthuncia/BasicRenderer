@@ -75,6 +75,7 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapExpandPredictedPagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapInvalidatePagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapMarkPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapResolveMarkedBlocksPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapSetupPass.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RenderPhase.h"
@@ -1216,6 +1217,27 @@ void CLodExtension::InitializeShadowResources()
     m_shadowMarkTileIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_shadowMarkTileIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Indirect Args Buffer"));
 
+    m_shadowMarkedBlocksMaskBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxMarkedBlockCount,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_shadowMarkedBlocksMaskBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Marked Blocks Mask Buffer"));
+
+    m_shadowMarkedBlocksListBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxMarkedBlockCount,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_shadowMarkedBlocksListBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Marked Blocks List Buffer"));
+
+    m_shadowMarkedBlocksCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowMarkedBlocksCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Marked Blocks Count Buffer"));
+
     m_shadowFreePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         maxShadowPhysicalPageCount,
         sizeof(uint32_t),
@@ -1505,6 +1527,9 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_shadowMarkTileWorkBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowMarkTileCountBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowMarkTileIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkedBlocksMaskBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkedBlocksListBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkedBlocksCountBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowFreePhysicalPagesBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowReusablePhysicalPagesBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowPageListHeaderBuffer, "Cluster LOD virtual shadow maps");
@@ -1681,6 +1706,9 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_shadowMarkTileWorkBuffer);
     releaseBufferBacking(m_shadowMarkTileCountBuffer);
     releaseBufferBacking(m_shadowMarkTileIndirectArgsBuffer);
+    releaseBufferBacking(m_shadowMarkedBlocksMaskBuffer);
+    releaseBufferBacking(m_shadowMarkedBlocksListBuffer);
+    releaseBufferBacking(m_shadowMarkedBlocksCountBuffer);
     releaseBufferBacking(m_shadowFreePhysicalPagesBuffer);
     releaseBufferBacking(m_shadowReusablePhysicalPagesBuffer);
     releaseBufferBacking(m_shadowPageListHeaderBuffer);
@@ -2405,6 +2433,21 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowMarkTileWorkBuffer,
                 m_shadowMarkTileCountBuffer,
                 m_shadowMarkTileIndirectArgsBuffer,
+                m_shadowMarkClipmapDataBuffer,
+                m_shadowMarkedBlocksMaskBuffer,
+                m_shadowMarkedBlocksListBuffer,
+                m_shadowMarkedBlocksCountBuffer));
+        shadowMarkPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildMarkTileDispatchArgsPassName));
+			shadowMarkPagesPassDesc.preferredQueueKind = QueueKind::Graphics;
+        outPasses.push_back(std::move(shadowMarkPagesPassDesc));
+
+        const std::string shadowResolveMarkedBlocksPassName = MakeVariantPassName(traits, "VirtualShadowResolveMarkedBlocksPass");
+        auto shadowResolveMarkedBlocksPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowResolveMarkedBlocksPassName,
+            std::make_shared<VirtualShadowMapResolveMarkedBlocksPass>(
+                m_shadowMarkedBlocksMaskBuffer,
+                m_shadowMarkedBlocksListBuffer,
+                m_shadowMarkedBlocksCountBuffer,
                 m_shadowAllocationRequestsBuffer,
                 m_shadowAllocationCountBuffer,
                 m_shadowMarkClipmapDataBuffer,
@@ -2412,9 +2455,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowDirtyPageFlagsBuffer,
                 m_shadowDirectionalPageViewInfoBuffer,
                 m_shadowStatsBuffer));
-        shadowMarkPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildMarkTileDispatchArgsPassName));
-			shadowMarkPagesPassDesc.preferredQueueKind = QueueKind::Graphics;
-        outPasses.push_back(std::move(shadowMarkPagesPassDesc));
+        shadowResolveMarkedBlocksPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowMarkPagesPassName));
+        shadowResolveMarkedBlocksPassDesc.preferredQueueKind = QueueKind::Graphics;
+        outPasses.push_back(std::move(shadowResolveMarkedBlocksPassDesc));
 
         const std::string shadowBuildPageListsPassName = MakeVariantPassName(traits, "VirtualShadowBuildPageListsPass");
         auto shadowBuildPageListsPassDesc = RenderGraph::ExternalPassDesc::Compute(
@@ -2425,7 +2468,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowFreePhysicalPagesBuffer,
                 m_shadowReusablePhysicalPagesBuffer,
                 m_shadowPageListHeaderBuffer));
-        shadowBuildPageListsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowMarkPagesPassName));
+        shadowBuildPageListsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowResolveMarkedBlocksPassName));
         outPasses.push_back(std::move(shadowBuildPageListsPassDesc));
 
         const std::string shadowBuildDispatchArgsPassName = MakeVariantPassName(traits, "VirtualShadowBuildAllocationDispatchArgsPass");

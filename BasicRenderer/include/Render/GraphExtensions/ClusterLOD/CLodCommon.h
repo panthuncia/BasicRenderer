@@ -319,6 +319,12 @@ inline constexpr uint32_t CLodVirtualShadowBlockPagesPerAxis = 4u;
 inline constexpr uint32_t CLodVirtualShadowBlockPackedPhysicalPageIndexCount =
     (CLodVirtualShadowBlockPagesPerAxis * CLodVirtualShadowBlockPagesPerAxis) / 2u;
 inline constexpr uint32_t CLodVirtualShadowBlockMaxTrackedPerCluster = 32u;
+inline constexpr uint32_t CLodVirtualShadowMaxBlocksPerAxis =
+    (CLodVirtualShadowMaxPageTableResolution + CLodVirtualShadowBlockPagesPerAxis - 1u) / CLodVirtualShadowBlockPagesPerAxis;
+inline constexpr uint32_t CLodVirtualShadowMaxBlocksPerClipmap =
+    CLodVirtualShadowMaxBlocksPerAxis * CLodVirtualShadowMaxBlocksPerAxis;
+inline constexpr uint32_t CLodVirtualShadowMaxMarkedBlockCount =
+    CLodVirtualShadowMaxBlocksPerClipmap * CLodVirtualShadowMaxSupportedClipmapCount;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileGridDimension = 512u;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileCount =
     CLodVirtualShadowMaxMarkTileGridDimension * CLodVirtualShadowMaxMarkTileGridDimension;
@@ -344,6 +350,11 @@ inline constexpr uint32_t CLodVirtualShadowInvalidationFlagSkinned = 0x4u;
 constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
 {
     return (physicalPageCount + 31u) / 32u;
+}
+
+constexpr uint32_t CLodVirtualShadowBlockCountPerAxis(uint32_t pageTableResolution)
+{
+    return (pageTableResolution + CLodVirtualShadowBlockPagesPerAxis - 1u) / CLodVirtualShadowBlockPagesPerAxis;
 }
 
 constexpr uint32_t CLodVirtualShadowSanitizeBackingResolution(uint32_t backingResolution)

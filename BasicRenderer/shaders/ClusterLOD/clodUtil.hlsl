@@ -21,8 +21,10 @@
 #include "PerPassRootConstants/clodVirtualShadowDeduplicatePredictedPagesRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowExpandPredictedPagesRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowInvalidateRootConstants.h"
+#include "PerPassRootConstants/clodVirtualShadowMarkBlocksRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowBuildMarkTilesRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowMarkRootConstants.h"
+#include "PerPassRootConstants/clodVirtualShadowResolveMarkedBlocksRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowSetupRootConstants.h"
 #include "PerPassRootConstants/clodReyesSplitRootConstants.h"
 #include "include/indirectCommands.hlsli"
@@ -530,10 +532,38 @@ uint CLodDirectionalShadowPageViewInfoIndex(uint2 wrappedPageCoords, uint clipma
         wrappedPageCoords.x;
 }
 
+uint CLodVirtualShadowBlockMaskForPageRect(
+    uint2 logicalPageMin,
+    uint2 logicalPageMax,
+    uint2 blockOriginPage)
+{
+    uint activeMask = 0u;
+
+    [unroll]
+    for (uint localPageY = 0u; localPageY < kCLodVirtualShadowBlockPagesPerAxis; ++localPageY)
+    {
+        [unroll]
+        for (uint localPageX = 0u; localPageX < kCLodVirtualShadowBlockPagesPerAxis; ++localPageX)
+        {
+            const uint2 logicalPageCoord = blockOriginPage + uint2(localPageX, localPageY);
+            const bool insideRect =
+                all(logicalPageCoord >= logicalPageMin) &&
+                all(logicalPageCoord <= logicalPageMax);
+            if (insideRect)
+            {
+                activeMask |= 1u << CLodVirtualShadowBlockLocalPageIndex(uint2(localPageX, localPageY));
+            }
+        }
+    }
+
+    return activeMask;
+}
+
 void CLodMarkVirtualShadowWrappedPage(
     uint2 wrappedPageCoords,
     uint clipmapIndex,
     uint pageTableResolution,
+    uint maxRequestCount,
     uint activeClipmapCount,
     float4 directionalPageViewRow,
     RWStructuredBuffer<uint4> allocationRequests,
@@ -545,8 +575,7 @@ void CLodMarkVirtualShadowWrappedPage(
 {
     const uint3 pageCoords = uint3(wrappedPageCoords, clipmapIndex);
     const uint pageViewInfoIndex = CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex, pageTableResolution);
-    const uint virtualAddress =
-        wrappedPageCoords.y * CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_RESOLUTION + wrappedPageCoords.x;
+    const uint virtualAddress = wrappedPageCoords.y * pageTableResolution + wrappedPageCoords.x;
 
     const uint currentPageState = pageTable[pageCoords];
     if ((currentPageState & kCLodVirtualShadowAllocatedMask) != 0u)
@@ -593,7 +622,7 @@ void CLodMarkVirtualShadowWrappedPage(
     bool requestIndexValid = false;
     CLodVirtualShadowWaveReserveRequestSlot(
         allocationCountBuffer,
-        CLOD_VIRTUAL_SHADOW_MARK_MAX_REQUEST_COUNT,
+        maxRequestCount,
         true,
         requestIndex,
         requestIndexValid);
@@ -1508,6 +1537,244 @@ void CLodVirtualShadowAccumulateTileProjectedBounds(
 
 [shader("compute")]
 [numthreads(128, 1, 1)]
+void CLodVirtualShadowMarkBlocksCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    StructuredBuffer<uint> tileCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_TILE_COUNT_DESCRIPTOR_INDEX];
+    const uint tileCount = tileCountBuffer.Load(0);
+    const uint tileIndex = dispatchThreadId.x;
+    if (tileIndex >= tileCount)
+    {
+        return;
+    }
+
+    StructuredBuffer<CLodVirtualShadowMarkTileWorkItem> tileWorkBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_TILE_WORK_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodVirtualShadowMainCameraInfo> compactMainCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactMainCamera)];
+    StructuredBuffer<CLodVirtualShadowMarkClipmapData> markClipmapDataBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_CLIPMAP_DATA_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> markedBlockMasks = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_MASK_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> markedBlockList = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_LIST_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> markedBlockCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_COUNT_DESCRIPTOR_INDEX];
+
+    const CLodVirtualShadowMarkTileWorkItem tileWork = tileWorkBuffer[tileIndex];
+    const float minDepth = asfloat(tileWork.minDepthBits);
+    const float maxDepth = asfloat(tileWork.maxDepthBits);
+    if (tileWork.minDepthBits == 0x7F7FFFFFu)
+    {
+        return;
+    }
+
+    const uint activeClipmapCount = CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_ACTIVE_CLIPMAP_COUNT;
+    if (activeClipmapCount == 0u)
+    {
+        return;
+    }
+
+    const float2 screenSize = float2(CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_WIDTH, CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_HEIGHT);
+    const uint2 tilePixelMin = uint2(tileWork.tileCoordX, tileWork.tileCoordY) * kCLodVirtualShadowMarkTileSize;
+    const uint2 tilePixelMax = min(
+        tilePixelMin + kCLodVirtualShadowMarkTileSize,
+        uint2(CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_WIDTH, CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_HEIGHT));
+
+    const float2 tileUvMin = float2(tilePixelMin) / screenSize;
+    const float2 tileUvMax = float2(tilePixelMax) / screenSize;
+    const float2 tileUvCenter = 0.5f * (tileUvMin + tileUvMax);
+
+    const CLodVirtualShadowMainCameraInfo mainCamera = compactMainCameraBuffer[0];
+
+    uint minClipmapIndex = activeClipmapCount - 1u;
+    uint maxClipmapIndex = 0u;
+#define CLOD_ACCUMULATE_TILE_CLIPMAP(sampleUvValue, depthValue) \
+    CLodVirtualShadowAccumulateTileClipmapRange( \
+        sampleUvValue, \
+        depthValue, \
+        mainCamera, \
+        markClipmapDataBuffer[0].texelWorldSize, \
+        markClipmapDataBuffer[0].directionalLodBias, \
+        activeClipmapCount, \
+        minClipmapIndex, \
+        maxClipmapIndex)
+
+    CLOD_ACCUMULATE_TILE_CLIPMAP(tileUvMin, minDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(float2(tileUvMax.x, tileUvMin.y), minDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(float2(tileUvMin.x, tileUvMax.y), minDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(tileUvMax, minDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(tileUvCenter, minDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(tileUvMin, maxDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(float2(tileUvMax.x, tileUvMin.y), maxDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(float2(tileUvMin.x, tileUvMax.y), maxDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(tileUvMax, maxDepth);
+    CLOD_ACCUMULATE_TILE_CLIPMAP(tileUvCenter, maxDepth);
+
+#undef CLOD_ACCUMULATE_TILE_CLIPMAP
+
+    [loop]
+    for (uint clipmapIndex = minClipmapIndex; clipmapIndex <= maxClipmapIndex; ++clipmapIndex)
+    {
+        const CLodVirtualShadowMarkClipmapData clipmapData = markClipmapDataBuffer[clipmapIndex];
+        if (!CLodVirtualShadowMarkClipmapIsValid(clipmapData))
+        {
+            continue;
+        }
+
+        float2 shadowUvMin = float2(1.0e30f, 1.0e30f);
+        float2 shadowUvMax = float2(-1.0e30f, -1.0e30f);
+        float minProjectedZ = 1.0e30f;
+        float maxProjectedZ = -1.0e30f;
+
+#define CLOD_ACCUMULATE_TILE_BOUNDS(sampleUvValue, depthValue) \
+        CLodVirtualShadowAccumulateTileProjectedBounds( \
+            sampleUvValue, \
+            depthValue, \
+            mainCamera, \
+            clipmapData.shadowViewProjection, \
+            shadowUvMin, \
+            shadowUvMax, \
+            minProjectedZ, \
+            maxProjectedZ)
+
+        CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMin, minDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMax.x, tileUvMin.y), minDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMin.x, tileUvMax.y), minDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMax, minDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(tileUvCenter, minDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMin, maxDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMax.x, tileUvMin.y), maxDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMin.x, tileUvMax.y), maxDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMax, maxDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(tileUvCenter, maxDepth);
+
+#undef CLOD_ACCUMULATE_TILE_BOUNDS
+
+        if (maxProjectedZ < 0.0f || minProjectedZ > 1.0f)
+        {
+            continue;
+        }
+
+        const float2 pagePaddingUv = 0.5f / max((float)clipmapData.pageTableResolution, 1.0f);
+        shadowUvMin = saturate(shadowUvMin - pagePaddingUv);
+        shadowUvMax = saturate(shadowUvMax + pagePaddingUv);
+
+        const uint2 logicalPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUvMin, clipmapData);
+        const uint2 logicalPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUvMax, clipmapData);
+        const uint2 logicalBlockMin = CLodVirtualShadowBlockCoordFromPageCoord(logicalPageMin);
+        const uint2 logicalBlockMax = CLodVirtualShadowBlockCoordFromPageCoord(logicalPageMax);
+
+        [loop]
+        for (uint blockY = logicalBlockMin.y; blockY <= logicalBlockMax.y; ++blockY)
+        {
+            [loop]
+            for (uint blockX = logicalBlockMin.x; blockX <= logicalBlockMax.x; ++blockX)
+            {
+                const uint2 blockCoord = uint2(blockX, blockY);
+                const uint2 blockOriginPage = CLodVirtualShadowBlockOriginFromBlockCoord(blockCoord);
+                const uint activeMask = CLodVirtualShadowBlockMaskForPageRect(
+                    logicalPageMin,
+                    logicalPageMax,
+                    blockOriginPage);
+                if (activeMask == 0u)
+                {
+                    continue;
+                }
+
+                const uint blockLinearIndex = CLodVirtualShadowBlockLinearIndex(blockCoord, clipmapIndex);
+                uint previousMask = 0u;
+                InterlockedOr(markedBlockMasks[blockLinearIndex], activeMask, previousMask);
+                if (previousMask == 0u)
+                {
+                    uint blockListIndex = 0u;
+                    InterlockedAdd(markedBlockCountBuffer[0], 1u, blockListIndex);
+                    if (blockListIndex < kCLodVirtualShadowMaxMarkedBlockCount)
+                    {
+                        markedBlockList[blockListIndex] = blockLinearIndex;
+                    }
+                }
+            }
+        }
+    }
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CLodVirtualShadowResolveMarkedBlocksCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    StructuredBuffer<uint> markedBlockMasks = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_MASK_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> markedBlockList = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_LIST_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> markedBlockCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_COUNT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint4> allocationRequests = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_REQUESTS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> allocationCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_REQUEST_COUNT_DESCRIPTOR_INDEX];
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_PAGE_TABLE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> dirtyFlags = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_DIRTY_FLAGS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_PAGE_VIEW_INFO_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_STATS_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodVirtualShadowMarkClipmapData> markClipmapDataBuffer =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_CLIPMAP_DATA_DESCRIPTOR_INDEX];
+
+    const uint markedBlockCount = min(markedBlockCountBuffer.Load(0), kCLodVirtualShadowMaxMarkedBlockCount);
+    const uint markedBlockIndex = dispatchThreadId.x;
+    if (markedBlockIndex >= markedBlockCount)
+    {
+        return;
+    }
+
+    const uint blockLinearIndex = markedBlockList[markedBlockIndex];
+    uint2 blockCoord = uint2(0u, 0u);
+    uint clipmapIndex = 0u;
+    CLodVirtualShadowUnpackBlockLinearIndex(blockLinearIndex, blockCoord, clipmapIndex);
+    if (clipmapIndex >= CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_ACTIVE_CLIPMAP_COUNT)
+    {
+        return;
+    }
+
+    const CLodVirtualShadowMarkClipmapData clipmapData = markClipmapDataBuffer[clipmapIndex];
+    if (!CLodVirtualShadowMarkClipmapIsValid(clipmapData))
+    {
+        return;
+    }
+
+    const uint activeMask = markedBlockMasks[blockLinearIndex];
+    if (activeMask == 0u)
+    {
+        return;
+    }
+
+    const uint2 blockOriginPage = CLodVirtualShadowBlockOriginFromBlockCoord(blockCoord);
+    [unroll]
+    for (uint localPageY = 0u; localPageY < kCLodVirtualShadowBlockPagesPerAxis; ++localPageY)
+    {
+        [unroll]
+        for (uint localPageX = 0u; localPageX < kCLodVirtualShadowBlockPagesPerAxis; ++localPageX)
+        {
+            const uint2 localPageCoord = uint2(localPageX, localPageY);
+            const uint localPageBit = 1u << CLodVirtualShadowBlockLocalPageIndex(localPageCoord);
+            if ((activeMask & localPageBit) == 0u)
+            {
+                continue;
+            }
+
+            const uint2 logicalPageCoord = blockOriginPage + localPageCoord;
+            if (logicalPageCoord.x >= clipmapData.pageTableResolution || logicalPageCoord.y >= clipmapData.pageTableResolution)
+            {
+                continue;
+            }
+
+            CLodMarkVirtualShadowWrappedPage(
+                CLodVirtualShadowWrappedPageCoords(logicalPageCoord, clipmapData),
+                clipmapData.pageTableLayer,
+                clipmapData.pageTableResolution,
+                CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_MAX_REQUEST_COUNT,
+                CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_ACTIVE_CLIPMAP_COUNT,
+                clipmapData.directionalPageViewRow,
+                allocationRequests,
+                allocationCountBuffer,
+                pageTable,
+                dirtyFlags,
+                directionalPageViewInfo,
+                statsBuffer);
+        }
+    }
+}
+
+[shader("compute")]
+[numthreads(128, 1, 1)]
 void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     StructuredBuffer<uint> tileCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_TILE_COUNT_DESCRIPTOR_INDEX];
@@ -1639,6 +1906,7 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
                     CLodVirtualShadowWrappedPageCoords(uint2(pageX, pageY), clipmapData),
                     clipmapData.pageTableLayer,
                     clipmapData.pageTableResolution,
+                    CLOD_VIRTUAL_SHADOW_MARK_MAX_REQUEST_COUNT,
                     activeClipmapCount,
                     directionalPageViewRow,
                     allocationRequests,

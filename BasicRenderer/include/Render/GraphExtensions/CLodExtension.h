@@ -177,6 +177,9 @@ private:
     std::shared_ptr<Buffer> m_shadowMarkTileWorkBuffer;
     std::shared_ptr<Buffer> m_shadowMarkTileCountBuffer;
     std::shared_ptr<Buffer> m_shadowMarkTileIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkedBlocksMaskBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkedBlocksListBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkedBlocksCountBuffer;
     std::shared_ptr<Buffer> m_shadowFreePhysicalPagesBuffer;
     std::shared_ptr<Buffer> m_shadowReusablePhysicalPagesBuffer;
     std::shared_ptr<Buffer> m_shadowPageListHeaderBuffer;

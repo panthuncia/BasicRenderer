@@ -42,6 +42,12 @@ static const uint kCLodVirtualShadowBlockPagesPerAxis = 4u;
 static const uint kCLodVirtualShadowBlockPackedPhysicalPageIndexCount =
     (kCLodVirtualShadowBlockPagesPerAxis * kCLodVirtualShadowBlockPagesPerAxis) / 2u;
 static const uint kCLodVirtualShadowBlockMaxTrackedPerCluster = 32u;
+static const uint kCLodVirtualShadowMaxBlocksPerAxis =
+    (kCLodVirtualShadowMaxPageTableResolution + kCLodVirtualShadowBlockPagesPerAxis - 1u) / kCLodVirtualShadowBlockPagesPerAxis;
+static const uint kCLodVirtualShadowMaxBlocksPerClipmap =
+    kCLodVirtualShadowMaxBlocksPerAxis * kCLodVirtualShadowMaxBlocksPerAxis;
+static const uint kCLodVirtualShadowMaxMarkedBlockCount =
+    kCLodVirtualShadowMaxBlocksPerClipmap * kCLodVirtualShadowClipmapCount;
 
 struct CLodVirtualShadowClipmapInfo
 {
@@ -294,6 +300,22 @@ uint2 CLodVirtualShadowBlockCoordFromPageCoord(uint2 pageCoord)
 uint2 CLodVirtualShadowBlockOriginFromBlockCoord(uint2 blockCoord)
 {
     return blockCoord * kCLodVirtualShadowBlockPagesPerAxis;
+}
+
+uint CLodVirtualShadowBlockLinearIndex(uint2 blockCoord, uint clipmapIndex)
+{
+    return clipmapIndex * kCLodVirtualShadowMaxBlocksPerClipmap +
+        blockCoord.y * kCLodVirtualShadowMaxBlocksPerAxis +
+        blockCoord.x;
+}
+
+void CLodVirtualShadowUnpackBlockLinearIndex(uint blockLinearIndex, out uint2 blockCoord, out uint clipmapIndex)
+{
+    clipmapIndex = blockLinearIndex / kCLodVirtualShadowMaxBlocksPerClipmap;
+    const uint blockIndexWithinClipmap = blockLinearIndex % kCLodVirtualShadowMaxBlocksPerClipmap;
+    blockCoord = uint2(
+        blockIndexWithinClipmap % kCLodVirtualShadowMaxBlocksPerAxis,
+        blockIndexWithinClipmap / kCLodVirtualShadowMaxBlocksPerAxis);
 }
 
 uint CLodVirtualShadowBlockLocalPageIndex(uint2 localPageCoord)

@@ -7,37 +7,38 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Resources/Buffers/Buffer.h"
-#include "Resources/PixelBuffer.h"
-#include "../shaders/PerPassRootConstants/clodVirtualShadowMarkRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodVirtualShadowMarkBlocksRootConstants.h"
 
 VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
     std::shared_ptr<Buffer> tileWorkBuffer,
     std::shared_ptr<Buffer> tileCountBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
-    std::shared_ptr<Buffer> allocationRequestsBuffer,
-    std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> markClipmapDataBuffer,
-    std::shared_ptr<PixelBuffer> pageTableTexture,
-    std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
-    std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
-    std::shared_ptr<Buffer> statsBuffer)
+    std::shared_ptr<Buffer> markedBlocksMaskBuffer,
+    std::shared_ptr<Buffer> markedBlocksListBuffer,
+    std::shared_ptr<Buffer> markedBlocksCountBuffer)
     : m_tileWorkBuffer(std::move(tileWorkBuffer))
     , m_tileCountBuffer(std::move(tileCountBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
-    , m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
-    , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_markClipmapDataBuffer(std::move(markClipmapDataBuffer))
-    , m_pageTableTexture(std::move(pageTableTexture))
-    , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
-    , m_directionalPageViewInfoBuffer(std::move(directionalPageViewInfoBuffer))
-    , m_statsBuffer(std::move(statsBuffer))
+    , m_markedBlocksMaskBuffer(std::move(markedBlocksMaskBuffer))
+    , m_markedBlocksListBuffer(std::move(markedBlocksListBuffer))
+    , m_markedBlocksCountBuffer(std::move(markedBlocksCountBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/clodUtil.hlsl",
-        L"CLodVirtualShadowMarkPagesCSMain",
+        L"CLodVirtualShadowMarkBlocksCSMain",
         {},
         "CLod.VirtualShadow.MarkPages.PSO");
+
+    m_clearPso = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"Shaders/ClusterLOD/clodUtil.hlsl",
+        L"ClearUintStructuredBufferCSMain",
+        {},
+        "CLod.VirtualShadow.MarkBlocks.Clear.PSO");
 
     rhi::IndirectArg dispatchArgs[] = {
         {.kind = rhi::IndirectArgKind::Dispatch }
@@ -60,12 +61,9 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
     )
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
-            m_allocationCountBuffer,
-            m_allocationRequestsBuffer,
-            m_pageTableTexture,
-            m_dirtyPageFlagsBuffer,
-            m_directionalPageViewInfoBuffer,
-            m_statsBuffer);
+            m_markedBlocksMaskBuffer,
+            m_markedBlocksListBuffer,
+            m_markedBlocksCountBuffer);
 }
 
 void VirtualShadowMapMarkPagesPass::Setup() {}
@@ -86,26 +84,62 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+
+    BindResourceDescriptorIndices(commandList, m_clearPso.GetResourceDescriptorSlots());
+    commandList.BindPipeline(m_clearPso.GetAPIPipelineState().GetHandle());
+
+    uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_markedBlocksMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = CLodVirtualShadowMaxMarkedBlockCount;
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        clearRootConstants);
+    commandList.Dispatch((CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u, 1u, 1u);
+
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = 1u;
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        clearRootConstants);
+    commandList.Dispatch(1u, 1u, 1u);
+
+    rhi::BufferBarrier clearBarriers[2] = {};
+    clearBarriers[0].buffer = m_markedBlocksMaskBuffer->GetAPIResource().GetHandle();
+    clearBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    clearBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    clearBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
+    clearBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
+    clearBarriers[1].buffer = m_markedBlocksCountBuffer->GetAPIResource().GetHandle();
+    clearBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    clearBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    clearBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
+    clearBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
+    rhi::BarrierBatch barrierBatch{};
+    barrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(clearBarriers, 2);
+    commandList.Barriers(barrierBatch);
+
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-    const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_TILE_WORK_DESCRIPTOR_INDEX] = m_tileWorkBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_TILE_COUNT_DESCRIPTOR_INDEX] = m_tileCountBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_SCREEN_WIDTH] = context.renderResolution.x;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_SCREEN_HEIGHT] = context.renderResolution.y;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_MAX_REQUEST_COUNT] = virtualShadowConfig.maxAllocationRequests;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_ACTIVE_CLIPMAP_COUNT] = m_activeClipmapCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_TILE_WORK_DESCRIPTOR_INDEX] = m_tileWorkBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_TILE_COUNT_DESCRIPTOR_INDEX] = m_tileCountBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_WIDTH] = context.renderResolution.x;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_HEIGHT] = context.renderResolution.y;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_ACTIVE_CLIPMAP_COUNT] = m_activeClipmapCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_MASK_DESCRIPTOR_INDEX] = m_markedBlocksMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_LIST_DESCRIPTOR_INDEX] = m_markedBlocksListBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_COUNT_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
