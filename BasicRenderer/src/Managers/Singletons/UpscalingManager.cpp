@@ -338,7 +338,10 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 	consts.jitterOffset.x = camera->jitterPixelSpace.x;
     consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
-    consts.mvecScale = { 1.0f / renderRes.x, -1.0f / renderRes.y };
+    // The motion buffer stores currentNdc - prevNdc with unjittered projections.
+    // Streamline expects normalized current-to-previous screen motion, so convert
+    // NDC delta here instead of treating the buffer as pixel-space velocity.
+    consts.mvecScale = { -0.5f, 0.5f };
 
     consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };
