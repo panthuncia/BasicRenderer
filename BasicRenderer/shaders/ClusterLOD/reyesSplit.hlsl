@@ -661,7 +661,12 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const CLodReyesTessTableConfigEntry splitConfig = ReyesGetTessTableConfigEntry(tessTableConfigs, splitConfigIndex);
     const uint childCount = splitConfig.numTriangles;
     InterlockedAdd(telemetryBuffer[0].splitChildOutputCounts[splitPassTelemetryIndex], childCount);
-    uint childSurvives[CLodReyesMaxVisibilityMicroTrianglesPerPatch] = { 0u };
+        uint childSurvivesBitset[(CLodReyesMaxVisibilityMicroTrianglesPerPatch + 31u) / 32u];
+        [unroll]
+        for (uint childWordIndex = 0u; childWordIndex < ((CLodReyesMaxVisibilityMicroTrianglesPerPatch + 31u) / 32u); ++childWordIndex)
+        {
+            childSurvivesBitset[childWordIndex] = 0u;
+        }
     uint survivingChildCount = 0u;
 
     // Decode the parent's (potentially rotated/flipped) domain vertices for rebasing.
@@ -711,7 +716,7 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             continue;
         }
 
-        childSurvives[childIndex] = 1u;
+        childSurvivesBitset[childIndex >> 5u] |= 1u << (childIndex & 31u);
         survivingChildCount += 1u;
     }
 
@@ -771,7 +776,7 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     for (uint childIndex = 0u; childIndex < childCount && emittedChildCount < maxWritableChildren; ++childIndex)
     {
-        if (childSurvives[childIndex] == 0u)
+        if ((childSurvivesBitset[childIndex >> 5u] & (1u << (childIndex & 31u))) == 0u)
         {
             continue;
         }
