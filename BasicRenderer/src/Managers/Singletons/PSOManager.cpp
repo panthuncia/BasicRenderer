@@ -1065,6 +1065,15 @@ PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
 PipelineState PSOManager::CreateClusterLODAVBOITRasterPSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
+    DxcDefine forwardTransparentMacro;
+    forwardTransparentMacro.Value = L"1";
+    forwardTransparentMacro.Name = L"CLOD_AVBOIT_FORWARD_TRANSPARENT";
+    defines.insert(defines.begin(), forwardTransparentMacro);
+
+    DxcDefine separateReyesBatchMacro;
+    separateReyesBatchMacro.Value = L"1";
+    separateReyesBatchMacro.Name = L"CLOD_AVBOIT_REYES_SEPARATE_BATCH";
+    defines.insert(defines.begin(), separateReyesBatchMacro);
 
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -1109,6 +1118,16 @@ PipelineState PSOManager::CreateClusterLODAVBOITRasterPSO(
 PipelineState PSOManager::CreateClusterLODAVBOITOccupancyPSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
+    DxcDefine forwardTransparentMacro;
+    forwardTransparentMacro.Value = L"1";
+    forwardTransparentMacro.Name = L"CLOD_AVBOIT_FORWARD_TRANSPARENT";
+    defines.insert(defines.begin(), forwardTransparentMacro);
+
+    DxcDefine separateReyesBatchMacro;
+    separateReyesBatchMacro.Value = L"1";
+    separateReyesBatchMacro.Name = L"CLOD_AVBOIT_REYES_SEPARATE_BATCH";
+    defines.insert(defines.begin(), separateReyesBatchMacro);
+
     defines.push_back(DxcDefine{ L"CLOD_AVBOIT_VBOIT_OCCUPANCY_ONLY", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;

@@ -355,6 +355,159 @@ MaterialUvSample GetBoundUvSample(in MaterialUvCache cache, in MaterialUvBinding
 }
 
 #if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
+void BuildForwardTransparentMaterialUvData(
+    in VisBufferPSInput input,
+    in MaterialInfo materialInfo,
+    uint materialFlags,
+    out MaterialUvCache cache,
+    out MaterialUvBindings bindings)
+{
+    cache = (MaterialUvCache)0;
+    bindings = (MaterialUvBindings)0;
+
+    uint cacheIndexByUvSet[MATERIAL_MAX_UNIQUE_UV_SETS];
+
+    [unroll]
+    for (uint uvSetIndex = 0u; uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS; ++uvSetIndex)
+    {
+        cacheIndexByUvSet[uvSetIndex] = MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        bindings.cacheIndexBySlot[slot] = MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+
+    const float4 uvSet01 = input.uvSet01;
+    const float4 uvSet23 = input.uvSet23;
+    const float4 uvSet45 = input.uvSet45;
+    const float4 uvSet67 = input.uvSet67;
+    const float4 uvSet01Dx = ddx(uvSet01);
+    const float4 uvSet01Dy = ddy(uvSet01);
+    const float4 uvSet23Dx = ddx(uvSet23);
+    const float4 uvSet23Dy = ddy(uvSet23);
+    const float4 uvSet45Dx = ddx(uvSet45);
+    const float4 uvSet45Dy = ddy(uvSet45);
+    const float4 uvSet67Dx = ddx(uvSet67);
+    const float4 uvSet67Dy = ddy(uvSet67);
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        const MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
+        {
+            continue;
+        }
+
+        const uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (uvSetIndex >= MATERIAL_MAX_UNIQUE_UV_SETS || cacheIndexByUvSet[uvSetIndex] != MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            continue;
+        }
+
+        const uint cacheIndex = cache.count;
+        MaterialUvSample sample = (MaterialUvSample)0;
+        sample.uvSetIndex = uvSetIndex;
+
+        switch (uvSetIndex)
+        {
+        case 0u:
+            sample.uv = uvSet01.xy;
+            sample.dUVdx = uvSet01Dx.xy;
+            sample.dUVdy = uvSet01Dy.xy;
+            break;
+        case 1u:
+            sample.uv = uvSet01.zw;
+            sample.dUVdx = uvSet01Dx.zw;
+            sample.dUVdy = uvSet01Dy.zw;
+            break;
+        case 2u:
+            sample.uv = uvSet23.xy;
+            sample.dUVdx = uvSet23Dx.xy;
+            sample.dUVdy = uvSet23Dy.xy;
+            break;
+        case 3u:
+            sample.uv = uvSet23.zw;
+            sample.dUVdx = uvSet23Dx.zw;
+            sample.dUVdy = uvSet23Dy.zw;
+            break;
+        case 4u:
+            sample.uv = uvSet45.xy;
+            sample.dUVdx = uvSet45Dx.xy;
+            sample.dUVdy = uvSet45Dy.xy;
+            break;
+        case 5u:
+            sample.uv = uvSet45.zw;
+            sample.dUVdx = uvSet45Dx.zw;
+            sample.dUVdy = uvSet45Dy.zw;
+            break;
+        case 6u:
+            sample.uv = uvSet67.xy;
+            sample.dUVdx = uvSet67Dx.xy;
+            sample.dUVdy = uvSet67Dy.xy;
+            break;
+        default:
+            sample.uv = uvSet67.zw;
+            sample.dUVdx = uvSet67Dx.zw;
+            sample.dUVdy = uvSet67Dy.zw;
+            break;
+        }
+
+        cache.samples[cacheIndex] = sample;
+        cacheIndexByUvSet[uvSetIndex] = cacheIndex;
+        cache.count = cacheIndex + 1u;
+    }
+
+    const uint uv0CacheIndex = cacheIndexByUvSet[0u];
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        const MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
+        {
+            continue;
+        }
+
+        uint cacheIndex = MATERIAL_INVALID_UV_CACHE_INDEX;
+        const uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndex = cacheIndexByUvSet[uvSetIndex];
+        }
+        if (cacheIndex == MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            cacheIndex = uv0CacheIndex;
+        }
+
+        bindings.cacheIndexBySlot[slot] = cacheIndex;
+    }
+
+    bindings.tbnCacheIndex = MATERIAL_INVALID_UV_CACHE_INDEX;
+    bindings.heightCacheIndex = MATERIAL_INVALID_UV_CACHE_INDEX;
+    bindings.hasTbnSource = false;
+    bindings.hasHeightSource = false;
+
+    if ((materialFlags & MATERIAL_NORMAL_MAP) != 0u)
+    {
+        bindings.tbnCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_NORMAL];
+        bindings.hasTbnSource = bindings.tbnCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+    else if ((materialFlags & MATERIAL_PARALLAX) != 0u)
+    {
+        bindings.tbnCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_HEIGHT];
+        bindings.hasTbnSource = bindings.tbnCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+
+    if ((materialFlags & MATERIAL_PARALLAX) != 0u)
+    {
+        bindings.heightCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_HEIGHT];
+        bindings.hasHeightSource = bindings.heightCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+}
+
 float2 GetForwardTransparentUvSet(in VisBufferPSInput input, uint uvSetIndex)
 {
     switch (uvSetIndex)

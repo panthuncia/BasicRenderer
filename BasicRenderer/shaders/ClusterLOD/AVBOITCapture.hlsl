@@ -60,7 +60,7 @@ void AVBOITCapturePSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFa
     }
 
     ClodShadingSample sample;
-    if (!ResolveClodShadingSampleFromVisKeyWithFace(PackVisKey(input.linearDepth, input.visibleClusterIndex, primID), pixel, !isFrontFace, sample))
+    if (!LoadAVBOITShadingSample(input, pixel, !isFrontFace, primID, sample))
     {
         return;
     }

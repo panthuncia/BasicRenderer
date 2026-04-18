@@ -136,4 +136,47 @@ float3 SampleIntegratedTransmittanceAtSliceCoordinate(
     return lerp(previousTransmittance, currentTransmittance, sliceLerpFactor);
 }
 
+bool LoadAVBOITShadingSample(VisBufferPSInput input, uint2 pixel, bool isBackface, uint primID, out ClodShadingSample sample)
+{
+#if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+
+    sample = (ClodShadingSample)0;
+
+    const MaterialInfo materialInfo = materialDataBuffer[input.materialDataIndex];
+    const uint materialFlags = materialInfo.materialFlags;
+    const float3 worldPosition = input.positionWorldSpace;
+    const float3 worldNormal = normalize(input.normalWorldSpace);
+    const float3 dpdx = ((materialFlags & (MATERIAL_NORMAL_MAP | MATERIAL_PARALLAX)) != 0u) ? ddx(worldPosition) : 0.0f.xxx;
+    const float3 dpdy = ((materialFlags & (MATERIAL_NORMAL_MAP | MATERIAL_PARALLAX)) != 0u) ? ddy(worldPosition) : 0.0f.xxx;
+    MaterialUvCache uvCache;
+    MaterialUvBindings uvBindings;
+    BuildForwardTransparentMaterialUvData(input, materialInfo, materialFlags, uvCache, uvBindings);
+
+    MaterialInputs materialInputs;
+    SampleMaterialFromUvCacheRuntime(
+        uvCache,
+        uvBindings,
+        worldNormal,
+        worldPosition,
+        input.color,
+        materialInfo,
+        materialFlags,
+        dpdx,
+        dpdy,
+        materialInputs);
+
+    const Camera mainCamera = cameras[input.viewID];
+    sample.linearDepth = input.linearDepth;
+    sample.positionWS = worldPosition;
+    sample.positionVS = mul(float4(worldPosition, 1.0f), mainCamera.view).xyz;
+    sample.materialFlags = materialFlags;
+    sample.materialInputs = materialInputs;
+    return true;
+#else
+    return ResolveClodShadingSampleFromVisKeyWithFace(PackVisKey(input.linearDepth, input.visibleClusterIndex, primID), pixel, isBackface, sample);
+#endif
+}
+
 #endif // CLOD_AVBOIT_VBOIT_COMMON_HLSLI
