@@ -685,6 +685,10 @@ private:
     std::function<bool()> getRenderGraphBatchTraceEnabled;
     std::function<void(bool)> setRenderGraphBatchTraceEnabled;
 
+    bool m_reshapeTexelAddressing = true;
+    std::function<bool()> getReshapeTexelAddressing;
+    std::function<void(bool)> setReshapeTexelAddressing;
+
     AutoAliasMode m_autoAliasMode = AutoAliasMode::Balanced;
     std::function<AutoAliasMode()> getAutoAliasMode;
     std::function<void(AutoAliasMode)> setAutoAliasMode;
@@ -1026,6 +1030,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setRenderGraphBatchTraceEnabled = settingsManager.getSettingSetter<bool>("renderGraphBatchTraceEnabled");
     m_renderGraphBatchTraceEnabled = getRenderGraphBatchTraceEnabled();
     observerSetting(m_renderGraphBatchTraceEnabled, "renderGraphBatchTraceEnabled");
+
+    getReshapeTexelAddressing = settingsManager.getSettingGetter<bool>("reshapeTexelAddressing");
+    setReshapeTexelAddressing = settingsManager.getSettingSetter<bool>("reshapeTexelAddressing");
+    m_reshapeTexelAddressing = getReshapeTexelAddressing();
+    observerSetting(m_reshapeTexelAddressing, "reshapeTexelAddressing");
 
     getAutoAliasMode = settingsManager.getSettingGetter<AutoAliasMode>("autoAliasMode");
     setAutoAliasMode = settingsManager.getSettingSetter<AutoAliasMode>("autoAliasMode");
@@ -1505,6 +1514,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		}
         if (ImGui::Checkbox("Render Graph Batch Trace", &m_renderGraphBatchTraceEnabled)) {
             setRenderGraphBatchTraceEnabled(m_renderGraphBatchTraceEnabled);
+        }
+        if (ImGui::Checkbox("ReShape texel addressing (requires recreate)", &m_reshapeTexelAddressing)) {
+            setReshapeTexelAddressing(m_reshapeTexelAddressing);
         }
         int clodCpuUploadBudget = static_cast<int>(std::min<uint32_t>(m_clodStreamingCpuUploadBudgetRequests, 4096u));
         if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {

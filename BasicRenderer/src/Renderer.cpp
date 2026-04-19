@@ -165,6 +165,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
     settingsManager.registerSetting<bool>("enableReShape", DefaultEnableReShapeForBuild());
     settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
+    settingsManager.registerSetting<bool>("reshapeTexelAddressing", true);
     settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
     settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", false);
     LoadPipeline(hwnd, x_res, y_res);
@@ -1107,6 +1108,12 @@ void Renderer::SetSettings() {
         (void)newValue;
         if (m_isInitialized) {
             spdlog::warn("Changing enableReShape requires device recreation to take effect.");
+        }
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("reshapeTexelAddressing", [this](const bool& newValue) {
+        (void)newValue;
+        if (m_isInitialized) {
+            spdlog::warn("Changing reshapeTexelAddressing requires device recreation to take effect.");
         }
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("reshapeSynchronousRecording", [this](const bool& newValue) {

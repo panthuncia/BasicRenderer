@@ -70,6 +70,7 @@ void DeviceManager::Initialize() {
 
     bool enableRuntimeInstrumentation = false;
     bool enableSynchronousRecording = false;
+    bool enableTexelAddressing = true;
     try {
         enableRuntimeInstrumentation = settingsManager.getSettingGetter<bool>("enableReShape")();
     }
@@ -84,12 +85,20 @@ void DeviceManager::Initialize() {
         enableSynchronousRecording = false;
     }
 
+    try {
+        enableTexelAddressing = settingsManager.getSettingGetter<bool>("reshapeTexelAddressing")();
+    }
+    catch (const std::exception&) {
+        enableTexelAddressing = true;
+    }
+
     spdlog::info(
-        "DeviceManager::Initialize enableStreamline={} enableDebug={} enableReShape={} reshapeSync={} framesInFlight={}",
+        "DeviceManager::Initialize enableStreamline={} enableDebug={} enableReShape={} reshapeSync={} reshapeTexel={} framesInFlight={}",
         enableStreamline,
         enableDebug,
         enableRuntimeInstrumentation,
         enableSynchronousRecording,
+        enableTexelAddressing,
         numFramesInFlight);
 
     rhi::CreateD3D12Device(
@@ -100,6 +109,7 @@ void DeviceManager::Initialize() {
             .instrumentation = {
                 .enableRuntimeInstrumentation = enableRuntimeInstrumentation,
                 .enableSynchronousRecording = enableSynchronousRecording,
+                .enableTexelAddressing = enableTexelAddressing,
             },
         },
         m_device,
@@ -123,10 +133,11 @@ void DeviceManager::Initialize() {
         rhi::DebugInstrumentationState instrumentationState{};
         if (rhi::IsOk(rhi::debug::GetInstrumentationState(m_device.Get(), instrumentationState))) {
             spdlog::info(
-                "DeviceManager::Initialize ReShape state requested={} active={} sync={} featureMask=0x{:X}",
+                "DeviceManager::Initialize ReShape state requested={} active={} sync={} texel={} featureMask=0x{:X}",
                 instrumentationState.requested,
                 instrumentationState.active,
                 instrumentationState.synchronousRecording,
+                instrumentationState.texelAddressingEnabled,
                 instrumentationState.globalFeatureMask);
         }
 
