@@ -18,6 +18,12 @@
 #define WRITE_DEBUG_FILES BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
 
 namespace {
+    // Bump this whenever the shader compiler argument set changes in a way that affects
+    // the generated DXIL container, especially debug payload availability.
+    constexpr uint64_t kShaderCompilerArgumentFingerprint = 2u;
+}
+
+namespace {
 
 constexpr std::wstring_view kValidationSkipEntryPoints[] = {
     L"ClusterLODBucketMSMain",
@@ -116,6 +122,7 @@ uint64_t ComputeShaderCacheBuildConfigHash()
     uint64_t seed = 0;
     util::hash_combine_u64(seed, shadercache::kSchemaVersion);
     util::hash_combine_u64(seed, kBRSLPreprocessVersion);
+    util::hash_combine_u64(seed, kShaderCompilerArgumentFingerprint);
 #if WRITE_DEBUG_FILES
     util::hash_combine_u64(seed, 1u);
 #else
@@ -2265,6 +2272,10 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
     if (opts.enableDebugInfo) {
         args.push_back(DXC_ARG_DEBUG);
         args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
+        // Keep source associations in the shader container so GPU-Reshape can resolve
+        // filenames/lines without relying solely on external PDB recovery.
+        args.push_back(L"-Qembed_debug");
+        args.push_back(L"-Qsource_in_debug_module");
         //args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
     }
 

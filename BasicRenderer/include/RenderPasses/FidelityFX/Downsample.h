@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "Interfaces/IDynamicDeclaredResources.h"
 #include "RenderPasses/Base/ComputePass.h"
 #include "BuiltinResources.h"
 #include "Managers/ViewManager.h"
@@ -28,7 +29,7 @@ inAU4 rectInfo, // left, top, width, height
 ASU1 mips
 */
 
-class DownsamplePass : public ComputePass {
+class DownsamplePass : public ComputePass, public IDynamicDeclaredResources {
 public:
 
     DownsamplePass()
@@ -45,6 +46,31 @@ public:
     }
 
     void Setup() override {
+        SyncMapInfos(m_activeDepthMaps);
+    }
+
+    void Update(const UpdateExecutionContext& executionContext) override {
+        auto* updateContext = executionContext.hostData->Get<UpdateContext>();
+        if (!updateContext || !updateContext->viewManager) {
+            if (!m_activeDepthMaps.empty()) {
+                m_activeDepthMaps.clear();
+                m_declaredResourcesChanged = true;
+            }
+            else {
+                m_declaredResourcesChanged = false;
+            }
+            return;
+        }
+
+        auto activeDepthMaps = CollectActiveDepthMaps(*updateContext->viewManager);
+        m_declaredResourcesChanged = !HaveSameActiveDepthMaps(m_activeDepthMaps, activeDepthMaps);
+        if (m_declaredResourcesChanged) {
+            m_activeDepthMaps = std::move(activeDepthMaps);
+        }
+    }
+
+    bool DeclaredResourcesChanged() const override {
+        return m_declaredResourcesChanged;
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {
@@ -58,8 +84,6 @@ public:
 
         // Set the root signature
         commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
-
-        SyncMapInfos(context);
 
         for (auto& [resourceID, mapInfo] : m_perMapInfo) {
             if (!mapInfo.pConstantsBufferView || !mapInfo.sourceMap) {
@@ -127,11 +151,54 @@ private:
         uint64_t sourceBackingGeneration;
     };
 	std::unordered_map<uint64_t, PerMapInfo> m_perMapInfo;
+    std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> m_activeDepthMaps;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
 
     PipelineState downsamplePassPSO;
 	PipelineState downsampleArrayPSO;
+    bool m_declaredResourcesChanged = true;
+
+    static std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> CollectActiveDepthMaps(ViewManager& viewManager)
+    {
+        std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> activeDepthMaps;
+
+        viewManager.ForEachView([&](uint64_t viewID) {
+            auto* view = viewManager.Get(viewID);
+            if (!view || !view->gpu.linearDepthMap) {
+                return;
+            }
+
+            const uint64_t resourceID = view->gpu.linearDepthMap->GetGlobalResourceID();
+            activeDepthMaps[resourceID] = view->gpu.linearDepthMap;
+        });
+
+        return activeDepthMaps;
+    }
+
+    static bool HaveSameActiveDepthMaps(
+        const std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>>& lhs,
+        const std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>>& rhs)
+    {
+        if (lhs.size() != rhs.size()) {
+            return false;
+        }
+
+        for (const auto& [resourceID, depthMap] : lhs) {
+            auto rhsIt = rhs.find(resourceID);
+            if (rhsIt == rhs.end()) {
+                return false;
+            }
+
+            const uint64_t lhsGeneration = depthMap ? depthMap->GetBackingGeneration() : 0;
+            const uint64_t rhsGeneration = rhsIt->second ? rhsIt->second->GetBackingGeneration() : 0;
+            if (lhsGeneration != rhsGeneration) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     static uint32_t GetSliceCount(const PixelBuffer& map)
     {
@@ -217,19 +284,7 @@ private:
         m_perMapInfo[resourceID] = std::move(mapInfo);
     }
 
-    void SyncMapInfos(const RenderContext& context) {
-        std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> activeDepthMaps;
-
-        context.viewManager->ForEachView([&](uint64_t viewID) {
-            auto* view = context.viewManager->Get(viewID);
-            if (!view || !view->gpu.linearDepthMap) {
-                return;
-            }
-
-            const uint64_t id = view->gpu.linearDepthMap->GetGlobalResourceID();
-            activeDepthMaps[id] = view->gpu.linearDepthMap;
-        });
-
+    void SyncMapInfos(const std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>>& activeDepthMaps) {
         std::vector<uint64_t> stale;
         stale.reserve(m_perMapInfo.size());
         for (const auto& [resourceID, mapInfo] : m_perMapInfo) {
