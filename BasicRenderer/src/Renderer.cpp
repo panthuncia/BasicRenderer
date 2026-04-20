@@ -1573,8 +1573,11 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
     updateData.currentScene = m_sceneRenderOverlapEnabled ? nullptr : currentScene.get();
+    updateData.primaryCamera = camera.get<Components::Camera>();
+    updateData.hasPrimaryCamera = true;
     updateData.frameIndex = m_frameIndex;
     updateData.frameFenceValue = m_currentFrameFenceValue;
+    updateData.frameNumber = m_totalFramesRendered;
     updateData.renderResolution = renderRes;
     updateData.outputResolution = outputRes;
     updateData.deltaTime = elapsedSeconds;

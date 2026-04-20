@@ -44,6 +44,9 @@ RWTexture2D<float4>         g_outputDbgImage    : register( u2 );
 
 #define XE_GTAO_FP32_DEPTHS
 
+uint2 XeGTAO_GetViewportSize( const GTAOConstants consts );
+uint2 XeGTAO_GetMipViewportSize( uint2 viewportSize, uint mipLevel );
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // R11G11B10_UNORM <-> float3
@@ -239,6 +242,10 @@ float3x3 XeGTAO_RotFromToMatrix( float3 from, float3 to )
 void XeGTAO_MainPass( const uint2 pixCoord, float sliceCount, float stepsPerSlice, const float2 localNoise, float3 viewspaceNormal, const GTAOConstants consts, 
     Texture2D<float> sourceViewspaceDepth, SamplerState depthSampler, RWTexture2D<uint> outWorkingAOTerm, RWTexture2D<unorm float> outWorkingEdges )
 {                                                                       
+    const uint2 viewportSize = XeGTAO_GetViewportSize( consts );
+    if( pixCoord.x >= viewportSize.x || pixCoord.y >= viewportSize.y )
+        return;
+
     float2 normalizedScreenPos = (pixCoord + 0.5.xx) * consts.ViewportPixelSize;
 
     float4 valuesUL   = sourceViewspaceDepth.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize )               );
@@ -607,26 +614,46 @@ float XeGTAO_ClampDepth( float depth )
 #endif
 }
 
+uint2 XeGTAO_GetViewportSize( const GTAOConstants consts )
+{
+    return uint2( max( consts.ViewportSize.x, 1 ), max( consts.ViewportSize.y, 1 ) );
+}
+
+uint2 XeGTAO_GetMipViewportSize( uint2 viewportSize, uint mipLevel )
+{
+    const uint roundedOffset = (1u << mipLevel) - 1u;
+    return max( (viewportSize + uint2( roundedOffset, roundedOffset )) >> mipLevel, uint2( 1, 1 ) );
+}
+
 groupshared float g_scratchDepths[8][8];
 void XeGTAO_PrefilterDepths16x16( uint2 dispatchThreadID /*: SV_DispatchThreadID*/, uint2 groupThreadID /*: SV_GroupThreadID*/, const GTAOConstants consts, Texture2D<float> sourceNDCDepth, SamplerState depthSampler, RWTexture2D<float> outDepth0, RWTexture2D<float> outDepth1, RWTexture2D<float> outDepth2, RWTexture2D<float> outDepth3, RWTexture2D<float> outDepth4 )
 {
+    const uint2 viewportSize = XeGTAO_GetViewportSize( consts );
+
     // MIP 0
     const uint2 baseCoord = dispatchThreadID;
     const uint2 pixCoord = baseCoord * 2;
-    float2 sourceUV = float2( pixCoord * consts.ViewportPixelSize ) * consts.SourceDepthUVScale;
+    const uint2 clampedPixCoord = min( pixCoord, viewportSize - 1u.xx );
+    float2 sourceUV = float2( clampedPixCoord * consts.ViewportPixelSize ) * consts.SourceDepthUVScale;
     float4 depths4 = sourceNDCDepth.GatherRed( depthSampler, sourceUV, int2(1,1) );
     float depth0 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.w, consts ) );
     float depth1 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.z, consts ) );
     float depth2 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.x, consts ) );
     float depth3 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.y, consts ) );
-    outDepth0[ pixCoord + uint2(0, 0) ] = (float)depth0;
-    outDepth0[ pixCoord + uint2(1, 0) ] = (float)depth1;
-    outDepth0[ pixCoord + uint2(0, 1) ] = (float)depth2;
-    outDepth0[ pixCoord + uint2(1, 1) ] = (float)depth3;
+    if( pixCoord.x < viewportSize.x && pixCoord.y < viewportSize.y )
+        outDepth0[ pixCoord + uint2(0, 0) ] = (float)depth0;
+    if( pixCoord.x + 1 < viewportSize.x && pixCoord.y < viewportSize.y )
+        outDepth0[ pixCoord + uint2(1, 0) ] = (float)depth1;
+    if( pixCoord.x < viewportSize.x && pixCoord.y + 1 < viewportSize.y )
+        outDepth0[ pixCoord + uint2(0, 1) ] = (float)depth2;
+    if( pixCoord.x + 1 < viewportSize.x && pixCoord.y + 1 < viewportSize.y )
+        outDepth0[ pixCoord + uint2(1, 1) ] = (float)depth3;
 
     // MIP 1
     float dm1 = XeGTAO_DepthMIPFilter( depth0, depth1, depth2, depth3, consts );
-    outDepth1[ baseCoord ] = (float)dm1;
+    const uint2 mip1Size = XeGTAO_GetMipViewportSize( viewportSize, 1u );
+    if( baseCoord.x < mip1Size.x && baseCoord.y < mip1Size.y )
+        outDepth1[ baseCoord ] = (float)dm1;
     g_scratchDepths[ groupThreadID.x ][ groupThreadID.y ] = dm1;
 
     GroupMemoryBarrierWithGroupSync( );
@@ -641,7 +668,10 @@ void XeGTAO_PrefilterDepths16x16( uint2 dispatchThreadID /*: SV_DispatchThreadID
         float inBR = g_scratchDepths[groupThreadID.x+1][groupThreadID.y+1];
 
         float dm2 = XeGTAO_DepthMIPFilter( inTL, inTR, inBL, inBR, consts );
-        outDepth2[ baseCoord / 2 ] = (float)dm2;
+        const uint2 mip2Coord = baseCoord / 2;
+        const uint2 mip2Size = XeGTAO_GetMipViewportSize( viewportSize, 2u );
+        if( mip2Coord.x < mip2Size.x && mip2Coord.y < mip2Size.y )
+            outDepth2[ mip2Coord ] = (float)dm2;
         g_scratchDepths[ groupThreadID.x ][ groupThreadID.y ] = dm2;
     }
 
@@ -657,7 +687,10 @@ void XeGTAO_PrefilterDepths16x16( uint2 dispatchThreadID /*: SV_DispatchThreadID
         float inBR = g_scratchDepths[groupThreadID.x+2][groupThreadID.y+2];
 
         float dm3 = XeGTAO_DepthMIPFilter( inTL, inTR, inBL, inBR, consts );
-        outDepth3[ baseCoord / 4 ] = (float)dm3;
+        const uint2 mip3Coord = baseCoord / 4;
+        const uint2 mip3Size = XeGTAO_GetMipViewportSize( viewportSize, 3u );
+        if( mip3Coord.x < mip3Size.x && mip3Coord.y < mip3Size.y )
+            outDepth3[ mip3Coord ] = (float)dm3;
         g_scratchDepths[ groupThreadID.x ][ groupThreadID.y ] = dm3;
     }
 
@@ -673,7 +706,10 @@ void XeGTAO_PrefilterDepths16x16( uint2 dispatchThreadID /*: SV_DispatchThreadID
         float inBR = g_scratchDepths[groupThreadID.x+4][groupThreadID.y+4];
 
         float dm4 = XeGTAO_DepthMIPFilter( inTL, inTR, inBL, inBR, consts );
-        outDepth4[ baseCoord / 8 ] = (float)dm4;
+        const uint2 mip4Coord = baseCoord / 8;
+        const uint2 mip4Size = XeGTAO_GetMipViewportSize( viewportSize, 4u );
+        if( mip4Coord.x < mip4Size.x && mip4Coord.y < mip4Size.y )
+            outDepth4[ mip4Coord ] = (float)dm4;
         //g_scratchDepths[ groupThreadID.x ][ groupThreadID.y ] = dm4;
     }
 }
@@ -728,6 +764,10 @@ void XeGTAO_DecodeGatherPartial( const uint4 packedValue, out AOTermType outDeco
 
 void XeGTAO_Denoise( const uint2 pixCoordBase, const GTAOConstants consts, Texture2D<uint> sourceAOTerm, Texture2D<float> sourceEdges, SamplerState texSampler, RWTexture2D<uint> outputTexture, const uniform bool finalApply )
 {
+    const uint2 viewportSize = XeGTAO_GetViewportSize( consts );
+    if( pixCoordBase.x >= viewportSize.x || pixCoordBase.y >= viewportSize.y )
+        return;
+
     const float blurAmount = (finalApply)?((float)consts.DenoiseBlurBeta):((float)consts.DenoiseBlurBeta/(float)5.0);
     const float diagWeight = 0.85 * 0.5;
 
@@ -739,7 +779,8 @@ void XeGTAO_Denoise( const uint2 pixCoordBase, const GTAOConstants consts, Textu
     float weightBR[2];
 
     // gather edge and visibility quads, used later
-    const float2 gatherCenter = float2( pixCoordBase.x, pixCoordBase.y ) * consts.ViewportPixelSize;
+    const uint2 clampedPixCoordBase = min( pixCoordBase, viewportSize - 1u.xx );
+    const float2 gatherCenter = float2( clampedPixCoordBase.x, clampedPixCoordBase.y ) * consts.ViewportPixelSize;
     float4 edgesQ0        = sourceEdges.GatherRed( texSampler, gatherCenter, int2( 0, 0 ) );
     float4 edgesQ1        = sourceEdges.GatherRed( texSampler, gatherCenter, int2( 2, 0 ) );
     float4 edgesQ2        = sourceEdges.GatherRed( texSampler, gatherCenter, int2( 1, 2 ) );
@@ -752,6 +793,8 @@ void XeGTAO_Denoise( const uint2 pixCoordBase, const GTAOConstants consts, Textu
     for( int side = 0; side < 2; side++ )
     {
         const int2 pixCoord = int2( pixCoordBase.x + side, pixCoordBase.y );
+        if( pixCoord.x >= viewportSize.x || pixCoord.y >= viewportSize.y )
+            continue;
 
         float4 edgesL_LRTB  = XeGTAO_UnpackEdges( (side==0)?(edgesQ0.x):(edgesQ0.y) );
         float4 edgesT_LRTB  = XeGTAO_UnpackEdges( (side==0)?(edgesQ0.z):(edgesQ1.w) );
