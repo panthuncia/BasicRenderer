@@ -1783,10 +1783,16 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_EMISSIVE_TEXTURE";
         defines.insert(defines.begin(), macro);
     }
-    if (materialFlags & MaterialCompileFlags::MaterialCompilePBRMaps) {
+    if (materialFlags & MaterialCompileFlags::MaterialCompileMetallicTexture) {
         DxcDefine macro;
         macro.Value = L"1";
-        macro.Name = L"PSO_PBR_MAPS";
+		macro.Name = L"PSO_METALLIC_TEXTURE";
+		defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileRoughnessTexture) {
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_ROUGHNESS_TEXTURE";
         defines.insert(defines.begin(), macro);
 	}
     if (materialFlags & MaterialCompileFlags::MaterialCompileAOTexture) {

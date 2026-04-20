@@ -230,8 +230,9 @@ bool MaterialSlotEnabled(MaterialInfo materialInfo, uint materialFlags, Material
     case MATERIAL_TEXTURE_SLOT_OPACITY:
         return (materialFlags & MATERIAL_OPACITY_TEXTURE) != 0u;
     case MATERIAL_TEXTURE_SLOT_METALLIC:
+        return (materialFlags & MATERIAL_METALLIC_TEXTURE) != 0u;
     case MATERIAL_TEXTURE_SLOT_ROUGHNESS:
-        return (materialFlags & MATERIAL_PBR_MAPS) != 0u;
+        return (materialFlags & MATERIAL_ROUGHNESS_TEXTURE) != 0u;
     case MATERIAL_TEXTURE_SLOT_NORMAL:
         return (materialFlags & MATERIAL_NORMAL_MAP) != 0u;
     case MATERIAL_TEXTURE_SLOT_AO:
@@ -676,14 +677,12 @@ void SampleMaterialFromUvCache(
     baseColor.a *= opacitySample.a;
 #endif
 
-    float metallic = 0.0f;
-    float roughness = 0.0f;
+    float metallic = materialInfo.metallicFactor;
+    float roughness = materialInfo.roughnessFactor;
 
-#if defined(PSO_PBR_MAPS)
+#if defined(PSO_METALLIC_TEXTURE)
     Texture2D<float4> metallicTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicTextureIndex)];
     SamplerState metallicSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicSamplerIndex)];
-    Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessTextureIndex)];
-    SamplerState roughnessSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessSamplerIndex)];
 
     float2 metallicSampleUv = metallicUv.uv;
     float2 metallicDUdx = metallicUv.dUVdx;
@@ -695,6 +694,14 @@ void SampleMaterialFromUvCache(
         metallicDUdy = parallaxDUdy;
     }
 
+    float4 metallicSample = Sample2DGrad(metallicTexture, metallicSamplerState, metallicSampleUv, metallicDUdx, metallicDUdy);
+    metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
+#endif
+
+#if defined(PSO_ROUGHNESS_TEXTURE)
+    Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessTextureIndex)];
+    SamplerState roughnessSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessSamplerIndex)];
+
     float2 roughnessSampleUv = roughnessUv.uv;
     float2 roughnessDUdx = roughnessUv.dUVdx;
     float2 roughnessDUdy = roughnessUv.dUVdy;
@@ -705,14 +712,8 @@ void SampleMaterialFromUvCache(
         roughnessDUdy = parallaxDUdy;
     }
 
-    float4 metallicSample = Sample2DGrad(metallicTexture, metallicSamplerState, metallicSampleUv, metallicDUdx, metallicDUdy);
     float4 roughnessSample = Sample2DGrad(roughnessTexture, roughnessSamplerState, roughnessSampleUv, roughnessDUdx, roughnessDUdy);
-
-    metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
     roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
-#else
-    metallic = materialInfo.metallicFactor;
-    roughness = materialInfo.roughnessFactor;
 #endif
 
     float3 normalWS = normalWSBase;
@@ -880,14 +881,11 @@ void SampleMaterialFromUvCacheRuntime(
 
     float metallic = materialInfo.metallicFactor;
     float roughness = materialInfo.roughnessFactor;
-    if ((materialFlags & MATERIAL_PBR_MAPS) != 0u)
+    if ((materialFlags & MATERIAL_METALLIC_TEXTURE) != 0u)
     {
         const MaterialUvSample metallicUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_METALLIC);
-        const MaterialUvSample roughnessUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_ROUGHNESS);
         Texture2D<float4> metallicTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicTextureIndex)];
         SamplerState metallicSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicSamplerIndex)];
-        Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessTextureIndex)];
-        SamplerState roughnessSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessSamplerIndex)];
 
         float2 metallicSampleUv = metallicUv.uv;
         float2 metallicDUdx = metallicUv.dUVdx;
@@ -899,6 +897,16 @@ void SampleMaterialFromUvCacheRuntime(
             metallicDUdy = parallaxDUdy;
         }
 
+        float4 metallicSample = Sample2DGrad(metallicTexture, metallicSamplerState, metallicSampleUv, metallicDUdx, metallicDUdy);
+        metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
+    }
+
+    if ((materialFlags & MATERIAL_ROUGHNESS_TEXTURE) != 0u)
+    {
+        const MaterialUvSample roughnessUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_ROUGHNESS);
+        Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessTextureIndex)];
+        SamplerState roughnessSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessSamplerIndex)];
+
         float2 roughnessSampleUv = roughnessUv.uv;
         float2 roughnessDUdx = roughnessUv.dUVdx;
         float2 roughnessDUdy = roughnessUv.dUVdy;
@@ -909,10 +917,7 @@ void SampleMaterialFromUvCacheRuntime(
             roughnessDUdy = parallaxDUdy;
         }
 
-        float4 metallicSample = Sample2DGrad(metallicTexture, metallicSamplerState, metallicSampleUv, metallicDUdx, metallicDUdy);
         float4 roughnessSample = Sample2DGrad(roughnessTexture, roughnessSamplerState, roughnessSampleUv, roughnessDUdx, roughnessDUdy);
-
-        metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
         roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
     }
 
@@ -1056,23 +1061,21 @@ void SampleMaterialCorePrecompiled(
 #endif
 
     // Metallic / roughness
-    float metallic = 0.0;
-    float roughness = 0.0;
+    float metallic = materialInfo.metallicFactor;
+    float roughness = materialInfo.roughnessFactor;
 
-#if defined(PSO_PBR_MAPS)
+#if defined(PSO_METALLIC_TEXTURE)
     Texture2D<float4> metallicTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicTextureIndex)];
     SamplerState metallicSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicSamplerIndex)];
+    float4 metallicSample  = Sample2DGrad(metallicTexture,  metallicSamplerState,  localUV, localDUdx, localDUdy);
+    metallic  = DynamicSwizzle(metallicSample,  materialInfo.metallicChannel)  * materialInfo.metallicFactor;
+#endif
+
+#if defined(PSO_ROUGHNESS_TEXTURE)
     Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessTextureIndex)];
     SamplerState roughnessSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessSamplerIndex)];
-
-    float4 metallicSample  = Sample2DGrad(metallicTexture,  metallicSamplerState,  localUV, localDUdx, localDUdy);
     float4 roughnessSample = Sample2DGrad(roughnessTexture, roughnessSamplerState, localUV, localDUdx, localDUdy);
-
-    metallic  = DynamicSwizzle(metallicSample,  materialInfo.metallicChannel)  * materialInfo.metallicFactor;
     roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
-#else
-    metallic = materialInfo.metallicFactor;
-    roughness = materialInfo.roughnessFactor;
 #endif
 
     // Normal map

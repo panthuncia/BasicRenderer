@@ -2418,7 +2418,7 @@ void Renderer::CreateRenderGraph() {
     adaptedLuminanceBuffer->SetName("Adapted Luminance");
     rg::memory::SetResourceUsageHint(*adaptedLuminanceBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
-	auto histogramBuffer = CreateIndexedStructuredBuffer(255, sizeof(uint32_t), true, false);
+	auto histogramBuffer = CreateIndexedStructuredBuffer(256, sizeof(uint32_t), true, false);
 	histogramBuffer->SetName("Luminance Histogram Buffer");
     rg::memory::SetResourceUsageHint(*histogramBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);

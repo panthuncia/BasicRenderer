@@ -64,8 +64,11 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 	if (d.aoMap.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileAOTexture;
 	}
-	if (d.metallic.texture || d.roughness.texture) {
-		tech.compileFlags |= MaterialCompileFlags::MaterialCompilePBRMaps;
+    if (d.metallic.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileMetallicTexture;
+    }
+    if (d.roughness.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileRoughnessTexture;
 	}
 	if (d.emissive.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileEmissiveTexture;
@@ -102,10 +105,10 @@ public:
             materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.metallic.texture) {
-            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_METALLIC_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.roughness.texture) {
-            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_ROUGHNESS_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.emissive.texture) {
             materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;

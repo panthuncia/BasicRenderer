@@ -7,12 +7,13 @@ enum MaterialFlags {
     MATERIAL_AO_TEXTURE = 1 << 3,
     MATERIAL_EMISSIVE_TEXTURE = 1 << 4,
     MATERIAL_PBR = 1 << 5,
-    MATERIAL_PBR_MAPS = 1 << 6,
-    MATERIAL_DOUBLE_SIDED = 1 << 7,
-    MATERIAL_PARALLAX = 1 << 8,
-	MATERIAL_NEGATE_NORMALS = 1 << 9, // Some normal textures are inverted
-	MATERIAL_INVERT_NORMAL_GREEN = 1 << 10, // Some normal textures have inverted green channel
-	MATERIAL_OPACITY_TEXTURE = 1 << 11,
-	MATERIAL_ALPHA_TEST = 1 << 12,
-    MATERIAL_GEOMETRIC_DISPLACEMENT = 1 << 13,
+    MATERIAL_METALLIC_TEXTURE = 1 << 6,
+    MATERIAL_ROUGHNESS_TEXTURE = 1 << 7,
+    MATERIAL_DOUBLE_SIDED = 1 << 8,
+    MATERIAL_PARALLAX = 1 << 9,
+	MATERIAL_NEGATE_NORMALS = 1 << 10, // Some normal textures are inverted
+	MATERIAL_INVERT_NORMAL_GREEN = 1 << 11, // Some normal textures have inverted green channel
+	MATERIAL_OPACITY_TEXTURE = 1 << 12,
+	MATERIAL_ALPHA_TEST = 1 << 13,
+    MATERIAL_GEOMETRIC_DISPLACEMENT = 1 << 14,
 };
