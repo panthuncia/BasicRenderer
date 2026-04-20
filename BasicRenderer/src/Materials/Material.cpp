@@ -47,6 +47,7 @@ Material::Material(const std::string& name,
 	float geometricDisplacementMax,
 	bool geometricDisplacementEnabled,
     TechniqueDescriptor technique,
+    OpenPBRMaterialParameters openPBRMaterial,
     float alphaCutoff)
     : m_name(name),
     m_psoFlags(psoFlags),
@@ -70,7 +71,8 @@ Material::Material(const std::string& name,
     m_roughnessFactor(roughnessFactor),
     m_baseColorFactor(baseColorFactor),
     m_emissiveFactor(emissiveFactor),
-	m_technique(technique)
+	m_technique(technique),
+    m_openPBRMaterial(openPBRMaterial)
 {
     m_materialData.materialFlags = materialFlags;
     m_materialData.ambientStrength = 0.5f;
@@ -124,6 +126,10 @@ void Material::SetHeightmapScale(float scale) {
 
 void Material::SetCompileFlagsID(uint32_t id) {
     m_materialData.compileFlagsID = id;
+}
+
+void Material::SetOpenPBRMaterialDataIndex(uint32_t index) {
+    m_materialData.openPBRMaterialDataIndex = index;
 }
 
 void Material::SetRasterBucketIndex(uint32_t index) {

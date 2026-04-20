@@ -9,6 +9,64 @@
 #include "include/constants.hlsli"
 #include "include/dynamicSwizzle.hlsli"
 
+struct OpenPBRSurfaceSample
+{
+    uint openPBRMaterialDataIndex;
+    float3 baseColor;
+    float baseMetalness;
+    float specularRoughness;
+    float opacity;
+    float3 emissive;
+};
+
+OpenPBRMaterialInfo LoadOpenPBRMaterialInfo(uint openPBRMaterialDataIndex)
+{
+    StructuredBuffer<OpenPBRMaterialInfo> openPBRMaterialBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialOpenPBRDataBuffer)];
+    return openPBRMaterialBuffer[openPBRMaterialDataIndex];
+}
+
+OpenPBRMaterialInfo LoadOpenPBRMaterialInfo(MaterialInfo materialInfo)
+{
+    return LoadOpenPBRMaterialInfo(materialInfo.openPBRMaterialDataIndex);
+}
+
+OpenPBRSurfaceSample ResolveCanonicalOpenPBRSurface(
+    MaterialInfo materialInfo,
+    float3 sampledBaseColor,
+    float sampledMetalness,
+    float sampledSpecularRoughness,
+    float sampledOpacity,
+    float3 sampledEmissive)
+{
+    OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(materialInfo);
+
+    OpenPBRSurfaceSample surface = (OpenPBRSurfaceSample)0;
+    surface.openPBRMaterialDataIndex = materialInfo.openPBRMaterialDataIndex;
+    surface.baseColor = sampledBaseColor;
+    surface.baseMetalness = sampledMetalness;
+    surface.specularRoughness = sampledSpecularRoughness;
+    surface.opacity = saturate(sampledOpacity * openPBRMaterialInfo.geometryOpacity);
+    surface.emissive = sampledEmissive;
+    return surface;
+}
+
+void PopulateLegacyMaterialInputsFromOpenPBRSurface(
+    OpenPBRSurfaceSample surface,
+    float3 normalWS,
+    float ambientOcclusion,
+    out MaterialInputs materialInputs)
+{
+    materialInputs.albedo = surface.baseColor;
+    materialInputs.normalWS = normalWS;
+    materialInputs.emissive = surface.emissive;
+    materialInputs.metallic = surface.baseMetalness;
+    materialInputs.roughness = surface.specularRoughness;
+    materialInputs.opacity = surface.opacity;
+    materialInputs.ambientOcclusion = ambientOcclusion;
+    materialInputs.openPBRMaterialDataIndex = surface.openPBRMaterialDataIndex;
+}
+
 // Basic blinn-phong for uint visualization
 float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {
     float ambientIntensity = 0.3;
@@ -780,13 +838,14 @@ void SampleMaterialFromUvCache(
         DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.z)) * materialInfo.emissiveFactor.rgb;
 #endif
 
-    ret.albedo = baseColor.rgb * vertexColorMultiplier;
-    ret.normalWS = normalWS;
-    ret.emissive = emissive;
-    ret.metallic = metallic;
-    ret.roughness = roughness;
-    ret.opacity = baseColor.a;
-    ret.ambientOcclusion = ao;
+    OpenPBRSurfaceSample openPBRSurface = ResolveCanonicalOpenPBRSurface(
+        materialInfo,
+        baseColor.rgb * vertexColorMultiplier,
+        metallic,
+        roughness,
+        baseColor.a,
+        emissive);
+    PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 }
 
 void SampleMaterialFromUvCacheRuntime(
@@ -987,13 +1046,14 @@ void SampleMaterialFromUvCacheRuntime(
             DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.z)) * materialInfo.emissiveFactor.rgb;
     }
 
-    ret.albedo = baseColor.rgb * vertexColorMultiplier;
-    ret.normalWS = normalWS;
-    ret.emissive = emissive;
-    ret.metallic = metallic;
-    ret.roughness = roughness;
-    ret.opacity = baseColor.a;
-    ret.ambientOcclusion = ao;
+    OpenPBRSurfaceSample openPBRSurface = ResolveCanonicalOpenPBRSurface(
+        materialInfo,
+        baseColor.rgb * vertexColorMultiplier,
+        metallic,
+        roughness,
+        baseColor.a,
+        emissive);
+    PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 }
 
 void SampleMaterialCorePrecompiled(
@@ -1111,13 +1171,14 @@ void SampleMaterialCorePrecompiled(
     emissive = Sample2DGrad(emissiveTexture, emissiveSamplerState, localUV, localDUdx, localDUdy).rgb * materialInfo.emissiveFactor.rgb;
 #endif
 
-    ret.albedo = baseColor.rgb;
-    ret.normalWS = normalWS;
-    ret.emissive = emissive;
-    ret.metallic = metallic;
-    ret.roughness = roughness;
-    ret.opacity = baseColor.a;
-    ret.ambientOcclusion = ao;
+    OpenPBRSurfaceSample openPBRSurface = ResolveCanonicalOpenPBRSurface(
+        materialInfo,
+        baseColor.rgb,
+        metallic,
+        roughness,
+        baseColor.a,
+        emissive);
+    PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 #endif
 }
 

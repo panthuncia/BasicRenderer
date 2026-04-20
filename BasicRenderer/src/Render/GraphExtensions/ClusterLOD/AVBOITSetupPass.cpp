@@ -207,6 +207,7 @@ PassReturn AVBOITSetupPass::Execute(PassExecutionContext& executionContext)
 
     clearFloatResource(m_occupancyTexture.get());
     clearFloatResource(m_coverageTexture.get());
+    clearFloatResource(m_integratedTransmittanceTexture.get(), 1.0f);
     clearUintResource(m_occupancySliceMaskTexture.get());
     clearUintResource(m_zeroTransmittanceSliceTexture.get(), CLodAVBOITDefaultSliceCount);
 

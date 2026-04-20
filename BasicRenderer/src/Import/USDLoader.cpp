@@ -1,5 +1,6 @@
 #include <spdlog/spdlog.h>
 #include <DirectXMath.h>
+#include <array>
 #include <filesystem>
 #include <vector>
 #include <cstring>
@@ -224,33 +225,45 @@ namespace USDLoader {
         return varnameStr;
 	}
 
-    TextureAndConstant* GetTextureBindingForInput(MaterialDescription& result, const TfToken& name) {
-        if (name == TfToken("diffuseColor")) {
-            return &result.baseColor;
-        }
-        if (name == TfToken("metallic")) {
-            return &result.metallic;
-        }
-        if (name == TfToken("roughness")) {
-            return &result.roughness;
-        }
-        if (name == TfToken("opacity")) {
-            return &result.opacity;
-        }
-        if (name == TfToken("emissiveColor")) {
-            return &result.emissive;
-        }
-        if (name == TfToken("normal")) {
-            return &result.normal;
-        }
-        if (name == TfToken("displacement")) {
-            return &result.heightMap;
-        }
-        if (name == TfToken("ambientOcclusion")) {
-            return &result.aoMap;
-        }
-        return nullptr;
-    }
+		struct MaterialTextureBindingEntry {
+			const char* inputName;
+			TextureAndConstant MaterialDescription::*binding;
+		};
+
+		constexpr std::array<MaterialTextureBindingEntry, 8> kMaterialTextureBindings = {{
+			{ "diffuseColor", &MaterialDescription::baseColor },
+			{ "metallic", &MaterialDescription::metallic },
+			{ "roughness", &MaterialDescription::roughness },
+			{ "opacity", &MaterialDescription::opacity },
+			{ "emissiveColor", &MaterialDescription::emissive },
+			{ "normal", &MaterialDescription::normal },
+			{ "displacement", &MaterialDescription::heightMap },
+			{ "ambientOcclusion", &MaterialDescription::aoMap },
+		}};
+
+		TextureAndConstant* FindTextureBinding(MaterialDescription& result, const TfToken& name) {
+			for (const auto& entry : kMaterialTextureBindings) {
+				if (name == TfToken(entry.inputName)) {
+					return &(result.*(entry.binding));
+				}
+			}
+
+			return nullptr;
+		}
+
+		template <typename Fn>
+		void ForEachMaterialTextureBinding(MaterialDescription& desc, Fn&& fn) {
+			for (const auto& entry : kMaterialTextureBindings) {
+				fn(desc.*(entry.binding));
+			}
+		}
+
+		template <typename Fn>
+		void ForEachMaterialTextureBinding(const MaterialDescription& desc, Fn&& fn) {
+			for (const auto& entry : kMaterialTextureBindings) {
+				fn(desc.*(entry.binding));
+			}
+		}
 
     std::vector<std::string> CollectReferencedUvSetNames(const MaterialDescription& desc) {
         std::vector<std::string> names;
@@ -261,14 +274,7 @@ namespace USDLoader {
             }
         };
 
-        appendIfValid(desc.baseColor);
-        appendIfValid(desc.normal);
-        appendIfValid(desc.metallic);
-        appendIfValid(desc.roughness);
-        appendIfValid(desc.emissive);
-        appendIfValid(desc.aoMap);
-        appendIfValid(desc.heightMap);
-        appendIfValid(desc.opacity);
+			ForEachMaterialTextureBinding(desc, appendIfValid);
         return names;
     }
 
@@ -346,7 +352,7 @@ namespace USDLoader {
 						surfSources[0].sourceName,
 						&cache);
 					if (resolvedSurf) {
-                        if (TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name)) {
+                        if (TextureAndConstant* textureBinding = FindTextureBinding(result, name)) {
                             textureBinding->uvSetName = ProcessUVReader(resolvedSurf);
                         }
 					}
@@ -369,7 +375,7 @@ namespace USDLoader {
 
 				auto tex = texIt->second;
 				std::string swizzle = src.sourceName.GetString();
-                TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name);
+				TextureAndConstant* textureBinding = FindTextureBinding(result, name);
                 if (textureBinding == nullptr) {
                     spdlog::warn("Unknown texture input: {}", name.GetString());
                     return;
@@ -560,7 +566,7 @@ namespace USDLoader {
 					ProcessTexture(result, src, stage, name, material);
 				}
 				else if (prodId == pxr::TfToken("UsdPrimvarReader_float2")) {
-                    if (TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name)) {
+                    if (TextureAndConstant* textureBinding = FindTextureBinding(result, name)) {
                         textureBinding->uvSetName = ProcessUVReader(r);
                     }
 				}
@@ -573,11 +579,11 @@ namespace USDLoader {
         ProcessDisplacementTerminal(result, material, stage, cache);
 
 		//Post-process to assign 1.0 to undefined factors with a valid texture
-		for (auto& tex : { &result.baseColor, &result.metallic, &result.roughness, &result.opacity, &result.emissive, &result.normal, &result.heightMap, &result.aoMap }) {
-			if (tex->texture && !tex->factor.HasValue()) {
-				tex->factor = 1.0f; // Unlike glTF, USD does not require a factor to be set if a texture is present
+		ForEachMaterialTextureBinding(result, [](TextureAndConstant& binding) {
+			if (binding.texture && !binding.factor.HasValue()) {
+				binding.factor = 1.0f; // Unlike glTF, USD does not require a factor to be set if a texture is present
 			}
-		}
+		});
 
         spdlog::info(
             "USD material '{}' displacement: enabled={}, hasHeightMap={}, scale={}, range=[{}, {}]",

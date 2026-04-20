@@ -49,6 +49,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
+            Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Environment::InfoBuffer,
             Builtin::CameraBuffer,

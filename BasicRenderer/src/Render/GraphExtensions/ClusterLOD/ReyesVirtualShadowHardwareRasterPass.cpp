@@ -69,6 +69,7 @@ void ReyesVirtualShadowHardwareRasterPass::DeclareResourceUsages(RenderPassBuild
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
+            Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::CameraBuffer,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,

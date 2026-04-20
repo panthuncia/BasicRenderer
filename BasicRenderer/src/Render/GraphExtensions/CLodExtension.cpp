@@ -882,6 +882,11 @@ void CLodExtension::InitializeAVBOITResources()
         return;
     }
 
+    const auto renderResolution =
+        SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    m_transparencyConfiguredRenderWidth = renderResolution.x;
+    m_transparencyConfiguredRenderHeight = renderResolution.y;
+
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const auto& traits = GetVariantTraits(m_type);
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
@@ -2127,6 +2132,27 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     TagShadowResourceUsages();
 }
 
+void CLodExtension::RefreshTransparencyResourcesForCurrentSettings()
+{
+    if (m_type != CLodExtensionType::AlphaBlend) {
+        return;
+    }
+
+    const auto renderResolution =
+        SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    const bool renderResolutionChanged =
+        m_transparencyConfiguredRenderWidth != renderResolution.x ||
+        m_transparencyConfiguredRenderHeight != renderResolution.y;
+
+    if (!renderResolutionChanged || !m_AVBOITOccupancyTexture) {
+        return;
+    }
+
+    ReleaseTransparencyResourceBackings();
+    InitializeAVBOITResources();
+    TagTransparencyResourceUsages();
+}
+
 void CLodExtension::RefreshShadowResourcesForCurrentSettings()
 {
     if (m_type != CLodExtensionType::Shadow) {
@@ -2166,6 +2192,7 @@ void CLodExtension::PrepareForBuild(RenderGraph& rg)
         return;
     }
 
+    RefreshTransparencyResourcesForCurrentSettings();
     RefreshShadowResourcesForCurrentSettings();
 
     if (m_type == CLodExtensionType::Shadow && !m_providerRegisteredForCurrentRegistry) {

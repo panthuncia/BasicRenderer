@@ -3,6 +3,7 @@
     "Backbuffer": {},
     "LastFrameLinearDepthMaps": {},
     "PerMaterialDataBuffer": {},
+    "PerMaterialOpenPBRDataBuffer": {},
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},

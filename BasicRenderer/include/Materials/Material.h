@@ -91,6 +91,7 @@ public:
     static std::shared_ptr<Material> CreateShared(const MaterialDescription& desc) {
         uint32_t materialFlags = 0;
         uint32_t psoFlags = 0;
+        OpenPBRMaterialParameters canonicalOpenPBR = BuildCanonicalOpenPBRMaterial(desc);
         const auto transparency = PickTransparency(desc);
         materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
         BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
@@ -181,6 +182,7 @@ public:
 			desc.geometricDisplacementMax,
 			desc.enableGeometricDisplacement,
             technique,
+            canonicalOpenPBR,
             desc.alphaCutoff
         );
     }
@@ -190,11 +192,13 @@ public:
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
     void SetCompileFlagsID(uint32_t id);
+    void SetOpenPBRMaterialDataIndex(uint32_t index);
     void SetRasterBucketIndex(uint32_t index);
     PSOFlags GetPSOFlags() const { return m_psoFlags; }
     MaterialFlags GetMaterialFlags() const { return static_cast<MaterialFlags>(m_materialData.materialFlags); }
     static std::shared_ptr<Material> GetDefaultMaterial();
     TechniqueDescriptor const& Technique() const { return m_technique; }
+    OpenPBRMaterialParameters const& GetOpenPBRMaterial() const { return m_openPBRMaterial; }
     static void DestroyDefaultMaterial() {
         defaultMaterial.reset();
     }
@@ -236,6 +240,7 @@ private:
     PerMaterialCB m_materialData = { 0 };
     PSOFlags m_psoFlags;
     TechniqueDescriptor m_technique;
+    OpenPBRMaterialParameters m_openPBRMaterial = {};
 
     Material(const std::string& name,
         MaterialFlags materialFlags, PSOFlags psoFlags);
@@ -274,6 +279,7 @@ private:
 		float geometricDisplacementMax,
 		bool geometricDisplacementEnabled,
 		TechniqueDescriptor technique,
+        OpenPBRMaterialParameters openPBRMaterial,
         float alphaCutoff);
 
     static std::shared_ptr<Material> CreateShared(const std::string& name,
@@ -310,6 +316,7 @@ private:
 		float geometricDisplacementMax,
 		bool geometricDisplacementEnabled,
         TechniqueDescriptor technique,
+        OpenPBRMaterialParameters openPBRMaterial,
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
             baseColorTexture, normalTexture, aoMap, heightMap,
@@ -321,6 +328,7 @@ private:
 			metallicUvSetIndex, roughnessUvSetIndex, emissiveUvSetIndex, opacityUvSetIndex,
 			heightMapScale, geometricDisplacementMin, geometricDisplacementMax, geometricDisplacementEnabled,
 			technique,
+            openPBRMaterial,
             alphaCutoff));
     }
 

@@ -303,6 +303,60 @@ struct MaterialInfo {
     uint aoUvSetIndex;
     uint heightUvSetIndex;
     uint opacityUvSetIndex;
+
+    uint openPBRMaterialDataIndex;
+    uint3 perMaterialPad1;
+};
+
+struct OpenPBRMaterialInfo {
+    float baseWeight;
+    float3 baseColor;
+    float baseDiffuseRoughness;
+    float baseMetalness;
+    float subsurfaceWeight;
+    float subsurfaceRadius;
+
+    float3 subsurfaceColor;
+    float subsurfaceScatterAnisotropy;
+    float3 subsurfaceRadiusScale;
+    float specularWeight;
+
+    float3 specularColor;
+    float specularRoughness;
+    float specularRoughnessAnisotropy;
+    float specularIor;
+    float2 specularAnisotropyRotationCosSin;
+
+    float coatWeight;
+    float3 coatColor;
+    float coatRoughness;
+    float coatRoughnessAnisotropy;
+    float coatIor;
+    float coatDarkening;
+    float2 coatAnisotropyRotationCosSin;
+
+    float fuzzWeight;
+    float3 fuzzColor;
+    float fuzzRoughness;
+    float transmissionWeight;
+    float3 transmissionColor;
+    float transmissionDepth;
+
+    float3 transmissionScatter;
+    float transmissionScatterAnisotropy;
+    float transmissionDispersionScale;
+    float transmissionDispersionAbbeNumber;
+    float thinFilmWeight;
+    float thinFilmThickness;
+    float thinFilmIor;
+    float emissionLuminance;
+
+    float3 emissionColor;
+    float geometryOpacity;
+    uint geometryThinWalled;
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 struct SingleMatrix {
@@ -449,6 +503,7 @@ struct MaterialInputs
     float roughness;
     float opacity;
     float ambientOcclusion;
+    uint openPBRMaterialDataIndex;
 };
 
 struct SkinningInstanceGPUInfo

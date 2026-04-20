@@ -93,6 +93,7 @@ void ReyesDeepVisibilityRasterizationPass::DeclareResourceUsages(ComputePassBuil
             Builtin::PerObjectBuffer,
             Builtin::CullingCameraBuffer,
             Builtin::PerMaterialDataBuffer,
+            Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo)

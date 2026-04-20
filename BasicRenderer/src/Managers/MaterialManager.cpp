@@ -3,13 +3,61 @@
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RasterBucketFlags.h"
 
+namespace {
+	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(const OpenPBRMaterialParameters& material) {
+		PerMaterialOpenPBRCB result = {};
+		result.baseWeight = material.baseWeight;
+		result.baseColor = material.baseColor;
+		result.baseDiffuseRoughness = material.baseDiffuseRoughness;
+		result.baseMetalness = material.baseMetalness;
+		result.subsurfaceWeight = material.subsurfaceWeight;
+		result.subsurfaceRadius = material.subsurfaceRadius;
+		result.subsurfaceColor = material.subsurfaceColor;
+		result.subsurfaceScatterAnisotropy = material.subsurfaceScatterAnisotropy;
+		result.subsurfaceRadiusScale = material.subsurfaceRadiusScale;
+		result.specularWeight = material.specularWeight;
+		result.specularColor = material.specularColor;
+		result.specularRoughness = material.specularRoughness;
+		result.specularRoughnessAnisotropy = material.specularRoughnessAnisotropy;
+		result.specularIor = material.specularIor;
+		result.specularAnisotropyRotationCosSin = material.specularAnisotropyRotationCosSin;
+		result.coatWeight = material.coatWeight;
+		result.coatColor = material.coatColor;
+		result.coatRoughness = material.coatRoughness;
+		result.coatRoughnessAnisotropy = material.coatRoughnessAnisotropy;
+		result.coatIor = material.coatIor;
+		result.coatDarkening = material.coatDarkening;
+		result.coatAnisotropyRotationCosSin = material.coatAnisotropyRotationCosSin;
+		result.fuzzWeight = material.fuzzWeight;
+		result.fuzzColor = material.fuzzColor;
+		result.fuzzRoughness = material.fuzzRoughness;
+		result.transmissionWeight = material.transmissionWeight;
+		result.transmissionColor = material.transmissionColor;
+		result.transmissionDepth = material.transmissionDepth;
+		result.transmissionScatter = material.transmissionScatter;
+		result.transmissionScatterAnisotropy = material.transmissionScatterAnisotropy;
+		result.transmissionDispersionScale = material.transmissionDispersionScale;
+		result.transmissionDispersionAbbeNumber = material.transmissionDispersionAbbeNumber;
+		result.thinFilmWeight = material.thinFilmWeight;
+		result.thinFilmThickness = material.thinFilmThickness;
+		result.thinFilmIor = material.thinFilmIor;
+		result.emissionLuminance = material.emissionLuminance;
+		result.emissionColor = material.emissionColor;
+		result.geometryOpacity = material.geometryOpacity;
+		result.geometryThinWalled = material.geometryThinWalled ? 1u : 0u;
+		return result;
+	}
+}
+
 // TODO: Use LazyDynamicStructuredBuffer and active indices buffer like draw calls? Would reduce number of no-op indirect arguments
 MaterialManager::MaterialManager() {
 	auto& rm = ResourceManager::GetInstance();
 
 	// Primary material data buffer
 	m_perMaterialDataBuffer = DynamicStructuredBuffer<PerMaterialCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialDataBuffer", true);
+	m_perMaterialOpenPBRDataBuffer = DynamicStructuredBuffer<PerMaterialOpenPBRCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialOpenPBRDataBuffer", true);
 	rg::memory::SetResourceUsageHint(*m_perMaterialDataBuffer, "Material buffers");
+	rg::memory::SetResourceUsageHint(*m_perMaterialOpenPBRDataBuffer, "Material buffers");
 
 	// Visibility buffer resources
     m_materialPixelCountBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(m_compileFlagsSlotsUsed, "VisUtil::MaterialPixelCountBuffer", true);
@@ -37,6 +85,7 @@ MaterialManager::MaterialManager() {
 	m_resources["Builtin::VisUtil::ScannedBlockSumsBuffer"] = m_scannedBlockSumsBuffer;
 	m_resources["Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer"] = m_materialEvaluationCommandBuffer;
 	m_resources[Builtin::PerMaterialDataBuffer] = m_perMaterialDataBuffer;
+	m_resources[Builtin::PerMaterialOpenPBRDataBuffer] = m_perMaterialOpenPBRDataBuffer;
 }
 
 void MaterialManager::IncrementMaterialUsageCount(Material& material) {
@@ -46,9 +95,17 @@ void MaterialManager::IncrementMaterialUsageCount(Material& material) {
 	m_compileFlagsUsageCounts[flagsSlot]++;
 	uint32_t materialID = material.GetMaterialID();
 	material.SetCompileFlagsID(flagsSlot);
-	unsigned int materialSlot = GetMaterialSlot(materialID, material.GetData());
+	UpdateMaterialDataBuffer(material);
+	unsigned int materialSlot = GetMaterialSlot(materialID);
 
 	m_materialUsageCounts[materialSlot]++;
+}
+
+void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
+	const unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
+	material.SetOpenPBRMaterialDataIndex(materialSlot);
+	m_perMaterialDataBuffer->UpdateAt(materialSlot, material.GetData());
+	m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, BuildOpenPBRMaterialData(material.GetOpenPBRMaterial()));
 }
 
 void MaterialManager::DecrementMaterialUsageCount(const Material& material) {
@@ -86,15 +143,24 @@ unsigned int MaterialManager::GetMaterialSlot(unsigned int materialID, std::opti
 		if (data.has_value()) {
 			m_perMaterialDataBuffer->UpdateAt(slot, data.value());
 		}
+		else {
+			m_perMaterialDataBuffer->UpdateAt(slot, PerMaterialCB{});
+		}
+		m_perMaterialOpenPBRDataBuffer->UpdateAt(slot, PerMaterialOpenPBRCB{});
 	}
 	else {
 		slot = m_materialSlotsUsed++;
 		m_materialUsageCounts.push_back(0);
 		// Resize resources to accommodate new material slot
 		m_perMaterialDataBuffer->Resize(m_materialSlotsUsed);
+		m_perMaterialOpenPBRDataBuffer->Resize(m_materialSlotsUsed);
 		if (data.has_value()) {
 			m_perMaterialDataBuffer->UpdateAt(slot, data.value());
 		}
+		else {
+			m_perMaterialDataBuffer->UpdateAt(slot, PerMaterialCB{});
+		}
+		m_perMaterialOpenPBRDataBuffer->UpdateAt(slot, PerMaterialOpenPBRCB{});
 	}
 	m_materialIDSlotMapping[materialID] = slot;
 	return slot;

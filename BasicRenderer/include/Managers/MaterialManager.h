@@ -22,8 +22,9 @@ public:
 	void IncrementMaterialUsageCount(Material& material);
 	void DecrementMaterialUsageCount(const Material& material);
 
-	void UpdateMaterialDataBuffer(const Material& material) {
-		m_perMaterialDataBuffer->UpdateAt(GetMaterialSlot(material.GetMaterialID()), material.GetData());
+	void UpdateMaterialDataBuffer(Material& material);
+	void UpdateOpenPBRMaterialDataBuffer(unsigned int materialSlot, const PerMaterialOpenPBRCB& data) {
+		m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, data);
 	}
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
@@ -87,4 +88,5 @@ private:
 	std::shared_ptr<DynamicStructuredBuffer<MaterialEvaluationIndirectCommand>> m_materialEvaluationCommandBuffer;
 
 	std::shared_ptr<DynamicStructuredBuffer<PerMaterialCB>> m_perMaterialDataBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<PerMaterialOpenPBRCB>> m_perMaterialOpenPBRDataBuffer;
 };

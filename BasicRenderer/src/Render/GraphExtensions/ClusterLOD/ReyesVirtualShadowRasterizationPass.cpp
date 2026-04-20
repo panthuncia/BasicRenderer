@@ -89,6 +89,7 @@ void ReyesVirtualShadowRasterizationPass::DeclareResourceUsages(ComputePassBuild
             Builtin::PerObjectBuffer,
             Builtin::CullingCameraBuffer,
             Builtin::PerMaterialDataBuffer,
+            Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo)

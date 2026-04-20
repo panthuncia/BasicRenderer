@@ -188,6 +188,60 @@ struct PerMaterialCB {
 	unsigned int aoUvSetIndex;
 	unsigned int heightUvSetIndex;
 	unsigned int opacityUvSetIndex;
+
+	unsigned int openPBRMaterialDataIndex;
+	unsigned int perMaterialPad1[3];
+};
+
+struct PerMaterialOpenPBRCB {
+    float baseWeight;
+    DirectX::XMFLOAT3 baseColor;
+    float baseDiffuseRoughness;
+    float baseMetalness;
+    float subsurfaceWeight;
+    float subsurfaceRadius;
+
+    DirectX::XMFLOAT3 subsurfaceColor;
+    float subsurfaceScatterAnisotropy;
+    DirectX::XMFLOAT3 subsurfaceRadiusScale;
+    float specularWeight;
+
+    DirectX::XMFLOAT3 specularColor;
+    float specularRoughness;
+    float specularRoughnessAnisotropy;
+    float specularIor;
+    DirectX::XMFLOAT2 specularAnisotropyRotationCosSin;
+
+    float coatWeight;
+    DirectX::XMFLOAT3 coatColor;
+    float coatRoughness;
+    float coatRoughnessAnisotropy;
+    float coatIor;
+    float coatDarkening;
+    DirectX::XMFLOAT2 coatAnisotropyRotationCosSin;
+
+    float fuzzWeight;
+    DirectX::XMFLOAT3 fuzzColor;
+    float fuzzRoughness;
+    float transmissionWeight;
+    DirectX::XMFLOAT3 transmissionColor;
+    float transmissionDepth;
+
+    DirectX::XMFLOAT3 transmissionScatter;
+    float transmissionScatterAnisotropy;
+    float transmissionDispersionScale;
+    float transmissionDispersionAbbeNumber;
+    float thinFilmWeight;
+    float thinFilmThickness;
+    float thinFilmIor;
+    float emissionLuminance;
+
+    DirectX::XMFLOAT3 emissionColor;
+    float geometryOpacity;
+    unsigned int geometryThinWalled;
+    unsigned int pad0;
+    unsigned int pad1;
+    unsigned int pad2;
 };
 
 struct LightInfo {

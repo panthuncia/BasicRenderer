@@ -950,7 +950,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
@@ -961,6 +961,9 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("queueSchedulingMinPenalty", 1.0f);
     settingsManager.registerSetting<float>("queueSchedulingResourcePressureWeight", 1.0f);
     settingsManager.registerSetting<float>("queueSchedulingUavPressureWeight", 0.5f);
+    settingsManager.registerSetting<float>("queueSchedulingAutoGraphicsBias", 2.5f);
+    settingsManager.registerSetting<float>("queueSchedulingAsyncOverlapBonus", 3.0f);
+    settingsManager.registerSetting<float>("queueSchedulingCrossQueueHandoffPenalty", 2.0f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
@@ -1802,6 +1805,9 @@ void Renderer::Render() {
         orgSettings.queueSchedulingMinPenalty = sm.getSettingGetter<float>("queueSchedulingMinPenalty")();
         orgSettings.queueSchedulingResourcePressureWeight = sm.getSettingGetter<float>("queueSchedulingResourcePressureWeight")();
         orgSettings.queueSchedulingUavPressureWeight = sm.getSettingGetter<float>("queueSchedulingUavPressureWeight")();
+        orgSettings.queueSchedulingAutoGraphicsBias = sm.getSettingGetter<float>("queueSchedulingAutoGraphicsBias")();
+        orgSettings.queueSchedulingAsyncOverlapBonus = sm.getSettingGetter<float>("queueSchedulingAsyncOverlapBonus")();
+        orgSettings.queueSchedulingCrossQueueHandoffPenalty = sm.getSettingGetter<float>("queueSchedulingCrossQueueHandoffPenalty")();
         orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
         orgSettings.autoAliasPoolGrowthHeadroom   = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
         orgSettings.heavyDebug                = sm.getSettingGetter<bool>("heavyDebug")();
