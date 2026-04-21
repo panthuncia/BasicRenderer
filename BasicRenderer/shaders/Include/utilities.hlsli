@@ -15,6 +15,12 @@ struct OpenPBRSurfaceSample
     float3 baseColor;
     float baseMetalness;
     float specularRoughness;
+    float3 coatColor;
+    float coatWeight;
+    float coatRoughness;
+    float3 fuzzColor;
+    float fuzzWeight;
+    float fuzzRoughness;
     float opacity;
     float3 emissive;
 };
@@ -40,14 +46,21 @@ OpenPBRSurfaceSample ResolveCanonicalOpenPBRSurface(
     float3 sampledEmissive)
 {
     OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(materialInfo);
+    const float3 canonicalEmissive = openPBRMaterialInfo.emissionColor * openPBRMaterialInfo.emissionLuminance;
 
     OpenPBRSurfaceSample surface = (OpenPBRSurfaceSample)0;
     surface.openPBRMaterialDataIndex = materialInfo.openPBRMaterialDataIndex;
     surface.baseColor = sampledBaseColor;
     surface.baseMetalness = sampledMetalness;
     surface.specularRoughness = sampledSpecularRoughness;
+    surface.coatColor = saturate(openPBRMaterialInfo.coatColor);
+    surface.coatWeight = saturate(openPBRMaterialInfo.coatWeight);
+    surface.coatRoughness = saturate(openPBRMaterialInfo.coatRoughness);
+    surface.fuzzColor = saturate(openPBRMaterialInfo.fuzzColor);
+    surface.fuzzWeight = saturate(openPBRMaterialInfo.fuzzWeight);
+    surface.fuzzRoughness = saturate(openPBRMaterialInfo.fuzzRoughness);
     surface.opacity = saturate(sampledOpacity * openPBRMaterialInfo.geometryOpacity);
-    surface.emissive = sampledEmissive;
+    surface.emissive = dot(sampledEmissive, sampledEmissive) > 0.0f ? sampledEmissive : canonicalEmissive;
     return surface;
 }
 
@@ -60,8 +73,14 @@ void PopulateLegacyMaterialInputsFromOpenPBRSurface(
     materialInputs.albedo = surface.baseColor;
     materialInputs.normalWS = normalWS;
     materialInputs.emissive = surface.emissive;
+    materialInputs.coatColor = surface.coatColor;
     materialInputs.metallic = surface.baseMetalness;
     materialInputs.roughness = surface.specularRoughness;
+    materialInputs.coatWeight = surface.coatWeight;
+    materialInputs.coatRoughness = surface.coatRoughness;
+    materialInputs.fuzzColor = surface.fuzzColor;
+    materialInputs.fuzzWeight = surface.fuzzWeight;
+    materialInputs.fuzzRoughness = surface.fuzzRoughness;
     materialInputs.opacity = surface.opacity;
     materialInputs.ambientOcclusion = ambientOcclusion;
     materialInputs.openPBRMaterialDataIndex = surface.openPBRMaterialDataIndex;
@@ -279,6 +298,185 @@ MaterialUvCache BuildSingleUvCache(float2 uv, float2 dUVdx, float2 dUVdy)
     return cache;
 }
 
+static const uint OPENPBR_INVALID_TEXTURE_INDEX = 0xffffffffu;
+
+bool HasOpenPBRTexture(uint textureIndex, uint samplerIndex)
+{
+    return textureIndex != OPENPBR_INVALID_TEXTURE_INDEX && samplerIndex != OPENPBR_INVALID_TEXTURE_INDEX;
+}
+
+MaterialUvSample ResolveOpenPBRTextureUv(
+    in MaterialUvCache uvCache,
+    uint uvSetIndex,
+    bool hasParallaxResolvedUv,
+    uint parallaxUvSetIndex,
+    float2 parallaxUv,
+    float2 parallaxDUdx,
+    float2 parallaxDUdy)
+{
+    if (hasParallaxResolvedUv && uvSetIndex == parallaxUvSetIndex)
+    {
+        MaterialUvSample sample = (MaterialUvSample)0;
+        sample.uvSetIndex = uvSetIndex;
+        sample.uv = parallaxUv;
+        sample.dUVdx = parallaxDUdx;
+        sample.dUVdy = parallaxDUdy;
+        return sample;
+    }
+
+    uint cacheIndex = FindMaterialUvCacheIndex(uvCache, uvSetIndex);
+    if (cacheIndex == MATERIAL_INVALID_UV_CACHE_INDEX)
+    {
+        cacheIndex = FindMaterialUvCacheIndex(uvCache, 0u);
+    }
+
+    if (cacheIndex == MATERIAL_INVALID_UV_CACHE_INDEX || cacheIndex >= uvCache.count)
+    {
+        return MakeDefaultMaterialUvSample();
+    }
+
+    return uvCache.samples[cacheIndex];
+}
+
+float4 SampleOpenPBRTexture(uint textureIndex, uint samplerIndex, MaterialUvSample uvSample)
+{
+    Texture2D<float4> textureHandle = ResourceDescriptorHeap[NonUniformResourceIndex(textureIndex)];
+    SamplerState samplerHandle = SamplerDescriptorHeap[NonUniformResourceIndex(samplerIndex)];
+    return Sample2DGrad(textureHandle, samplerHandle, uvSample.uv, uvSample.dUVdx, uvSample.dUVdy);
+}
+
+float3 SampleOpenPBRColorTexture(
+    uint textureIndex,
+    uint samplerIndex,
+    uint4 channels,
+    MaterialUvSample uvSample)
+{
+    if (!HasOpenPBRTexture(textureIndex, samplerIndex))
+    {
+        return float3(1.0f, 1.0f, 1.0f);
+    }
+
+    const float4 sampleValue = SampleOpenPBRTexture(textureIndex, samplerIndex, uvSample);
+    return float3(
+        DynamicSwizzle(sampleValue, channels.x),
+        DynamicSwizzle(sampleValue, channels.y),
+        DynamicSwizzle(sampleValue, channels.z));
+}
+
+float SampleOpenPBRScalarTexture(
+    uint textureIndex,
+    uint samplerIndex,
+    uint channel,
+    MaterialUvSample uvSample)
+{
+    if (!HasOpenPBRTexture(textureIndex, samplerIndex))
+    {
+        return 1.0f;
+    }
+
+    const float4 sampleValue = SampleOpenPBRTexture(textureIndex, samplerIndex, uvSample);
+    return DynamicSwizzle(sampleValue, channel);
+}
+
+void ApplyOpenPBRTextureSampling(
+    in MaterialUvCache uvCache,
+    bool hasParallaxResolvedUv,
+    uint parallaxUvSetIndex,
+    float2 parallaxUv,
+    float2 parallaxDUdx,
+    float2 parallaxDUdy,
+    in OpenPBRMaterialInfo openPBRMaterialInfo,
+    inout OpenPBRSurfaceSample surface)
+{
+    const MaterialUvSample coatColorUv = ResolveOpenPBRTextureUv(
+        uvCache,
+        openPBRMaterialInfo.coatColorUvSetIndex,
+        hasParallaxResolvedUv,
+        parallaxUvSetIndex,
+        parallaxUv,
+        parallaxDUdx,
+        parallaxDUdy);
+    const MaterialUvSample coatWeightUv = ResolveOpenPBRTextureUv(
+        uvCache,
+        openPBRMaterialInfo.coatWeightUvSetIndex,
+        hasParallaxResolvedUv,
+        parallaxUvSetIndex,
+        parallaxUv,
+        parallaxDUdx,
+        parallaxDUdy);
+    const MaterialUvSample coatRoughnessUv = ResolveOpenPBRTextureUv(
+        uvCache,
+        openPBRMaterialInfo.coatRoughnessUvSetIndex,
+        hasParallaxResolvedUv,
+        parallaxUvSetIndex,
+        parallaxUv,
+        parallaxDUdx,
+        parallaxDUdy);
+    const MaterialUvSample fuzzColorUv = ResolveOpenPBRTextureUv(
+        uvCache,
+        openPBRMaterialInfo.fuzzColorUvSetIndex,
+        hasParallaxResolvedUv,
+        parallaxUvSetIndex,
+        parallaxUv,
+        parallaxDUdx,
+        parallaxDUdy);
+    const MaterialUvSample fuzzWeightUv = ResolveOpenPBRTextureUv(
+        uvCache,
+        openPBRMaterialInfo.fuzzWeightUvSetIndex,
+        hasParallaxResolvedUv,
+        parallaxUvSetIndex,
+        parallaxUv,
+        parallaxDUdx,
+        parallaxDUdy);
+    const MaterialUvSample fuzzRoughnessUv = ResolveOpenPBRTextureUv(
+        uvCache,
+        openPBRMaterialInfo.fuzzRoughnessUvSetIndex,
+        hasParallaxResolvedUv,
+        parallaxUvSetIndex,
+        parallaxUv,
+        parallaxDUdx,
+        parallaxDUdy);
+
+    surface.coatColor *= SampleOpenPBRColorTexture(
+        openPBRMaterialInfo.coatColorTextureIndex,
+        openPBRMaterialInfo.coatColorSamplerIndex,
+        openPBRMaterialInfo.coatColorChannels,
+        coatColorUv);
+    surface.coatWeight *= SampleOpenPBRScalarTexture(
+        openPBRMaterialInfo.coatWeightTextureIndex,
+        openPBRMaterialInfo.coatWeightSamplerIndex,
+        openPBRMaterialInfo.coatWeightChannel,
+        coatWeightUv);
+    surface.coatRoughness *= SampleOpenPBRScalarTexture(
+        openPBRMaterialInfo.coatRoughnessTextureIndex,
+        openPBRMaterialInfo.coatRoughnessSamplerIndex,
+        openPBRMaterialInfo.coatRoughnessChannel,
+        coatRoughnessUv);
+
+    surface.fuzzColor *= SampleOpenPBRColorTexture(
+        openPBRMaterialInfo.fuzzColorTextureIndex,
+        openPBRMaterialInfo.fuzzColorSamplerIndex,
+        openPBRMaterialInfo.fuzzColorChannels,
+        fuzzColorUv);
+    surface.fuzzWeight *= SampleOpenPBRScalarTexture(
+        openPBRMaterialInfo.fuzzWeightTextureIndex,
+        openPBRMaterialInfo.fuzzWeightSamplerIndex,
+        openPBRMaterialInfo.fuzzWeightChannel,
+        fuzzWeightUv);
+    surface.fuzzRoughness *= SampleOpenPBRScalarTexture(
+        openPBRMaterialInfo.fuzzRoughnessTextureIndex,
+        openPBRMaterialInfo.fuzzRoughnessSamplerIndex,
+        openPBRMaterialInfo.fuzzRoughnessChannel,
+        fuzzRoughnessUv);
+
+    surface.coatColor = saturate(surface.coatColor);
+    surface.coatWeight = saturate(surface.coatWeight);
+    surface.coatRoughness = saturate(surface.coatRoughness);
+    surface.fuzzColor = saturate(surface.fuzzColor);
+    surface.fuzzWeight = saturate(surface.fuzzWeight);
+    surface.fuzzRoughness = saturate(surface.fuzzRoughness);
+}
+
 bool MaterialSlotEnabled(MaterialInfo materialInfo, uint materialFlags, MaterialTextureSlot slot)
 {
     switch (slot)
@@ -413,6 +611,11 @@ MaterialUvSample GetBoundUvSample(in MaterialUvCache cache, in MaterialUvBinding
     return cache.samples[cacheIndex];
 }
 
+void AppendOpenPBRForwardUvSamples(
+    inout MaterialUvCache cache,
+    in VisBufferPSInput input,
+    in OpenPBRMaterialInfo openPBRMaterialInfo);
+
 #if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
 void BuildForwardTransparentMaterialUvData(
     in VisBufferPSInput input,
@@ -519,6 +722,23 @@ void BuildForwardTransparentMaterialUvData(
         cache.count = cacheIndex + 1u;
     }
 
+    AppendOpenPBRForwardUvSamples(cache, input, LoadOpenPBRMaterialInfo(materialInfo));
+
+    [unroll]
+    for (uint cacheIndex = 0u; cacheIndex < MATERIAL_MAX_UNIQUE_UV_SETS; ++cacheIndex)
+    {
+        if (cacheIndex >= cache.count)
+        {
+            break;
+        }
+
+        const uint uvSetIndex = cache.samples[cacheIndex].uvSetIndex;
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndexByUvSet[uvSetIndex] = cacheIndex;
+        }
+    }
+
     const uint uv0CacheIndex = cacheIndexByUvSet[0u];
 
     [unroll]
@@ -610,6 +830,56 @@ void AppendForwardMaterialUvSample(inout MaterialUvCache cache, uint uvSetIndex,
     cache.count++;
 }
 
+void AppendOpenPBRForwardUvSamples(
+    inout MaterialUvCache cache,
+    in VisBufferPSInput input,
+    in OpenPBRMaterialInfo openPBRMaterialInfo)
+{
+    const uint uvSetIndices[6] = {
+        openPBRMaterialInfo.coatColorUvSetIndex,
+        openPBRMaterialInfo.coatWeightUvSetIndex,
+        openPBRMaterialInfo.coatRoughnessUvSetIndex,
+        openPBRMaterialInfo.fuzzColorUvSetIndex,
+        openPBRMaterialInfo.fuzzWeightUvSetIndex,
+        openPBRMaterialInfo.fuzzRoughnessUvSetIndex
+    };
+
+    const uint textureIndices[6] = {
+        openPBRMaterialInfo.coatColorTextureIndex,
+        openPBRMaterialInfo.coatWeightTextureIndex,
+        openPBRMaterialInfo.coatRoughnessTextureIndex,
+        openPBRMaterialInfo.fuzzColorTextureIndex,
+        openPBRMaterialInfo.fuzzWeightTextureIndex,
+        openPBRMaterialInfo.fuzzRoughnessTextureIndex
+    };
+
+    const uint samplerIndices[6] = {
+        openPBRMaterialInfo.coatColorSamplerIndex,
+        openPBRMaterialInfo.coatWeightSamplerIndex,
+        openPBRMaterialInfo.coatRoughnessSamplerIndex,
+        openPBRMaterialInfo.fuzzColorSamplerIndex,
+        openPBRMaterialInfo.fuzzWeightSamplerIndex,
+        openPBRMaterialInfo.fuzzRoughnessSamplerIndex
+    };
+
+    [unroll]
+    for (uint i = 0u; i < 6u; ++i)
+    {
+        if (!HasOpenPBRTexture(textureIndices[i], samplerIndices[i]))
+        {
+            continue;
+        }
+
+        const uint uvSetIndex = uvSetIndices[i];
+        if (FindMaterialUvCacheIndex(cache, uvSetIndex) != MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            continue;
+        }
+
+        AppendForwardMaterialUvSample(cache, uvSetIndex, input);
+    }
+}
+
 MaterialUvCache BuildMaterialUvCacheFromForwardInput(
     in VisBufferPSInput input,
     in MaterialInfo materialInfo,
@@ -634,6 +904,8 @@ MaterialUvCache BuildMaterialUvCacheFromForwardInput(
 
         AppendForwardMaterialUvSample(cache, uvSetIndex, input);
     }
+
+    AppendOpenPBRForwardUvSamples(cache, input, LoadOpenPBRMaterialInfo(materialInfo));
 
     return cache;
 }
@@ -845,6 +1117,15 @@ void SampleMaterialFromUvCache(
         roughness,
         baseColor.a,
         emissive);
+    ApplyOpenPBRTextureSampling(
+        uvCache,
+        hasParallaxResolvedUv,
+        materialInfo.heightUvSetIndex,
+        parallaxUv,
+        parallaxDUdx,
+        parallaxDUdy,
+        LoadOpenPBRMaterialInfo(materialInfo),
+        openPBRSurface);
     PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 }
 
@@ -1178,6 +1459,15 @@ void SampleMaterialCorePrecompiled(
         roughness,
         baseColor.a,
         emissive);
+    ApplyOpenPBRTextureSampling(
+        BuildSingleUvCache(localUV, localDUdx, localDUdy),
+        false,
+        0u,
+        float2(0.0f, 0.0f),
+        float2(0.0f, 0.0f),
+        float2(0.0f, 0.0f),
+        LoadOpenPBRMaterialInfo(materialInfo),
+        openPBRSurface);
     PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 #endif
 }
@@ -1295,6 +1585,43 @@ float computeDielectricF0(float reflectance)
     return 0.16 * reflectance * reflectance;
 }
 
+float OpenPBRIorToF0(float ior)
+{
+    const float safeIor = max(ior, 1.0f);
+    const float f = (safeIor - 1.0f) / (safeIor + 1.0f);
+    return f * f;
+}
+
+void PopulateFragmentInfoFromOpenPBR(
+    OpenPBRSurfaceSample surface,
+    inout FragmentInfo ret)
+{
+    OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(surface.openPBRMaterialDataIndex);
+    const float dielectricF0Scalar = OpenPBRIorToF0(openPBRMaterialInfo.specularIor) * saturate(openPBRMaterialInfo.specularWeight);
+    const float3 dielectricF0 = saturate(openPBRMaterialInfo.specularColor * dielectricF0Scalar);
+    const float dielectricF0Max = max(max(dielectricF0.x, dielectricF0.y), dielectricF0.z);
+    const float coatPerceptualRoughness = clamp(surface.coatRoughness, MIN_PERCEPTUAL_ROUGHNESS, 1.0f);
+    const float coatF0Scalar = OpenPBRIorToF0(openPBRMaterialInfo.coatIor);
+
+    ret.openPBRMaterialDataIndex = surface.openPBRMaterialDataIndex;
+    ret.albedo = surface.baseColor;
+    ret.emissive = surface.emissive;
+    ret.metallic = surface.baseMetalness;
+    ret.coatWeight = saturate(surface.coatWeight);
+    ret.coatColor = saturate(surface.coatColor);
+    ret.coatPerceptualRoughness = coatPerceptualRoughness;
+    ret.coatRoughness = PerceptualRoughnessToRoughness(coatPerceptualRoughness);
+    ret.coatF0 = saturate(ret.coatColor * coatF0Scalar);
+    ret.coatDarkening = saturate(openPBRMaterialInfo.coatDarkening);
+    ret.fuzzWeight = saturate(surface.fuzzWeight);
+    ret.fuzzColor = saturate(surface.fuzzColor);
+    ret.fuzzRoughness = saturate(surface.fuzzRoughness);
+    ret.diffuseColor = computeDiffuseColor(surface.baseColor * openPBRMaterialInfo.baseWeight, surface.baseMetalness);
+    ret.reflectance = sqrt(saturate(dielectricF0Max / 0.16f));
+    ret.dielectricF0 = dielectricF0Max * (1.0f - surface.baseMetalness);
+    ret.F0 = saturate(lerp(dielectricF0, surface.baseColor, surface.baseMetalness));
+}
+
 void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in float3 fragPosViewSpace, in float3 fragPosWorldSpace, in bool enableGTAO, out FragmentInfo ret) {
     ret.pixelCoords = pixelCoordinates;
     ret.fragPosViewSpace = fragPosViewSpace;
@@ -1304,16 +1631,18 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     Texture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
     
     // Load values
-    ret.normalWS = normalsTexture[pixelCoordinates].xyz;
+    float4 normalSample = normalsTexture[pixelCoordinates];
+    ret.normalWS = normalSample.xyz;
     //ret.normalWS = SignedOctDecode(encodedNormal.yzw);
     
     Texture2D<float4> albedoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Albedo)];
     float4 baseColorSample = albedoTexture[pixelCoordinates];
-    ret.albedo = baseColorSample.xyz;
-    
+    Texture2D<float4> coatTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Coat)];
+    float4 coatSample = coatTexture[pixelCoordinates];
     Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Emissive)];
     float4 emissive = emissiveTexture[pixelCoordinates];
-    ret.emissive = emissive.xyz;
+    Texture2D<float4> fuzzTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Fuzz)];
+    float4 fuzzSample = fuzzTexture[pixelCoordinates];
     
     if (enableGTAO)
     {
@@ -1325,8 +1654,8 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
         ret.diffuseAmbientOcclusion = baseColorSample.w; // AO stored in alpha channel
     }
     
-    Texture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
-    float2 metallicRoughness = metallicRoughnessTexture[pixelCoordinates];
+    Texture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
+    float4 metallicRoughness = metallicRoughnessTexture[pixelCoordinates];
     
     float perceptualRoughness = metallicRoughness.y;
     ret.perceptualRoughnessUnclamped = perceptualRoughness;
@@ -1344,22 +1673,28 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
     
     //ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
-    
-    ret.metallic = metallicRoughness.x;
-    ret.diffuseColor = computeDiffuseColor(baseColorSample.xyz, ret.metallic);
+
     ret.alpha = 1.0; // Opaque objects
-    
-    ret.reflectance = 0.35; // This is a default value for the reflectance of dielectrics, similar to setting an F0 directly. Ideally, each material should have its own reflectance value.
-    // Assumes an interface from air to an IOR of 1.5 for dielectrics
-    ret.dielectricF0 = computeDielectricF0(ret.reflectance);
-    ret.F0 = computeF0(float4(baseColorSample.xyz, 1.0), ret.metallic, ret.dielectricF0); // base albedo, not the diffuse color
-    ret.dielectricF0 *= (1.0 - ret.metallic);
+
+    OpenPBRSurfaceSample surface = (OpenPBRSurfaceSample)0;
+    surface.openPBRMaterialDataIndex = (uint)(normalSample.w + 0.5f);
+    surface.baseColor = baseColorSample.xyz;
+    surface.baseMetalness = metallicRoughness.x;
+    surface.specularRoughness = metallicRoughness.y;
+    surface.coatColor = coatSample.xyz;
+    surface.coatWeight = coatSample.w;
+    surface.coatRoughness = metallicRoughness.z;
+    surface.fuzzColor = fuzzSample.xyz;
+    surface.fuzzWeight = metallicRoughness.w;
+    surface.fuzzRoughness = fuzzSample.w;
+    surface.opacity = 1.0f;
+    surface.emissive = emissive.xyz;
+    PopulateFragmentInfoFromOpenPBR(surface, ret);
 }
 
 void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialInfo, in float3 viewWS, in float2 pixelCoords, in bool transparent, in bool isFrontFace, in uint materialFlags)
 {
     ret.materialFlags = materialFlags;
-    ret.metallic = materialInfo.metallic;
     float perceptualRoughness = materialInfo.roughness;
     ret.perceptualRoughnessUnclamped = perceptualRoughness;
     // Clamp the roughness to a minimum value to avoid divisions by 0 during lighting
@@ -1382,9 +1717,22 @@ void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialIn
     ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
     
     //ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
-    
-    ret.diffuseColor = computeDiffuseColor(materialInfo.albedo, ret.metallic);
-    ret.albedo = materialInfo.albedo;
+
+    OpenPBRSurfaceSample surface = (OpenPBRSurfaceSample)0;
+    surface.openPBRMaterialDataIndex = materialInfo.openPBRMaterialDataIndex;
+    surface.baseColor = materialInfo.albedo;
+    surface.baseMetalness = materialInfo.metallic;
+    surface.specularRoughness = materialInfo.roughness;
+    surface.coatColor = materialInfo.coatColor;
+    surface.coatWeight = materialInfo.coatWeight;
+    surface.coatRoughness = materialInfo.coatRoughness;
+    surface.fuzzColor = materialInfo.fuzzColor;
+    surface.fuzzWeight = materialInfo.fuzzWeight;
+    surface.fuzzRoughness = materialInfo.fuzzRoughness;
+    surface.opacity = materialInfo.opacity;
+    surface.emissive = materialInfo.emissive;
+    PopulateFragmentInfoFromOpenPBR(surface, ret);
+
     if (transparent)
     {
         ret.alpha = materialInfo.opacity;
@@ -1404,13 +1752,6 @@ void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialIn
         }
     }
     
-    ret.reflectance = 0.35; // This is a default value for the reflectance of dielectrics, similar to setting an F0 directly. Ideally, each material should have its own reflectance value.
-    // Assumes an interface from air to an IOR of 1.5 for dielectrics
-    ret.dielectricF0 = computeDielectricF0(ret.reflectance);
-    ret.F0 = computeF0(float4(materialInfo.albedo.xyz, 1.0), ret.metallic, ret.dielectricF0); // base albedo, not the diffuse color
-    ret.dielectricF0 *= (1.0 - ret.metallic);
-    
-    ret.emissive = materialInfo.emissive; // TODO
 }
 
 void GetFragmentInfoDirectPrecompiled(in PSInput input, in float3 viewWS, bool enableGTAO, bool transparent, bool isFrontFace, out FragmentInfo ret)

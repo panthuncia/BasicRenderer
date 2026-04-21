@@ -19,9 +19,12 @@ public:
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
         builder->WithShaderResource(Builtin::PostProcessing::ScreenSpaceReflections, 
             Builtin::Environment::InfoBuffer,
+            Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::GBuffer::Normals,
             Builtin::GBuffer::Albedo,
+            Builtin::GBuffer::Coat,
             Builtin::GBuffer::Emissive,
+            Builtin::GBuffer::Fuzz,
             Builtin::GBuffer::MetallicRoughness,
             Builtin::PrimaryCamera::DepthTexture,
             Builtin::CameraBuffer)

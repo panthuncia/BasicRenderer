@@ -48,6 +48,7 @@ Material::Material(const std::string& name,
 	bool geometricDisplacementEnabled,
     TechniqueDescriptor technique,
     OpenPBRMaterialParameters openPBRMaterial,
+    OpenPBRTextureBindings openPBRTextures,
     float alphaCutoff)
     : m_name(name),
     m_psoFlags(psoFlags),
@@ -72,7 +73,8 @@ Material::Material(const std::string& name,
     m_baseColorFactor(baseColorFactor),
     m_emissiveFactor(emissiveFactor),
 	m_technique(technique),
-    m_openPBRMaterial(openPBRMaterial)
+    m_openPBRMaterial(openPBRMaterial),
+    m_openPBRTextures(openPBRTextures)
 {
     m_materialData.materialFlags = materialFlags;
     m_materialData.ambientStrength = 0.5f;
@@ -194,6 +196,20 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
         m_opacityTexture->EnsureUploaded(factory);
 	}
 
+    auto ensureOpenPBRTexture = [&](std::shared_ptr<TextureAsset> const& texture) {
+        if (texture) {
+            texture->SetGenerateMipmaps(true);
+            texture->EnsureUploaded(factory);
+        }
+    };
+
+    ensureOpenPBRTexture(m_openPBRTextures.coatColor.texture);
+    ensureOpenPBRTexture(m_openPBRTextures.coatWeight.texture);
+    ensureOpenPBRTexture(m_openPBRTextures.coatRoughness.texture);
+    ensureOpenPBRTexture(m_openPBRTextures.fuzzColor.texture);
+    ensureOpenPBRTexture(m_openPBRTextures.fuzzWeight.texture);
+    ensureOpenPBRTexture(m_openPBRTextures.fuzzRoughness.texture);
+
     if (m_baseColorTexture != nullptr) {
         m_materialData.baseColorTextureIndex = m_baseColorTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.baseColorSamplerIndex = m_baseColorTexture->SamplerDescriptorIndex();
@@ -262,4 +278,18 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
         rg::memory::SetResourceUsageHint(m_opacityTexture->Image(), "Material textures");
         m_opacityTexture->Image().SetName("OpacityTexture");
     }
+
+    auto nameOpenPBRTexture = [](std::shared_ptr<TextureAsset> const& texture, const char* name) {
+        if (texture != nullptr) {
+            rg::memory::SetResourceUsageHint(texture->Image(), "Material textures");
+            texture->Image().SetName(name);
+        }
+    };
+
+    nameOpenPBRTexture(m_openPBRTextures.coatColor.texture, "OpenPBRCoatColorTexture");
+    nameOpenPBRTexture(m_openPBRTextures.coatWeight.texture, "OpenPBRCoatWeightTexture");
+    nameOpenPBRTexture(m_openPBRTextures.coatRoughness.texture, "OpenPBRCoatRoughnessTexture");
+    nameOpenPBRTexture(m_openPBRTextures.fuzzColor.texture, "OpenPBRFuzzColorTexture");
+    nameOpenPBRTexture(m_openPBRTextures.fuzzWeight.texture, "OpenPBRFuzzWeightTexture");
+    nameOpenPBRTexture(m_openPBRTextures.fuzzRoughness.texture, "OpenPBRFuzzRoughnessTexture");
 }

@@ -26,14 +26,18 @@ void EvaluateGBufferOptimized(uint2 pixel)
 
     RWTexture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
     RWTexture2D<float4> albedoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Albedo)];
+    RWTexture2D<float4> coatTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Coat)];
     RWTexture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Emissive)];
-    RWTexture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
+    RWTexture2D<float4> fuzzTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Fuzz)];
+    RWTexture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
     RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
 
-    normalsTexture[pixel].xyz = sample.materialInputs.normalWS;
+    normalsTexture[pixel] = float4(sample.materialInputs.normalWS, (float)sample.materialInputs.openPBRMaterialDataIndex);
     albedoTexture[pixel] = float4(sample.materialInputs.albedo, sample.materialInputs.ambientOcclusion);
+    coatTexture[pixel] = float4(sample.materialInputs.coatColor, sample.materialInputs.coatWeight);
     emissiveTexture[pixel].xyz = sample.materialInputs.emissive;
-    metallicRoughnessTexture[pixel] = float2(sample.materialInputs.metallic, sample.materialInputs.roughness);
+    fuzzTexture[pixel] = float4(sample.materialInputs.fuzzColor, sample.materialInputs.fuzzRoughness);
+    metallicRoughnessTexture[pixel] = float4(sample.materialInputs.metallic, sample.materialInputs.roughness, sample.materialInputs.coatRoughness, sample.materialInputs.fuzzWeight);
     motionVectorTexture[pixel] = sample.motionVector;
 
     ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];

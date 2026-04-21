@@ -162,12 +162,12 @@ void LogFailedShaderSource(
 
     const char* source = static_cast<const char*>(sourceBuffer.Ptr);
     const size_t sourceSize = GetNormalizedShaderSourceSize(source, sourceBuffer.Size);
-    spdlog::error(
-        "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
-        ws2s(filename),
-        ws2s(entryPoint),
-        ws2s(target),
-        std::string(source, sourceSize));
+    //spdlog::error(
+    //    "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
+    //    ws2s(filename),
+    //    ws2s(entryPoint),
+    //    ws2s(target),
+    //    std::string(source, sourceSize));
 }
 
 bool CreateBlobFromBytes(

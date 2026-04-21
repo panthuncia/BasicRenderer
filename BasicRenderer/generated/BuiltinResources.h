@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE — DO NOT EDIT
+// GENERATED CODE ï¿½ DO NOT EDIT
 
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
@@ -47,7 +47,9 @@ struct Builtin {
   };
   struct GBuffer {
     inline static constexpr std::string_view Albedo = "Builtin::GBuffer::Albedo";
+    inline static constexpr std::string_view Coat = "Builtin::GBuffer::Coat";
     inline static constexpr std::string_view Emissive = "Builtin::GBuffer::Emissive";
+    inline static constexpr std::string_view Fuzz = "Builtin::GBuffer::Fuzz";
     inline static constexpr std::string_view MetallicRoughness = "Builtin::GBuffer::MetallicRoughness";
     inline static constexpr std::string_view MotionVectors = "Builtin::GBuffer::MotionVectors";
     inline static constexpr std::string_view Normals = "Builtin::GBuffer::Normals";

@@ -357,6 +357,41 @@ struct OpenPBRMaterialInfo {
     uint pad0;
     uint pad1;
     uint pad2;
+
+    uint coatColorTextureIndex;
+    uint coatColorSamplerIndex;
+    uint coatWeightTextureIndex;
+    uint coatWeightSamplerIndex;
+
+    uint coatRoughnessTextureIndex;
+    uint coatRoughnessSamplerIndex;
+    uint fuzzColorTextureIndex;
+    uint fuzzColorSamplerIndex;
+
+    uint fuzzWeightTextureIndex;
+    uint fuzzWeightSamplerIndex;
+    uint fuzzRoughnessTextureIndex;
+    uint fuzzRoughnessSamplerIndex;
+
+    uint4 coatColorChannels;
+    uint coatWeightChannel;
+    uint coatRoughnessChannel;
+    uint coatTexturePad0;
+
+    uint4 fuzzColorChannels;
+    uint fuzzWeightChannel;
+    uint fuzzRoughnessChannel;
+    uint fuzzTexturePad0;
+
+    uint coatColorUvSetIndex;
+    uint coatWeightUvSetIndex;
+    uint coatRoughnessUvSetIndex;
+    uint fuzzColorUvSetIndex;
+
+    uint fuzzWeightUvSetIndex;
+    uint fuzzRoughnessUvSetIndex;
+    uint openPBRTexturePad0;
+    uint openPBRTexturePad1;
 };
 
 struct SingleMatrix {
@@ -449,9 +484,19 @@ struct FragmentInfo {
     float2 pixelCoords;
     float3 fragPosWorldSpace;
     float3 fragPosViewSpace;
+    uint openPBRMaterialDataIndex;
     float3 normalWS;
     float3 diffuseColor;
     float3 albedo;
+    float coatWeight;
+    float3 coatColor;
+    float coatPerceptualRoughness;
+    float coatRoughness;
+    float3 coatF0;
+    float coatDarkening;
+    float fuzzWeight;
+    float3 fuzzColor;
+    float fuzzRoughness;
     float alpha;
     float diffuseAmbientOcclusion;
     float metallic;
@@ -499,8 +544,14 @@ struct MaterialInputs
     float3 albedo;
     float3 normalWS;
     float3 emissive;
+    float3 coatColor;
     float metallic;
     float roughness;
+    float coatWeight;
+    float coatRoughness;
+    float3 fuzzColor;
+    float fuzzWeight;
+    float fuzzRoughness;
     float opacity;
     float ambientOcclusion;
     uint openPBRMaterialDataIndex;

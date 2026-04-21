@@ -134,6 +134,14 @@ public:
         if (desc.forceDoubleSided) {
             materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
         }
+        if (desc.openPBRTextures.coatColor.texture ||
+            desc.openPBRTextures.coatWeight.texture ||
+            desc.openPBRTextures.coatRoughness.texture ||
+            desc.openPBRTextures.fuzzColor.texture ||
+            desc.openPBRTextures.fuzzWeight.texture ||
+            desc.openPBRTextures.fuzzRoughness.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_TEXTURED;
+        }
         if (desc.negateNormals) {
             materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;
         }
@@ -183,6 +191,7 @@ public:
 			desc.enableGeometricDisplacement,
             technique,
             canonicalOpenPBR,
+            desc.openPBRTextures,
             desc.alphaCutoff
         );
     }
@@ -199,6 +208,7 @@ public:
     static std::shared_ptr<Material> GetDefaultMaterial();
     TechniqueDescriptor const& Technique() const { return m_technique; }
     OpenPBRMaterialParameters const& GetOpenPBRMaterial() const { return m_openPBRMaterial; }
+    OpenPBRTextureBindings const& GetOpenPBRTextures() const { return m_openPBRTextures; }
     static void DestroyDefaultMaterial() {
         defaultMaterial.reset();
     }
@@ -241,6 +251,7 @@ private:
     PSOFlags m_psoFlags;
     TechniqueDescriptor m_technique;
     OpenPBRMaterialParameters m_openPBRMaterial = {};
+    OpenPBRTextureBindings m_openPBRTextures = {};
 
     Material(const std::string& name,
         MaterialFlags materialFlags, PSOFlags psoFlags);
@@ -280,6 +291,7 @@ private:
 		bool geometricDisplacementEnabled,
 		TechniqueDescriptor technique,
         OpenPBRMaterialParameters openPBRMaterial,
+        OpenPBRTextureBindings openPBRTextures,
         float alphaCutoff);
 
     static std::shared_ptr<Material> CreateShared(const std::string& name,
@@ -317,6 +329,7 @@ private:
 		bool geometricDisplacementEnabled,
         TechniqueDescriptor technique,
         OpenPBRMaterialParameters openPBRMaterial,
+        OpenPBRTextureBindings openPBRTextures,
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
             baseColorTexture, normalTexture, aoMap, heightMap,
@@ -329,6 +342,7 @@ private:
 			heightMapScale, geometricDisplacementMin, geometricDisplacementMax, geometricDisplacementEnabled,
 			technique,
             openPBRMaterial,
+            openPBRTextures,
             alphaCutoff));
     }
 

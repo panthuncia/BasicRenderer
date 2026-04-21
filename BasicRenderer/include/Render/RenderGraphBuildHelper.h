@@ -57,6 +57,8 @@ void CreateGBufferResources(RenderGraph* graph) {
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
     std::shared_ptr<PixelBuffer> albedo;
+    std::shared_ptr<PixelBuffer> coat;
+    std::shared_ptr<PixelBuffer> fuzz;
     std::shared_ptr<PixelBuffer> metallicRoughness;
     std::shared_ptr<PixelBuffer> emissive;
 
@@ -75,10 +77,40 @@ void CreateGBufferResources(RenderGraph* graph) {
     rg::memory::SetResourceUsageHint(*albedo, "GBuffer");
     graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
+    TextureDescription coatDesc;
+    coatDesc.channels = 4;
+    coatDesc.hasRTV = true;
+    coatDesc.format = rhi::Format::R16G16B16A16_Float;
+    coatDesc.hasSRV = true;
+	coatDesc.hasUAV = true;
+    coatDesc.hasNonShaderVisibleUAV = true;
+    ImageDimensions coatDims = { resolution.x, resolution.y, 0, 0 };
+    coatDesc.imageDimensions.push_back(coatDims);
+    coatDesc.allowAlias = true;
+    coat = PixelBuffer::CreateSharedUnmaterialized(coatDesc);
+    coat->SetName("OpenPBR Coat");
+    rg::memory::SetResourceUsageHint(*coat, "GBuffer");
+    graph->RegisterResource(Builtin::GBuffer::Coat, coat);
+
+    TextureDescription fuzzDesc;
+    fuzzDesc.channels = 4;
+    fuzzDesc.hasRTV = true;
+    fuzzDesc.format = rhi::Format::R16G16B16A16_Float;
+    fuzzDesc.hasSRV = true;
+	fuzzDesc.hasUAV = true;
+    fuzzDesc.hasNonShaderVisibleUAV = true;
+    ImageDimensions fuzzDims = { resolution.x, resolution.y, 0, 0 };
+    fuzzDesc.imageDimensions.push_back(fuzzDims);
+    fuzzDesc.allowAlias = true;
+    fuzz = PixelBuffer::CreateSharedUnmaterialized(fuzzDesc);
+    fuzz->SetName("OpenPBR Fuzz");
+    rg::memory::SetResourceUsageHint(*fuzz, "GBuffer");
+    graph->RegisterResource(Builtin::GBuffer::Fuzz, fuzz);
+
     TextureDescription metallicRoughnessDesc;
-    metallicRoughnessDesc.channels = 2;
+    metallicRoughnessDesc.channels = 4;
     metallicRoughnessDesc.hasRTV = true;
-    metallicRoughnessDesc.format = rhi::Format::R8G8_UNorm;
+    metallicRoughnessDesc.format = rhi::Format::R8G8B8A8_UNorm;
     metallicRoughnessDesc.hasSRV = true;
 	metallicRoughnessDesc.hasUAV = true;
 	metallicRoughnessDesc.hasNonShaderVisibleUAV = true;

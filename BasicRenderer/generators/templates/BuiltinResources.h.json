@@ -83,6 +83,8 @@
       "Normals": {},
       "MotionVectors": {},
       "Albedo": {},
+      "Coat": {},
+      "Fuzz": {},
       "MetallicRoughness": {},
       "Emissive": {}
     },

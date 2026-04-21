@@ -3,48 +3,127 @@
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RasterBucketFlags.h"
 
+#include <limits>
+
 namespace {
-	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(const OpenPBRMaterialParameters& material) {
+	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(const Material& material) {
+		const OpenPBRMaterialParameters& materialParameters = material.GetOpenPBRMaterial();
+		const OpenPBRTextureBindings& textures = material.GetOpenPBRTextures();
+		constexpr uint32_t kInvalidDescriptor = std::numeric_limits<uint32_t>::max();
 		PerMaterialOpenPBRCB result = {};
-		result.baseWeight = material.baseWeight;
-		result.baseColor = material.baseColor;
-		result.baseDiffuseRoughness = material.baseDiffuseRoughness;
-		result.baseMetalness = material.baseMetalness;
-		result.subsurfaceWeight = material.subsurfaceWeight;
-		result.subsurfaceRadius = material.subsurfaceRadius;
-		result.subsurfaceColor = material.subsurfaceColor;
-		result.subsurfaceScatterAnisotropy = material.subsurfaceScatterAnisotropy;
-		result.subsurfaceRadiusScale = material.subsurfaceRadiusScale;
-		result.specularWeight = material.specularWeight;
-		result.specularColor = material.specularColor;
-		result.specularRoughness = material.specularRoughness;
-		result.specularRoughnessAnisotropy = material.specularRoughnessAnisotropy;
-		result.specularIor = material.specularIor;
-		result.specularAnisotropyRotationCosSin = material.specularAnisotropyRotationCosSin;
-		result.coatWeight = material.coatWeight;
-		result.coatColor = material.coatColor;
-		result.coatRoughness = material.coatRoughness;
-		result.coatRoughnessAnisotropy = material.coatRoughnessAnisotropy;
-		result.coatIor = material.coatIor;
-		result.coatDarkening = material.coatDarkening;
-		result.coatAnisotropyRotationCosSin = material.coatAnisotropyRotationCosSin;
-		result.fuzzWeight = material.fuzzWeight;
-		result.fuzzColor = material.fuzzColor;
-		result.fuzzRoughness = material.fuzzRoughness;
-		result.transmissionWeight = material.transmissionWeight;
-		result.transmissionColor = material.transmissionColor;
-		result.transmissionDepth = material.transmissionDepth;
-		result.transmissionScatter = material.transmissionScatter;
-		result.transmissionScatterAnisotropy = material.transmissionScatterAnisotropy;
-		result.transmissionDispersionScale = material.transmissionDispersionScale;
-		result.transmissionDispersionAbbeNumber = material.transmissionDispersionAbbeNumber;
-		result.thinFilmWeight = material.thinFilmWeight;
-		result.thinFilmThickness = material.thinFilmThickness;
-		result.thinFilmIor = material.thinFilmIor;
-		result.emissionLuminance = material.emissionLuminance;
-		result.emissionColor = material.emissionColor;
-		result.geometryOpacity = material.geometryOpacity;
-		result.geometryThinWalled = material.geometryThinWalled ? 1u : 0u;
+		result.baseWeight = materialParameters.baseWeight;
+		result.baseColor = materialParameters.baseColor;
+		result.baseDiffuseRoughness = materialParameters.baseDiffuseRoughness;
+		result.baseMetalness = materialParameters.baseMetalness;
+		result.subsurfaceWeight = materialParameters.subsurfaceWeight;
+		result.subsurfaceRadius = materialParameters.subsurfaceRadius;
+		result.subsurfaceColor = materialParameters.subsurfaceColor;
+		result.subsurfaceScatterAnisotropy = materialParameters.subsurfaceScatterAnisotropy;
+		result.subsurfaceRadiusScale = materialParameters.subsurfaceRadiusScale;
+		result.specularWeight = materialParameters.specularWeight;
+		result.specularColor = materialParameters.specularColor;
+		result.specularRoughness = materialParameters.specularRoughness;
+		result.specularRoughnessAnisotropy = materialParameters.specularRoughnessAnisotropy;
+		result.specularIor = materialParameters.specularIor;
+		result.specularAnisotropyRotationCosSin = materialParameters.specularAnisotropyRotationCosSin;
+		result.coatWeight = materialParameters.coatWeight;
+		result.coatColor = materialParameters.coatColor;
+		result.coatRoughness = materialParameters.coatRoughness;
+		result.coatRoughnessAnisotropy = materialParameters.coatRoughnessAnisotropy;
+		result.coatIor = materialParameters.coatIor;
+		result.coatDarkening = materialParameters.coatDarkening;
+		result.coatAnisotropyRotationCosSin = materialParameters.coatAnisotropyRotationCosSin;
+		result.fuzzWeight = materialParameters.fuzzWeight;
+		result.fuzzColor = materialParameters.fuzzColor;
+		result.fuzzRoughness = materialParameters.fuzzRoughness;
+		result.transmissionWeight = materialParameters.transmissionWeight;
+		result.transmissionColor = materialParameters.transmissionColor;
+		result.transmissionDepth = materialParameters.transmissionDepth;
+		result.transmissionScatter = materialParameters.transmissionScatter;
+		result.transmissionScatterAnisotropy = materialParameters.transmissionScatterAnisotropy;
+		result.transmissionDispersionScale = materialParameters.transmissionDispersionScale;
+		result.transmissionDispersionAbbeNumber = materialParameters.transmissionDispersionAbbeNumber;
+		result.thinFilmWeight = materialParameters.thinFilmWeight;
+		result.thinFilmThickness = materialParameters.thinFilmThickness;
+		result.thinFilmIor = materialParameters.thinFilmIor;
+		result.emissionLuminance = materialParameters.emissionLuminance;
+		result.emissionColor = materialParameters.emissionColor;
+		result.geometryOpacity = materialParameters.geometryOpacity;
+		result.geometryThinWalled = materialParameters.geometryThinWalled ? 1u : 0u;
+
+		auto initializeColorTextureMetadata = [&](const TextureAndConstant& binding,
+			uint32_t& textureIndex,
+			uint32_t& samplerIndex,
+			DirectX::XMUINT4& channels,
+			uint32_t& uvSetIndex) {
+			textureIndex = kInvalidDescriptor;
+			samplerIndex = kInvalidDescriptor;
+			uvSetIndex = binding.uvSetIndex;
+			channels = DirectX::XMUINT4(0u, 1u, 2u, 3u);
+
+			if (binding.texture == nullptr) {
+				return;
+			}
+
+			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
+			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			if (binding.channels.size() > 0u) channels.x = binding.channels[0];
+			if (binding.channels.size() > 1u) channels.y = binding.channels[1];
+			if (binding.channels.size() > 2u) channels.z = binding.channels[2];
+			if (binding.channels.size() > 3u) channels.w = binding.channels[3];
+		};
+
+		auto initializeScalarTextureMetadata = [&](const TextureAndConstant& binding,
+			uint32_t& textureIndex,
+			uint32_t& samplerIndex,
+			uint32_t& channel,
+			uint32_t& uvSetIndex) {
+			textureIndex = kInvalidDescriptor;
+			samplerIndex = kInvalidDescriptor;
+			channel = 0u;
+			uvSetIndex = binding.uvSetIndex;
+
+			if (binding.texture == nullptr) {
+				return;
+			}
+
+			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
+			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			if (!binding.channels.empty()) {
+				channel = binding.channels[0];
+			}
+		};
+
+		initializeColorTextureMetadata(textures.coatColor,
+			result.coatColorTextureIndex,
+			result.coatColorSamplerIndex,
+			result.coatColorChannels,
+			result.coatColorUvSetIndex);
+		initializeScalarTextureMetadata(textures.coatWeight,
+			result.coatWeightTextureIndex,
+			result.coatWeightSamplerIndex,
+			result.coatWeightChannel,
+			result.coatWeightUvSetIndex);
+		initializeScalarTextureMetadata(textures.coatRoughness,
+			result.coatRoughnessTextureIndex,
+			result.coatRoughnessSamplerIndex,
+			result.coatRoughnessChannel,
+			result.coatRoughnessUvSetIndex);
+		initializeColorTextureMetadata(textures.fuzzColor,
+			result.fuzzColorTextureIndex,
+			result.fuzzColorSamplerIndex,
+			result.fuzzColorChannels,
+			result.fuzzColorUvSetIndex);
+		initializeScalarTextureMetadata(textures.fuzzWeight,
+			result.fuzzWeightTextureIndex,
+			result.fuzzWeightSamplerIndex,
+			result.fuzzWeightChannel,
+			result.fuzzWeightUvSetIndex);
+		initializeScalarTextureMetadata(textures.fuzzRoughness,
+			result.fuzzRoughnessTextureIndex,
+			result.fuzzRoughnessSamplerIndex,
+			result.fuzzRoughnessChannel,
+			result.fuzzRoughnessUvSetIndex);
 		return result;
 	}
 }
@@ -105,7 +184,7 @@ void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
 	const unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
 	material.SetOpenPBRMaterialDataIndex(materialSlot);
 	m_perMaterialDataBuffer->UpdateAt(materialSlot, material.GetData());
-	m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, BuildOpenPBRMaterialData(material.GetOpenPBRMaterial()));
+	m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, BuildOpenPBRMaterialData(material));
 }
 
 void MaterialManager::DecrementMaterialUsageCount(const Material& material) {

@@ -97,7 +97,9 @@ public:
             Builtin::PerMaterialOpenPBRDataBuffer)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
+                Builtin::GBuffer::Coat,
                 Builtin::GBuffer::Emissive,
+                Builtin::GBuffer::Fuzz,
                 Builtin::GBuffer::MetallicRoughness,
                 Builtin::GBuffer::MotionVectors,
                 Builtin::DebugVisualization)

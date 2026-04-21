@@ -31,6 +31,15 @@ struct TextureAndConstant {
 	std::string uvSetName;
 };
 
+struct OpenPBRTextureBindings {
+    TextureAndConstant coatColor = {};
+    TextureAndConstant coatWeight = {};
+    TextureAndConstant coatRoughness = {};
+    TextureAndConstant fuzzColor = {};
+    TextureAndConstant fuzzWeight = {};
+    TextureAndConstant fuzzRoughness = {};
+};
+
 struct OpenPBRMaterialParameters {
     float baseWeight = 1.0f;
     DirectX::XMFLOAT3 baseColor = { 0.8f, 0.8f, 0.8f };
@@ -104,6 +113,7 @@ struct MaterialDescription {
 	TextureAndConstant  heightMap = {};
     TextureAndConstant	normal = {};
     OpenPBRMaterialParameters openPBR = {};
+    OpenPBRTextureBindings openPBRTextures = {};
 };
 
 inline OpenPBRMaterialParameters TranslateLegacyMaterialDescriptionToOpenPBR(const MaterialDescription& desc) {

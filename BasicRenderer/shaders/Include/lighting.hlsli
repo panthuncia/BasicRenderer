@@ -33,6 +33,13 @@ struct LightingParameters {
     float metallic;
     float roughness;
     float3 F0;
+    float3 coatF0;
+    float coatWeight;
+    float coatDarkening;
+    float coatRoughness;
+    float3 fuzzColor;
+    float fuzzWeight;
+    float fuzzRoughness;
 };
 
 struct LightingOutput { // Lighting + debug info
@@ -109,8 +116,22 @@ float3 calculateLightContributionPBR(LightFragmentData light, LightingParameters
     float3 Fd = diffuseLobe(lightingParameters.roughness, lightingParameters.diffuseColor, normDotView, normDotLight, lightDotHalf);
 
     float3 energyCompensation = mx_ggx_energy_compensation(normDotView, lightingParameters.roughness, lightingParameters.F0);
-    
-    float3 BRDF = Fd + Fr * energyCompensation;
+    const float3 fuzzViewAttenuation = OpenPBRFuzzTransmittance(lightingParameters.fuzzWeight, lightingParameters.fuzzRoughness, normDotView);
+    const float3 fuzzLightAttenuation = OpenPBRFuzzTransmittance(lightingParameters.fuzzWeight, lightingParameters.fuzzRoughness, normDotLight);
+    const float3 fuzzLayerAttenuation = fuzzViewAttenuation * fuzzLightAttenuation;
+    const float3 coatViewAttenuation = OpenPBRCoatTransmittance(lightingParameters.coatF0, lightingParameters.coatWeight, lightingParameters.coatDarkening, normDotView);
+    const float3 coatLightAttenuation = OpenPBRCoatTransmittance(lightingParameters.coatF0, lightingParameters.coatWeight, lightingParameters.coatDarkening, normDotLight);
+
+    float3 coatFr = 0.0f.xxx;
+    if (lightingParameters.coatWeight > 0.0f)
+    {
+        coatFr = specularLobe(lightingParameters.coatRoughness, lightingParameters.coatF0, halfwayDir, normDotView, normDotLight, normDotHalf, lightDotHalf);
+        coatFr *= mx_ggx_energy_compensation(normDotView, lightingParameters.coatRoughness, lightingParameters.coatF0) * lightingParameters.coatWeight;
+    }
+
+    float3 fuzzFd = lightingParameters.fuzzWeight * lightingParameters.fuzzColor * OpenPBRFuzzCoverage(lightingParameters.fuzzWeight, lightingParameters.fuzzRoughness, lightDotHalf) * Fd_Lambert();
+    float3 baseAttenuation = fuzzLayerAttenuation * coatViewAttenuation * coatLightAttenuation;
+    float3 BRDF = (Fd + Fr * energyCompensation) * baseAttenuation + coatFr * fuzzLayerAttenuation + fuzzFd;
     
     return BRDF * light.lightColor.rgb * light.intensity * light.attenuation * light.spotAttenuation * normDotLight;
 }
@@ -165,6 +186,14 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
                 fragmentInfo.reflectedWS,
                 fragmentInfo.roughness,
                 fragmentInfo.perceptualRoughness,
+                fragmentInfo.coatF0,
+                fragmentInfo.coatWeight,
+                fragmentInfo.coatDarkening,
+                fragmentInfo.coatRoughness,
+                fragmentInfo.coatPerceptualRoughness,
+                fragmentInfo.fuzzColor,
+                fragmentInfo.fuzzWeight,
+                fragmentInfo.fuzzRoughness,
                 fragmentInfo.NdotV,
                 activeEnvironmentIndex,
                 environmentBufferDescriptorIndex);
@@ -180,6 +209,13 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
         lightingParameters.metallic = fragmentInfo.metallic;
         lightingParameters.roughness = fragmentInfo.roughness;
         lightingParameters.F0 = fragmentInfo.F0;
+        lightingParameters.coatF0 = fragmentInfo.coatF0;
+        lightingParameters.coatWeight = fragmentInfo.coatWeight;
+        lightingParameters.coatDarkening = fragmentInfo.coatDarkening;
+        lightingParameters.coatRoughness = fragmentInfo.coatRoughness;
+        lightingParameters.fuzzColor = fragmentInfo.fuzzColor;
+        lightingParameters.fuzzWeight = fragmentInfo.fuzzWeight;
+        lightingParameters.fuzzRoughness = fragmentInfo.fuzzRoughness;
 
         StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
         StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
@@ -278,7 +314,14 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
 #endif
     }
 
-    return lighting + fragmentInfo.emissive;
+    return lighting + EvaluateOpenPBREmissive(
+        fragmentInfo.emissive,
+        fragmentInfo.coatF0,
+        fragmentInfo.coatWeight,
+        fragmentInfo.coatDarkening,
+        fragmentInfo.fuzzWeight,
+        fragmentInfo.fuzzRoughness,
+        fragmentInfo.NdotV);
 }
 
 LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex, bool isFrontFace) {
@@ -308,6 +351,14 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                 fragmentInfo.reflectedWS, 
                 fragmentInfo.roughness,
                 fragmentInfo.perceptualRoughness,
+                fragmentInfo.coatF0,
+                fragmentInfo.coatWeight,
+                fragmentInfo.coatDarkening,
+                fragmentInfo.coatRoughness,
+                fragmentInfo.coatPerceptualRoughness,
+                fragmentInfo.fuzzColor,
+                fragmentInfo.fuzzWeight,
+                fragmentInfo.fuzzRoughness,
                 fragmentInfo.NdotV,
                 activeEnvironmentIndex, 
                 environmentBufferDescriptorIndex);
@@ -329,6 +380,13 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         lightingParameters.metallic = fragmentInfo.metallic;
         lightingParameters.roughness = fragmentInfo.roughness;
         lightingParameters.F0 = fragmentInfo.F0;
+        lightingParameters.coatF0 = fragmentInfo.coatF0;
+        lightingParameters.coatWeight = fragmentInfo.coatWeight;
+        lightingParameters.coatDarkening = fragmentInfo.coatDarkening;
+        lightingParameters.coatRoughness = fragmentInfo.coatRoughness;
+        lightingParameters.fuzzColor = fragmentInfo.fuzzColor;
+        lightingParameters.fuzzWeight = fragmentInfo.fuzzWeight;
+        lightingParameters.fuzzRoughness = fragmentInfo.fuzzRoughness;
         
         // TODO: Parallax shadows will require a forward pass
         //parallaxShadowParameters parallaxShadowParams;
@@ -479,7 +537,14 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif
     }
 
-    lighting += fragmentInfo.emissive;
+    lighting += EvaluateOpenPBREmissive(
+        fragmentInfo.emissive,
+        fragmentInfo.coatF0,
+        fragmentInfo.coatWeight,
+        fragmentInfo.coatDarkening,
+        fragmentInfo.fuzzWeight,
+        fragmentInfo.fuzzRoughness,
+        fragmentInfo.NdotV);
     
     output.lighting = lighting;
     

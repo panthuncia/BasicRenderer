@@ -11,7 +11,9 @@ public:
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
 		builder->WithUnorderedAccess(Builtin::PrimaryCamera::VisibilityTexture,
 			Builtin::GBuffer::Albedo,
+			Builtin::GBuffer::Coat,
 			Builtin::GBuffer::Emissive,
+			Builtin::GBuffer::Fuzz,
 			Builtin::GBuffer::MetallicRoughness,
 			Builtin::GBuffer::Normals,
 			Builtin::GBuffer::MotionVectors,
@@ -23,8 +25,10 @@ public:
 	void Setup() override {
 		m_visibilityBuffer = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::VisibilityTexture);
 		m_albedo = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Albedo);
+		m_coat = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Coat);
 		m_metallicRoughness = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MetallicRoughness);
 		m_emissive = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Emissive);
+		m_fuzz = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Fuzz);
 		m_normals = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Normals);
 		m_motionVectors = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors);
 		m_HDRColorTarget = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Color::HDRColorTarget);
@@ -81,8 +85,10 @@ public:
 			};
 
 		clearResource(m_albedo);
+		clearResource(m_coat);
 		clearResource(m_metallicRoughness);
 		clearResource(m_emissive);
+		clearResource(m_fuzz);
 		clearResource(m_normals);
 		clearResource(m_motionVectors);
 		clearResource(m_HDRColorTarget); // TODO: Only needed because of non-zero initialized memory issue- make a clear manager instead?
@@ -109,8 +115,10 @@ public:
 private:
 	GloballyIndexedResource* m_visibilityBuffer;
 	GloballyIndexedResource* m_albedo;
+	GloballyIndexedResource* m_coat;
 	GloballyIndexedResource* m_metallicRoughness;
 	GloballyIndexedResource* m_emissive;
+	GloballyIndexedResource* m_fuzz;
 	GloballyIndexedResource* m_normals;
 	GloballyIndexedResource* m_motionVectors;
 	GloballyIndexedResource* m_HDRColorTarget;

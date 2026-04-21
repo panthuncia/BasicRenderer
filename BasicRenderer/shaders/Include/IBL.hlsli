@@ -91,6 +91,29 @@ float3 prefilteredRadiance(float3 reflection, float roughness, unsigned int pref
     return specularSample.rgb;
 }
 
+float OpenPBRFuzzCoverage(float fuzzWeight, float fuzzRoughness, float NdotX)
+{
+    const float safeNdotX = saturate(NdotX);
+    return saturate(fuzzWeight * pow(1.0f - safeNdotX, lerp(6.0f, 2.0f, fuzzRoughness)));
+}
+
+float3 OpenPBRFuzzTransmittance(float fuzzWeight, float fuzzRoughness, float NdotX)
+{
+    return 1.0f.xxx - OpenPBRFuzzCoverage(fuzzWeight, fuzzRoughness, NdotX).xxx;
+}
+
+float3 OpenPBRCoatTransmittance(float3 coatF0, float coatWeight, float coatDarkening, float NdotX)
+{
+    return 1.0f.xxx - saturate(coatWeight * fresnel(coatF0, saturate(NdotX)) * coatDarkening);
+}
+
+float3 EvaluateOpenPBREmissive(float3 emissive, float3 coatF0, float coatWeight, float coatDarkening, float fuzzWeight, float fuzzRoughness, float NdotV)
+{
+    const float3 fuzzTransmittance = OpenPBRFuzzTransmittance(fuzzWeight, fuzzRoughness, NdotV);
+    const float3 coatTransmittance = OpenPBRCoatTransmittance(coatF0, coatWeight, coatDarkening, NdotV);
+    return emissive * fuzzTransmittance * coatTransmittance;
+}
+
 void combineDiffuseAndSpecular(const float3 n, const float3 E, const float3 Fd, const float3 Fr, inout float3 color)
 {
 #if defined(HAS_REFRACTION) // TODO: Refraction
@@ -100,7 +123,7 @@ void combineDiffuseAndSpecular(const float3 n, const float3 E, const float3 Fd, 
 #endif
 }
 
-void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 debugSpecular, float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float3 F0, float3 reflection, float roughness, float perceptualRoughness, float NdotV, in const uint environmentIndex, in const uint environmentBufferDescriptorIndex)
+void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 debugSpecular, float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float3 F0, float3 reflection, float roughness, float perceptualRoughness, float3 coatF0, float coatWeight, float coatDarkening, float coatRoughness, float coatPerceptualRoughness, float3 fuzzColor, float fuzzWeight, float fuzzRoughness, float NdotV, in const uint environmentIndex, in const uint environmentBufferDescriptorIndex)
 {
     
     // Specular
@@ -114,18 +137,38 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
 #endif
     float3 diffuseIrradiance = max(irradianceSH(normalize(normal + bentNormal), environmentIndex, environmentBufferDescriptorIndex), 0.0) * Fd_Lambert();
     float3 Fd = diffuseColor * diffuseIrradiance * (1.0 - E) * diffuseAO;
-    
-    // TODO: Subsurface and clearcoat
+    const float3 fuzzViewAttenuation = OpenPBRFuzzTransmittance(fuzzWeight, fuzzRoughness, NdotV);
+    const float3 coatViewAttenuation = OpenPBRCoatTransmittance(coatF0, coatWeight, coatDarkening, NdotV);
+
+    float3 coatFr = 0.0f.xxx;
+#if defined (PSO_SPECULAR_IBL)
+    if (coatWeight > 0.0f)
+    {
+        const float3 coatE = mx_ggx_dir_albedo_analytic(NdotV, coatRoughness, coatF0, float3(1.0f, 1.0f, 1.0f));
+        coatFr = coatWeight * coatE * prefilteredRadiance(r, coatPerceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
+    }
+#endif
+
+    const float3 baseAttenuation = fuzzViewAttenuation * coatViewAttenuation;
+    const float3 coatAttenuation = fuzzViewAttenuation;
+    Fd *= baseAttenuation;
+    Fr *= baseAttenuation;
+    coatFr *= coatAttenuation;
+
+    const float fuzzGrazing = OpenPBRFuzzCoverage(fuzzWeight, fuzzRoughness, NdotV);
+    float3 fuzzFd = fuzzWeight * fuzzColor * diffuseIrradiance * fuzzGrazing * diffuseAO;
     
     multiBounceAO(diffuseAO, diffuseColor, Fd);
+    multiBounceAO(diffuseAO, fuzzColor, fuzzFd);
     
 #if defined (PSO_SPECULAR_IBL)
     float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);
     multiBounceSpecularAO(specularAO, F0, Fr);
+    multiBounceSpecularAO(specularAO, coatF0, coatFr);
 #endif
-    combineDiffuseAndSpecular(normal, E, Fd, Fr, color);
-    debugDiffuse = Fd;
-    debugSpecular = Fr;
+    combineDiffuseAndSpecular(normal, E, Fd + fuzzFd, Fr + coatFr, color);
+    debugDiffuse = Fd + fuzzFd;
+    debugSpecular = Fr + coatFr;
 }
 
 float3 evaluateSpecularIBL(float3 normal, float3 bentNormal, float diffuseAO, float3 F0, float3 reflection, float roughness, float perceptualRoughness, float NdotV, in const uint environmentIndex)
@@ -137,15 +180,24 @@ float3 evaluateSpecularIBL(float3 normal, float3 bentNormal, float diffuseAO, fl
     return Fr;
 } 
 
-float3 evaluateSpecularIBLFromSSR(float3 specularSample, float3 normal, float3 bentNormal, float diffuseAO, float3 F0, float roughness, float perceptualRoughness, float NdotV)
+float3 evaluateSpecularIBLFromSSR(float3 specularSample, float3 normal, float3 bentNormal, float diffuseAO, float3 F0, float roughness, float perceptualRoughness, float3 coatF0, float coatWeight, float coatRoughness, float NdotV)
 {
     float3 E = mx_ggx_dir_albedo_analytic(NdotV, roughness, F0, float3(1.0, 1.0, 1.0));
     //StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
     //float3 r = getReflectedVector(reflection, normal, roughness);
     float3 Fr = E * specularSample; //prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
+    const float3 baseAttenuation = OpenPBRCoatTransmittance(coatF0, coatWeight, 1.0f, NdotV);
+    float3 coatFr = 0.0f.xxx;
+    if (coatWeight > 0.0f)
+    {
+        const float3 coatE = mx_ggx_dir_albedo_analytic(NdotV, coatRoughness, coatF0, float3(1.0f, 1.0f, 1.0f));
+        coatFr = coatWeight * coatE * specularSample;
+    }
+    Fr *= baseAttenuation;
     float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);
     multiBounceSpecularAO(specularAO, F0, Fr);
-    return Fr;
+    multiBounceSpecularAO(specularAO, coatF0, coatFr);
+    return Fr + coatFr;
 }
 
 #endif // __IBL_HLSLI__

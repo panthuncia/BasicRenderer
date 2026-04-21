@@ -242,6 +242,41 @@ struct PerMaterialOpenPBRCB {
     unsigned int pad0;
     unsigned int pad1;
     unsigned int pad2;
+
+    unsigned int coatColorTextureIndex;
+    unsigned int coatColorSamplerIndex;
+    unsigned int coatWeightTextureIndex;
+    unsigned int coatWeightSamplerIndex;
+
+    unsigned int coatRoughnessTextureIndex;
+    unsigned int coatRoughnessSamplerIndex;
+    unsigned int fuzzColorTextureIndex;
+    unsigned int fuzzColorSamplerIndex;
+
+    unsigned int fuzzWeightTextureIndex;
+    unsigned int fuzzWeightSamplerIndex;
+    unsigned int fuzzRoughnessTextureIndex;
+    unsigned int fuzzRoughnessSamplerIndex;
+
+    DirectX::XMUINT4 coatColorChannels;
+    unsigned int coatWeightChannel;
+    unsigned int coatRoughnessChannel;
+    unsigned int coatTexturePad0;
+
+    DirectX::XMUINT4 fuzzColorChannels;
+    unsigned int fuzzWeightChannel;
+    unsigned int fuzzRoughnessChannel;
+    unsigned int fuzzTexturePad0;
+
+    unsigned int coatColorUvSetIndex;
+    unsigned int coatWeightUvSetIndex;
+    unsigned int coatRoughnessUvSetIndex;
+    unsigned int fuzzColorUvSetIndex;
+
+    unsigned int fuzzWeightUvSetIndex;
+    unsigned int fuzzRoughnessUvSetIndex;
+    unsigned int openPBRTexturePad0;
+    unsigned int openPBRTexturePad1;
 };
 
 struct LightInfo {

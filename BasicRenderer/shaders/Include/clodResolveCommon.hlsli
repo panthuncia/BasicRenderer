@@ -245,6 +245,49 @@ MaterialUvCache BuildClodMaterialUvCache(
         AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, md, bary);
     }
 
+    OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(materialInfo);
+    const uint uvSetIndices[6] = {
+        openPBRMaterialInfo.coatColorUvSetIndex,
+        openPBRMaterialInfo.coatWeightUvSetIndex,
+        openPBRMaterialInfo.coatRoughnessUvSetIndex,
+        openPBRMaterialInfo.fuzzColorUvSetIndex,
+        openPBRMaterialInfo.fuzzWeightUvSetIndex,
+        openPBRMaterialInfo.fuzzRoughnessUvSetIndex
+    };
+    const uint textureIndices[6] = {
+        openPBRMaterialInfo.coatColorTextureIndex,
+        openPBRMaterialInfo.coatWeightTextureIndex,
+        openPBRMaterialInfo.coatRoughnessTextureIndex,
+        openPBRMaterialInfo.fuzzColorTextureIndex,
+        openPBRMaterialInfo.fuzzWeightTextureIndex,
+        openPBRMaterialInfo.fuzzRoughnessTextureIndex
+    };
+    const uint samplerIndices[6] = {
+        openPBRMaterialInfo.coatColorSamplerIndex,
+        openPBRMaterialInfo.coatWeightSamplerIndex,
+        openPBRMaterialInfo.coatRoughnessSamplerIndex,
+        openPBRMaterialInfo.fuzzColorSamplerIndex,
+        openPBRMaterialInfo.fuzzWeightSamplerIndex,
+        openPBRMaterialInfo.fuzzRoughnessSamplerIndex
+    };
+
+    [unroll]
+    for (uint i = 0u; i < 6u; ++i)
+    {
+        if (!HasOpenPBRTexture(textureIndices[i], samplerIndices[i]))
+        {
+            continue;
+        }
+
+        const uint uvSetIndex = uvSetIndices[i];
+        if (FindMaterialUvCacheIndex(cache, uvSetIndex) != MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            continue;
+        }
+
+        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, md, bary);
+    }
+
     return cache;
 }
 

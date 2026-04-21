@@ -64,6 +64,8 @@ public:
             Builtin::PerObjectBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
+            Builtin::PerMaterialDataBuffer,
+            Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::PostSkinningVertices)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
