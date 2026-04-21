@@ -83,6 +83,13 @@ bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltDat
 	return CLodCache::Save(cacheKey, buildHash, prebuiltData, payload);
 }
 
+bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload, ClusterLODPrebuiltData* outSavedPrebuiltData)
+{
+	const auto cacheKey = ToCacheKey(identity);
+	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	return CLodCache::Save(cacheKey, buildHash, prebuiltData, payload, outSavedPrebuiltData);
+}
+
 bool SavePrebuiltLocked(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
 {
 	spdlog::debug("CLodCacheLoader::SavePrebuiltLocked  src='{}' prim='{}' subset='{}'",
@@ -94,6 +101,24 @@ bool SavePrebuiltLocked(const MeshCacheIdentity& identity, const ClusterLODPrebu
 	}
 
 	bool ok = SavePrebuilt(identity, prebuiltData, payload);
+	if (ok)
+		spdlog::debug("  -> SavePrebuilt succeeded.");
+	else
+		spdlog::warn("  -> SavePrebuilt FAILED.");
+	return ok;
+}
+
+bool SavePrebuiltLocked(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload, ClusterLODPrebuiltData* outSavedPrebuiltData)
+{
+	spdlog::debug("CLodCacheLoader::SavePrebuiltLocked  src='{}' prim='{}' subset='{}'",
+		identity.sourceIdentifier, identity.primPath, identity.subsetName);
+	std::lock_guard<std::mutex> saveLock(GetCacheSaveMutexForIdentity(identity));
+	if (TryLoadPrebuilt(identity).has_value()) {
+		spdlog::debug("  -> already cached (race-condition guard).");
+		return true;
+	}
+
+	bool ok = SavePrebuilt(identity, prebuiltData, payload, outSavedPrebuiltData);
 	if (ok)
 		spdlog::debug("  -> SavePrebuilt succeeded.");
 	else

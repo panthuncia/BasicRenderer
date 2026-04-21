@@ -27,6 +27,10 @@ public:
             Builtin::GBuffer::Fuzz,
             Builtin::GBuffer::MetallicRoughness,
             Builtin::PrimaryCamera::DepthTexture,
+			Builtin::OpenPBR::FuzzLTC,
+			Builtin::OpenPBR::IdealMetalEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
             Builtin::CameraBuffer)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithConstantBuffer(Builtin::PerFrameBuffer);
@@ -39,6 +43,7 @@ public:
     }
 
     void Setup() override {
+		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
         m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
     }
 

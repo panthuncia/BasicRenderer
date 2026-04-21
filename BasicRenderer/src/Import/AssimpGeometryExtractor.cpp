@@ -244,18 +244,20 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 		// Build CLod cache if needed
 		if (!prebuiltData.has_value()) {
 			ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
+			ClusterLODPrebuiltData savedPrebuiltData;
 
 			auto loadedBeforeSave = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 			if (loadedBeforeSave.has_value()) {
 				prebuiltData = std::move(loadedBeforeSave);
 			}
-			else if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
+			else if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload(), &savedPrebuiltData)) {
 				auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 				if (diskBackedPrebuilt.has_value()) {
 					prebuiltData = std::move(diskBackedPrebuilt);
 				}
 				else {
-					prebuiltData = std::move(artifacts.prebuiltData);
+					spdlog::warn("Immediate CLOD cache reload missed after save for {} (mesh {}); using saved disk metadata directly.", sourceFilePath, i);
+					prebuiltData = std::move(savedPrebuiltData);
 				}
 			}
 			else {

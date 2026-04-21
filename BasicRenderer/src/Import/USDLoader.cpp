@@ -1074,7 +1074,9 @@ namespace USDLoader {
 			// Phase 2: GPU mesh creation
 			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-			outMeshes.push_back(mPtr);
+			if (mPtr != nullptr) {
+				outMeshes.push_back(mPtr);
+			}
 		}
 		else {
 			// Otherwise: one mesh per subset
@@ -1095,7 +1097,9 @@ namespace USDLoader {
 				// Phase 2: GPU mesh creation
 				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
 				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-				outMeshes.push_back(mPtr);
+				if (mPtr != nullptr) {
+					outMeshes.push_back(mPtr);
+				}
 			}
 		}
 

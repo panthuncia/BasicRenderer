@@ -809,19 +809,24 @@ MeshPreprocessResult ExtractSubMesh(
 	if (!prebuiltData.has_value()) {
 		spdlog::info("    Building CLod artifacts...");
 		ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
+		ClusterLODPrebuiltData savedPrebuiltData;
 		spdlog::info("    CLod artifacts built: {} groups, {} nodes",
 			artifacts.prebuiltData.groups.size(), artifacts.prebuiltData.nodes.size());
 
 		spdlog::info("    Saving cache to disk...");
 		if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData,
-			artifacts.cacheBuildData.AsPayload()))
+			artifacts.cacheBuildData.AsPayload(), &savedPrebuiltData))
 		{
 			spdlog::info("    Cache SAVED successfully.");
 			auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 			if (diskBackedPrebuilt.has_value())
 				prebuiltData = std::move(diskBackedPrebuilt);
-			else
-				prebuiltData = std::move(artifacts.prebuiltData);
+			else {
+				spdlog::warn("    Cache reload missed immediately after save for prim='{}' subset='{}'; using saved disk metadata directly.",
+					cacheIdentity.primPath,
+					subsetName);
+				prebuiltData = std::move(savedPrebuiltData);
+			}
 		}
 		else {
 			spdlog::warn("    Cache save FAILED — using in-memory artifacts only.");

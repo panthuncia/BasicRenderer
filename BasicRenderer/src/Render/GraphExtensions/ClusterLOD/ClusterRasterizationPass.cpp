@@ -175,6 +175,11 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
                 Builtin::Light::DirectionalLightCascadeBuffer,
                 Builtin::Light::ClusterBuffer,
                 Builtin::Light::PagesBuffer,
+                Builtin::OpenPBR::FuzzLTC,
+                Builtin::OpenPBR::IdealMetalEnergyComplement,
+                Builtin::OpenPBR::IdealMetalAverageEnergyComplement,
+                Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
+                Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
                 Builtin::Noise::BlueNoise2D,
                 m_AVBOITConfigBuffer,
                 m_AVBOITIntegratedTransmittanceTexture,
@@ -211,6 +216,9 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
 }
 
 void ClusterRasterizationPass::Setup() {
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
+        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
+    }
     if (m_outputKind == CLodRasterOutputKind::AVBOITShading && m_getShadowsEnabled && m_getShadowsEnabled()) {
         RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
     }

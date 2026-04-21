@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE ï¿½ DO NOT EDIT
+// GENERATED CODE — DO NOT EDIT
 
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
@@ -88,6 +88,16 @@ struct Builtin {
     inline static constexpr std::string_view BlueNoise2D = "Builtin::Noise::BlueNoise2D";
   };
   inline static constexpr std::string_view NormalMatrixBuffer = "Builtin::NormalMatrixBuffer";
+  struct OpenPBR {
+    inline static constexpr std::string_view FuzzLTC = "Builtin::OpenPBR::FuzzLTC";
+    inline static constexpr std::string_view IdealDielectricAverageEnergyComplement = "Builtin::OpenPBR::IdealDielectricAverageEnergyComplement";
+    inline static constexpr std::string_view IdealDielectricEnergyComplement = "Builtin::OpenPBR::IdealDielectricEnergyComplement";
+    inline static constexpr std::string_view IdealDielectricReflectionRatio = "Builtin::OpenPBR::IdealDielectricReflectionRatio";
+    inline static constexpr std::string_view IdealMetalAverageEnergyComplement = "Builtin::OpenPBR::IdealMetalAverageEnergyComplement";
+    inline static constexpr std::string_view IdealMetalEnergyComplement = "Builtin::OpenPBR::IdealMetalEnergyComplement";
+    inline static constexpr std::string_view OpaqueDielectricAverageEnergyComplement = "Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement";
+    inline static constexpr std::string_view OpaqueDielectricEnergyComplement = "Builtin::OpenPBR::OpaqueDielectricEnergyComplement";
+  };
   struct PPLL {
     inline static constexpr std::string_view Counter = "Builtin::PPLL::Counter";
     inline static constexpr std::string_view DataBuffer = "Builtin::PPLL::DataBuffer";

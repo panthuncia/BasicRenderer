@@ -120,6 +120,16 @@
     },
     "ActiveDrawSetIndices": {},
     "BRDFLUT": {},
+    "OpenPBR": {
+      "FuzzLTC": {},
+      "IdealDielectricEnergyComplement": {},
+      "IdealDielectricAverageEnergyComplement": {},
+      "IdealDielectricReflectionRatio": {},
+      "OpaqueDielectricAverageEnergyComplement": {},
+      "OpaqueDielectricEnergyComplement": {},
+      "IdealMetalAverageEnergyComplement": {},
+      "IdealMetalEnergyComplement": {}
+    },
     "DebugTexture": {},
     "DebugVisualization": {},
     "Noise": {

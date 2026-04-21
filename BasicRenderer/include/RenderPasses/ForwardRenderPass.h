@@ -66,6 +66,11 @@ public:
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::PerMaterialOpenPBRDataBuffer,
+			Builtin::OpenPBR::FuzzLTC,
+			Builtin::OpenPBR::IdealMetalEnergyComplement,
+            Builtin::OpenPBR::IdealMetalAverageEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
             Builtin::PostSkinningVertices)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
@@ -105,6 +110,7 @@ public:
     }
 
     void Setup() override {
+        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
         if (getShadowsEnabled()) {
             RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
         }

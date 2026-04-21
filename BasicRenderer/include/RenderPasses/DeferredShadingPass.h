@@ -37,6 +37,11 @@ public:
 			Builtin::GBuffer::MetallicRoughness,
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
+			Builtin::OpenPBR::FuzzLTC,
+			Builtin::OpenPBR::IdealMetalEnergyComplement,
+			Builtin::OpenPBR::IdealMetalAverageEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
 			Builtin::Noise::BlueNoise2D)
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget,
 				Builtin::DebugVisualization);
@@ -62,6 +67,7 @@ public:
 	}
 
 	void Setup() override {
+		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
 		if (getShadowsEnabled()) {
 			RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
 		}

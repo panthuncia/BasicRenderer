@@ -773,6 +773,8 @@ void Renderer::CreateGlobalResources() {
             m_blueNoiseTexture->SetName("Blue Noise 2D");
         }
     }
+
+    m_openPBRLookupResources = CreateOpenPBRLookupResources(*m_pTextureFactory);
 }
 
 void Renderer::CreateDefaultEnvironmentResources() {
@@ -2412,6 +2414,30 @@ void Renderer::CreateRenderGraph() {
 
     if (m_blueNoiseTexture) {
         newGraph->RegisterResource(Builtin::Noise::BlueNoise2D, m_blueNoiseTexture);
+    }
+    if (m_openPBRLookupResources.idealDielectricEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealDielectricEnergyComplement, m_openPBRLookupResources.idealDielectricEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealDielectricAverageEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealDielectricAverageEnergyComplement, m_openPBRLookupResources.idealDielectricAverageEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealDielectricReflectionRatio) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealDielectricReflectionRatio, m_openPBRLookupResources.idealDielectricReflectionRatio);
+    }
+    if (m_openPBRLookupResources.opaqueDielectricEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::OpaqueDielectricEnergyComplement, m_openPBRLookupResources.opaqueDielectricEnergyComplement);
+    }
+    if (m_openPBRLookupResources.opaqueDielectricAverageEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement, m_openPBRLookupResources.opaqueDielectricAverageEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealMetalEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealMetalEnergyComplement, m_openPBRLookupResources.idealMetalEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealMetalAverageEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealMetalAverageEnergyComplement, m_openPBRLookupResources.idealMetalAverageEnergyComplement);
+    }
+    if (m_openPBRLookupResources.fuzzLTC) {
+        newGraph->RegisterResource(Builtin::OpenPBR::FuzzLTC, m_openPBRLookupResources.fuzzLTC);
     }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());

@@ -29,12 +29,23 @@ struct LightingParameters {
     float3 fragPos;
     float3 viewDir;
     float3 normal;
+    float3 weightedBaseColor;
     float3 diffuseColor;
+    float baseDiffuseRoughness;
+    float specularAlpha;
+    float weightedSpecularIor;
+    float dielectricSpecularWeight;
+    float3 dielectricSpecularF0;
+    float metalSpecularWeight;
+    float3 metalAverageFresnel;
+    float3 metalSpecularF0;
     float metallic;
     float roughness;
     float3 F0;
     float3 coatF0;
     float coatWeight;
+    float3 coatColor;
+    float coatIor;
     float coatDarkening;
     float coatRoughness;
     float3 fuzzColor;
@@ -104,34 +115,50 @@ LightFragmentData getLightParametersForFragment(LightInfo light, float3 fragPos)
 
 float3 calculateLightContributionPBR(LightFragmentData light, LightingParameters lightingParameters)
 {
-
-    float3 halfwayDir = normalize(light.lightToFrag + lightingParameters.viewDir);
     float normDotView = saturate(dot(lightingParameters.normal, lightingParameters.viewDir));
     float normDotLight = saturate(dot(lightingParameters.normal, light.lightToFrag));
-    float normDotHalf = saturate(dot(lightingParameters.normal, halfwayDir));
-    float lightDotHalf = saturate(dot(light.lightToFrag, halfwayDir));
-    
-    float3 Fr = specularLobe(lightingParameters.roughness, lightingParameters.F0, halfwayDir, normDotView, normDotLight, normDotHalf, lightDotHalf);
-    
-    float3 Fd = diffuseLobe(lightingParameters.roughness, lightingParameters.diffuseColor, normDotView, normDotLight, lightDotHalf);
-
-    float3 energyCompensation = mx_ggx_energy_compensation(normDotView, lightingParameters.roughness, lightingParameters.F0);
-    const float3 fuzzViewAttenuation = OpenPBRFuzzTransmittance(lightingParameters.fuzzWeight, lightingParameters.fuzzRoughness, normDotView);
-    const float3 fuzzLightAttenuation = OpenPBRFuzzTransmittance(lightingParameters.fuzzWeight, lightingParameters.fuzzRoughness, normDotLight);
-    const float3 fuzzLayerAttenuation = fuzzViewAttenuation * fuzzLightAttenuation;
-    const float3 coatViewAttenuation = OpenPBRCoatTransmittance(lightingParameters.coatF0, lightingParameters.coatWeight, lightingParameters.coatDarkening, normDotView);
-    const float3 coatLightAttenuation = OpenPBRCoatTransmittance(lightingParameters.coatF0, lightingParameters.coatWeight, lightingParameters.coatDarkening, normDotLight);
+    const OpenPBRBaseLayerState baseState = MakeOpenPBRBaseLayerState(
+        lightingParameters.weightedBaseColor,
+        lightingParameters.diffuseColor,
+        lightingParameters.baseDiffuseRoughness,
+        lightingParameters.specularAlpha,
+        lightingParameters.weightedSpecularIor,
+        lightingParameters.dielectricSpecularF0,
+        lightingParameters.dielectricSpecularWeight,
+        lightingParameters.metalAverageFresnel,
+        lightingParameters.metalSpecularF0,
+        lightingParameters.metalSpecularWeight);
+    const OpenPBRCoatLayerState coatState = MakeOpenPBRCoatLayerState(
+        baseState,
+        lightingParameters.coatColor,
+        lightingParameters.coatWeight,
+        lightingParameters.coatIor,
+        lightingParameters.coatRoughness,
+        lightingParameters.coatDarkening);
+    const OpenPBRFuzzLayerState fuzzState = MakeOpenPBRFuzzLayerState(
+        lightingParameters.normal,
+        lightingParameters.viewDir,
+        lightingParameters.fuzzColor,
+        lightingParameters.fuzzWeight,
+        lightingParameters.fuzzRoughness);
+    const OpenPBRBaseLayerEvaluation baseEvaluation =
+        EvaluateOpenPBRBaseLayerDirect(baseState, lightingParameters.normal, lightingParameters.viewDir, light.lightToFrag);
+    const float fuzzLayerScale = OpenPBRFuzzBaseLayerScaleComplete(fuzzState, light.lightToFrag);
+    const float3 baseLayerScale = OpenPBRCoatBaseLayerScaleComplete(coatState, normDotView, normDotLight);
 
     float3 coatFr = 0.0f.xxx;
-    if (lightingParameters.coatWeight > 0.0f)
+    if (coatState.presence > 0.0f)
     {
+        float3 halfwayDir = normalize(light.lightToFrag + lightingParameters.viewDir);
+        float normDotHalf = saturate(dot(lightingParameters.normal, halfwayDir));
+        float lightDotHalf = saturate(dot(light.lightToFrag, halfwayDir));
         coatFr = specularLobe(lightingParameters.coatRoughness, lightingParameters.coatF0, halfwayDir, normDotView, normDotLight, normDotHalf, lightDotHalf);
-        coatFr *= mx_ggx_energy_compensation(normDotView, lightingParameters.coatRoughness, lightingParameters.coatF0) * lightingParameters.coatWeight;
+        coatFr *= mx_ggx_energy_compensation(normDotView, lightingParameters.coatRoughness, lightingParameters.coatF0) * coatState.presence;
     }
 
-    float3 fuzzFd = lightingParameters.fuzzWeight * lightingParameters.fuzzColor * OpenPBRFuzzCoverage(lightingParameters.fuzzWeight, lightingParameters.fuzzRoughness, lightDotHalf) * Fd_Lambert();
-    float3 baseAttenuation = fuzzLayerAttenuation * coatViewAttenuation * coatLightAttenuation;
-    float3 BRDF = (Fd + Fr * energyCompensation) * baseAttenuation + coatFr * fuzzLayerAttenuation + fuzzFd;
+    float3 fuzzFr = OpenPBRFuzzSheenBRDF(fuzzState, light.lightToFrag);
+    float3 baseAttenuation = fuzzLayerScale.xxx * baseLayerScale;
+    float3 BRDF = (baseEvaluation.diffuse + baseEvaluation.specular) * baseAttenuation + coatFr * fuzzLayerScale.xxx + fuzzFr;
     
     return BRDF * light.lightColor.rgb * light.intensity * light.attenuation * light.spotAttenuation * normDotLight;
 }
@@ -180,14 +207,24 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
                 unusedSpecularIBL,
                 fragmentInfo.normalWS,
                 fragmentInfo.normalWS,
+                fragmentInfo.albedo,
                 fragmentInfo.diffuseColor,
                 fragmentInfo.diffuseAmbientOcclusion,
-                fragmentInfo.F0,
+                fragmentInfo.baseDiffuseRoughness,
+                fragmentInfo.dielectricSpecularF0,
+                fragmentInfo.dielectricSpecularWeight,
+                fragmentInfo.weightedSpecularIor,
+                fragmentInfo.metalAverageFresnel,
+                fragmentInfo.metalSpecularF0,
+                fragmentInfo.metalSpecularWeight,
                 fragmentInfo.reflectedWS,
                 fragmentInfo.roughness,
                 fragmentInfo.perceptualRoughness,
+                fragmentInfo.specularAlpha,
+                fragmentInfo.coatColor,
                 fragmentInfo.coatF0,
                 fragmentInfo.coatWeight,
+                fragmentInfo.coatIor,
                 fragmentInfo.coatDarkening,
                 fragmentInfo.coatRoughness,
                 fragmentInfo.coatPerceptualRoughness,
@@ -205,12 +242,23 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
         lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
         lightingParameters.viewDir = fragmentInfo.viewWS;
         lightingParameters.normal = fragmentInfo.normalWS;
+        lightingParameters.weightedBaseColor = fragmentInfo.albedo;
         lightingParameters.diffuseColor = fragmentInfo.diffuseColor;
+        lightingParameters.baseDiffuseRoughness = fragmentInfo.baseDiffuseRoughness;
+        lightingParameters.specularAlpha = fragmentInfo.specularAlpha;
+        lightingParameters.weightedSpecularIor = fragmentInfo.weightedSpecularIor;
+        lightingParameters.dielectricSpecularWeight = fragmentInfo.dielectricSpecularWeight;
+        lightingParameters.dielectricSpecularF0 = fragmentInfo.dielectricSpecularF0;
+        lightingParameters.metalSpecularWeight = fragmentInfo.metalSpecularWeight;
+        lightingParameters.metalAverageFresnel = fragmentInfo.metalAverageFresnel;
+        lightingParameters.metalSpecularF0 = fragmentInfo.metalSpecularF0;
         lightingParameters.metallic = fragmentInfo.metallic;
         lightingParameters.roughness = fragmentInfo.roughness;
         lightingParameters.F0 = fragmentInfo.F0;
         lightingParameters.coatF0 = fragmentInfo.coatF0;
         lightingParameters.coatWeight = fragmentInfo.coatWeight;
+        lightingParameters.coatColor = fragmentInfo.coatColor;
+        lightingParameters.coatIor = fragmentInfo.coatIor;
         lightingParameters.coatDarkening = fragmentInfo.coatDarkening;
         lightingParameters.coatRoughness = fragmentInfo.coatRoughness;
         lightingParameters.fuzzColor = fragmentInfo.fuzzColor;
@@ -314,11 +362,27 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
 #endif
     }
 
+    const OpenPBRBaseLayerState emissiveBaseState = MakeOpenPBRBaseLayerState(
+        fragmentInfo.albedo,
+        fragmentInfo.diffuseColor,
+        fragmentInfo.baseDiffuseRoughness,
+        fragmentInfo.specularAlpha,
+        fragmentInfo.weightedSpecularIor,
+        fragmentInfo.dielectricSpecularF0,
+        fragmentInfo.dielectricSpecularWeight,
+        fragmentInfo.metalAverageFresnel,
+        fragmentInfo.metalSpecularF0,
+        fragmentInfo.metalSpecularWeight);
+    const OpenPBRCoatLayerState emissiveCoatState = MakeOpenPBRCoatLayerState(
+        emissiveBaseState,
+        fragmentInfo.coatColor,
+        fragmentInfo.coatWeight,
+        fragmentInfo.coatIor,
+        fragmentInfo.coatRoughness,
+        fragmentInfo.coatDarkening);
     return lighting + EvaluateOpenPBREmissive(
         fragmentInfo.emissive,
-        fragmentInfo.coatF0,
-        fragmentInfo.coatWeight,
-        fragmentInfo.coatDarkening,
+        emissiveCoatState,
         fragmentInfo.fuzzWeight,
         fragmentInfo.fuzzRoughness,
         fragmentInfo.NdotV);
@@ -345,14 +409,24 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                 debugSpecular,
                 fragmentInfo.normalWS, 
                 fragmentInfo.normalWS, 
+                fragmentInfo.albedo,
                 fragmentInfo.diffuseColor, 
                 fragmentInfo.diffuseAmbientOcclusion, 
-                fragmentInfo.F0, 
+                fragmentInfo.baseDiffuseRoughness,
+                fragmentInfo.dielectricSpecularF0,
+                fragmentInfo.dielectricSpecularWeight,
+                fragmentInfo.weightedSpecularIor,
+                fragmentInfo.metalAverageFresnel,
+                fragmentInfo.metalSpecularF0,
+                fragmentInfo.metalSpecularWeight,
                 fragmentInfo.reflectedWS, 
                 fragmentInfo.roughness,
                 fragmentInfo.perceptualRoughness,
+                fragmentInfo.specularAlpha,
+                fragmentInfo.coatColor,
                 fragmentInfo.coatF0,
                 fragmentInfo.coatWeight,
+                fragmentInfo.coatIor,
                 fragmentInfo.coatDarkening,
                 fragmentInfo.coatRoughness,
                 fragmentInfo.coatPerceptualRoughness,
@@ -376,12 +450,23 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
         lightingParameters.viewDir = fragmentInfo.viewWS;
         lightingParameters.normal = fragmentInfo.normalWS;
+        lightingParameters.weightedBaseColor = fragmentInfo.albedo;
         lightingParameters.diffuseColor = fragmentInfo.diffuseColor;
+        lightingParameters.baseDiffuseRoughness = fragmentInfo.baseDiffuseRoughness;
+        lightingParameters.specularAlpha = fragmentInfo.specularAlpha;
+        lightingParameters.weightedSpecularIor = fragmentInfo.weightedSpecularIor;
+        lightingParameters.dielectricSpecularWeight = fragmentInfo.dielectricSpecularWeight;
+        lightingParameters.dielectricSpecularF0 = fragmentInfo.dielectricSpecularF0;
+        lightingParameters.metalSpecularWeight = fragmentInfo.metalSpecularWeight;
+        lightingParameters.metalAverageFresnel = fragmentInfo.metalAverageFresnel;
+        lightingParameters.metalSpecularF0 = fragmentInfo.metalSpecularF0;
         lightingParameters.metallic = fragmentInfo.metallic;
         lightingParameters.roughness = fragmentInfo.roughness;
         lightingParameters.F0 = fragmentInfo.F0;
         lightingParameters.coatF0 = fragmentInfo.coatF0;
         lightingParameters.coatWeight = fragmentInfo.coatWeight;
+        lightingParameters.coatColor = fragmentInfo.coatColor;
+        lightingParameters.coatIor = fragmentInfo.coatIor;
         lightingParameters.coatDarkening = fragmentInfo.coatDarkening;
         lightingParameters.coatRoughness = fragmentInfo.coatRoughness;
         lightingParameters.fuzzColor = fragmentInfo.fuzzColor;
@@ -537,11 +622,27 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif
     }
 
+    const OpenPBRBaseLayerState emissiveBaseState = MakeOpenPBRBaseLayerState(
+        fragmentInfo.albedo,
+        fragmentInfo.diffuseColor,
+        fragmentInfo.baseDiffuseRoughness,
+        fragmentInfo.specularAlpha,
+        fragmentInfo.weightedSpecularIor,
+        fragmentInfo.dielectricSpecularF0,
+        fragmentInfo.dielectricSpecularWeight,
+        fragmentInfo.metalAverageFresnel,
+        fragmentInfo.metalSpecularF0,
+        fragmentInfo.metalSpecularWeight);
+    const OpenPBRCoatLayerState emissiveCoatState = MakeOpenPBRCoatLayerState(
+        emissiveBaseState,
+        fragmentInfo.coatColor,
+        fragmentInfo.coatWeight,
+        fragmentInfo.coatIor,
+        fragmentInfo.coatRoughness,
+        fragmentInfo.coatDarkening);
     lighting += EvaluateOpenPBREmissive(
         fragmentInfo.emissive,
-        fragmentInfo.coatF0,
-        fragmentInfo.coatWeight,
-        fragmentInfo.coatDarkening,
+        emissiveCoatState,
         fragmentInfo.fuzzWeight,
         fragmentInfo.fuzzRoughness,
         fragmentInfo.NdotV);

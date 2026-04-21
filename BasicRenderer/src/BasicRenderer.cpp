@@ -346,7 +346,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto usdScene = LoadModel("models/sponza.usdz");
     
     //auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
-    auto bistro = LoadModel("models/bistroExterior.glb");
+    //auto bistro = LoadModel("models/bistroExterior.glb");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -360,7 +360,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	
 	//auto cubes = LoadModel("models/cubes/suspicious_cubes.usda");
 
+    //auto barbershop = LoadModel("models/barbershop.glb");
+
+	auto subway = LoadModel("models/Subway.usdz");
+
     renderer.SetCurrentScene(baseScene);
+
+	renderer.GetCurrentScene()->AppendScene(subway->Clone());
+
+	//renderer.GetCurrentScene()->AppendScene(barbershop->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(cubes->Clone());
     
@@ -385,7 +393,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
 
 	//sphereScene->GetRoot().set<Components::Position>({ 0.0, 2.0, 0.0 });
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());

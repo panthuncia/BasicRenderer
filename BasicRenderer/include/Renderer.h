@@ -37,6 +37,7 @@
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
 #include "Render/RenderContext.h"
+#include "Render/OpenPBRLookupResources.h"
 #include "Render/SceneRenderBridge.h"
 
 class DynamicResource;
@@ -131,6 +132,7 @@ private:
     std::shared_ptr<PixelBuffer> m_defaultEnvironmentCubemap = nullptr;
     std::shared_ptr<PixelBuffer> m_defaultEnvironmentPrefilteredCubemap = nullptr;
     std::shared_ptr<PixelBuffer> m_blueNoiseTexture = nullptr;
+    OpenPBRLookupResources m_openPBRLookupResources;
     bool m_warnedUsingFallbackEnvironment = false;
     bool m_warnedNullScene = false;
     bool m_warnedMissingPrimaryCamera = false;

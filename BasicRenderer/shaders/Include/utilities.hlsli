@@ -1592,19 +1592,64 @@ float OpenPBRIorToF0(float ior)
     return f * f;
 }
 
+float OpenPBRIorFromF0(float f0)
+{
+    const float safeF0 = min(saturate(f0), 0.9999f);
+    const float sqrtF0 = sqrt(safeF0);
+    return (1.0f + sqrtF0) / max(1.0f - sqrtF0, 1.0e-4f);
+}
+
+float OpenPBRApplySpecularWeightToIor(float ior, float specularWeight)
+{
+    const float unscaledF0 = OpenPBRIorToF0(ior);
+    const float scaledF0 = min(unscaledF0 * saturate(specularWeight), 0.9999f);
+    return OpenPBRIorFromF0(scaledF0);
+}
+
+float3 OpenPBRComputeMetalSchlickBFactor(float3 f0, float3 f82Tint)
+{
+    const float cosThetaMax = 1.0f / 7.0f;
+    const float oneMinusCosThetaMax = 1.0f - cosThetaMax;
+    const float oneMinusCosThetaMaxToTheFifth = pow(oneMinusCosThetaMax, 5.0f);
+    const float oneMinusCosThetaMaxToTheSixth = pow(oneMinusCosThetaMax, 6.0f);
+    const float3 whiteMinusF0 = 1.0f.xxx - saturate(f0);
+    const float3 whiteMinusTint = 1.0f.xxx - saturate(f82Tint);
+    const float3 numerator = (saturate(f0) + whiteMinusF0 * oneMinusCosThetaMaxToTheFifth) * whiteMinusTint;
+    const float denominator = cosThetaMax * oneMinusCosThetaMaxToTheSixth;
+    return numerator / max(denominator, 1.0e-6f);
+}
+
+float3 OpenPBRMetalAverageFresnelWithF82Tint(float3 f0, float3 f82Tint)
+{
+    const float3 safeF0 = saturate(f0);
+    const float3 whiteMinusF0 = 1.0f.xxx - safeF0;
+    const float3 b = OpenPBRComputeMetalSchlickBFactor(safeF0, f82Tint);
+    return saturate(safeF0 + whiteMinusF0 * (1.0f / 21.0f) - b * (1.0f / 126.0f));
+}
+
 void PopulateFragmentInfoFromOpenPBR(
     OpenPBRSurfaceSample surface,
     inout FragmentInfo ret)
 {
     OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(surface.openPBRMaterialDataIndex);
-    const float dielectricF0Scalar = OpenPBRIorToF0(openPBRMaterialInfo.specularIor) * saturate(openPBRMaterialInfo.specularWeight);
-    const float3 dielectricF0 = saturate(openPBRMaterialInfo.specularColor * dielectricF0Scalar);
+    const float baseWeight = saturate(openPBRMaterialInfo.baseWeight);
+    const float specularWeight = saturate(openPBRMaterialInfo.specularWeight);
+    const float3 specularColor = saturate(openPBRMaterialInfo.specularColor);
+    const float3 weightedBaseColor = saturate(surface.baseColor * baseWeight);
+    const float weightedSpecularIor = OpenPBRApplySpecularWeightToIor(openPBRMaterialInfo.specularIor, specularWeight);
+    const float dielectricF0Scalar = OpenPBRIorToF0(weightedSpecularIor);
+    const float3 dielectricF0 = saturate(specularColor * dielectricF0Scalar);
     const float dielectricF0Max = max(max(dielectricF0.x, dielectricF0.y), dielectricF0.z);
     const float coatPerceptualRoughness = clamp(surface.coatRoughness, MIN_PERCEPTUAL_ROUGHNESS, 1.0f);
     const float coatF0Scalar = OpenPBRIorToF0(openPBRMaterialInfo.coatIor);
+    const float dielectricSpecularWeight = saturate(1.0f - surface.baseMetalness);
+    const float metalSpecularWeight = saturate(surface.baseMetalness * specularWeight);
+    const float3 metalF0 = saturate(weightedBaseColor * specularColor);
+    const float3 metalAverageFresnel = OpenPBRMetalAverageFresnelWithF82Tint(weightedBaseColor, specularColor);
+    const float specularAlpha = ret.roughness;
 
     ret.openPBRMaterialDataIndex = surface.openPBRMaterialDataIndex;
-    ret.albedo = surface.baseColor;
+    ret.albedo = weightedBaseColor;
     ret.emissive = surface.emissive;
     ret.metallic = surface.baseMetalness;
     ret.coatWeight = saturate(surface.coatWeight);
@@ -1612,14 +1657,23 @@ void PopulateFragmentInfoFromOpenPBR(
     ret.coatPerceptualRoughness = coatPerceptualRoughness;
     ret.coatRoughness = PerceptualRoughnessToRoughness(coatPerceptualRoughness);
     ret.coatF0 = saturate(ret.coatColor * coatF0Scalar);
+    ret.coatIor = openPBRMaterialInfo.coatIor;
     ret.coatDarkening = saturate(openPBRMaterialInfo.coatDarkening);
     ret.fuzzWeight = saturate(surface.fuzzWeight);
     ret.fuzzColor = saturate(surface.fuzzColor);
     ret.fuzzRoughness = saturate(surface.fuzzRoughness);
-    ret.diffuseColor = computeDiffuseColor(surface.baseColor * openPBRMaterialInfo.baseWeight, surface.baseMetalness);
+    ret.baseDiffuseRoughness = saturate(openPBRMaterialInfo.baseDiffuseRoughness);
+    ret.specularAlpha = specularAlpha;
+    ret.weightedSpecularIor = weightedSpecularIor;
+    ret.dielectricSpecularWeight = dielectricSpecularWeight;
+    ret.dielectricSpecularF0 = dielectricF0;
+    ret.metalSpecularWeight = metalSpecularWeight;
+    ret.metalSpecularF0 = metalF0;
+    ret.metalAverageFresnel = metalAverageFresnel;
+    ret.diffuseColor = computeDiffuseColor(weightedBaseColor, surface.baseMetalness);
     ret.reflectance = sqrt(saturate(dielectricF0Max / 0.16f));
     ret.dielectricF0 = dielectricF0Max * (1.0f - surface.baseMetalness);
-    ret.F0 = saturate(lerp(dielectricF0, surface.baseColor, surface.baseMetalness));
+    ret.F0 = saturate(dielectricSpecularWeight * dielectricF0 + metalSpecularWeight * metalF0);
 }
 
 void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in float3 fragPosViewSpace, in float3 fragPosWorldSpace, in bool enableGTAO, out FragmentInfo ret) {

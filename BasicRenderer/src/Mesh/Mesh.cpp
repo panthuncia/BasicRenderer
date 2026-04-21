@@ -15,6 +15,8 @@
 #include <cassert>
 #include <set>
 
+#include <spdlog/spdlog.h>
+
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
@@ -234,12 +236,63 @@ namespace
 
 		return summary;
 	}
+
+	bool HasRenderableImportedMeshPayload(
+		const std::vector<std::byte>& vertices,
+		unsigned int vertexSize,
+		const std::vector<UINT32>& indices,
+		const std::optional<ClusterLODPrebuiltData>& prebuiltClusterLOD,
+		const Material* material,
+		const char*& outReason)
+	{
+		if (vertices.empty() || vertexSize == 0 || indices.empty()) {
+			outReason = "empty source geometry";
+			return false;
+		}
+
+		if (!prebuiltClusterLOD.has_value()) {
+			outReason = "missing ClusterLOD payload";
+			return false;
+		}
+
+		const auto& prebuilt = prebuiltClusterLOD.value();
+		if (prebuilt.groups.empty()) {
+			outReason = "empty ClusterLOD group payload";
+			return false;
+		}
+
+		if (prebuilt.groupDiskLocators.size() != prebuilt.groups.size()) {
+			outReason = "missing disk-backed ClusterLOD locators";
+			return false;
+		}
+
+		if (prebuilt.cacheSource.containerFileName.empty()) {
+			outReason = "missing ClusterLOD container file";
+			return false;
+		}
+
+		outReason = nullptr;
+		return true;
+	}
 }
 
 std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 	const std::shared_ptr<Material>& material,
 	std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD,
 	MeshCpuDataPolicy cpuDataPolicy) {
+	const char* discardReason = nullptr;
+	if (!HasRenderableImportedMeshPayload(m_vertices, m_vertexSize, m_indices, prebuiltClusterLOD, material.get(), discardReason)) {
+		spdlog::warn(
+			"Discarding imported mesh: {} (vertex_bytes={}, vertex_size={}, index_count={}, clod_groups={}, disk_locators={})",
+			discardReason != nullptr ? discardReason : "invalid payload",
+			m_vertices.size(),
+			m_vertexSize,
+			m_indices.size(),
+			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->groups.size() : 0ull,
+			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->groupDiskLocators.size() : 0ull);
+		return nullptr;
+	}
+
 	auto vertices = std::make_unique<std::vector<std::byte>>(std::move(m_vertices));
 	auto uvSets = std::move(m_uvSets);
 
