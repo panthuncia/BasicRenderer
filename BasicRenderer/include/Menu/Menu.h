@@ -661,6 +661,9 @@ private:
     std::function<bool()> getJitterEnabled;
     std::function<void(bool)> setJitterEnabled;
 
+    bool m_collectPassStatistics = true;
+    std::function<bool()> getCollectPassStatistics;
+    std::function<void(bool)> setCollectPassStatistics;
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
@@ -1001,6 +1004,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     getJitterEnabled = settingsManager.getSettingGetter<bool>("enableJitter");
     m_jitterEnabled = getJitterEnabled();
 	observerSetting(m_jitterEnabled, "enableJitter");
+
+    getCollectPassStatistics = settingsManager.getSettingGetter<bool>("collectPassStatistics");
+    setCollectPassStatistics = settingsManager.getSettingSetter<bool>("collectPassStatistics");
+    m_collectPassStatistics = getCollectPassStatistics();
+    observerSetting(m_collectPassStatistics, "collectPassStatistics");
 
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
@@ -1494,6 +1502,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		}
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);
+        }
+        if (ImGui::Checkbox("Collect Pass Statistics", &m_collectPassStatistics)) {
+            setCollectPassStatistics(m_collectPassStatistics);
         }
 		if (ImGui::Checkbox("Collect Pipeline Statistics", &m_collectPipelineStatistics)) {
 			setCollectPipelineStatistics(m_collectPipelineStatistics);

@@ -238,18 +238,11 @@ namespace
 	}
 
 	bool HasRenderableImportedMeshPayload(
-		const std::vector<std::byte>& vertices,
 		unsigned int vertexSize,
-		const std::vector<UINT32>& indices,
 		const std::optional<ClusterLODPrebuiltData>& prebuiltClusterLOD,
 		const Material* material,
 		const char*& outReason)
 	{
-		if (vertices.empty() || vertexSize == 0 || indices.empty()) {
-			outReason = "empty source geometry";
-			return false;
-		}
-
 		if (!prebuiltClusterLOD.has_value()) {
 			outReason = "missing ClusterLOD payload";
 			return false;
@@ -281,7 +274,7 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 	std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD,
 	MeshCpuDataPolicy cpuDataPolicy) {
 	const char* discardReason = nullptr;
-	if (!HasRenderableImportedMeshPayload(m_vertices, m_vertexSize, m_indices, prebuiltClusterLOD, material.get(), discardReason)) {
+	if (!HasRenderableImportedMeshPayload(m_vertexSize, prebuiltClusterLOD, material.get(), discardReason)) {
 		spdlog::warn(
 			"Discarding imported mesh: {} (vertex_bytes={}, vertex_size={}, index_count={}, clod_groups={}, disk_locators={})",
 			discardReason != nullptr ? discardReason : "invalid payload",
