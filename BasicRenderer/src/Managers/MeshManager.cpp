@@ -223,6 +223,7 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
+
 	mesh->SetCurrentMeshManager(this);
 	if (mesh->GetPreSkinningVertexBufferView() != nullptr) {
 		m_preSkinningVertices->Deallocate(mesh->GetPreSkinningVertexBufferView());
@@ -280,7 +281,11 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	std::vector<std::unique_ptr<BufferView>> clodMeshletBoundsChunkViews;
 
 	const bool hasDiskBackedGroupChunks = !groupDiskLocators.empty() && (groupDiskLocators.size() == mesh->GetCLodGroupCount());
-	const bool preferDiskBackedStreaming = hasDiskBackedGroupChunks && mesh->HasCLodDiskStreamingSource();
+	const bool hasData = hasDiskBackedGroupChunks && mesh->HasCLodDiskStreamingSource();
+	if (!hasData) {
+		spdlog::warn("Loading mesh with no associated geometry, skipping");
+		return; //Empty mesh? Nothing to upload.
+	}
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
 		//preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), numVertices * skinningVertexByteSize, skinningVertexByteSize);
@@ -288,10 +293,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	else {
 		//postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexByteSize, vertexByteSize);
 		//meshletBoundsView = m_meshletBoundsBuffer->AddData(mesh->GetMeshletBounds().data(), mesh->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
-	}
-
-	if (!preferDiskBackedStreaming) {
-		throw std::runtime_error("CLod disk streaming metadata is required; non-disk CLOD upload path has been removed.");
 	}
 
 	// Per mesh buffer

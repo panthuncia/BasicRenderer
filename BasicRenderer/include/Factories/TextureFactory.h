@@ -48,8 +48,6 @@ private:
         {
             m_pMipConstants = LazyDynamicStructuredBuffer<MipmapSpdConstants>::CreateShared(
                 64, "Mipmap SPD constants");
-
-            CreatePipelines();
         }
 
         void Setup() override {
@@ -73,6 +71,13 @@ private:
         }
 
     private:
+        enum class MipmapValueType
+        {
+            Float1,
+            Float2,
+            Float4,
+        };
+
         struct MipmapSpdConstants
         {
             uint32_t srcSize[2];
@@ -103,52 +108,31 @@ private:
             uint32_t mipsToGenerate = 0;
 
             bool isArray = false;
-            bool isScalar = false;
             bool isSrgb = false;
+            MipmapValueType valueType = MipmapValueType::Float4;
         };
 
         std::vector<Job> m_pending;
 
         std::shared_ptr<LazyDynamicStructuredBuffer<MipmapSpdConstants>> m_pMipConstants;
 
-        PipelineState m_psoVec2D;
-        PipelineState m_psoVecArray;
-        PipelineState m_psoScalar2D;
-        PipelineState m_psoScalarArray;
+        PipelineState m_psoFloat1_2D;
+        PipelineState m_psoFloat1_Array;
+        PipelineState m_psoFloat2_2D;
+        PipelineState m_psoFloat2_Array;
+        PipelineState m_psoFloat4_2D;
+        PipelineState m_psoFloat4_Array;
 
-        void CreatePipelines()
-        {
-            auto& psoManager = PSOManager::GetInstance();
-            auto& layout = psoManager.GetRootSignature();
+        bool m_hasPsoFloat1_2D = false;
+        bool m_hasPsoFloat1_Array = false;
+        bool m_hasPsoFloat2_2D = false;
+        bool m_hasPsoFloat2_Array = false;
+        bool m_hasPsoFloat4_2D = false;
+        bool m_hasPsoFloat4_Array = false;
 
-            m_psoVec2D = psoManager.MakeComputePipeline(
-                layout.GetHandle(),
-                L"shaders/Utilities/mipmapping.hlsl",
-                L"MipmapCSMain",
-                { }, // no defines
-                "MipmapSPD[Vec2D]");
-
-            m_psoVecArray = psoManager.MakeComputePipeline(
-                layout.GetHandle(),
-                L"shaders/Utilities/mipmapping.hlsl",
-                L"MipmapCSMain",
-                { DxcDefine{ L"MIPMAP_ARRAY", L"1" } },
-                "MipmapSPD[VecArray]");
-
-            m_psoScalar2D = psoManager.MakeComputePipeline(
-                layout.GetHandle(),
-                L"shaders/Utilities/mipmapping.hlsl",
-                L"MipmapCSMain",
-                { DxcDefine{ L"MIPMAP_SCALAR", L"1" } },
-                "MipmapSPD[Scalar2D]");
-
-            m_psoScalarArray = psoManager.MakeComputePipeline(
-                layout.GetHandle(),
-                L"shaders/Utilities/mipmapping.hlsl",
-                L"MipmapCSMain",
-                { DxcDefine{ L"MIPMAP_SCALAR", L"1" }, DxcDefine{ L"MIPMAP_ARRAY", L"1" } },
-                "MipmapSPD[ScalarArray]");
-        }
+        static bool TryGetValueType(const PixelBuffer& tex, MipmapValueType& outValueType);
+        PipelineState& GetOrCreatePipeline(MipmapValueType valueType, bool isArray);
+        PipelineState CreatePipeline(MipmapValueType valueType, bool isArray) const;
 
         bool m_declaredResourcesChanged = true;
     };

@@ -300,11 +300,11 @@ namespace AssimpLoader {
             }
             if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
                 metallicTex = materialTextures[aiTextureType_METALNESS];
-                materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+                materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_METALLIC_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             }
             if (materialTextures.find(aiTextureType_DIFFUSE_ROUGHNESS) != materialTextures.end()) {
                 roughnessTex = materialTextures[aiTextureType_DIFFUSE_ROUGHNESS];
-                materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+                materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_ROUGHNESS_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             }
             if (materialTextures.find(aiTextureType_AMBIENT_OCCLUSION) != materialTextures.end()) {
                 aoMap = materialTextures[aiTextureType_AMBIENT_OCCLUSION];

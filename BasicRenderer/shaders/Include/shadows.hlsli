@@ -660,14 +660,9 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
     StructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodDirectionalPageViewInfo)];
     Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
     Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
-    Texture2D<float4> blueNoiseTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Noise::BlueNoise2D)];
-
-    uint2 blueNoiseSize;
-    blueNoiseTex.GetDimensions(blueNoiseSize.x, blueNoiseSize.y);
 
     const uint activeClipmapCount = min(numDirectionalClipmaps, kCLodVirtualShadowClipmapCount);
     const float3 lightToFrag = -light.dirWorldSpace.xyz;
-    const uint2 pixelCoordsInt = uint2(pixelCoords);
     const CLodVirtualShadowLookupResult receiverLookup = CLodVirtualShadowLookupDirectionalOcclusion(
         fragPosWorldSpace,
         normal,
@@ -691,6 +686,11 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
     {
         return hardShadow;
     }
+
+    Texture2D<float4> blueNoiseTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Noise::BlueNoise2D)];
+    uint2 blueNoiseSize;
+    blueNoiseTex.GetDimensions(blueNoiseSize.x, blueNoiseSize.y);
+    const uint2 pixelCoordsInt = uint2(pixelCoords);
 
     const float clampedRayAngleDegrees = min(
         light.shadowSourceAngleDegrees,
@@ -852,12 +852,12 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
             float depthForComparison;
             if (bBehind)
             {
-                // Shadow map doesn't show the tracked surface — extrapolate
+                // Shadow map doesn't show the tracked surface: extrapolate
                 depthForComparison = depthHistory + depthSlope * stepDist;
             }
             else
             {
-                // Shadow map shows a surface near the ray — use it directly
+                // Shadow map shows a surface near the ray: use it directly
                 depthForComparison = closestDepth;
                 if (abs(closestDepth - depthHistory) > 1.0e-6f)
                 {

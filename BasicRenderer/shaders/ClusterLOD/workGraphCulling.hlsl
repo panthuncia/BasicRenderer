@@ -26,7 +26,7 @@
 #endif
 
 // Set to 1 to enable occlusion culling for VSM / shadow cameras (ortho).
-// Defaults to 0 (off) — ortho cameras skip occlusion culling entirely.
+// Defaults to 0 (off): ortho cameras skip occlusion culling entirely.
 #ifndef CLOD_VSM_OCCLUSION_CULLING
 #define CLOD_VSM_OCCLUSION_CULLING 0
 #endif
@@ -236,8 +236,10 @@ bool CLodWorkGraphUseDedicatedComputePageJobBuffer()
     StructuredBuffer<uint4> pageJobDescriptorBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
     const uint2 descriptorPair = pageJobDescriptorBuffer[0].xy;
+    // Shadow PageJob/Reyes large-cluster routing consumes the dedicated side-channel
+    // buffer after culling regardless of whether visibility SW raster runs in compute
+    // or work-graph mode. If descriptors are present, keep emitting into that buffer.
     return
-        CLodWorkGraphUseComputeSWRaster() &&
         descriptorPair.x != 0xFFFFFFFFu &&
         descriptorPair.y != 0xFFFFFFFFu;
 #else
@@ -263,7 +265,7 @@ float CLodSWRasterDiameterThreshold()
 #endif
 }
 
-// Page-job VSM flags helpers — decode from CLOD_WG_PAGE_JOB_FLAGS root constant.
+// Page-job VSM flags helpers: decode from CLOD_WG_PAGE_JOB_FLAGS root constant.
 bool CLodPageJobEnabled()
 {
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW

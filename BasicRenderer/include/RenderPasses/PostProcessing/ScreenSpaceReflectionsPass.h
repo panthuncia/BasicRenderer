@@ -51,6 +51,7 @@ public:
 
         executionContext.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
+        // TODO: Do we need a clear here? Need transitions if so.
         //rhi::UavClearInfo clearInfo{};
         //clearInfo.cpuVisible = m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot;
         //clearInfo.shaderVisible = m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot;

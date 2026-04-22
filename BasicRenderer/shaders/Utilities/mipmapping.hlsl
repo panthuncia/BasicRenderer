@@ -60,7 +60,7 @@ AF4 SpdLoadSourceImage(ASU2 p, AU1 slice)
 
     uint2 q = min(p, max(uint2(1, 1), c.srcSize) - 1);
 
-#if defined(MIPMAP_SCALAR)
+#if defined(MIPMAP_FLOAT1)
 #if defined(MIPMAP_ARRAY)
         Texture2DArray<float> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
         float v = imgSrc.Load(int4(q, slice, (int)c.srcMip));
@@ -69,6 +69,15 @@ AF4 SpdLoadSourceImage(ASU2 p, AU1 slice)
         float v = imgSrc.Load(int3(q, (int)c.srcMip));
 #endif
     return AF4(v, v, v, v);
+#elif defined(MIPMAP_FLOAT2)
+#if defined(MIPMAP_ARRAY)
+    Texture2DArray<float2> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
+    float2 v = imgSrc.Load(int4(q, slice, (int)c.srcMip));
+#else
+    Texture2D<float2> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
+    float2 v = imgSrc.Load(int3(q, (int)c.srcMip));
+#endif
+    return AF4(v.x, v.y, 0.0f, 0.0f);
 #else
 #if defined(MIPMAP_ARRAY)
         Texture2DArray<float4> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
@@ -86,13 +95,23 @@ AF4 SpdLoad(ASU2 tex, AU1 slice)
     StructuredBuffer<MipmapSpdConstants> constantsBuf = ResourceDescriptorHeap[UintRootConstant2];
     MipmapSpdConstants c = constantsBuf[UintRootConstant3];
 
-#if defined(MIPMAP_SCALAR)
+#if defined(MIPMAP_FLOAT1)
 #if defined(MIPMAP_ARRAY)
         globallycoherent RWTexture2DArray<float> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
         return imgDst5[float3(tex, slice)].rrrr;
 #else
         globallycoherent RWTexture2D<float> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
         return imgDst5[tex].rrrr;
+#endif
+#elif defined(MIPMAP_FLOAT2)
+#if defined(MIPMAP_ARRAY)
+    globallycoherent RWTexture2DArray<float2> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
+    float2 v = imgDst5[float3(tex, slice)];
+    return AF4(v.x, v.y, 0.0f, 0.0f);
+#else
+    globallycoherent RWTexture2D<float2> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
+    float2 v = imgDst5[tex];
+    return AF4(v.x, v.y, 0.0f, 0.0f);
 #endif
 #else
 #if defined(MIPMAP_ARRAY)
@@ -112,7 +131,7 @@ void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
     StructuredBuffer<MipmapSpdConstants> constantsBuf = ResourceDescriptorHeap[UintRootConstant2];
     MipmapSpdConstants c = constantsBuf[UintRootConstant3];
 
-#if defined(MIPMAP_SCALAR)
+#if defined(MIPMAP_FLOAT1)
     float v = outValue.x;
     if (index == 5)
     {
@@ -132,6 +151,28 @@ void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
 #else
         RWTexture2D<float> imgDst = ResourceDescriptorHeap[NonUniformResourceIndex(c.mipUavDescriptorIndices[index])];
         imgDst[pix] = v;
+#endif
+
+#elif defined(MIPMAP_FLOAT2)
+    float2 v = outValue.xy;
+    if (index == 5)
+    {
+#if defined(MIPMAP_ARRAY)
+            globallycoherent RWTexture2DArray<float2> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
+            imgDst5[float3(pix, slice)] = v;
+#else
+        globallycoherent RWTexture2D<float2> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
+        imgDst5[pix] = v;
+#endif
+        return;
+    }
+
+#if defined(MIPMAP_ARRAY)
+        RWTexture2DArray<float2> imgDst = ResourceDescriptorHeap[NonUniformResourceIndex(c.mipUavDescriptorIndices[index])];
+        imgDst[float3(pix, slice)] = v;
+#else
+    RWTexture2D<float2> imgDst = ResourceDescriptorHeap[NonUniformResourceIndex(c.mipUavDescriptorIndices[index])];
+    imgDst[pix] = v;
 #endif
 
 #else

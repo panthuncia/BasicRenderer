@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
+#include <rhi_feature_info.h>
 #include <rhi_interop_dx12.h>
+#include <spdlog/spdlog.h>
 
 #include "Managers\IndirectCommandBufferManager.h"
 #include "Managers\MaterialManager.h"
@@ -106,6 +108,13 @@ HierarchialCullingPass::HierarchialCullingPass(
         m_workGraph,
         m_createCommandPipelineState,
         m_clearPipelineState);
+    if (!m_workGraph) {
+        spdlog::error(
+            "HierarchialCullingPass::HierarchialCullingPass CreatePipelines returned null work graph this={} workGraphMode={} rasterOutputKind={}",
+            static_cast<const void*>(this),
+            static_cast<int>(m_workGraphMode),
+            static_cast<int>(m_rasterOutputKind));
+    }
     auto memSize = m_workGraph->GetRequiredScratchMemorySize();
     m_scratchBuffer = Buffer::CreateShared(
         rhi::HeapType::DeviceLocal,
@@ -345,7 +354,9 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uint32_t pageJobFlags = 0;
     {
         auto& settings = SettingsManager::GetInstance();
-        const bool pageJobEnabled = settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)();
+        const bool pageJobEnabled =
+            CLodVSMRasterModeUsesLargeClusterShadowRouting(
+                settings.getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)());
         if (pageJobEnabled && UsesVirtualShadowOutput(m_rasterOutputKind)) {
             pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_ENABLED;
         }
@@ -642,6 +653,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
         std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
+        const bool useHistoryDepth = m_isFirstPass;
         for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
             viewDepthSrvIndices[i].cameraBufferIndex = i;
             viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
@@ -649,7 +661,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
         context.viewManager->ForEachView([&](uint64_t viewID) {
             const auto* view = context.viewManager->Get(viewID);
-            if (!view || !view->gpu.linearDepthMap) {
+            if (!view) {
                 return;
             }
 
@@ -658,7 +670,13 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
                 return;
             }
 
-            const auto linearDepthMap = view->gpu.linearDepthMap;
+            const auto linearDepthMap = useHistoryDepth
+                ? (view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr)
+                : view->gpu.linearDepthMap;
+            if (!linearDepthMap) {
+                return;
+            }
+
             uint32_t slice = 0;
             if (view->cameraInfo.depthBufferArrayIndex >= 0) {
                 slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
@@ -765,6 +783,8 @@ void HierarchialCullingPass::CreatePipelines(
     PipelineState& outCreateCommandPipeline,
     PipelineState& outClearPipeline)
 {
+    WorkGraphFeatureInfo workGraphFeatureInfo{};
+    const rhi::Result workGraphFeatureResult = device.QueryFeatureInfo(&workGraphFeatureInfo.header);
     ShaderLibraryInfo libInfo(L"shaders/ClusterLOD/workGraphCulling.hlsl", L"lib_6_8");
     std::wstring pageJobDescriptorResourceIdWide(
         m_workGraphComputePageJobDescriptorResourceId.begin(),

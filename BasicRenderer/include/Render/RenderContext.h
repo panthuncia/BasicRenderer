@@ -57,8 +57,11 @@ struct UpdateContext {
 	MaterialManager* materialManager = nullptr;
 
 	Scene* currentScene = nullptr;
+	Components::Camera primaryCamera;
+	bool hasPrimaryCamera = false;
 	UINT frameIndex = 0;
 	UINT64 frameFenceValue = 0;
+	uint64_t frameNumber = 0;
 	DirectX::XMUINT2 renderResolution{};
 	DirectX::XMUINT2 outputResolution{};
 	float deltaTime = 0.0f;

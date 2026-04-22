@@ -393,6 +393,9 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 	AssignStableSceneID(entity);
 	Components::MeshInstances meshInstances;
     for (auto& mesh : meshes) {
+		if (mesh == nullptr) {
+			continue;
+		}
 		bool skinned = mesh->HasBaseSkin();
 		if (skinned) {
 			entity.add<Components::Skinned>();

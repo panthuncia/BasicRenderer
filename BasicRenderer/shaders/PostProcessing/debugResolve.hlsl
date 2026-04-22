@@ -51,6 +51,16 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_TRANSPARENT_DEPTH_COMPLEXITY:
             color = UnpackDebugFloat3(payload);
             break;
+        case OUTPUT_TRANSPARENT_VBOIT_TRANSMITTANCE:
+        case OUTPUT_TRANSPARENT_VBOIT_COVERAGE:
+        case OUTPUT_TRANSPARENT_VBOIT_ZERO_SLICE:
+        case OUTPUT_TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT:
+        case OUTPUT_TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT:
+        case OUTPUT_TRANSPARENT_VBOIT_FITTED_VIRTUAL_SLICE_COUNT:
+        case OUTPUT_TRANSPARENT_VBOIT_OCCUPIED_VIRTUAL_SLICE_COUNT:
+        case OUTPUT_TRANSPARENT_VBOIT_DEPTH_DISTRIBUTION_EXPONENT:
+            color = UnpackDebugFloat1(payload).xxx;
+            break;
         case OUTPUT_SW_RASTER:
             color = float3(1, 0, 0);
             break;

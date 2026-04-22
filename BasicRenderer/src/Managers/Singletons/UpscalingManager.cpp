@@ -30,6 +30,38 @@ void SlLogMessageCallback(sl::LogType level, const char* message) {
     //spdlog::info("Streamline Log: {}", message);
 }
 
+namespace {
+    bool IsStreamlineDisabledByEnvironment() {
+        char* value = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&value, &len, "BASICRENDERER_DISABLE_STREAMLINE") != 0 || value == nullptr) {
+            return false;
+        }
+        const bool disabled = value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y';
+        free(value);
+        return disabled;
+    }
+
+    bool IsStreamlineEnabledSetting() {
+        if (IsStreamlineDisabledByEnvironment()) {
+            return false;
+        }
+        try {
+            return SettingsManager::GetInstance().getSettingGetter<bool>("enableStreamline")();
+        }
+        catch (const std::exception&) {
+            return true;
+        }
+    }
+
+    UpscalingMode ResolveEffectiveUpscalingMode(UpscalingMode requestedMode, bool dlssSupported) {
+        if (requestedMode == UpscalingMode::DLSS && (!IsStreamlineEnabledSetting() || !dlssSupported)) {
+            return UpscalingMode::None;
+        }
+        return requestedMode;
+    }
+}
+
 static ID3D12Device* dx12_device() { return rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice()); }
 static IDXGIFactory7* dx12_factory() { return rhi::dx12::get_factory(DeviceManager::GetInstance().GetDevice()); }
 static IDXGIAdapter4* dx12_adapter() { return rhi::dx12::get_adapter(DeviceManager::GetInstance().GetDevice()); }
@@ -89,6 +121,15 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
 
 void UpscalingManager::InitializeAdapter()
 {
+    if (!IsStreamlineEnabledSetting()) {
+        m_dlssSupported = false;
+        if (m_upscalingMode == UpscalingMode::DLSS) {
+            m_upscalingMode = UpscalingMode::None;
+        }
+        spdlog::info("UpscalingManager::InitializeAdapter skipped DLSS probing because enableStreamline=false");
+        return;
+    }
+
     auto dev = DeviceManager::GetInstance().GetDevice();
 	m_dlssSupported = CheckDLSSSupport(dev); // TODO: Query from RHI
 }
@@ -179,19 +220,27 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 }
 
 bool UpscalingManager::InitSL() {
+    if (!IsStreamlineEnabledSetting()) {
+        m_dlssSupported = false;
+        if (m_upscalingMode == UpscalingMode::DLSS) {
+            m_upscalingMode = UpscalingMode::None;
+        }
+        spdlog::info("UpscalingManager::InitSL skipped because enableStreamline=false");
+        return false;
+    }
     return true;
 }
 
 void UpscalingManager::Setup() {
     auto outputRes = m_getOutputRes();
-    auto renderRes = m_getRenderRes();
-    switch (m_upscalingMode)
+    const UpscalingMode effectiveMode = ResolveEffectiveUpscalingMode(m_upscalingMode, m_dlssSupported);
+    switch (effectiveMode)
     {
     case UpscalingMode::None: {
         // No upscaling, just set the render resolution to the output resolution
         SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(outputRes);
         break;
-	}
+    }
     case UpscalingMode::DLSS: {
         sl::DLSSOptimalSettings dlssSettings;
         sl::DLSSOptions dlssOptions = {};
@@ -289,7 +338,10 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 	consts.jitterOffset.x = camera->jitterPixelSpace.x;
     consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
-    consts.mvecScale = { 1.0f / renderRes.x, -1.0f / renderRes.y };
+    // The motion buffer stores currentNdc - prevNdc with unjittered projections.
+    // Streamline expects normalized current-to-previous screen motion, so convert
+    // NDC delta here instead of treating the buffer as pixel-space velocity.
+    consts.mvecScale = { -0.5f, 0.5f };
 
     consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };
@@ -419,7 +471,8 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
 }
 
 void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
-    switch (m_upscalingMode)
+    const UpscalingMode effectiveMode = ResolveEffectiveUpscalingMode(m_upscalingMode, m_dlssSupported);
+    switch (effectiveMode)
     {
 	    case UpscalingMode::None:
             EvaluateNone(commandList, camera, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);

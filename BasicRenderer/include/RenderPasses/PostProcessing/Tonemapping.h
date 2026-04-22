@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <functional>
 
+#include <spdlog/spdlog.h>
+
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
@@ -63,8 +65,8 @@ public:
     }
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-	    auto& context = *renderContext;
+		auto* renderContext = executionContext.hostData->Get<RenderContext>();
+		auto& context = *renderContext;
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = executionContext.commandList;
 
@@ -73,20 +75,40 @@ public:
 		rhi::PassBeginInfo passInfo{};
 		rhi::ColorAttachment colorAttachment{};
 		colorAttachment.rtv = { context.rtvHeap.GetHandle(), context.frameIndex };
-		colorAttachment.loadOp = rhi::LoadOp::Load;
+		colorAttachment.loadOp = rhi::LoadOp::Clear;
 		colorAttachment.storeOp = rhi::StoreOp::Store;
+		colorAttachment.clear.rgba[0] = 0.0f;
+		colorAttachment.clear.rgba[1] = 0.0f;
+		colorAttachment.clear.rgba[2] = 0.0f;
+		colorAttachment.clear.rgba[3] = 1.0f;
 		passInfo.colors = { &colorAttachment };
 		passInfo.width = context.outputResolution.x;
 		passInfo.height = context.outputResolution.y;
 		commandList.BeginPass(passInfo);
 
 		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
+		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+		commandList.BindPipeline(m_pso->GetHandle());
 
-		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-        commandList.BindPipeline(m_pso->GetHandle());
-
-
-        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+		unsigned int descriptorIndices[rg::shaderapi::kNumResourceDescriptorIndicesRootConstants] = {};
+		int descriptorCount = 0;
+		for (const auto& binding : m_resourceDescriptorBindings.mandatoryResourceDescriptorSlots) {
+			descriptorIndices[descriptorCount] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, false, &binding.name);
+			++descriptorCount;
+		}
+		for (const auto& binding : m_resourceDescriptorBindings.optionalResourceDescriptorSlots) {
+			descriptorIndices[descriptorCount] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, true, &binding.name);
+			++descriptorCount;
+		}
+		if (descriptorCount > 0) {
+			commandList.PushConstants(
+				rhi::ShaderStage::All,
+				0,
+				rg::shaderapi::kResourceDescriptorIndicesRootParameter,
+				0,
+				descriptorCount,
+				descriptorIndices);
+		}
 
 		unsigned int misc[NumMiscUintRootConstants] = {};
 		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
@@ -143,7 +165,7 @@ private:
         bs.numAttachments = 1;
         {
             auto& a0 = bs.attachments[0];
-            a0.enable = true;
+			a0.enable = false;
             a0.srcColor = rhi::BlendFactor::SrcAlpha;
             a0.dstColor = rhi::BlendFactor::InvSrcAlpha;
             a0.colorOp = rhi::BlendOp::Add;

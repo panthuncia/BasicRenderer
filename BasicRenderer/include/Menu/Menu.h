@@ -4,6 +4,7 @@
 #include <directx/d3d12.h>
 #include <rhi.h>
 #include <rhi_interop_dx12.h>
+#include <rhi_imgui_widgets.h>
 #include <memory>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -251,6 +252,7 @@ public:
         m_alphaDeepVisibilityStatsQuery = {};
 		m_reyesTelemetryPhase1Query = {};
 		m_reyesTelemetryPhase2Query = {};
+        m_shadowReyesTelemetryPhase1Query = {};
         m_shadowTelemetryQuery = {};
         m_shadowVisibleCounterQuery = {};
         m_shadowVisibleClustersQuery = {};
@@ -388,6 +390,13 @@ private:
     CLodReyesTelemetry m_clodReyesTelemetryPhase2{};
     std::string m_clodReyesTelemetryStatus = "No Reyes captures yet.";
 
+    bool m_shadowClodReyesTelemetryHasData = false;
+    bool m_shadowClodReyesTelemetryCapturePending = false;
+    uint64_t m_shadowClodReyesTelemetryCaptureId = 0;
+    uint64_t m_shadowClodReyesTelemetryCaptureCount = 0;
+    CLodReyesTelemetry m_shadowClodReyesTelemetryPhase1{};
+    std::string m_shadowClodReyesTelemetryStatus = "No shadow Reyes captures yet.";
+
     struct CLodStreamingOpsHistorySample {
         std::chrono::steady_clock::time_point timestamp;
         CLodStreamingOperationStats stats{};
@@ -423,6 +432,7 @@ private:
     flecs::query<const Components::Resource> m_shadowTelemetryQuery;
     flecs::query<const Components::Resource> m_reyesTelemetryPhase1Query;
     flecs::query<const Components::Resource> m_reyesTelemetryPhase2Query;
+    flecs::query<const Components::Resource> m_shadowReyesTelemetryPhase1Query;
     flecs::query<const Components::Resource> m_visibleClustersQuery;
     flecs::query<const Components::Resource> m_visibleCounterQuery;
     flecs::query<const Components::Resource> m_shadowVisibleClustersQuery;
@@ -511,6 +521,14 @@ private:
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
 
+    CLodVSMRasterMode m_clodVSMRasterMode = CLodVSMRasterMode::PageJob;
+    std::function<CLodVSMRasterMode()> getCLodVSMRasterMode;
+    std::function<void(CLodVSMRasterMode)> setCLodVSMRasterMode;
+
+    CLodTransparencyMode m_clodTransparencyMode = CLodTransparencyMode::LinkedListDeepVisibility;
+    std::function<CLodTransparencyMode()> getCLodTransparencyMode;
+    std::function<void(CLodTransparencyMode)> setCLodTransparencyMode;
+
     bool m_clodDisableReyesRasterization = false;
     std::function<bool()> getCLodDisableReyesRasterization;
     std::function<void(bool)> setCLodDisableReyesRasterization;
@@ -522,6 +540,10 @@ private:
     bool m_clodEnablePageJobVSM = false;
     std::function<bool()> getCLodEnablePageJobVSM;
     std::function<void(bool)> setCLodEnablePageJobVSM;
+
+    float m_clodReyesShadowCoarseTargetPagesPerTriangle = CLodReyesShadowCoarseTargetPagesPerTriangleDefault;
+    std::function<float()> getCLodReyesShadowCoarseTargetPagesPerTriangle;
+    std::function<void(float)> setCLodReyesShadowCoarseTargetPagesPerTriangle;
 
     uint32_t m_clodPageJobDiameterThreshold = 64u;
     std::function<uint32_t()> getCLodPageJobDiameterThreshold;
@@ -639,6 +661,9 @@ private:
     std::function<bool()> getJitterEnabled;
     std::function<void(bool)> setJitterEnabled;
 
+    bool m_collectPassStatistics = true;
+    std::function<bool()> getCollectPassStatistics;
+    std::function<void(bool)> setCollectPassStatistics;
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
@@ -658,6 +683,14 @@ private:
 	bool m_heavyDebug = false;
 	std::function<bool()> getHeavyDebug;
 	std::function<void(bool)> setHeavyDebug;
+
+    bool m_renderGraphBatchTraceEnabled = false;
+    std::function<bool()> getRenderGraphBatchTraceEnabled;
+    std::function<void(bool)> setRenderGraphBatchTraceEnabled;
+
+    bool m_reshapeTexelAddressing = true;
+    std::function<bool()> getReshapeTexelAddressing;
+    std::function<void(bool)> setReshapeTexelAddressing;
 
     AutoAliasMode m_autoAliasMode = AutoAliasMode::Balanced;
     std::function<AutoAliasMode()> getAutoAliasMode;
@@ -802,6 +835,16 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
     observerSetting(m_clodSoftwareRasterMode, CLodSoftwareRasterModeSettingName);
 
+    getCLodVSMRasterMode = settingsManager.getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName);
+    setCLodVSMRasterMode = settingsManager.getSettingSetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName);
+    m_clodVSMRasterMode = getCLodVSMRasterMode();
+    observerSetting(m_clodVSMRasterMode, CLodVSMRasterModeSettingName);
+
+    getCLodTransparencyMode = settingsManager.getSettingGetter<CLodTransparencyMode>(CLodTransparencyModeSettingName);
+    setCLodTransparencyMode = settingsManager.getSettingSetter<CLodTransparencyMode>(CLodTransparencyModeSettingName);
+    m_clodTransparencyMode = getCLodTransparencyMode();
+    observerSetting(m_clodTransparencyMode, CLodTransparencyModeSettingName);
+
     getCLodDisableReyesRasterization = settingsManager.getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName);
     setCLodDisableReyesRasterization = settingsManager.getSettingSetter<bool>(CLodDisableReyesRasterizationSettingName);
     m_clodDisableReyesRasterization = getCLodDisableReyesRasterization();
@@ -816,6 +859,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodEnablePageJobVSM = settingsManager.getSettingSetter<bool>(CLodEnablePageJobVSMSettingName);
     m_clodEnablePageJobVSM = getCLodEnablePageJobVSM();
     observerSetting(m_clodEnablePageJobVSM, CLodEnablePageJobVSMSettingName);
+
+    getCLodReyesShadowCoarseTargetPagesPerTriangle = settingsManager.getSettingGetter<float>(CLodReyesShadowCoarseTargetPagesPerTriangleSettingName);
+    setCLodReyesShadowCoarseTargetPagesPerTriangle = settingsManager.getSettingSetter<float>(CLodReyesShadowCoarseTargetPagesPerTriangleSettingName);
+    m_clodReyesShadowCoarseTargetPagesPerTriangle = getCLodReyesShadowCoarseTargetPagesPerTriangle();
+    observerSetting(m_clodReyesShadowCoarseTargetPagesPerTriangle, CLodReyesShadowCoarseTargetPagesPerTriangleSettingName);
 
     getCLodPageJobDiameterThreshold = settingsManager.getSettingGetter<uint32_t>(CLodPageJobDiameterThresholdSettingName);
     setCLodPageJobDiameterThreshold = settingsManager.getSettingSetter<uint32_t>(CLodPageJobDiameterThresholdSettingName);
@@ -957,6 +1005,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_jitterEnabled = getJitterEnabled();
 	observerSetting(m_jitterEnabled, "enableJitter");
 
+    getCollectPassStatistics = settingsManager.getSettingGetter<bool>("collectPassStatistics");
+    setCollectPassStatistics = settingsManager.getSettingSetter<bool>("collectPassStatistics");
+    m_collectPassStatistics = getCollectPassStatistics();
+    observerSetting(m_collectPassStatistics, "collectPassStatistics");
+
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
 	m_collectPipelineStatistics = getCollectPipelineStatistics();
@@ -980,6 +1033,16 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	setHeavyDebug = settingsManager.getSettingSetter<bool>("heavyDebug");
 	m_heavyDebug = getHeavyDebug();
 	observerSetting(m_heavyDebug, "heavyDebug");
+
+    getRenderGraphBatchTraceEnabled = settingsManager.getSettingGetter<bool>("renderGraphBatchTraceEnabled");
+    setRenderGraphBatchTraceEnabled = settingsManager.getSettingSetter<bool>("renderGraphBatchTraceEnabled");
+    m_renderGraphBatchTraceEnabled = getRenderGraphBatchTraceEnabled();
+    observerSetting(m_renderGraphBatchTraceEnabled, "renderGraphBatchTraceEnabled");
+
+    getReshapeTexelAddressing = settingsManager.getSettingGetter<bool>("reshapeTexelAddressing");
+    setReshapeTexelAddressing = settingsManager.getSettingSetter<bool>("reshapeTexelAddressing");
+    m_reshapeTexelAddressing = getReshapeTexelAddressing();
+    observerSetting(m_reshapeTexelAddressing, "reshapeTexelAddressing");
 
     getAutoAliasMode = settingsManager.getSettingGetter<AutoAliasMode>("autoAliasMode");
     setAutoAliasMode = settingsManager.getSettingSetter<AutoAliasMode>("autoAliasMode");
@@ -1037,6 +1100,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .query_builder<const Components::Resource>()
         .with<CLodReyesTelemetryBufferPhase2Tag>()
         .with<CLodExtensionTypeTag>(visBufferTag)
+        .build();
+    m_shadowReyesTelemetryPhase1Query = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodReyesTelemetryBufferPhase1Tag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
         .build();
     m_visibleClustersQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
@@ -1124,6 +1192,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     static bool showCLodTelemetry = false;
     static bool showFrameTaskGraph = false;
     static bool showAutoAliasPlanner = false;
+    static bool showGpuInstrumentation = false;
 
     const float fps = ImGui::GetIO().Framerate;
     const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
@@ -1198,21 +1267,42 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 			setMeshletCullingEnabled(meshletCulling);
 		}
         int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
-        if (ImGui::Combo("Software Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
+        if (ImGui::Combo("Visibility/Alpha SW Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
             m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
             setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
         }
-        if (ImGui::Checkbox("Disable Reyes Tessellation/Displacement", &m_clodDisableReyesRasterization)) {
+        int clodVSMRasterModeIndex = static_cast<int>(m_clodVSMRasterMode);
+        if (ImGui::Combo("VSM Raster Mode", &clodVSMRasterModeIndex, CLodVSMRasterModeNames, CLodVSMRasterModeCount)) {
+            clodVSMRasterModeIndex = std::clamp(clodVSMRasterModeIndex, 0, CLodVSMRasterModeCount - 1);
+            m_clodVSMRasterMode = static_cast<CLodVSMRasterMode>(clodVSMRasterModeIndex);
+            setCLodVSMRasterMode(m_clodVSMRasterMode);
+        }
+        int clodTransparencyModeIndex = static_cast<int>(m_clodTransparencyMode);
+        if (ImGui::Combo("Transparency Mode", &clodTransparencyModeIndex, CLodTransparencyModeNames, CLodTransparencyModeCount)) {
+            clodTransparencyModeIndex = std::clamp(clodTransparencyModeIndex, 0, CLodTransparencyModeCount - 1);
+            m_clodTransparencyMode = static_cast<CLodTransparencyMode>(clodTransparencyModeIndex);
+            setCLodTransparencyMode(m_clodTransparencyMode);
+        }
+        if (ImGui::Checkbox("Disable Reyes Tessellation / VSM Reyes Routing", &m_clodDisableReyesRasterization)) {
             setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);
         }
         if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
             setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
         }
-        if (ImGui::Checkbox("Enable Page-Job VSM Raster", &m_clodEnablePageJobVSM)) {
-            setCLodEnablePageJobVSM(m_clodEnablePageJobVSM);
+        if (ImGui::SliderFloat(
+                "Shadow Reyes Coarse Target Pages/Triangle",
+                &m_clodReyesShadowCoarseTargetPagesPerTriangle,
+                CLodReyesShadowCoarseTargetPagesPerTriangleMin,
+                CLodReyesShadowCoarseTargetPagesPerTriangleMax,
+                "%.2f")) {
+            m_clodReyesShadowCoarseTargetPagesPerTriangle = std::clamp(
+                m_clodReyesShadowCoarseTargetPagesPerTriangle,
+                CLodReyesShadowCoarseTargetPagesPerTriangleMin,
+                CLodReyesShadowCoarseTargetPagesPerTriangleMax);
+            setCLodReyesShadowCoarseTargetPagesPerTriangle(m_clodReyesShadowCoarseTargetPagesPerTriangle);
         }
-        if (m_clodEnablePageJobVSM) {
+        if (m_clodVSMRasterMode == CLodVSMRasterMode::PageJob) {
             int diameterThreshold = static_cast<int>(m_clodPageJobDiameterThreshold);
             if (ImGui::SliderInt("Page-Job Diameter Threshold", &diameterThreshold, 1, 255)) {
                 m_clodPageJobDiameterThreshold = static_cast<uint32_t>(std::clamp(diameterThreshold, 1, 255));
@@ -1413,6 +1503,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);
         }
+        if (ImGui::Checkbox("Collect Pass Statistics", &m_collectPassStatistics)) {
+            setCollectPassStatistics(m_collectPassStatistics);
+        }
 		if (ImGui::Checkbox("Collect Pipeline Statistics", &m_collectPipelineStatistics)) {
 			setCollectPipelineStatistics(m_collectPipelineStatistics);
 		}
@@ -1430,6 +1523,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Heavy Debug (1 pass/batch + GPU drain)", &m_heavyDebug)) {
 			setHeavyDebug(m_heavyDebug);
 		}
+        if (ImGui::Checkbox("Render Graph Batch Trace", &m_renderGraphBatchTraceEnabled)) {
+            setRenderGraphBatchTraceEnabled(m_renderGraphBatchTraceEnabled);
+        }
+        if (ImGui::Checkbox("ReShape texel addressing (requires recreate)", &m_reshapeTexelAddressing)) {
+            setReshapeTexelAddressing(m_reshapeTexelAddressing);
+        }
         int clodCpuUploadBudget = static_cast<int>(std::min<uint32_t>(m_clodStreamingCpuUploadBudgetRequests, 4096u));
         if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {
             m_clodStreamingCpuUploadBudgetRequests = static_cast<uint32_t>(std::max(clodCpuUploadBudget, 1));
@@ -1440,6 +1539,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
         ImGui::Checkbox("CPU frame task graph", &showFrameTaskGraph);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
+        ImGui::Checkbox("GPU instrumentation", &showGpuInstrumentation);
         std::string memoryString = "Memory usage: unavailable";
         const double KiB = 1024.0;
         const double MiB = KiB * 1024.0;
@@ -1545,6 +1645,11 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
     if (showCLodTelemetry) {
         DrawCLodTelemetryWindow();
+    }
+
+    if (showGpuInstrumentation) {
+        static rhi::debug::InstrumentationWidget g_gpuInstrumentationWidget;
+        g_gpuInstrumentationWidget.Draw(DeviceManager::GetInstance().GetDevice(), &showGpuInstrumentation);
     }
 
     if (showFrameTaskGraph) {
@@ -2086,13 +2191,17 @@ inline void Menu::TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId) {
     m_clodReyesTelemetryStatus = "Reyes capture completed.";
 
     spdlog::info(
-        "Reyes telemetry capture: phase1 input={} totalDice={} splitDepth={} rasterizedPatches={} rasterizedMicros={} | phase2 input={} totalDice={} splitDepth={} rasterizedPatches={} rasterizedMicros={}",
+        "Reyes telemetry capture: phase1 input={} owned={} bypass={} totalDice={} splitDepth={} rasterizedPatches={} rasterizedMicros={} | phase2 input={} owned={} bypass={} totalDice={} splitDepth={} rasterizedPatches={} rasterizedMicros={}",
         m_clodReyesTelemetryPhase1.visibleClusterInputCount,
+        m_clodReyesTelemetryPhase1.ownedClusterOutputCount,
+        m_clodReyesTelemetryPhase1.fullClusterOutputCount,
         m_clodReyesTelemetryPhase1.immediateDiceQueueEntryCount + m_clodReyesTelemetryPhase1.finalDiceQueueEntryCount,
         m_clodReyesTelemetryPhase1.deepestSplitLevelReached,
         m_clodReyesTelemetryPhase1.patchRasterizedPatchCount,
         m_clodReyesTelemetryPhase1.patchRasterizedMicroTriangleCount,
         m_clodReyesTelemetryPhase2.visibleClusterInputCount,
+        m_clodReyesTelemetryPhase2.ownedClusterOutputCount,
+        m_clodReyesTelemetryPhase2.fullClusterOutputCount,
         m_clodReyesTelemetryPhase2.immediateDiceQueueEntryCount + m_clodReyesTelemetryPhase2.finalDiceQueueEntryCount,
         m_clodReyesTelemetryPhase2.deepestSplitLevelReached,
         m_clodReyesTelemetryPhase2.patchRasterizedPatchCount,
@@ -2121,6 +2230,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
     Resource* shadowClodTelemetryResource = nullptr;
     Resource* reyesTelemetryPhase1Resource = nullptr;
     Resource* reyesTelemetryPhase2Resource = nullptr;
+    Resource* shadowReyesTelemetryPhase1Resource = nullptr;
     Resource* clodVisibleClustersResource = nullptr;
     Resource* clodVisibleCounterResource = nullptr;
     Resource* shadowClodVisibleClustersResource = nullptr;
@@ -2159,6 +2269,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             if (reyesTelemetryPhase2Resource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
                     reyesTelemetryPhase2Resource = resource.get();
+                }
+            }
+            });
+
+        m_shadowReyesTelemetryPhase1Query.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowReyesTelemetryPhase1Resource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowReyesTelemetryPhase1Resource = resource.get();
                 }
             }
             });
@@ -2245,6 +2363,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
     const bool reyesCaptureResourcesReady =
         (reyesTelemetryPhase1Resource != nullptr) &&
         (reyesTelemetryPhase2Resource != nullptr);
+    const bool shadowReyesCaptureResourcesReady =
+        (shadowReyesTelemetryPhase1Resource != nullptr);
     auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
     const bool canCapture =
         (clodTelemetryResource != nullptr) &&
@@ -2262,6 +2382,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
         (readbackService != nullptr) &&
         (!m_shadowVirtualShadowTelemetry.capturePending);
     const bool canCaptureReyes = reyesCaptureResourcesReady && (readbackService != nullptr) && (!m_clodReyesTelemetryCapturePending);
+    const bool canCaptureShadowReyes = shadowReyesCaptureResourcesReady && (readbackService != nullptr) && (!m_shadowClodReyesTelemetryCapturePending);
     const bool canCaptureAlpha = alphaCaptureResourcesReady && (readbackService != nullptr) && (!m_clodAlphaTelemetryCapturePending);
 
     if (!captureStatsResourcesReady) {
@@ -2651,6 +2772,59 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     ImGui::SameLine();
     ImGui::Text("Reyes Status: %s", m_clodReyesTelemetryStatus.c_str());
+
+    if (!shadowReyesCaptureResourcesReady) {
+        ImGui::TextDisabled("Shadow Reyes metrics unavailable: phase telemetry resource not found.");
+    }
+
+    if (!canCaptureShadowReyes) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture Shadow Reyes Metrics")) {
+        m_shadowClodReyesTelemetryCapturePending = true;
+        m_shadowClodReyesTelemetryCaptureId++;
+        m_shadowClodReyesTelemetryPhase1 = {};
+        m_shadowClodReyesTelemetryStatus = "Shadow Reyes capture requested.";
+
+        const uint64_t captureId = m_shadowClodReyesTelemetryCaptureId;
+        readbackService->RequestReadbackCapture(
+            "CLodShadow::VirtualShadowClearDirtyBitsPass",
+            shadowReyesTelemetryPhase1Resource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_shadowClodReyesTelemetryCapturePending || m_shadowClodReyesTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodReyesTelemetry)) {
+                    m_shadowClodReyesTelemetryStatus = "Shadow Reyes capture failed: phase 1 payload too small.";
+                    m_shadowClodReyesTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_shadowClodReyesTelemetryPhase1, result.data.data(), sizeof(CLodReyesTelemetry));
+                m_shadowClodReyesTelemetryHasData = true;
+                m_shadowClodReyesTelemetryCapturePending = false;
+                m_shadowClodReyesTelemetryCaptureCount++;
+                m_shadowClodReyesTelemetryStatus = "Shadow Reyes capture completed.";
+
+                spdlog::info(
+                    "Shadow Reyes telemetry capture: phase1 input={} owned={} bypass={} totalDice={} splitDepth={} rasterizedPatches={} rasterizedMicros={}",
+                    m_shadowClodReyesTelemetryPhase1.visibleClusterInputCount,
+                    m_shadowClodReyesTelemetryPhase1.ownedClusterOutputCount,
+                    m_shadowClodReyesTelemetryPhase1.fullClusterOutputCount,
+                    m_shadowClodReyesTelemetryPhase1.immediateDiceQueueEntryCount + m_shadowClodReyesTelemetryPhase1.finalDiceQueueEntryCount,
+                    m_shadowClodReyesTelemetryPhase1.deepestSplitLevelReached,
+                    m_shadowClodReyesTelemetryPhase1.patchRasterizedPatchCount,
+                    m_shadowClodReyesTelemetryPhase1.patchRasterizedMicroTriangleCount);
+            });
+    }
+    if (!canCaptureShadowReyes) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Shadow Reyes Status: %s", m_shadowClodReyesTelemetryStatus.c_str());
 
     if (!alphaCaptureResourcesReady) {
         ImGui::TextDisabled("Alpha deep-visibility metrics unavailable: required resources not found.");
@@ -3309,6 +3483,84 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     ImGui::Separator();
     ImGui::TextUnformatted("Reyes Pipeline");
+    const auto drawReyesPhase = [](const char* label, const CLodReyesTelemetry& telemetry) {
+        if (!ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+            return;
+        }
+
+        const uint32_t totalDiceInputs = telemetry.immediateDiceQueueEntryCount + telemetry.finalDiceQueueEntryCount;
+        ImGui::Text("Phase index: %u", telemetry.phaseIndex);
+        ImGui::Text("Classify: visible input=%u reyes-owned=%u bypass-full=%u immediate dice=%u",
+            telemetry.visibleClusterInputCount,
+            telemetry.ownedClusterOutputCount,
+            telemetry.fullClusterOutputCount,
+            telemetry.immediateDiceQueueEntryCount);
+        ImGui::Text("Split: deepest level=%u max configured=%u split-routed dice=%u",
+            telemetry.deepestSplitLevelReached,
+            telemetry.configuredMaxSplitPassCount,
+            telemetry.finalDiceQueueEntryCount);
+        ImGui::Text("Split rejects: invalid domains=%u fallback-to-dice=%u frustum=%u shadow-dirty=%u child=%u",
+            telemetry.invalidSplitPatchDomainCount,
+            telemetry.splitCollapseFallbackDiceCount,
+            telemetry.splitFrustumCullCount,
+            telemetry.splitShadowDirtyCullCount,
+            telemetry.splitChildCullCount);
+        ImGui::Text("Coarse dirty-only: eligible=%u rejected=%u leaf outputs=%u",
+            telemetry.splitCoarseOnlyDirtyEligibleCount,
+            telemetry.splitCoarseOnlyDirtyRejectedCount,
+            telemetry.splitCoarseOnlyDirtyLeafOutputCount);
+        ImGui::Text("Dice: total queue inputs=%u valid patches=%u invalid domains=%u est triangles=%u est vertices=%u",
+            totalDiceInputs,
+            telemetry.dicedPatchCount,
+            telemetry.invalidDicePatchDomainCount,
+            telemetry.dicedTriangleEstimateCount,
+            telemetry.dicedVertexEstimateCount);
+        ImGui::Text("Raster work: entries=%u emitted patches=%u emitted microtriangles=%u overflow patches=%u overflow batches=%u",
+            telemetry.rasterWorkEntryCount,
+            telemetry.patchRasterizedPatchCount,
+            telemetry.patchRasterizedMicroTriangleCount,
+            telemetry.rasterWorkOverflowPatchCount,
+            telemetry.rasterWorkOverflowBatchCount);
+        ImGui::Text(
+            "Hardware Reyes: meshGroups=%u packed entries=%u emitted triangles=%u avg entries/group=%.2f avg emitted/group=%.2f avg requested/group=%.2f",
+            telemetry.hardwareRasterMeshGroupCount,
+            telemetry.hardwareRasterPackedWorkEntryCount,
+            telemetry.hardwareRasterMicroTriangleCount,
+            telemetry.hardwareRasterMeshGroupCount > 0u
+                ? static_cast<float>(telemetry.hardwareRasterPackedWorkEntryCount) / static_cast<float>(telemetry.hardwareRasterMeshGroupCount)
+                : 0.0f,
+            telemetry.hardwareRasterMeshGroupCount > 0u
+                ? static_cast<float>(telemetry.hardwareRasterMicroTriangleCount) / static_cast<float>(telemetry.hardwareRasterMeshGroupCount)
+                : 0.0f,
+            telemetry.hardwareRasterMeshGroupCount > 0u
+                ? static_cast<float>(telemetry.hardwareRasterRequestedMicroTriangleCount) / static_cast<float>(telemetry.hardwareRasterMeshGroupCount)
+                : 0.0f);
+        ImGui::Text("Patch raster rejects: zeroCount=%u overflow=%u clip=%u area=%u bounds=%u clippedQuad=%u",
+            telemetry.rasterZeroMicroTriangleCount,
+            telemetry.rasterMicroTriangleOverflowCount,
+            telemetry.rasterClipCullCount,
+            telemetry.rasterPreAreaCullCount,
+            telemetry.rasterEmptyBoundsCullCount,
+            telemetry.rasterNearPlaneClippedQuadCount);
+        ImGui::Text("Patch raster projected-triangles: windingSwaps=%u postSwapDegenerate=%u",
+            telemetry.rasterWindingSwapCount,
+            telemetry.rasterPostSwapNonNegativeAreaCount);
+        ImGui::Text("Patch raster tiny-triangle fallback=%u",
+            telemetry.rasterTinyTriangleFallbackCount);
+
+        ImGui::TextUnformatted("Per split pass");
+        for (uint32_t splitPassIndex = 0; splitPassIndex < CLodReyesMaxSplitPassCount; ++splitPassIndex) {
+            ImGui::Text(
+                "  Split %u: input=%u children=%u diced=%u splitOverflow=%u diceOverflow=%u",
+                splitPassIndex,
+                telemetry.splitInputCounts[splitPassIndex],
+                telemetry.splitChildOutputCounts[splitPassIndex],
+                telemetry.splitDiceOutputCounts[splitPassIndex],
+                telemetry.splitQueueOverflowCounts[splitPassIndex],
+                telemetry.diceQueueOverflowCounts[splitPassIndex]);
+        }
+    };
+
     if (m_clodReyesTelemetryCapturePending) {
         ImGui::Text("Reyes capture status: pending...");
     }
@@ -3317,64 +3569,21 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
     else {
         ImGui::Text("Reyes telemetry captures: %llu", static_cast<unsigned long long>(m_clodReyesTelemetryCaptureCount));
-
-        const auto drawReyesPhase = [](const char* label, const CLodReyesTelemetry& telemetry) {
-            if (!ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
-                return;
-            }
-
-            const uint32_t totalDiceInputs = telemetry.immediateDiceQueueEntryCount + telemetry.finalDiceQueueEntryCount;
-            ImGui::Text("Phase index: %u", telemetry.phaseIndex);
-            ImGui::Text("Classify: visible input=%u full output=%u immediate dice=%u",
-                telemetry.visibleClusterInputCount,
-                telemetry.fullClusterOutputCount,
-                telemetry.immediateDiceQueueEntryCount);
-            ImGui::Text("Split: deepest level=%u max configured=%u split-routed dice=%u",
-                telemetry.deepestSplitLevelReached,
-                telemetry.configuredMaxSplitPassCount,
-                telemetry.finalDiceQueueEntryCount);
-            ImGui::Text("Split rejects: invalid domains=%u fallback-to-dice=%u",
-                telemetry.invalidSplitPatchDomainCount,
-                telemetry.splitCollapseFallbackDiceCount);
-            ImGui::Text("Dice: total queue inputs=%u valid patches=%u invalid domains=%u est triangles=%u est vertices=%u",
-                totalDiceInputs,
-                telemetry.dicedPatchCount,
-                telemetry.invalidDicePatchDomainCount,
-                telemetry.dicedTriangleEstimateCount,
-                telemetry.dicedVertexEstimateCount);
-            ImGui::Text("Raster work: emitted patches=%u emitted microtriangles=%u overflow patches=%u overflow batches=%u",
-                telemetry.patchRasterizedPatchCount,
-                telemetry.patchRasterizedMicroTriangleCount,
-                telemetry.rasterWorkOverflowPatchCount,
-                telemetry.rasterWorkOverflowBatchCount);
-            ImGui::Text("Patch raster rejects: zeroCount=%u overflow=%u clip=%u area=%u bounds=%u clippedQuad=%u",
-                telemetry.rasterZeroMicroTriangleCount,
-                telemetry.rasterMicroTriangleOverflowCount,
-                telemetry.rasterClipCullCount,
-                telemetry.rasterPreAreaCullCount,
-                telemetry.rasterEmptyBoundsCullCount,
-                telemetry.rasterNearPlaneClippedQuadCount);
-            ImGui::Text("Patch raster projected-triangles: windingSwaps=%u postSwapDegenerate=%u",
-                telemetry.rasterWindingSwapCount,
-                telemetry.rasterPostSwapNonNegativeAreaCount);
-            ImGui::Text("Patch raster tiny-triangle fallback=%u",
-                telemetry.rasterTinyTriangleFallbackCount);
-
-            ImGui::TextUnformatted("Per split pass");
-            for (uint32_t splitPassIndex = 0; splitPassIndex < CLodReyesMaxSplitPassCount; ++splitPassIndex) {
-                ImGui::Text(
-                    "  Split %u: input=%u children=%u diced=%u splitOverflow=%u diceOverflow=%u",
-                    splitPassIndex,
-                    telemetry.splitInputCounts[splitPassIndex],
-                    telemetry.splitChildOutputCounts[splitPassIndex],
-                    telemetry.splitDiceOutputCounts[splitPassIndex],
-                    telemetry.splitQueueOverflowCounts[splitPassIndex],
-                    telemetry.diceQueueOverflowCounts[splitPassIndex]);
-            }
-        };
-
         drawReyesPhase("Reyes Phase 1", m_clodReyesTelemetryPhase1);
         drawReyesPhase("Reyes Phase 2", m_clodReyesTelemetryPhase2);
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Shadow Reyes Pipeline");
+    if (m_shadowClodReyesTelemetryCapturePending) {
+        ImGui::Text("Shadow Reyes capture status: pending...");
+    }
+    else if (!m_shadowClodReyesTelemetryHasData) {
+        ImGui::TextDisabled("No shadow Reyes telemetry capture results yet.");
+    }
+    else {
+        ImGui::Text("Shadow Reyes telemetry captures: %llu", static_cast<unsigned long long>(m_shadowClodReyesTelemetryCaptureCount));
+        drawReyesPhase("Shadow Reyes Phase 1", m_shadowClodReyesTelemetryPhase1);
     }
 
     ImGui::Separator();
@@ -3971,11 +4180,13 @@ inline void Menu::DrawPassTimingWindow() {
         return;
     }
 
-    auto& names     = statisticsService->GetPassNames();
-    auto& stats     = statisticsService->GetPassStats();
+    auto& names = statisticsService->GetPassNames();
+    auto& techniquePaths = statisticsService->GetPassTechniquePaths();
+    auto& stats = statisticsService->GetPassStats();
     auto& meshStats = statisticsService->GetMeshStats();
-    auto& isGeom    = statisticsService->GetIsGeometryPassVector();
+    auto& isGeom = statisticsService->GetIsGeometryPassVector();
     static int maxStaleFrames = 240;
+    static int viewMode = 0;
 
     if (names.empty()) {
         return;
@@ -3983,6 +4194,9 @@ inline void Menu::DrawPassTimingWindow() {
 
     ImGui::Begin("Pass Timings");
     ImGui::SliderInt("Max Stale Frames", &maxStaleFrames, 0, 2000);
+    constexpr const char* kPassTimingViewNames[] = { "Flat", "Techniques" };
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::Combo("View", &viewMode, kPassTimingViewNames, IM_ARRAYSIZE(kPassTimingViewNames));
 
     const auto& visible = statisticsService->GetVisiblePassIndices(static_cast<uint64_t>(maxStaleFrames));
     if (visible.empty()) {
@@ -3995,6 +4209,11 @@ inline void Menu::DrawPassTimingWindow() {
     if (pinned.size() != names.size()) {
         pinned.assign(names.size(), false);
     }
+
+    enum class PassTimingViewMode : int {
+        Flat = 0,
+        Techniques = 1,
+    };
 
     enum class PassTimingColumn : ImGuiID {
         Pass = 1,
@@ -4089,7 +4308,8 @@ inline void Menu::DrawPassTimingWindow() {
         ImGuiTableFlags_SizingStretchProp;
 
     if (ImGui::BeginTable("PassTimingsTable", 6, tableFlags)) {
-        ImGui::TableSetupColumn("Pin", ImGuiTableColumnFlags_NoSort | ImGuiTableColumnFlags_WidthFixed, 52.0f);
+        const bool techniquesView = viewMode == static_cast<int>(PassTimingViewMode::Techniques);
+        ImGui::TableSetupColumn(techniquesView ? "Passes" : "Pin", ImGuiTableColumnFlags_NoSort | ImGuiTableColumnFlags_WidthFixed, 60.0f);
         ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Pass));
         ImGui::TableSetupColumn("GPU (ms)", ImGuiTableColumnFlags_PreferSortDescending | ImGuiTableColumnFlags_DefaultSort, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Gpu));
         ImGui::TableSetupColumn("CPU (ms)", ImGuiTableColumnFlags_PreferSortDescending, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Cpu));
@@ -4100,15 +4320,6 @@ inline void Menu::DrawPassTimingWindow() {
         const ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs();
         const ImGuiTableColumnSortSpecs* primarySort =
             (sortSpecs != nullptr && sortSpecs->SpecsCount > 0) ? &sortSpecs->Specs[0] : nullptr;
-
-        auto sortRows = [&](std::vector<int>& rows) {
-            std::stable_sort(rows.begin(), rows.end(), [&](int lhs, int rhs) {
-                return compareRows(lhs, rhs, primarySort);
-            });
-        };
-
-        sortRows(pinnedRows);
-        sortRows(unpinnedRows);
 
         auto drawRow = [&](int idx) {
             const bool hasMeshDetails = idx < static_cast<int>(isGeom.size()) && idx < static_cast<int>(meshStats.size()) && isGeom[idx];
@@ -4153,11 +4364,205 @@ inline void Menu::DrawPassTimingWindow() {
             ImGui::PopID();
         };
 
-        for (int idx : pinnedRows) {
-            drawRow(idx);
+        if (viewMode == static_cast<int>(PassTimingViewMode::Flat)) {
+            auto sortRows = [&](std::vector<int>& rows) {
+                std::stable_sort(rows.begin(), rows.end(), [&](int lhs, int rhs) {
+                    return compareRows(lhs, rhs, primarySort);
+                });
+            };
+
+            sortRows(pinnedRows);
+            sortRows(unpinnedRows);
+
+            for (int idx : pinnedRows) {
+                drawRow(idx);
+            }
+            for (int idx : unpinnedRows) {
+                drawRow(idx);
+            }
         }
-        for (int idx : unpinnedRows) {
-            drawRow(idx);
+        else {
+            struct TechniqueTreeNode {
+                std::string label;
+                int parentIndex = -1;
+                std::vector<int> childNodeIndices;
+                std::vector<int> passIndices;
+                double gpuTimeMs = 0.0;
+                double cpuTimeMs = 0.0;
+                double updateTimeMs = 0.0;
+                double executeTimeMs = 0.0;
+                uint32_t totalPassCount = 0;
+            };
+
+            std::vector<TechniqueTreeNode> techniqueNodes;
+            techniqueNodes.reserve(visible.size() + 1);
+            techniqueNodes.push_back({ "All Techniques", -1 });
+
+            std::unordered_map<std::string, int> techniquePathToNodeIndex;
+            techniquePathToNodeIndex.reserve(visible.size() + 1);
+            techniquePathToNodeIndex.emplace("", 0);
+
+            auto ensureTechniqueNode = [&](int parentIndex, const std::string& techniquePath, std::string_view label) {
+                auto it = techniquePathToNodeIndex.find(techniquePath);
+                if (it != techniquePathToNodeIndex.end()) {
+                    return it->second;
+                }
+
+                const int nodeIndex = static_cast<int>(techniqueNodes.size());
+                techniqueNodes.push_back({ std::string(label), parentIndex });
+                techniquePathToNodeIndex.emplace(techniquePath, nodeIndex);
+                techniqueNodes[parentIndex].childNodeIndices.push_back(nodeIndex);
+                return nodeIndex;
+            };
+
+            for (unsigned rawIdx : visible) {
+                if (rawIdx >= names.size() || rawIdx >= stats.size()) {
+                    continue;
+                }
+
+                const int passIndex = static_cast<int>(rawIdx);
+                std::string techniquePath =
+                    rawIdx < techniquePaths.size() && !techniquePaths[rawIdx].empty()
+                    ? techniquePaths[rawIdx]
+                    : "Ungrouped";
+
+                int currentNodeIndex = 0;
+                std::string currentPath;
+                size_t segmentStart = 0;
+                while (segmentStart <= techniquePath.size()) {
+                    const size_t separator = techniquePath.find("::", segmentStart);
+                    const size_t segmentEnd = separator == std::string::npos ? techniquePath.size() : separator;
+                    const std::string_view segment(techniquePath.data() + segmentStart, segmentEnd - segmentStart);
+                    if (!segment.empty()) {
+                        if (!currentPath.empty()) {
+                            currentPath += "::";
+                        }
+                        currentPath.append(segment);
+                        currentNodeIndex = ensureTechniqueNode(currentNodeIndex, currentPath, segment);
+                    }
+
+                    if (separator == std::string::npos) {
+                        break;
+                    }
+                    segmentStart = separator + 2;
+                }
+
+                techniqueNodes[currentNodeIndex].passIndices.push_back(passIndex);
+                for (int aggregateNodeIndex = currentNodeIndex; aggregateNodeIndex >= 0; aggregateNodeIndex = techniqueNodes[aggregateNodeIndex].parentIndex) {
+                    auto& aggregateNode = techniqueNodes[aggregateNodeIndex];
+                    aggregateNode.gpuTimeMs += stats[passIndex].gpuTimeEma;
+                    aggregateNode.cpuTimeMs += stats[passIndex].GetCpuTimeEma();
+                    aggregateNode.updateTimeMs += stats[passIndex].cpuUpdateTimeEma;
+                    aggregateNode.executeTimeMs += stats[passIndex].cpuExecuteTimeEma;
+                    aggregateNode.totalPassCount += 1;
+                }
+            }
+
+            auto compareNodeValues = [&](const TechniqueTreeNode& lhs, const TechniqueTreeNode& rhs) {
+                int result = 0;
+                switch (static_cast<PassTimingColumn>(primarySort != nullptr ? primarySort->ColumnUserID : static_cast<ImGuiID>(PassTimingColumn::Gpu))) {
+                case PassTimingColumn::Pass:
+                    result = std::strcmp(lhs.label.c_str(), rhs.label.c_str());
+                    break;
+                case PassTimingColumn::Gpu:
+                    result = compareDoubles(lhs.gpuTimeMs, rhs.gpuTimeMs);
+                    break;
+                case PassTimingColumn::Cpu:
+                    result = compareDoubles(lhs.cpuTimeMs, rhs.cpuTimeMs);
+                    break;
+                case PassTimingColumn::CpuUpdate:
+                    result = compareDoubles(lhs.updateTimeMs, rhs.updateTimeMs);
+                    break;
+                case PassTimingColumn::CpuExecute:
+                    result = compareDoubles(lhs.executeTimeMs, rhs.executeTimeMs);
+                    break;
+                default:
+                    result = compareDoubles(lhs.gpuTimeMs, rhs.gpuTimeMs);
+                    break;
+                }
+
+                if (result == 0) {
+                    result = std::strcmp(lhs.label.c_str(), rhs.label.c_str());
+                }
+
+                const ImGuiSortDirection direction = primarySort != nullptr
+                    ? primarySort->SortDirection
+                    : ImGuiSortDirection_Descending;
+                return direction == ImGuiSortDirection_Ascending ? (result < 0) : (result > 0);
+            };
+
+            auto compareTechniquePasses = [&](int lhs, int rhs) {
+                if (pinned[lhs] != pinned[rhs]) {
+                    return pinned[lhs] && !pinned[rhs];
+                }
+                return compareRows(lhs, rhs, primarySort);
+            };
+
+            std::function<void(int)> sortTechniqueTree = [&](int nodeIndex) {
+                auto& node = techniqueNodes[nodeIndex];
+                std::stable_sort(node.childNodeIndices.begin(), node.childNodeIndices.end(), [&](int lhs, int rhs) {
+                    return compareNodeValues(techniqueNodes[lhs], techniqueNodes[rhs]);
+                });
+                std::stable_sort(node.passIndices.begin(), node.passIndices.end(), compareTechniquePasses);
+                for (int childNodeIndex : node.childNodeIndices) {
+                    sortTechniqueTree(childNodeIndex);
+                }
+            };
+            sortTechniqueTree(0);
+
+            std::function<void(int)> drawTechniqueNode = [&](int nodeIndex) {
+                auto& node = techniqueNodes[nodeIndex];
+                if (nodeIndex != 0) {
+                    ImGui::PushID(nodeIndex + 100000);
+                    ImGui::TableNextRow();
+
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("%u", node.totalPassCount);
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags_SpanFullWidth;
+                    if (node.childNodeIndices.empty() && node.passIndices.empty()) {
+                        treeFlags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                    }
+                    const bool open = ImGui::TreeNodeEx("TechniqueRow", treeFlags, "%s", node.label.c_str());
+
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%.3f", node.gpuTimeMs);
+
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("%.3f", node.cpuTimeMs);
+
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("%.3f", node.updateTimeMs);
+
+                    ImGui::TableSetColumnIndex(5);
+                    ImGui::Text("%.3f", node.executeTimeMs);
+
+                    if (!open) {
+                        ImGui::PopID();
+                        return;
+                    }
+
+                    for (int childNodeIndex : node.childNodeIndices) {
+                        drawTechniqueNode(childNodeIndex);
+                    }
+                    for (int passIndex : node.passIndices) {
+                        drawRow(passIndex);
+                    }
+                    ImGui::TreePop();
+                    ImGui::PopID();
+                    return;
+                }
+
+                for (int childNodeIndex : node.childNodeIndices) {
+                    drawTechniqueNode(childNodeIndex);
+                }
+                for (int passIndex : node.passIndices) {
+                    drawRow(passIndex);
+                }
+            };
+
+            drawTechniqueNode(0);
         }
 
         ImGui::EndTable();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -37,10 +38,22 @@ public:
         std::shared_ptr<Buffer> deepVisibilityNodesBuffer = nullptr,
         std::shared_ptr<Buffer> deepVisibilityCounterBuffer = nullptr,
         std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer = nullptr,
+        std::shared_ptr<Buffer> AVBOITConfigBuffer = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITOccupancyTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITScalarExtinctionTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITChromaticExtinctionTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITIntegratedTransmittanceTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITZeroTransmittanceSliceTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITAccumulationTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITNormalizationTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITShadingExtinctionTexture = nullptr,
+        std::shared_ptr<Buffer> visibleClustersResolveBuffer = nullptr,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
         std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture = nullptr,
         std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture = nullptr,
-        std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer = nullptr);
+        std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITOccupancySliceMaskTexture = nullptr,
+        std::shared_ptr<PixelBuffer> AVBOITEarlyDepthTexture = nullptr);
     ~ClusterRasterizationPass();
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override;
@@ -67,6 +80,18 @@ private:
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
+    std::shared_ptr<Buffer> m_AVBOITConfigBuffer;
+    std::shared_ptr<PixelBuffer> m_AVBOITOccupancyTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITScalarExtinctionTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITChromaticExtinctionTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITIntegratedTransmittanceTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITZeroTransmittanceSliceTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITAccumulationTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITNormalizationTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITShadingExtinctionTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITEarlyDepthTexture;
+    std::shared_ptr<PixelBuffer> m_AVBOITOccupancySliceMaskTexture;
+    std::shared_ptr<Buffer> m_visibleClustersResolveBuffer;
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_virtualShadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
@@ -80,6 +105,9 @@ private:
     uint32_t m_passHeight = 1;
     uint32_t m_deepVisibilityNodeCapacity = 1;
     bool m_declaredResourcesChanged = true;
+    std::function<bool()> m_getPunctualLightingEnabled;
+    std::function<bool()> m_getShadowsEnabled;
+    bool m_gtaoEnabled = false;
 
     RenderPhase m_renderPhase;
 };

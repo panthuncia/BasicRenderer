@@ -18,6 +18,22 @@ struct VisBufferPSInput
 {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
     float linearDepth : TEXCOORD0;
+#if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
+    float3 positionWorldSpace : TEXCOORD1;
+    float3 normalWorldSpace : TEXCOORD2;
+    float3 color : TEXCOORD3;
+    float4 uvSet01 : TEXCOORD4;
+    float4 uvSet23 : TEXCOORD5;
+    float4 uvSet45 : TEXCOORD6;
+    float4 uvSet67 : TEXCOORD7;
+    nointerpolation uint materialDataIndex : TEXCOORD8;
+#if defined (PSO_ALPHA_TEST)
+    float2 texcoord : TEXCOORD9;
+#endif
+    nointerpolation uint visibleClusterIndex : TEXCOORD10;
+    nointerpolation uint viewID : TEXCOORD11;
+    nointerpolation uint shadowClipmapIndex : TEXCOORD12;
+#else
 #if defined (PSO_ALPHA_TEST)
     float2 texcoord : TEXCOORD1;
     nointerpolation uint materialDataIndex : TEXCOORD2; // convenience for alpha test
@@ -25,6 +41,7 @@ struct VisBufferPSInput
     nointerpolation uint visibleClusterIndex : TEXCOORD3;
     nointerpolation uint viewID : TEXCOORD4;
     nointerpolation uint shadowClipmapIndex : TEXCOORD5;
+#endif
 };
 
 struct ClodViewRasterInfo
@@ -60,6 +77,68 @@ struct CLodDeepVisibilityStats
     uint pad0;
     uint pad1;
     uint pad2;
+};
+
+static const uint CLOD_AVBOIT_VBOIT_DEFAULT_SLICE_COUNT = 16u;
+static const uint CLOD_AVBOIT_VBOIT_DEFAULT_VIRTUAL_SLICE_COUNT = 32u;
+static const uint CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_RESOLUTION = 8192u;
+static const uint CLOD_AVBOIT_VBOIT_DEFAULT_DOWNSAMPLE_FACTOR = 4u;
+static const float CLOD_AVBOIT_VBOIT_EXTINCTION_QUANTIZATION_SCALE = 4096.0f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_DEPTH_DISTRIBUTION_EXPONENT = 1.0f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_LOOKUP_DEPTH_BIAS_IN_SLICES = 2.0f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_ZERO_TRANSMITTANCE_THRESHOLD = 1.0e-3f;
+static const float CLOD_AVBOIT_VBOIT_DEFAULT_RESOLUTION_SCALE = 0.25f;
+static const float CLOD_AVBOIT_VBOIT_MIN_DEPTH_DISTRIBUTION_EXPONENT = 0.5f;
+static const float CLOD_AVBOIT_VBOIT_MAX_DEPTH_DISTRIBUTION_EXPONENT = 2.0f;
+
+struct CLodAVBOITConfig
+{
+    uint occupancyUAVDescriptorIndex;
+    uint coverageUAVDescriptorIndex;
+    uint occupancySliceMaskUAVDescriptorIndex;
+    uint depthWarpLUTSRVDescriptorIndex;
+    uint scalarExtinctionUAVDescriptorIndex;
+    uint chromaticExtinctionUAVDescriptorIndex;
+    uint integratedTransmittanceUAVDescriptorIndex;
+    uint shadingTransmittanceSRVDescriptorIndex;
+    uint zeroTransmittanceSliceUAVDescriptorIndex;
+    uint sliceCount;
+    uint virtualSliceCount;
+    uint lowResolutionWidth;
+    uint lowResolutionHeight;
+    float viewNearDepth;
+    float viewFarDepth;
+    float depthDistributionExponent;
+    float lookupDepthBiasInSlices;
+    float zeroTransmittanceThreshold;
+    float pad0;
+};
+
+static const uint CLOD_AVBOIT_VBOIT_DEPTH_WARP_FLAG_FILTER_TO_NEXT = 1u;
+
+struct CLodAVBOITDepthWarpLUTEntry
+{
+    float warpedSliceCoordinate;
+    uint flags;
+};
+
+struct CLodAVBOITFitState
+{
+    uint fittedVirtualSliceCount;
+    uint occupiedVirtualSliceCount;
+    float fittedDepthDistributionExponent;
+    uint pad1;
+};
+
+struct CLodAVBOITEarlyDepthTileIndirectCommand
+{
+    uint lowResolutionPixelX;
+    uint lowResolutionPixelY;
+    uint zeroTransmittanceSlice;
+    uint vertexCountPerInstance;
+    uint instanceCount;
+    uint startVertexLocation;
+    uint startInstanceLocation;
 };
 
 struct ClippingPlane {
@@ -224,6 +303,95 @@ struct MaterialInfo {
     uint aoUvSetIndex;
     uint heightUvSetIndex;
     uint opacityUvSetIndex;
+
+    uint openPBRMaterialDataIndex;
+    uint3 perMaterialPad1;
+};
+
+struct OpenPBRMaterialInfo {
+    float baseWeight;
+    float3 baseColor;
+    float baseDiffuseRoughness;
+    float baseMetalness;
+    float subsurfaceWeight;
+    float subsurfaceRadius;
+
+    float3 subsurfaceColor;
+    float subsurfaceScatterAnisotropy;
+    float3 subsurfaceRadiusScale;
+    float specularWeight;
+
+    float3 specularColor;
+    float specularRoughness;
+    float specularRoughnessAnisotropy;
+    float specularIor;
+    float2 specularAnisotropyRotationCosSin;
+
+    float coatWeight;
+    float3 coatColor;
+    float coatRoughness;
+    float coatRoughnessAnisotropy;
+    float coatIor;
+    float coatDarkening;
+    float2 coatAnisotropyRotationCosSin;
+
+    float fuzzWeight;
+    float3 fuzzColor;
+    float fuzzRoughness;
+    float transmissionWeight;
+    float3 transmissionColor;
+    float transmissionDepth;
+
+    float3 transmissionScatter;
+    float transmissionScatterAnisotropy;
+    float transmissionDispersionScale;
+    float transmissionDispersionAbbeNumber;
+    float thinFilmWeight;
+    float thinFilmThickness;
+    float thinFilmIor;
+    float emissionLuminance;
+
+    float3 emissionColor;
+    float geometryOpacity;
+    uint geometryThinWalled;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+
+    uint coatColorTextureIndex;
+    uint coatColorSamplerIndex;
+    uint coatWeightTextureIndex;
+    uint coatWeightSamplerIndex;
+
+    uint coatRoughnessTextureIndex;
+    uint coatRoughnessSamplerIndex;
+    uint fuzzColorTextureIndex;
+    uint fuzzColorSamplerIndex;
+
+    uint fuzzWeightTextureIndex;
+    uint fuzzWeightSamplerIndex;
+    uint fuzzRoughnessTextureIndex;
+    uint fuzzRoughnessSamplerIndex;
+
+    uint4 coatColorChannels;
+    uint coatWeightChannel;
+    uint coatRoughnessChannel;
+    uint coatTexturePad0;
+
+    uint4 fuzzColorChannels;
+    uint fuzzWeightChannel;
+    uint fuzzRoughnessChannel;
+    uint fuzzTexturePad0;
+
+    uint coatColorUvSetIndex;
+    uint coatWeightUvSetIndex;
+    uint coatRoughnessUvSetIndex;
+    uint fuzzColorUvSetIndex;
+
+    uint fuzzWeightUvSetIndex;
+    uint fuzzRoughnessUvSetIndex;
+    uint openPBRTexturePad0;
+    uint openPBRTexturePad1;
 };
 
 struct SingleMatrix {
@@ -316,9 +484,28 @@ struct FragmentInfo {
     float2 pixelCoords;
     float3 fragPosWorldSpace;
     float3 fragPosViewSpace;
+    uint openPBRMaterialDataIndex;
     float3 normalWS;
     float3 diffuseColor;
+    float baseDiffuseRoughness;
+    float specularAlpha;
+    float weightedSpecularIor;
+    float dielectricSpecularWeight;
+    float3 dielectricSpecularF0;
+    float metalSpecularWeight;
+    float3 metalSpecularF0;
+    float3 metalAverageFresnel;
     float3 albedo;
+    float coatWeight;
+    float3 coatColor;
+    float coatPerceptualRoughness;
+    float coatRoughness;
+    float3 coatF0;
+    float coatIor;
+    float coatDarkening;
+    float fuzzWeight;
+    float3 fuzzColor;
+    float fuzzRoughness;
     float alpha;
     float diffuseAmbientOcclusion;
     float metallic;
@@ -366,10 +553,17 @@ struct MaterialInputs
     float3 albedo;
     float3 normalWS;
     float3 emissive;
+    float3 coatColor;
     float metallic;
     float roughness;
+    float coatWeight;
+    float coatRoughness;
+    float3 fuzzColor;
+    float fuzzWeight;
+    float fuzzRoughness;
     float opacity;
     float ambientOcclusion;
+    uint openPBRMaterialDataIndex;
 };
 
 struct SkinningInstanceGPUInfo
@@ -463,6 +657,25 @@ struct CLodReyesDiceQueueEntry
     uint reserved;
 };
 
+static const uint CLOD_REYES_FLAG_SKINNED = 1u << 0;
+static const uint CLOD_REYES_FLAG_DISPLACEMENT_ENABLED = 1u << 1;
+static const uint CLOD_REYES_FLAG_COARSE_DIRTY_ONLY_LEAF = 1u << 2;
+static const uint CLOD_REYES_FLAG_ROUTE_SHIFT = 8u;
+static const uint CLOD_REYES_FLAG_ROUTE_MASK = 0x3u << CLOD_REYES_FLAG_ROUTE_SHIFT;
+static const uint CLOD_REYES_ROUTE_VISIBILITY = 0u;
+static const uint CLOD_REYES_ROUTE_FINE_MICROPOLY_VSM = 1u;
+static const uint CLOD_REYES_ROUTE_COARSE_HARDWARE_VSM = 2u;
+
+bool CLodReyesIsCoarseDirtyOnlyLeaf(uint flags)
+{
+    return (flags & CLOD_REYES_FLAG_COARSE_DIRTY_ONLY_LEAF) != 0u;
+}
+
+uint CLodReyesDecodeRouteKind(uint flags)
+{
+    return (flags & CLOD_REYES_FLAG_ROUTE_MASK) >> CLOD_REYES_FLAG_ROUTE_SHIFT;
+}
+
 struct CLodReyesDispatchIndirectCommand
 {
     uint dispatchX;
@@ -475,6 +688,14 @@ struct CLodReyesRasterWorkEntry
     uint diceQueueIndex;
     uint microTriangleOffset;
     uint microTriangleCount;
+    uint rasterBucketIndex;
+};
+
+struct CLodReyesPackedRasterWorkGroupEntry
+{
+    uint firstCompactedRasterWorkIndex;
+    uint rasterWorkEntryCount;
+    uint requestedMicroTriangleCount;
     uint reserved;
 };
 
@@ -482,6 +703,7 @@ struct CLodReyesTelemetry
 {
     uint visibleClusterInputCount;
     uint fullClusterOutputCount;
+    uint ownedClusterOutputCount;
     uint immediateDiceQueueEntryCount;
     uint finalDiceQueueEntryCount;
     uint phaseIndex;
@@ -492,6 +714,11 @@ struct CLodReyesTelemetry
     uint dicedTriangleEstimateCount;
     uint dicedVertexEstimateCount;
     uint patchRasterizedMicroTriangleCount;
+    uint rasterWorkEntryCount;
+    uint hardwareRasterMeshGroupCount;
+    uint hardwareRasterMicroTriangleCount;
+    uint hardwareRasterRequestedMicroTriangleCount;
+    uint hardwareRasterPackedWorkEntryCount;
     uint splitInputCounts[4];
     uint splitChildOutputCounts[4];
     uint splitDiceOutputCounts[4];
@@ -505,6 +732,12 @@ struct CLodReyesTelemetry
     uint canonicalFactorTieCount;
     uint flippedTessTableConfigCount;
     uint splitConfigTieCount;
+    uint splitFrustumCullCount;
+    uint splitShadowDirtyCullCount;
+    uint splitChildCullCount;
+    uint splitCoarseOnlyDirtyEligibleCount;
+    uint splitCoarseOnlyDirtyRejectedCount;
+    uint splitCoarseOnlyDirtyLeafOutputCount;
     uint splitConfigSelectionCounts[4];
     uint canonicalRotationCounts[3];
     uint siblingSharedEdgeCheckCount;

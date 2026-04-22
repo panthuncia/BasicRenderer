@@ -40,6 +40,7 @@ DeepVisibilityResolvePass::DeepVisibilityResolvePass(
 
 void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
+    const bool shadowsEnabled = m_getShadowsEnabled ? m_getShadowsEnabled() : false;
     builder->WithShaderResource(
             Builtin::Light::BufferGroup,
             Builtin::PostSkinningVertices,
@@ -48,6 +49,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
+            Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Environment::InfoBuffer,
             Builtin::CameraBuffer,
@@ -56,12 +58,6 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::Light::PointLightCubemapBuffer,
             Builtin::Light::SpotLightMatrixBuffer,
             Builtin::Light::DirectionalLightCascadeBuffer,
-            Builtin::Shadows::CLodClipmapInfo,
-            Builtin::Shadows::CLodDirectionalPageViewInfo,
-            Builtin::Shadows::CLodPageTable,
-            Builtin::Shadows::CLodPhysicalPages,
-		    Builtin::Shadows::CLodCompactMainCamera,
-            Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::Light::ClusterBuffer,
             Builtin::Light::PagesBuffer,
             Builtin::CLod::Offsets,
@@ -83,6 +79,16 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
         .WithUnorderedAccess(Builtin::DebugVisualization)
         .WithUnorderedAccess(m_deepVisibilityStatsBuffer);
 
+    if (shadowsEnabled) {
+        builder->WithShaderResource(
+            Builtin::Shadows::CLodClipmapInfo,
+            Builtin::Shadows::CLodDirectionalPageViewInfo,
+            Builtin::Shadows::CLodPageTable,
+            Builtin::Shadows::CLodPhysicalPages,
+		    Builtin::Shadows::CLodCompactMainCamera,
+            Builtin::Shadows::CLodCompactShadowCameras);
+    }
+
     if (m_reyesDiceQueueBuffer) {
         builder->WithShaderResource(m_reyesDiceQueueBuffer);
     }
@@ -103,7 +109,9 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
 
 void DeepVisibilityResolvePass::Setup()
 {
-    RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+    if (m_getShadowsEnabled && m_getShadowsEnabled()) {
+        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+    }
     m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
 }
 

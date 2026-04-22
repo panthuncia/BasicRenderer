@@ -5,6 +5,8 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 
+#include <string>
+
 class BRDFIntegrationPass : public RenderPass {
 public:
     BRDFIntegrationPass() {
@@ -40,6 +42,7 @@ public:
 
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
 		commandList.BindPipeline(PSO->GetHandle());
+        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
         commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
         commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
@@ -57,20 +60,22 @@ private:
     PixelBuffer* m_lutTexture = nullptr;
 
     rhi::PipelinePtr PSO;
+    PipelineResources m_resourceDescriptorBindings;
 
     void CreatePSO() {
         auto dev = DeviceManager::GetInstance().GetDevice();
 
         // Compile shaders
         ShaderInfoBundle sib;
-        sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+        sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
         sib.pixelShader = { L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6" };
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
+        m_resourceDescriptorBindings = compiled.resourceDescriptorSlots;
 
         // Subobjects
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSNoViewRayMain" };
         rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PSMain" };
 
         rhi::RasterState rs{};
@@ -98,24 +103,31 @@ private:
         rts.formats[0] = rhi::Format::R16G16_Float;
         rhi::SubobjRTVs soRTVs{ rts };
 
+        rhi::SubobjDSV soDSV{ rhi::Format::D32_Float };
         rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
 		rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         const rhi::PipelineStreamItem items[] = {
+            rhi::Make(soLayout),
             rhi::Make(soVS),
             rhi::Make(soPS),
-            rhi::Make(soLayout),
 			rhi::Make(soTopo),
             rhi::Make(soRaster),
             rhi::Make(soBlend),
             rhi::Make(soDepth),
             rhi::Make(soRTVs),
+            rhi::Make(soDSV),
             rhi::Make(soSmp),
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), PSO);
         if (Failed(result)) {
-            throw std::runtime_error("Failed to create BRDF integration PSO (RHI)");
+            throw std::runtime_error(
+                std::string("Failed to create BRDF integration PSO (RHI): ") +
+                rhi::ResultName(result) +
+                " (" +
+                std::to_string(static_cast<uint32_t>(result)) +
+                ")");
         }
         PSO->SetName("BRDFIntegration.PSO");
     }

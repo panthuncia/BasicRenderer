@@ -3,8 +3,12 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "ShaderBuffers.h"
+#include "ThirdParty/XeGTAO.h"
 #include "Resources/PixelBuffer.h"
+#include <Resources/Buffers/Buffer.h>
 #include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 
 class GTAOFilterPass : public ComputePass {
 public:
@@ -14,7 +18,31 @@ public:
     }
 
     void Setup() override {
-        // Removed redundant Register calls now covered by declared-resource auto descriptor registration
+        m_gtaoConstantsHandle = m_resourceRegistryView->RequestHandle("Builtin::GTAO::ConstantsBuffer");
+    }
+
+    void Update(const UpdateExecutionContext& updateExecutionContext) override {
+        const auto* updateContext = updateExecutionContext.hostData->Get<UpdateContext>();
+        if (updateContext == nullptr || !updateContext->hasPrimaryCamera) {
+            return;
+        }
+
+        GTAOInfo gtaoInfo{};
+        XeGTAO::GTAOSettings gtaoSettings;
+        XeGTAO::GTAOUpdateConstants(
+            gtaoInfo.g_GTAOConstants,
+            updateContext->renderResolution.x,
+            updateContext->renderResolution.y,
+            gtaoSettings,
+            false,
+            static_cast<unsigned int>(updateContext->frameNumber),
+            updateContext->primaryCamera);
+
+        BUFFER_UPLOAD(
+            &gtaoInfo,
+            sizeof(GTAOInfo),
+            rg::runtime::UploadTarget::FromHandle(m_gtaoConstantsHandle),
+            0);
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder){
@@ -68,6 +96,7 @@ private:
 
     PipelineState PrefilterDepths16x16PSO;
     uint32_t m_samplerIndex = 0;
+    ResourceRegistry::RegistryHandle m_gtaoConstantsHandle;
 
     void CreatePointClampSampler()
     {

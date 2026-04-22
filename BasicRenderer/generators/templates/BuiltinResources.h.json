@@ -3,6 +3,7 @@
     "Backbuffer": {},
     "LastFrameLinearDepthMaps": {},
     "PerMaterialDataBuffer": {},
+    "PerMaterialOpenPBRDataBuffer": {},
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},
@@ -82,6 +83,8 @@
       "Normals": {},
       "MotionVectors": {},
       "Albedo": {},
+      "Coat": {},
+      "Fuzz": {},
       "MetallicRoughness": {},
       "Emissive": {}
     },
@@ -117,6 +120,16 @@
     },
     "ActiveDrawSetIndices": {},
     "BRDFLUT": {},
+    "OpenPBR": {
+      "FuzzLTC": {},
+      "IdealDielectricEnergyComplement": {},
+      "IdealDielectricAverageEnergyComplement": {},
+      "IdealDielectricReflectionRatio": {},
+      "OpaqueDielectricAverageEnergyComplement": {},
+      "OpaqueDielectricEnergyComplement": {},
+      "IdealMetalAverageEnergyComplement": {},
+      "IdealMetalEnergyComplement": {}
+    },
     "DebugTexture": {},
     "DebugVisualization": {},
     "Noise": {

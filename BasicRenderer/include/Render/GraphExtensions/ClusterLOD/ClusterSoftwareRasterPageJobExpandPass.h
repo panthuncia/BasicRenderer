@@ -130,7 +130,8 @@ public:
         }
 
         auto& settings = SettingsManager::GetInstance();
-        if (!settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)()) {
+        if (!CLodVSMRasterModeUsesLargeClusterPageJob(
+                settings.getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)())) {
             return {};
         }
 

@@ -6,6 +6,8 @@
 #include <rhi.h>
 #include <memory>
 
+#include <spdlog/spdlog.h>
+
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Interfaces/IHasMemoryMetadata.h"

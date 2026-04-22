@@ -87,6 +87,11 @@ struct MeshletSetup
     uint pagePoolSlabDescriptorIndex;  // Descriptor-heap index of the slab ByteAddressBuffer
 };
 
+bool HasValidMeshShaderOutputCounts(uint vertCount, uint triCount)
+{
+    return vertCount <= MS_MESHLET_SIZE && triCount <= MS_MESHLET_SIZE;
+}
+
 // Internal common initialization (indices already chosen)
 bool InitializeMeshletInternal(
     uint meshletLocalIndex,
@@ -212,6 +217,10 @@ bool InitializeMeshletInternalCLod(
     setup.meshlet = (Meshlet)0; // Not used in CLod path
     setup.vertCount = CLodDescVertexCount(desc);
     setup.triCount = CLodDescTriangleCount(desc);
+    if (!HasValidMeshShaderOutputCounts(setup.vertCount, setup.triCount))
+    {
+        return false;
+    }
     setup.vertOffset = 0;
 
     // Per-meshlet compression from descriptor

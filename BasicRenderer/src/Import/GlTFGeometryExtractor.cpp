@@ -1264,8 +1264,9 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 
 	if (!prebuiltData.has_value()) {
 		ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
+		ClusterLODPrebuiltData savedPrebuiltData;
 
-		const bool cacheSaved = CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload());
+		const bool cacheSaved = CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload(), &savedPrebuiltData);
 		if (!cacheSaved) {
 			spdlog::warn("Failed to save CLOD cache for {} (mesh {}, primitive {})", sourceFilePath, meshIndex, primitiveIndex);
 			prebuiltData = std::move(artifacts.prebuiltData);
@@ -1276,7 +1277,8 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 				prebuiltData = std::move(diskBackedPrebuilt);
 			}
 			else {
-				prebuiltData = std::move(artifacts.prebuiltData);
+				spdlog::warn("Immediate CLOD cache reload missed after save for {} (mesh {}, primitive {}); using saved disk metadata directly.", sourceFilePath, meshIndex, primitiveIndex);
+				prebuiltData = std::move(savedPrebuiltData);
 			}
 		}
 	}

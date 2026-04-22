@@ -15,7 +15,30 @@
 
 #pragma comment(lib, "dxcompiler.lib")
 
+#define WRITE_DEBUG_FILES BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+
 namespace {
+    // Bump this whenever the shader compiler argument set changes in a way that affects
+    // the generated DXIL container, especially debug payload availability.
+    constexpr uint64_t kShaderCompilerArgumentFingerprint = 2u;
+}
+
+namespace {
+
+constexpr std::wstring_view kValidationSkipEntryPoints[] = {
+    L"ClusterLODBucketMSMain",
+};
+
+bool ShouldSkipValidationForEntryPoint(std::wstring_view entryPoint)
+{
+    for (std::wstring_view skippedEntryPoint : kValidationSkipEntryPoints) {
+        if (skippedEntryPoint == entryPoint) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 uint64_t HashBytesStable(const void* data, size_t size)
 {
@@ -72,6 +95,7 @@ uint64_t BuildBundleIdentityHash(
         util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(buffer.Ptr), buffer.Size));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->entryPoint)));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->target)));
+        util::hash_combine_u64(seed, ShouldSkipValidationForEntryPoint(slot->entryPoint) ? 1u : 0u);
     };
 
     hashSlot(shadercache::BlobKind::Amplification, info.amplificationShader, amplificationBuffer);
@@ -98,7 +122,8 @@ uint64_t ComputeShaderCacheBuildConfigHash()
     uint64_t seed = 0;
     util::hash_combine_u64(seed, shadercache::kSchemaVersion);
     util::hash_combine_u64(seed, kBRSLPreprocessVersion);
-#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+    util::hash_combine_u64(seed, kShaderCompilerArgumentFingerprint);
+#if WRITE_DEBUG_FILES
     util::hash_combine_u64(seed, 1u);
 #else
     util::hash_combine_u64(seed, 0u);
@@ -123,6 +148,26 @@ uint64_t ComputeShaderCacheBuildConfigHash()
     }
 
     return seed;
+}
+
+void LogFailedShaderSource(
+    const std::wstring& filename,
+    const std::wstring& entryPoint,
+    const std::wstring& target,
+    const DxcBuffer& sourceBuffer)
+{
+    if (sourceBuffer.Ptr == nullptr || sourceBuffer.Size == 0) {
+        return;
+    }
+
+    const char* source = static_cast<const char*>(sourceBuffer.Ptr);
+    const size_t sourceSize = GetNormalizedShaderSourceSize(source, sourceBuffer.Size);
+    spdlog::error(
+        "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
+        ws2s(filename),
+        ws2s(entryPoint),
+        ws2s(target),
+        std::string(source, sourceSize));
 }
 
 bool CreateBlobFromBytes(
@@ -155,6 +200,19 @@ std::vector<std::byte> CopyBlobBytes(ID3DBlob* blob)
     }
     const std::byte* begin = static_cast<const std::byte*>(blob->GetBufferPointer());
     return std::vector<std::byte>(begin, begin + blob->GetBufferSize());
+}
+
+template <typename TCache, typename TKey, typename TFactory>
+const PipelineState& GetOrCreatePipelineState(
+    TCache& cache,
+    const TKey& key,
+    TFactory&& factory)
+{
+    auto it = cache.find(key);
+    if (it == cache.end()) {
+        it = cache.emplace(key, factory()).first;
+    }
+    return it->second;
 }
 
 void AppendBundleBlob(
@@ -299,6 +357,7 @@ void PSOManager::initialize() {
 }
 
 void PSOManager::Cleanup() {
+    std::scoped_lock lock(m_cacheMutex);
     m_psoCache.clear();
     m_PPLLPSOCache.clear();
     m_meshPSOCache.clear();
@@ -312,8 +371,12 @@ void PSOManager::Cleanup() {
     m_deferredPSOCache.clear();
     m_clusterLODRasterPSOCache.clear();
     m_clusterLODVirtualShadowRasterPSOCache.clear();
+    m_clusterLODVirtualShadowReyesRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODAVBOITOccupancyPSOCache.clear();
+    m_clusterLODAVBOITRasterPSOCache.clear();
+    m_clusterLODAVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
 
     debugPSO.Reset();
@@ -328,129 +391,161 @@ void PSOManager::Cleanup() {
 
 const PipelineState& PSOManager::GetPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_psoCache.find(key) == m_psoCache.end()) {
-        m_psoCache[key] = CreatePSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_psoCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_psoCache, key, [&]() {
+        return CreatePSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_shadowPSOCache.find(key) == m_shadowPSOCache.end()) {
-        m_shadowPSOCache[key] = CreateShadowPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_shadowPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_shadowPSOCache, key, [&]() {
+        return CreateShadowPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetShadowMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_shadowMeshPSOCache.find(key) == m_shadowMeshPSOCache.end()) {
-        m_shadowMeshPSOCache[key] = CreateShadowMeshPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_shadowMeshPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_shadowMeshPSOCache, key, [&]() {
+        return CreateShadowMeshPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_prePassPSOCache.find(key) == m_prePassPSOCache.end()) {
-        m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_prePassPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_prePassPSOCache, key, [&]() {
+        return CreatePrePassPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetMeshPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_meshPrePassPSOCache.find(key) == m_meshPrePassPSOCache.end()) {
-        m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_meshPrePassPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_meshPrePassPSOCache, key, [&]() {
+        return CreateMeshPrePassPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_PPLLPSOCache.find(key) == m_PPLLPSOCache.end()) {
-        m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_PPLLPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_PPLLPSOCache, key, [&]() {
+        return CreatePPLLPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_meshPSOCache.find(key) == m_meshPSOCache.end()) {
-        m_meshPSOCache[key] = CreateMeshPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_meshPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_meshPSOCache, key, [&]() {
+        return CreateMeshPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetMeshPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_meshPPLLPSOCache.find(key) == m_meshPPLLPSOCache.end()) {
-        m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_meshPPLLPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_meshPPLLPSOCache, key, [&]() {
+        return CreateMeshPPLLPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_visibilityBufferPSOCache.find(key) == m_visibilityBufferPSOCache.end()) {
-        m_visibilityBufferPSOCache[key] = CreateVisibilityBufferPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_visibilityBufferPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_visibilityBufferPSOCache, key, [&]() {
+        return CreateVisibilityBufferPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
-    if (m_visibilityBufferMeshPSOCache.find(key) == m_visibilityBufferMeshPSOCache.end()) {
-        m_visibilityBufferMeshPSOCache[key] = CreateVisibilityBufferMeshPSO(psoFlags, materialCompileFlags, wireframe);
-    }
-    return m_visibilityBufferMeshPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_visibilityBufferMeshPSOCache, key, [&]() {
+        return CreateVisibilityBufferMeshPSO(psoFlags, materialCompileFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
-    if (m_clusterLODRasterPSOCache.find(key) == m_clusterLODRasterPSOCache.end()) {
-        m_clusterLODRasterPSOCache[key] = CreateClusterLODRasterPSO(materialRasterFlags, wireframe);
-    }
-    return m_clusterLODRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODRasterPSOCache, key, [&]() {
+        return CreateClusterLODRasterPSO(materialRasterFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
-    if (m_clusterLODVirtualShadowRasterPSOCache.find(key) == m_clusterLODVirtualShadowRasterPSOCache.end()) {
-        m_clusterLODVirtualShadowRasterPSOCache[key] = CreateClusterLODVirtualShadowRasterPSO(materialRasterFlags, wireframe);
-    }
-    return m_clusterLODVirtualShadowRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODVirtualShadowRasterPSOCache, key, [&]() {
+        return CreateClusterLODVirtualShadowRasterPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODVirtualShadowReyesRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODVirtualShadowReyesRasterPSOCache, key, [&]() {
+        return CreateClusterLODVirtualShadowReyesRasterPSO(materialRasterFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
     RasterPSOKey key(materialRasterFlags, wireframe);
-    if (m_clusterLODDeepVisibilityRasterPSOCache.find(key) == m_clusterLODDeepVisibilityRasterPSOCache.end()) {
-        m_clusterLODDeepVisibilityRasterPSOCache[key] = CreateClusterLODDeepVisibilityRasterPSO(materialRasterFlags, wireframe);
-    }
-    return m_clusterLODDeepVisibilityRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODDeepVisibilityRasterPSOCache, key, [&]() {
+        return CreateClusterLODDeepVisibilityRasterPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODAVBOITOccupancyPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODAVBOITOccupancyPSOCache, key, [&]() {
+        return CreateClusterLODAVBOITOccupancyPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODAVBOITRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODAVBOITRasterPSOCache, key, [&]() {
+        return CreateClusterLODAVBOITRasterPSO(materialRasterFlags, wireframe);
+    });
+}
+
+const PipelineState& PSOManager::GetClusterLODAVBOITShadePSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODAVBOITShadePSOCache, key, [&]() {
+        return CreateClusterLODAVBOITShadePSO(materialRasterFlags, wireframe);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags, CLodRasterOutputKind outputKind) {
     const uint64_t key = static_cast<uint64_t>(materialRasterFlags) |
         (static_cast<uint64_t>(outputKind) << 32u);
-    if (m_clusterLODSoftwareRasterPSOCache.find(key) == m_clusterLODSoftwareRasterPSOCache.end()) {
-        m_clusterLODSoftwareRasterPSOCache[key] = CreateClusterLODSoftwareRasterPSO(materialRasterFlags, outputKind);
-    }
-    return m_clusterLODSoftwareRasterPSOCache[key];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODSoftwareRasterPSOCache, key, [&]() {
+        return CreateClusterLODSoftwareRasterPSO(materialRasterFlags, outputKind);
+    });
 }
 
 const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
-    if (m_deferredPSOCache.find(psoFlags) == m_deferredPSOCache.end()) {
-        m_deferredPSOCache[psoFlags] = CreateDeferredPSO(psoFlags);
-    }
-    return m_deferredPSOCache[psoFlags];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_deferredPSOCache, psoFlags, [&]() {
+        return CreateDeferredPSO(psoFlags);
+    });
 }
 
 const PipelineState& PSOManager::GetClusterLODDeepVisibilityResolvePSO(UINT psoFlags) {
-    if (m_clusterLODDeepVisibilityResolvePSOCache.find(psoFlags) == m_clusterLODDeepVisibilityResolvePSOCache.end()) {
-        m_clusterLODDeepVisibilityResolvePSOCache[psoFlags] = CreateClusterLODDeepVisibilityResolvePSO(psoFlags);
-    }
-    return m_clusterLODDeepVisibilityResolvePSOCache[psoFlags];
+    std::scoped_lock lock(m_cacheMutex);
+    return GetOrCreatePipelineState(m_clusterLODDeepVisibilityResolvePSOCache, psoFlags, [&]() {
+        return CreateClusterLODDeepVisibilityResolvePSO(psoFlags);
+    });
 }
 
 PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
@@ -885,6 +980,51 @@ PipelineState PSOManager::CreateClusterLODVirtualShadowRasterPSO(
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
+PipelineState PSOManager::CreateClusterLODVirtualShadowReyesRasterPSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+    defines.push_back({ L"CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW", L"1" });
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODReyesVirtualShadowMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/VirtualShadowOutput.hlsl", L"VirtualShadowBufferPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODReyesVirtualShadowMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "VirtualShadowBufferPSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod Reyes virtual shadow raster PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
 PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
@@ -924,6 +1064,202 @@ PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
         throw std::runtime_error("Failed to create CLod deep visibility raster PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODAVBOITRasterPSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+    DxcDefine forwardTransparentMacro;
+    forwardTransparentMacro.Value = L"1";
+    forwardTransparentMacro.Name = L"CLOD_AVBOIT_FORWARD_TRANSPARENT";
+    defines.insert(defines.begin(), forwardTransparentMacro);
+
+    DxcDefine separateReyesBatchMacro;
+    separateReyesBatchMacro.Value = L"1";
+    separateReyesBatchMacro.Name = L"CLOD_AVBOIT_REYES_SEPARATE_BATCH";
+    defines.insert(defines.begin(), separateReyesBatchMacro);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/AVBOITCapture.hlsl", L"AVBOITCapturePSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "AVBOITCapturePSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod AVBOIT raster PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODAVBOITOccupancyPSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+    DxcDefine forwardTransparentMacro;
+    forwardTransparentMacro.Value = L"1";
+    forwardTransparentMacro.Name = L"CLOD_AVBOIT_FORWARD_TRANSPARENT";
+    defines.insert(defines.begin(), forwardTransparentMacro);
+
+    DxcDefine separateReyesBatchMacro;
+    separateReyesBatchMacro.Value = L"1";
+    separateReyesBatchMacro.Name = L"CLOD_AVBOIT_REYES_SEPARATE_BATCH";
+    defines.insert(defines.begin(), separateReyesBatchMacro);
+
+    defines.push_back(DxcDefine{ L"CLOD_AVBOIT_VBOIT_OCCUPANCY_ONLY", L"1" });
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/AVBOITCapture.hlsl", L"AVBOITCapturePSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "AVBOITCapturePSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod AVBOIT occupancy PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODAVBOITShadePSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+    DxcDefine forwardTransparentMacro;
+    forwardTransparentMacro.Value = L"1";
+    forwardTransparentMacro.Name = L"CLOD_AVBOIT_FORWARD_TRANSPARENT";
+    defines.insert(defines.begin(), forwardTransparentMacro);
+
+    DxcDefine separateReyesBatchMacro;
+    separateReyesBatchMacro.Value = L"1";
+    separateReyesBatchMacro.Name = L"CLOD_AVBOIT_REYES_SEPARATE_BATCH";
+    defines.insert(defines.begin(), separateReyesBatchMacro);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/AVBOITShade.hlsl", L"AVBOITShadePSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "AVBOITShadePSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState blend{};
+    blend.alphaToCoverage = FALSE;
+    blend.independentBlend = FALSE;
+    for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+        blend.attachments[i].enable = TRUE;
+        blend.attachments[i].srcColor = rhi::BlendFactor::One;
+        blend.attachments[i].dstColor = rhi::BlendFactor::One;
+        blend.attachments[i].colorOp = rhi::BlendOp::Add;
+        blend.attachments[i].srcAlpha = rhi::BlendFactor::One;
+        blend.attachments[i].dstAlpha = rhi::BlendFactor::One;
+        blend.attachments[i].alphaOp = rhi::BlendOp::Add;
+        blend.attachments[i].writeMask = rhi::ColorWriteEnable::All;
+    }
+    rhi::SubobjBlend soBlend{ blend };
+
+    rhi::DepthStencilState depthState{};
+    depthState.depthEnable = true;
+    depthState.depthWrite = false;
+    depthState.depthFunc = rhi::CompareOp::LessEqual;
+    rhi::SubobjDepth soDepth{ depthState };
+
+    rhi::RenderTargets rts{};
+    rts.count = 3;
+    rts.formats[0] = rhi::Format::R16G16B16A16_Float;
+    rts.formats[1] = rhi::Format::R16G16B16A16_Float;
+    rts.formats[2] = rhi::Format::R16G16B16A16_Float;
+    rhi::SubobjRTVs soRTV{ rts };
+    rhi::SubobjDSV soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod AVBOIT shading PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
@@ -1447,10 +1783,16 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_EMISSIVE_TEXTURE";
         defines.insert(defines.begin(), macro);
     }
-    if (materialFlags & MaterialCompileFlags::MaterialCompilePBRMaps) {
+    if (materialFlags & MaterialCompileFlags::MaterialCompileMetallicTexture) {
         DxcDefine macro;
         macro.Value = L"1";
-        macro.Name = L"PSO_PBR_MAPS";
+		macro.Name = L"PSO_METALLIC_TEXTURE";
+		defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileRoughnessTexture) {
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_ROUGHNESS_TEXTURE";
         defines.insert(defines.begin(), macro);
 	}
     if (materialFlags & MaterialCompileFlags::MaterialCompileAOTexture) {
@@ -1519,8 +1861,8 @@ void PSOManager::GetPreprocessedBlob(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-    opts.enableDebugInfo = false;
+#if WRITE_DEBUG_FILES
+    opts.enableDebugInfo = true;
 #endif
     opts.warningsAsErrors = true;
 
@@ -1529,7 +1871,7 @@ void PSOManager::GetPreprocessedBlob(
 
     args.push_back(L"-P"); // Preprocess only
     auto preProcessedResult = InvokeCompile(
-        srcBuf.buffer, args, includeHandler.Get()
+        srcBuf.buffer, args, includeHandler.Get(), filename, entryPoint, target
     );
 
     preProcessedResult->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&outBlob), nullptr);
@@ -1864,7 +2206,7 @@ void PSOManager::CompileShader(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
-#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+#if WRITE_DEBUG_FILES
     opts.enableDebugInfo = true;
 #endif
     opts.warningsAsErrors = true;
@@ -1879,7 +2221,7 @@ void PSOManager::CompileShader(
         ThrowIfFailed(hr);
         return;
     }
-    auto result = InvokeCompile(ppBuffer, args, includeHandler.Get());
+    auto result = InvokeCompile(ppBuffer, args, includeHandler.Get(), filename, entryPoint, target);
 
     ComPtr<IDxcBlobEncoding> errors;
     result->GetErrorBuffer(&errors);
@@ -1936,10 +2278,14 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
     if (opts.enableDebugInfo) {
         args.push_back(DXC_ARG_DEBUG);
         args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
-        args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
+        // Keep source associations in the shader container so GPU-Reshape can resolve
+        // filenames/lines without relying solely on external PDB recovery.
+        args.push_back(L"-Qembed_debug");
+        args.push_back(L"-Qsource_in_debug_module");
+        //args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
     }
 
-    for (auto& def : opts.defines) {
+    for (auto& def : opts.defines) { 
         args.push_back(L"-D");
         if (def.Value && def.Value[0] != L'\0') {
             ownedArgs.emplace_back(def.Name);
@@ -1962,7 +2308,10 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
 ComPtr<IDxcResult> PSOManager::InvokeCompile(
     const DxcBuffer& src,
     std::vector<LPCWSTR>& arguments,
-    IDxcIncludeHandler* includeHandler)
+    IDxcIncludeHandler* includeHandler,
+    const std::wstring& filename,
+    const std::wstring& entryPoint,
+    const std::wstring& target)
 {
     ComPtr<IDxcResult> result;
     HRESULT hr = pCompiler->Compile(
@@ -1976,9 +2325,12 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
     // on failure or errors, pull DXC_OUT_ERRORS and log
     if (FAILED(hr)) {
         ComPtr<IDxcBlobUtf8> errs;
-        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
+        if (result) {
+            result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
+        }
         if (errs && errs->GetStringLength())
             spdlog::error("Shader compile error: {}", errs->GetStringPointer());
+        LogFailedShaderSource(filename, entryPoint, target, src);
         ThrowIfFailed(hr);
     }
 
@@ -1987,8 +2339,10 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
         result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
         if (errs && errs->GetStringLength()) {
             spdlog::error("Shader compile warnings: {}", errs->GetStringPointer());
-            if (strstr(errs->GetStringPointer(), "error"))
+            if (strstr(errs->GetStringPointer(), "error")) {
+                LogFailedShaderSource(filename, entryPoint, target, src);
                 ThrowIfFailed(E_FAIL);
+            }
         }
     }
 
@@ -2061,7 +2415,7 @@ void PSOManager::createRootSignature() {
     { rhi::ShaderStage::All, NumViewRootConstants,      0, 2 },
     { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 3 },
     { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4 },
-    { rhi::ShaderStage::All, rg::shaderapi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter },
+    { rhi::ShaderStage::All, rg::shaderapi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter, rhi::PushConstantRangeType::EmulatedRootConstants },
     { rhi::ShaderStage::All, rg::shaderapi::kNumIndirectCommandSignatureRootConstants, 0, rg::shaderapi::kIndirectCommandSignatureRootParameter },
     };
 
@@ -2098,6 +2452,19 @@ void PSOManager::createRootSignature() {
         },
         m_rootSignature);
 
+    if (Failed(result) || !m_rootSignature || !m_rootSignature->IsValid()) {
+        spdlog::error(
+            "Failed to create graphics root signature / pipeline layout: {} ({})",
+            rhi::ResultName(result),
+            static_cast<uint32_t>(result));
+        throw std::runtime_error(
+            std::string("Failed to create graphics root signature / pipeline layout: ") +
+            rhi::ResultName(result) +
+            " (" +
+            std::to_string(static_cast<uint32_t>(result)) +
+            ")");
+    }
+
     result = device.CreatePipelineLayout(
         rhi::PipelineLayoutDesc{
             .ranges = {},
@@ -2106,17 +2473,37 @@ void PSOManager::createRootSignature() {
             .flags = rhi::PipelineLayoutFlags::PF_None
         },
         m_computeRootSignature);
+
+    if (Failed(result) || !m_computeRootSignature || !m_computeRootSignature->IsValid()) {
+        spdlog::error(
+            "Failed to create compute root signature / pipeline layout: {} ({})",
+            rhi::ResultName(result),
+            static_cast<uint32_t>(result));
+        throw std::runtime_error(
+            std::string("Failed to create compute root signature / pipeline layout: ") +
+            rhi::ResultName(result) +
+            " (" +
+            std::to_string(static_cast<uint32_t>(result)) +
+            ")");
+    }
 }
 
 const rhi::PipelineLayout& PSOManager::GetRootSignature() {
+	if (!m_rootSignature || !m_rootSignature->IsValid()) {
+		throw std::runtime_error("Graphics root signature / pipeline layout is not initialized");
+	}
     return m_rootSignature.Get();
 }
 
 const rhi::PipelineLayout& PSOManager::GetComputeRootSignature() {
+	if (!m_computeRootSignature || !m_computeRootSignature->IsValid()) {
+		throw std::runtime_error("Compute root signature / pipeline layout is not initialized");
+	}
 	return m_computeRootSignature.Get();
 }
 
 void PSOManager::ReloadShaders() {
+    std::scoped_lock lock(m_cacheMutex);
     m_psoCache.clear();
 	m_meshPSOCache.clear();
 	m_deferredPSOCache.clear();
@@ -2130,6 +2517,9 @@ void PSOManager::ReloadShaders() {
     m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODAVBOITOccupancyPSOCache.clear();
+    m_clusterLODAVBOITRasterPSOCache.clear();
+    m_clusterLODAVBOITShadePSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
 }
 

@@ -184,8 +184,8 @@ void CLodDeepVisibilityResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             bool isBackface = (gathered[i].flags & 0x1u) != 0u;
 
-            ClodResolvedSample sample;
-            if (!ResolveClodSampleFromVisKeyWithFace(gathered[i].visKey, pixel, isBackface, sample))
+            ClodShadingSample sample;
+            if (!ResolveClodShadingSampleFromVisKeyWithFace(gathered[i].visKey, pixel, isBackface, sample))
             {
                 continue;
             }
@@ -205,16 +205,15 @@ void CLodDeepVisibilityResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
                 !isBackface,
                 sample.materialFlags);
 
-            LightingOutput lightingOutput = lightFragment(
+            const float3 lighting = lightFragmentColor(
                 fragmentInfo,
                 mainCamera,
                 perFrameBuffer.activeEnvironmentIndex,
-                ResourceDescriptorIndex(Builtin::Environment::InfoBuffer),
-                !isBackface);
+                ResourceDescriptorIndex(Builtin::Environment::InfoBuffer));
 
             float alpha = saturate(fragmentInfo.alpha);
             float remaining = 1.0f - accumulatedAlpha;
-            accumulatedPremultiplied += lightingOutput.lighting * (alpha * remaining);
+            accumulatedPremultiplied += lighting * (alpha * remaining);
             accumulatedAlpha += alpha * remaining;
 
             ++resolvedSampleCount;

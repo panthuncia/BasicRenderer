@@ -262,34 +262,36 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsCounter, m_usedGroupsCounter);
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroups, m_usedGroupsBuffer);
 
+	auto streamingBeginPass = std::make_shared<CLodStreamingBeginFramePass>(
+		[this]() -> UploadInstance* { return m_uploadInstance.get(); },
+		m_streamingLoadCounter,
+		m_usedGroupsCounter,
+		m_streamingNonResidentBits,
+		m_streamingActiveGroupsBits,
+		m_streamingRuntimeState,
+		[this](std::vector<uint32_t>& outBits) {
+			if (!m_streamingNonResidentBitsUploadPending) {
+				return false;
+			}
+
+			outBits = m_streamingNonResidentBitsCpu;
+			m_streamingNonResidentBitsUploadPending = false;
+			return true;
+		},
+		[this](std::vector<uint32_t>& outBits, uint32_t& outActiveScanCount) {
+			outBits = m_streamingActiveGroupsBitsCpu;
+			outActiveScanCount = m_streamingActiveGroupScanCount;
+		},
+		[this]() {
+			PollCompletedReadbackSlots();
+		},
+		[this]() {
+			ProcessStreamingRequestsBudgeted();
+		});
+
     auto streamingBeginPassDesc = RenderGraph::ExternalPassDesc::Compute(
         "CLod::StreamingBeginFramePass",
-        std::make_shared<CLodStreamingBeginFramePass>(
-        [this]() -> UploadInstance* { return m_uploadInstance.get(); },
-        m_streamingLoadCounter,
-        m_usedGroupsCounter,
-        m_streamingNonResidentBits,
-        m_streamingActiveGroupsBits,
-        m_streamingRuntimeState,
-        [this](std::vector<uint32_t>& outBits) {
-            if (!m_streamingNonResidentBitsUploadPending) {
-                return false;
-            }
-
-            outBits = m_streamingNonResidentBitsCpu;
-            m_streamingNonResidentBitsUploadPending = false;
-            return true;
-        },
-        [this](std::vector<uint32_t>& outBits, uint32_t& outActiveScanCount) {
-            outBits = m_streamingActiveGroupsBitsCpu;
-            outActiveScanCount = m_streamingActiveGroupScanCount;
-        },
-        [this]() {
-            PollCompletedReadbackSlots();
-        },
-        [this]() {
-            ProcessStreamingRequestsBudgeted();
-        }));
+        streamingBeginPass);
     // Keep the CLod front-end behind the visibility/depth clear so the graph
     // cannot legally sink ClearVisibilityBufferPass after CLod rasterization.
     streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("ClearVisibilityBufferPass"));
@@ -1448,19 +1450,6 @@ void CLodStreamingSystem::StreamingWorkerMain() {
             }
             for (const uint32_t g : batchUsedGroups) {
                 m_decodedUsedGroupsBatch.push_back(g);
-            }
-
-            if (totalRequestCount > 0) {
-                spdlog::info(
-                    "CLod streaming worker: {} requests ({} unique groups) decoded",
-                    totalRequestCount,
-                    static_cast<uint32_t>(batchMaxPriorityByGroup.size()));
-            }
-            if (totalUsedGroupsCount > 0) {
-                spdlog::info(
-                    "CLod streaming worker: {} used groups ({} unique) decoded",
-                    totalUsedGroupsCount,
-                    static_cast<uint32_t>(batchUsedGroups.size()));
             }
         }
 

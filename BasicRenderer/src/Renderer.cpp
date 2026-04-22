@@ -13,6 +13,7 @@
 #include <typeindex>
 #include <utility>
 
+#include <rhi_debug.h>
 #include <rhi_interop_dx12.h>
 #include <tracy/Tracy.hpp>
 #include <spdlog/spdlog.h>
@@ -102,6 +103,30 @@ void D3D12DebugCallback(
 
 namespace {
 
+bool IsStreamlineDisabledByEnvironment() {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, "BASICRENDERER_DISABLE_STREAMLINE") != 0 || value == nullptr) {
+        return false;
+    }
+    const bool disabled = value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y';
+    free(value);
+    return disabled;
+}
+
+bool DefaultEnableReShapeForBuild() {
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+    return true;
+#else
+    return false;
+#endif
+}
+
+void ProbeGraphicsCommandListCreation(rhi::Device device, std::string_view phase) {
+    (void)device;
+    (void)phase;
+}
+
 flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stableSceneID) {
     if (!node.is_alive()) {
         return {};
@@ -131,12 +156,20 @@ flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stable
 
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     auto& settingsManager = SettingsManager::GetInstance();
+    const bool enableStreamline = !IsStreamlineDisabledByEnvironment();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
+    settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
+    settingsManager.registerSetting<bool>("enableReShape", DefaultEnableReShapeForBuild());
+    settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
+    settingsManager.registerSetting<bool>("reshapeTexelAddressing", true);
+    settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
+    settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", false);
     LoadPipeline(hwnd, x_res, y_res);
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
     UpscalingManager::GetInstance().InitFFX(); // Needs device
     FFXManager::GetInstance().InitFFX();
@@ -196,6 +229,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     PSOManager::GetInstance().initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after PSO and command signatures");
     Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
     if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
         readbackService->Initialize(m_readbackFence.Get());
@@ -208,8 +242,10 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     }
 
     UpscalingManager::GetInstance().Setup();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after UpscalingManager::Setup");
 
     CreateTextures();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after CreateTextures");
 
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
@@ -235,6 +271,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pTextureFactory = TextureFactory::CreateUnique();
 
     CreateGlobalResources();
+    ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after CreateGlobalResources");
 
 	m_managerInterface.SetManagers(
         m_pMeshManager.get(), 
@@ -272,7 +309,59 @@ void Renderer::RunTransformPropagationStage() {
 
 void Renderer::RunSceneBridgeSyncStage() {
     ZoneScopedN("Renderer::Update::SceneBridgeSync");
+    if (!currentScene) {
+        return;
+    }
     m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+}
+
+void Renderer::ApplyPrimaryCameraInput(float elapsedSeconds) {
+    if (!currentScene || !currentScene->HasUsablePrimaryCamera()) {
+        return;
+    }
+
+    Components::Position& cameraPosition = currentScene->GetPrimaryCameraPosition();
+    Components::Rotation& cameraRotation = currentScene->GetPrimaryCameraRotation();
+    ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
+    RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+    currentScene->GetPrimaryCamera().modified<Components::Position>();
+    currentScene->GetPrimaryCamera().modified<Components::Rotation>();
+    verticalAngle = 0.0f;
+    horizontalAngle = 0.0f;
+}
+
+void Renderer::InvalidateSceneOverlapState() {
+    m_sceneOverlapEpoch.fetch_add(1, std::memory_order_relaxed);
+    m_sceneTaskCompleted.store(false);
+    {
+        std::scoped_lock lock(m_sceneSnapshotMutex);
+        m_committedSceneSnapshot.reset();
+        m_completedSceneSnapshot.reset();
+    }
+}
+
+void Renderer::SetSceneRenderOverlapEnabled(bool enabled) {
+    if (m_sceneRenderOverlapEnabled == enabled) {
+        return;
+    }
+
+    if (m_sceneTaskInFlight.load()) {
+        spdlog::info("Renderer: scene overlap mode changed while async update was running. Dropping stale async snapshot work.");
+    }
+
+    m_sceneRenderOverlapEnabled = enabled;
+    InvalidateSceneOverlapState();
+
+    if (!currentScene) {
+        return;
+    }
+
+    if (enabled) {
+        BootstrapCommittedSceneSnapshot();
+        return;
+    }
+
+    RunSceneBridgeSyncStage();
 }
 
 void Renderer::QueueSceneNodePositionEdit(uint64_t stableSceneID, DirectX::XMFLOAT3 position) {
@@ -325,12 +414,12 @@ void Renderer::FlushPendingSceneExplorerEdits() {
     if (anyApplied) {
         currentScene->PropagateTransforms();
 
-        {
-            std::scoped_lock lock(m_sceneSnapshotMutex);
-            m_completedSceneSnapshot.reset();
+        InvalidateSceneOverlapState();
+        if (m_sceneRenderOverlapEnabled) {
+            BootstrapCommittedSceneSnapshot();
+        } else {
+            RunSceneBridgeSyncStage();
         }
-        m_sceneTaskCompleted.store(false);
-        BootstrapCommittedSceneSnapshot();
     }
 }
 
@@ -388,13 +477,14 @@ void Renderer::ScheduleSceneUpdateTask(float elapsedSeconds) {
     const auto movementSnapshot = movementState;
     const float verticalAngleSnapshot = verticalAngle;
     const float horizontalAngleSnapshot = horizontalAngle;
+    const uint64_t overlapEpoch = m_sceneOverlapEpoch.load(std::memory_order_relaxed);
     const uint64_t snapshotSequence = m_nextSceneSnapshotSequence++;
     const uint64_t sourceFrameNumber = m_totalFramesRendered + 1;
 
     verticalAngle = 0.0f;
     horizontalAngle = 0.0f;
 
-    TaskSchedulerManager::GetInstance().RunBackgroundTask("SceneUpdateOverlap", [this, scene, elapsedSeconds, movementSnapshot, verticalAngleSnapshot, horizontalAngleSnapshot, snapshotSequence, sourceFrameNumber]() mutable {
+    TaskSchedulerManager::GetInstance().RunBackgroundTask("SceneUpdateOverlap", [this, scene, elapsedSeconds, movementSnapshot, verticalAngleSnapshot, horizontalAngleSnapshot, overlapEpoch, snapshotSequence, sourceFrameNumber]() mutable {
         const auto taskStart = std::chrono::steady_clock::now();
 
         if (!scene) {
@@ -416,6 +506,11 @@ void Renderer::ScheduleSceneUpdateTask(float elapsedSeconds) {
 
         auto snapshot = std::make_shared<br::render::SceneFrameSnapshot>(
             m_sceneRenderBridge.ExportSnapshot(*scene, snapshotSequence, sourceFrameNumber));
+
+        if (overlapEpoch != m_sceneOverlapEpoch.load(std::memory_order_relaxed)) {
+            m_sceneTaskInFlight.store(false);
+            return;
+        }
 
         const auto taskEnd = std::chrono::steady_clock::now();
         const auto durationMs = std::chrono::duration<double, std::milli>(taskEnd - taskStart).count();
@@ -507,6 +602,37 @@ void Renderer::RunRenderResourceSyncStage() {
     });
 
     auto* objectManager = m_managerInterface.GetObjectManager();
+    size_t perObjectDirtyBegin = 0;
+    size_t perObjectDirtyEnd = 0;
+    size_t normalMatrixDirtyBegin = 0;
+    size_t normalMatrixDirtyEnd = 0;
+    bool hasObjectDirtyRange = false;
+    bool hasNormalMatrixDirtyRange = false;
+
+    for (const auto& item : objectItems) {
+        const size_t perObjectBegin = item.drawInfo->perObjectCBView->GetOffset();
+        const size_t perObjectEnd = perObjectBegin + sizeof(PerObjectCB);
+        const size_t normalMatrixBegin = item.drawInfo->normalMatrixView->GetOffset();
+        const size_t normalMatrixEnd = normalMatrixBegin + sizeof(DirectX::XMFLOAT4X4);
+
+        if (!hasObjectDirtyRange) {
+            perObjectDirtyBegin = perObjectBegin;
+            perObjectDirtyEnd = perObjectEnd;
+            hasObjectDirtyRange = true;
+        } else {
+            perObjectDirtyBegin = std::min(perObjectDirtyBegin, perObjectBegin);
+            perObjectDirtyEnd = std::max(perObjectDirtyEnd, perObjectEnd);
+        }
+
+        if (!hasNormalMatrixDirtyRange) {
+            normalMatrixDirtyBegin = normalMatrixBegin;
+            normalMatrixDirtyEnd = normalMatrixEnd;
+            hasNormalMatrixDirtyRange = true;
+        } else {
+            normalMatrixDirtyBegin = std::min(normalMatrixDirtyBegin, normalMatrixBegin);
+            normalMatrixDirtyEnd = std::max(normalMatrixDirtyEnd, normalMatrixEnd);
+        }
+    }
 
     // Pre-size scratch buffers single-threaded so the parallel loop can
     // memcpy into non-overlapping regions without any synchronization.
@@ -548,10 +674,13 @@ void Renderer::RunRenderResourceSyncStage() {
         });
 
     // Register dirty ranges single-threaded.
-    // Mark the entire used portion dirty — the coalescer handles this efficiently.
-    if (!objectItems.empty()) {
-        objectManager->EndPerObjectBulkWrite(0, perObjectHandle.capacity);
-        objectManager->EndNormalMatrixBulkWrite(0, normalMatrixHandle.capacity);
+    // Upload only the range actually written this frame. Uploading the entire
+    // grown backing every frame scales badly on large scenes and can starve the frame.
+    if (hasObjectDirtyRange) {
+        objectManager->EndPerObjectBulkWrite(perObjectDirtyBegin, perObjectDirtyEnd - perObjectDirtyBegin);
+    }
+    if (hasNormalMatrixDirtyRange) {
+        objectManager->EndNormalMatrixBulkWrite(normalMatrixDirtyBegin, normalMatrixDirtyEnd - normalMatrixDirtyBegin);
     }
 
     m_renderSyncCameraQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Camera& camera, Components::RenderViewRef& renderView) {
@@ -644,6 +773,8 @@ void Renderer::CreateGlobalResources() {
             m_blueNoiseTexture->SetName("Blue Noise 2D");
         }
     }
+
+    m_openPBRLookupResources = CreateOpenPBRLookupResources(*m_pTextureFactory);
 }
 
 void Renderer::CreateDefaultEnvironmentResources() {
@@ -776,6 +907,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
+    settingsManager.registerSetting<bool>("collectPassStatistics", true);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
@@ -797,7 +929,12 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
+    settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::PageJob);
+    settingsManager.registerSetting<CLodTransparencyMode>(CLodTransparencyModeSettingName, CLodTransparencyMode::AVBOIT);
     settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);
+    settingsManager.registerSetting<float>(
+        CLodReyesShadowCoarseTargetPagesPerTriangleSettingName,
+        CLodReyesShadowCoarseTargetPagesPerTriangleDefault);
     settingsManager.registerSetting<uint32_t>(CLodPageJobDiameterThresholdSettingName, 64u);
     settingsManager.registerSetting<float>(CLodPageJobSparseRatioSettingName, 0.5f);
     settingsManager.registerSetting<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName, 32u);
@@ -814,8 +951,9 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
-    settingsManager.registerSetting<bool>("useAsyncCompute", true);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
+    settingsManager.registerSetting<bool>("useAsyncCompute", false);
+    settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
@@ -826,6 +964,9 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("queueSchedulingMinPenalty", 1.0f);
     settingsManager.registerSetting<float>("queueSchedulingResourcePressureWeight", 1.0f);
     settingsManager.registerSetting<float>("queueSchedulingUavPressureWeight", 0.5f);
+    settingsManager.registerSetting<float>("queueSchedulingAutoGraphicsBias", 2.5f);
+    settingsManager.registerSetting<float>("queueSchedulingAsyncOverlapBonus", 3.0f);
+    settingsManager.registerSetting<float>("queueSchedulingCrossQueueHandoffPenalty", 2.0f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
@@ -907,7 +1048,18 @@ void Renderer::SetSettings() {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
 		}));
+        m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableSceneRenderOverlap", [this](const bool& newValue) {
+                SetSceneRenderOverlapEnabled(newValue);
+                }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, [this](const CLodSoftwareRasterMode& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, [this](const CLodVSMRasterMode& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<CLodTransparencyMode>(CLodTransparencyModeSettingName, [this](const CLodTransparencyMode& newValue) {
         (void)newValue;
         rebuildRenderGraph = true;
         }));
@@ -957,6 +1109,30 @@ void Renderer::SetSettings() {
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
         m_jitter = newValue;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableReShape", [this](const bool& newValue) {
+        (void)newValue;
+        if (m_isInitialized) {
+            spdlog::warn("Changing enableReShape requires device recreation to take effect.");
+        }
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("reshapeTexelAddressing", [this](const bool& newValue) {
+        (void)newValue;
+        if (m_isInitialized) {
+            spdlog::warn("Changing reshapeTexelAddressing requires device recreation to take effect.");
+        }
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("reshapeSynchronousRecording", [this](const bool& newValue) {
+        auto result = rhi::debug::SetSynchronousRecording(m_device, newValue);
+        if (!rhi::IsOk(result) && result != rhi::Result::Unsupported) {
+            spdlog::warn("Failed to update runtime instrumentation synchronous recording state: {}", static_cast<uint32_t>(result));
+        }
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint64_t>("reshapeGlobalFeatureMask", [this](const uint64_t& newValue) {
+        auto result = rhi::debug::SetGlobalInstrumentationMask(m_device, newValue);
+        if (!rhi::IsOk(result) && result != rhi::Result::Unsupported) {
+            spdlog::warn("Failed to update runtime instrumentation feature mask: {}", static_cast<uint32_t>(result));
+        }
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<uint8_t>("numDirectionalLightCascades", [](const uint8_t& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
@@ -1081,9 +1257,9 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-    UpscalingManager::GetInstance().InitializeAdapter();
-
     auto result = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing, m_swapChain);
+
+    UpscalingManager::GetInstance().InitializeAdapter();
 
     // Create RTV descriptor heap
 	rhi::DescriptorHeapDesc rtvHeapDesc = {};
@@ -1112,6 +1288,8 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     m_dynamicBackbuffer->SetName("Backbuffer");
 
     CreateRTVs();
+    m_swapChainReady = true;
+    m_loggedSwapChainNotReady = false;
 
     // Create command allocator
 
@@ -1132,6 +1310,8 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 	for (int i = 0; i < m_numFramesInFlight; i++) {
 		m_frameFenceValues[i] = 0;
 	}
+
+    m_frameIndex = static_cast<uint8_t>(m_swapChain->CurrentImageIndex());
 
     result = device.CreateTimeline(m_frameFence);
     result = device.CreateTimeline(m_readbackFence);
@@ -1191,6 +1371,7 @@ void Renderer::CreateTextures() {
 
 void Renderer::CreateRTVs() {
     auto device = DeviceManager::GetInstance().GetDevice();
+    const bool renderGraphBatchTraceEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("renderGraphBatchTraceEnabled")();
     // Recreate the render target views
     for (UINT n = 0; n < m_numFramesInFlight; n++) {
         renderTargets[n] = m_swapChain->Image(n);
@@ -1203,11 +1384,29 @@ void Renderer::CreateRTVs() {
         // Keep external texture wrappers in sync after resize
         if (n < m_backbufferResources.size() && m_backbufferResources[n]) {
             m_backbufferResources[n]->SetHandle(renderTargets[n]);
+            m_backbufferResources[n]->SetRTVSlot({ rtvHeap->GetHandle(), n });
+            m_backbufferResources[n]->ResetToCommon();
+            if (renderGraphBatchTraceEnabled) {
+                spdlog::info(
+                    "Renderer: CreateRTVs slot={} resourceID={} handle=({}, {}) rtv=({}, {})",
+                    n,
+                    m_backbufferResources[n]->GetGlobalResourceID(),
+                    renderTargets[n].index,
+                    renderTargets[n].generation,
+                    rtvHeap->GetHandle().index,
+                    n);
+            }
         }
     }
 }
 
 void Renderer::OnResize(UINT newWidth, UINT newHeight) {
+    spdlog::info(
+        "Renderer: OnResize {}x{} frameIndex={} totalFramesRendered={}",
+        newWidth,
+        newHeight,
+        static_cast<unsigned>(m_frameIndex),
+        m_totalFramesRendered);
     // Wait for all in-flight GPU work before destroying resources
 	StallPipeline();
 
@@ -1215,11 +1414,25 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
     auto numFramesInFlight = getNumFramesInFlight();
 
     // Resize the swap chain
-	m_swapChain->ResizeBuffers(m_numFramesInFlight, newWidth, newHeight, rhi::Format::R8G8B8A8_UNorm, DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH); // TODO: Port flags to RHI
+    m_swapChainReady = false;
+    m_loggedSwapChainNotReady = false;
+    auto resizeResult = m_swapChain->ResizeBuffers(m_numFramesInFlight, newWidth, newHeight, rhi::Format::R8G8B8A8_UNorm, DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH); // TODO: Port flags to RHI
+    if (resizeResult != rhi::Result::Ok) {
+        spdlog::critical(
+            "Renderer: ResizeBuffers failed during OnResize {}x{} result={} frameIndex={} totalFramesRendered={}",
+            newWidth,
+            newHeight,
+            static_cast<unsigned>(resizeResult),
+            static_cast<unsigned>(m_frameIndex),
+            m_totalFramesRendered);
+        return;
+    }
 
     m_frameIndex = static_cast<uint8_t>(m_swapChain->CurrentImageIndex());
 
     CreateRTVs();
+    m_swapChainReady = true;
+    m_loggedSwapChainNotReady = false;
 
 	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("outputResolution")({ newWidth, newHeight });
 
@@ -1262,31 +1475,44 @@ void Renderer::Update(float elapsedSeconds) {
     if (!IsSceneReadyForFrame()) {
         return;
     }
+
+    if (m_shaderReloadRequested) {
+        runCapturedStage("ShaderReload", [&]() {
+            ZoneScopedN("Renderer::Update::ShaderReload");
+            spdlog::info("Renderer: draining GPU work before shader reload.");
+            StallPipeline();
+            PSOManager::GetInstance().ReloadShaders();
+            rebuildRenderGraph = true;
+            m_shaderReloadRequested = false;
+        });
+    }
+
     runCapturedStage("SceneExplorerEdits", [&]() {
         ZoneScopedN("Renderer::Update::SceneExplorerEdits");
         FlushPendingSceneExplorerEdits();
     });
-    if (NeedsSceneSnapshotBootstrap()) {
-        runCapturedStage("BootstrapSceneSnapshot", [&]() {
-            ZoneScopedN("Renderer::Update::BootstrapSceneSnapshot");
-            if (currentScene->HasUsablePrimaryCamera()) {
-                Components::Position& cameraPosition = currentScene->GetPrimaryCameraPosition();
-                Components::Rotation& cameraRotation = currentScene->GetPrimaryCameraRotation();
-                ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
-                RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
-                currentScene->GetPrimaryCamera().modified<Components::Position>();
-                currentScene->GetPrimaryCamera().modified<Components::Rotation>();
-                verticalAngle = 0.0f;
-                horizontalAngle = 0.0f;
-            }
+    if (m_sceneRenderOverlapEnabled) {
+        if (NeedsSceneSnapshotBootstrap()) {
+            runCapturedStage("BootstrapSceneSnapshot", [&]() {
+                ZoneScopedN("Renderer::Update::BootstrapSceneSnapshot");
+                ApplyPrimaryCameraInput(elapsedSeconds);
+                RunGameUpdateStage(elapsedSeconds);
+                RunTransformPropagationStage();
+                BootstrapCommittedSceneSnapshot();
+            });
+        } else {
+            runCapturedStage("CommitSceneSnapshot", [&]() {
+                ZoneScopedN("Renderer::Update::CommitSceneSnapshot");
+                CommitCompletedSceneSnapshot();
+            });
+        }
+    } else {
+        runCapturedStage("SynchronousSceneUpdate", [&]() {
+            ZoneScopedN("Renderer::Update::SynchronousSceneUpdate");
+            ApplyPrimaryCameraInput(elapsedSeconds);
             RunGameUpdateStage(elapsedSeconds);
             RunTransformPropagationStage();
-            BootstrapCommittedSceneSnapshot();
-        });
-    } else {
-        runCapturedStage("CommitSceneSnapshot", [&]() {
-            ZoneScopedN("Renderer::Update::CommitSceneSnapshot");
-            CommitCompletedSceneSnapshot();
+            RunSceneBridgeSyncStage();
         });
     }
 
@@ -1307,6 +1533,7 @@ void Renderer::Update(float elapsedSeconds) {
             ZoneScopedN("Renderer::Update::RenderGraphBuild");
 		    CreateRenderGraph();
         });
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after RenderGraphBuild");
     }
     runCapturedStage("RenderResourceSync", [&]() {
         RunRenderResourceSyncStage();
@@ -1323,11 +1550,12 @@ void Renderer::Update(float elapsedSeconds) {
         return;
     }
     unsigned int cameraIndex = m_pViewManager->Get(camera.get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
-	auto& commandAllocator = m_commandAllocators[m_frameIndex];
-	auto& commandList = m_commandLists[m_frameIndex];
 
+    runCapturedStage("WaitForFrame", [&]() {
+        ZoneScopedN("Renderer::Update::WaitForFrame");
+        WaitForFrame(m_frameIndex);
+        });
 
-    commandAllocator->Recycle();
     auto& resourceManager = ResourceManager::GetInstance();
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     runCapturedStage("PerFrameBuffer", [&]() {
@@ -1348,8 +1576,11 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
     updateData.currentScene = m_sceneRenderOverlapEnabled ? nullptr : currentScene.get();
+    updateData.primaryCamera = camera.get<Components::Camera>();
+    updateData.hasPrimaryCamera = true;
     updateData.frameIndex = m_frameIndex;
     updateData.frameFenceValue = m_currentFrameFenceValue;
+    updateData.frameNumber = m_totalFramesRendered;
     updateData.renderResolution = renderRes;
     updateData.outputResolution = outputRes;
     updateData.deltaTime = elapsedSeconds;
@@ -1385,6 +1616,7 @@ void Renderer::Update(float elapsedSeconds) {
         ZoneScopedN("Renderer::Update::RenderGraphUpdate");
         currentRenderGraph->Update(context, deviceManager.GetDevice());
     });
+    ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "after RenderGraphUpdate");
 
     // Clear transform-update tags only after render-graph update so passes such as
     // virtual shadow invalidation can still consume same-frame movement signals.
@@ -1399,11 +1631,10 @@ void Renderer::Update(float elapsedSeconds) {
         ScheduleSceneUpdateTask(elapsedSeconds);
     });
 
-    runCapturedStage("WaitForFrame", [&]() {
-        ZoneScopedN("Renderer::Update::WaitForFrame");
-        WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
-        });
-    rg::runtime::BeginUploadPolicyFrame();
+    runCapturedStage("BeginUploadPolicyFrame", [&]() {
+        ZoneScopedN("Renderer::Update::BeginUploadPolicyFrame");
+        rg::runtime::BeginUploadPolicyFrame();
+    });
 
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
     auto computeQueue = deviceManager.GetComputeQueue();
@@ -1423,8 +1654,7 @@ void Renderer::Update(float elapsedSeconds) {
             }
         }
         });
-
-    commandList->Recycle(commandAllocator.Get());
+    ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "after FrameMaintenance");
 }
 
 void Renderer::PostUpdate() {
@@ -1453,9 +1683,24 @@ void Renderer::Render() {
         return;
     }
 
+    if (!m_swapChainReady) {
+        if (!m_loggedSwapChainNotReady) {
+            spdlog::critical(
+                "Renderer: skipping render because swapchain/backbuffers are not ready frame={} frameIndex={}",
+                m_totalFramesRendered,
+                static_cast<unsigned>(m_frameIndex));
+            m_loggedSwapChainNotReady = true;
+        }
+        return;
+    }
+
+    const bool renderGraphBatchTraceEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("renderGraphBatchTraceEnabled")();
+
+    const uint8_t renderedFrameIndex = m_frameIndex;
+
     // Record all the commands we need to render the scene into the command list
-    auto& commandAllocator = m_commandAllocators[m_frameIndex];
-    auto& commandList = m_commandLists[m_frameIndex];
+    auto& commandAllocator = m_commandAllocators[renderedFrameIndex];
+    auto& commandList = m_commandLists[renderedFrameIndex];
 
     auto& world = RendererECSManager::GetInstance().GetWorld();
 	const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
@@ -1473,7 +1718,7 @@ void Renderer::Render() {
         m_context.rtvHeap = rtvHeap.Get();
         m_context.rtvDescriptorSize = rtvDescriptorSize;
         m_context.dsvDescriptorSize = dsvDescriptorSize;
-        m_context.frameIndex = m_frameIndex;
+	    m_context.frameIndex = renderedFrameIndex;
 		m_context.frameNumber = m_totalFramesRendered;
         m_context.frameFenceValue = m_currentFrameFenceValue;
         m_context.renderResolution = { renderRes.x, renderRes.y };
@@ -1543,15 +1788,8 @@ void Renderer::Render() {
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
     passExecutionContext.hostData = &hostFrameData;
-   
-    commandList->End();
 
-    // Execute the command list
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
-    runCapturedStage("SubmitSetup", [&]() {
-        ZoneScopedN("Renderer::Render::SubmitSetup");
-        graphicsQueue.Submit({ &commandList.Get() });
-    });
 
     // Sync SettingsManager values into OpenRenderGraphSettings so the
     // DefaultRenderGraphSettingsService reads up-to-date values.
@@ -1559,9 +1797,11 @@ void Renderer::Render() {
         auto& sm = SettingsManager::GetInstance();
         rg::runtime::OpenRenderGraphSettings orgSettings{};
         orgSettings.numFramesInFlight        = m_numFramesInFlight;
-        orgSettings.collectPipelineStatistics = false;
+        orgSettings.collectPassStatistics    = sm.getSettingGetter<bool>("collectPassStatistics")();
+        orgSettings.collectPipelineStatistics = sm.getSettingGetter<bool>("collectPipelineStatistics")();
         orgSettings.useAsyncCompute           = sm.getSettingGetter<bool>("useAsyncCompute")();
         orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
+        orgSettings.renderGraphBatchTraceEnabled = sm.getSettingGetter<bool>("renderGraphBatchTraceEnabled")();
         orgSettings.autoAliasMode             = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
         orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
         orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
@@ -1572,19 +1812,71 @@ void Renderer::Render() {
         orgSettings.queueSchedulingMinPenalty = sm.getSettingGetter<float>("queueSchedulingMinPenalty")();
         orgSettings.queueSchedulingResourcePressureWeight = sm.getSettingGetter<float>("queueSchedulingResourcePressureWeight")();
         orgSettings.queueSchedulingUavPressureWeight = sm.getSettingGetter<float>("queueSchedulingUavPressureWeight")();
+        orgSettings.queueSchedulingAutoGraphicsBias = sm.getSettingGetter<float>("queueSchedulingAutoGraphicsBias")();
+        orgSettings.queueSchedulingAsyncOverlapBonus = sm.getSettingGetter<float>("queueSchedulingAsyncOverlapBonus")();
+        orgSettings.queueSchedulingCrossQueueHandoffPenalty = sm.getSettingGetter<float>("queueSchedulingCrossQueueHandoffPenalty")();
         orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
         orgSettings.autoAliasPoolGrowthHeadroom   = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
         orgSettings.heavyDebug                = sm.getSettingGetter<bool>("heavyDebug")();
         rg::runtime::SetOpenRenderGraphSettings(orgSettings);
     }
 
+    std::shared_ptr<ExternalTextureResource> currentBackbufferResource;
+    if (renderedFrameIndex < m_backbufferResources.size()) {
+        currentBackbufferResource = m_backbufferResources[renderedFrameIndex];
+    }
+
+    if (!currentBackbufferResource) {
+        spdlog::error(
+            "Renderer: frame {} render slot {} has no backbuffer resource wrapper",
+            m_totalFramesRendered,
+            renderedFrameIndex);
+    } else {
+        const auto backbufferHandle = currentBackbufferResource->GetHandle();
+        const auto backbufferRtv = currentBackbufferResource->GetRTVSlot();
+        if (renderGraphBatchTraceEnabled) {
+            spdlog::info(
+                "Renderer: frame {} begin backbuffer diagnostics slot={} dynamicID={} backingID={} handle=({}, {}) rtv=({}, {})",
+                m_totalFramesRendered,
+                renderedFrameIndex,
+                m_dynamicBackbuffer ? m_dynamicBackbuffer->GetGlobalResourceID() : 0ull,
+                currentBackbufferResource->GetGlobalResourceID(),
+                backbufferHandle.index,
+                backbufferHandle.generation,
+                backbufferRtv.heap.index,
+                backbufferRtv.index);
+        }
+        if (!currentBackbufferResource->HasHandle() || !currentBackbufferResource->HasRTVSlot()) {
+            spdlog::error(
+                "Renderer: frame {} slot {} invalid backbuffer state before execute: hasHandle={} hasRTV={}",
+                m_totalFramesRendered,
+                renderedFrameIndex,
+                currentBackbufferResource->HasHandle(),
+                currentBackbufferResource->HasRTVSlot());
+        }
+    }
+
     runCapturedStage("RenderGraphExecute", [&]() {
         ZoneScopedN("Renderer::Render::RenderGraphExecute");
-        m_dynamicBackbuffer->SetResource(m_backbufferResources[m_frameIndex]);
-        currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
+        if (renderGraphBatchTraceEnabled) {
+            ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "before RenderGraph::Execute");
+            spdlog::info("Renderer: frame {} entering RenderGraph::Execute", m_totalFramesRendered);
+        }
+        m_dynamicBackbuffer->SetResource(m_backbufferResources[renderedFrameIndex]);
+        try {
+            currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
+            if (renderGraphBatchTraceEnabled) {
+                spdlog::info("Renderer: frame {} completed RenderGraph::Execute", m_totalFramesRendered);
+            }
+        }
+        catch (const std::exception& ex) {
+            spdlog::critical("Renderer: frame {} RenderGraph::Execute threw: {}", m_totalFramesRendered, ex.what());
+            throw;
+        }
     });
 
 	// Transition backbuffer to Common for present
+    commandAllocator->Recycle();
 	commandList->Recycle(commandAllocator.Get());
 	rhi::TextureBarrier rtvBarrier = {};
 	rtvBarrier.afterAccess = rhi::ResourceAccessType::Common;
@@ -1593,38 +1885,47 @@ void Renderer::Render() {
 	rtvBarrier.beforeAccess = rhi::ResourceAccessType::RenderTarget;
 	rtvBarrier.beforeLayout = rhi::ResourceLayout::RenderTarget;
 	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
-	rtvBarrier.texture = renderTargets[m_frameIndex];
+    rtvBarrier.texture = renderTargets[renderedFrameIndex];
 	rhi::BarrierBatch batch = {};
 	batch.textures = { &rtvBarrier };
     runCapturedStage("TransitionForPresent", [&]() {
         ZoneScopedN("Renderer::Render::TransitionForPresent");
+        if (renderGraphBatchTraceEnabled) {
+            spdlog::info("Renderer: frame {} transitioning backbuffer {} for present", m_totalFramesRendered, renderedFrameIndex);
+        }
         commandList->Barriers(batch);
     });
 
     // Keep the symbolic tracker in sync with the manual barrier above so the
     // graph emits a Common->RenderTarget transition on the next frame.
-    m_backbufferResources[m_frameIndex]->ResetToCommon();
+    m_backbufferResources[renderedFrameIndex]->ResetToCommon();
 
     commandList->End();
 
     // Execute the command list
     runCapturedStage("SubmitPresent", [&]() {
         ZoneScopedN("Renderer::Render::SubmitPresent");
+        if (renderGraphBatchTraceEnabled) {
+            spdlog::info("Renderer: frame {} submitting present command list", m_totalFramesRendered);
+        }
         graphicsQueue.Submit({ &commandList.Get() });
     });
 
     // Present the frame
     runCapturedStage("Present", [&]() {
         ZoneScopedN("Renderer::Render::Present");
+        if (renderGraphBatchTraceEnabled) {
+            spdlog::info("Renderer: frame {} calling Present for slot {}", m_totalFramesRendered, renderedFrameIndex);
+        }
         m_swapChain->Present(!m_allowTearing);
     });
 
-    AdvanceFrameIndex();
-
     runCapturedStage("SignalFence", [&]() {
         ZoneScopedN("Renderer::Render::SignalFence");
-        SignalFence(graphicsQueue, m_frameIndex);
+        SignalFence(graphicsQueue, renderedFrameIndex);
     });
+
+    AdvanceFrameIndex();
 
     runCapturedStage("ReadbackRequests", [&]() {
         if (currentRenderGraph) {
@@ -1656,7 +1957,11 @@ void Renderer::SignalFence(rhi::Queue commandQueue, uint8_t frameIndexToSignal) 
 }
 
 void Renderer::AdvanceFrameIndex() {
-    m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
+    if (m_swapChain) {
+        m_frameIndex = static_cast<uint8_t>(m_swapChain->CurrentImageIndex());
+    } else {
+        m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
+    }
     m_totalFramesRendered += 1;
 }
 
@@ -1792,12 +2097,7 @@ std::shared_ptr<Scene>& Renderer::GetCurrentScene() {
 
 void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	if (!newScene) {
-    m_sceneTaskCompleted.store(false);
-    {
-        std::scoped_lock lock(m_sceneSnapshotMutex);
-        m_committedSceneSnapshot.reset();
-        m_completedSceneSnapshot.reset();
-    }
+    InvalidateSceneOverlapState();
         m_sceneRenderBridge.Clear(m_managerInterface);
         if (currentScene) {
             currentScene->Deactivate();
@@ -1815,19 +2115,18 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
         }
 	}
 
-    m_sceneTaskCompleted.store(false);
-    {
-        std::scoped_lock lock(m_sceneSnapshotMutex);
-        m_committedSceneSnapshot.reset();
-        m_completedSceneSnapshot.reset();
-    }
+    InvalidateSceneOverlapState();
 
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
     //currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
     currentScene->PropagateTransforms();
-    BootstrapCommittedSceneSnapshot();
+    if (m_sceneRenderOverlapEnabled) {
+        BootstrapCommittedSceneSnapshot();
+    } else {
+        RunSceneBridgeSyncStage();
+    }
 	m_warnedNullScene = false;
 	m_warnedMissingPrimaryCamera = false;
 	rebuildRenderGraph = true;
@@ -1919,8 +2218,8 @@ void Renderer::SetupInputHandlers() {
         // TODO
         });
 
-	context.SetActionHandler(InputAction::Reset, [](float magnitude, const InputData& inputData) {
-        PSOManager::GetInstance().ReloadShaders();
+	context.SetActionHandler(InputAction::Reset, [this](float magnitude, const InputData& inputData) {
+        m_shaderReloadRequested = true;
 		});
 
     context.SetActionHandler(InputAction::X, [](float magnitude, const InputData& inputData) {
@@ -2006,9 +2305,13 @@ void Renderer::CreateRenderGraph() {
     }
 
     auto& newGraph = currentRenderGraph;
+    const auto probeGraphBuildPhase = [&](const char* phase) {
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), phase);
+    };
 
     newGraph->ResetForRebuild();
     DeletionManager::GetInstance().DrainAll();
+    probeGraphBuildPhase("CreateRenderGraph after ResetForRebuild");
 
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
@@ -2020,6 +2323,7 @@ void Renderer::CreateRenderGraph() {
 	newGraph->RegisterProvider(m_pSkeletonManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
     newGraph->PrepareExtensionsForBuild();
+    probeGraphBuildPhase("CreateRenderGraph after PrepareExtensionsForBuild");
 
     auto& depth = primaryCameraEntity.get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth.depthMap;
@@ -2073,10 +2377,12 @@ void Renderer::CreateRenderGraph() {
 
     if (m_visibilityRendering) {
         newGraph->BuildRenderPass<ClearVisibilityBufferPass>("ClearVisibilityBufferPass");
+        newGraph->SetPassTechnique("ClearVisibilityBufferPass", "Primary Visibility::GBuffer Construction");
     }
 
 	// Either visibility or standard GBuffer pass
     BuildGBufferPipeline(newGraph.get());
+    probeGraphBuildPhase("CreateRenderGraph after BuildGBufferPipeline");
 
     // GTAO pass
     if (m_gtaoEnabled) {
@@ -2111,8 +2417,33 @@ void Renderer::CreateRenderGraph() {
     if (m_blueNoiseTexture) {
         newGraph->RegisterResource(Builtin::Noise::BlueNoise2D, m_blueNoiseTexture);
     }
+    if (m_openPBRLookupResources.idealDielectricEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealDielectricEnergyComplement, m_openPBRLookupResources.idealDielectricEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealDielectricAverageEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealDielectricAverageEnergyComplement, m_openPBRLookupResources.idealDielectricAverageEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealDielectricReflectionRatio) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealDielectricReflectionRatio, m_openPBRLookupResources.idealDielectricReflectionRatio);
+    }
+    if (m_openPBRLookupResources.opaqueDielectricEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::OpaqueDielectricEnergyComplement, m_openPBRLookupResources.opaqueDielectricEnergyComplement);
+    }
+    if (m_openPBRLookupResources.opaqueDielectricAverageEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement, m_openPBRLookupResources.opaqueDielectricAverageEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealMetalEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealMetalEnergyComplement, m_openPBRLookupResources.idealMetalEnergyComplement);
+    }
+    if (m_openPBRLookupResources.idealMetalAverageEnergyComplement) {
+        newGraph->RegisterResource(Builtin::OpenPBR::IdealMetalAverageEnergyComplement, m_openPBRLookupResources.idealMetalAverageEnergyComplement);
+    }
+    if (m_openPBRLookupResources.fuzzLTC) {
+        newGraph->RegisterResource(Builtin::OpenPBR::FuzzLTC, m_openPBRLookupResources.fuzzLTC);
+    }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
+    probeGraphBuildPhase("CreateRenderGraph after BuildPrimaryPass");
 
 	// Start of post-processing passes
 
@@ -2124,15 +2455,18 @@ void Renderer::CreateRenderGraph() {
     adaptedLuminanceBuffer->SetName("Adapted Luminance");
     rg::memory::SetResourceUsageHint(*adaptedLuminanceBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
-	auto histogramBuffer = CreateIndexedStructuredBuffer(255, sizeof(uint32_t), true, false);
+	auto histogramBuffer = CreateIndexedStructuredBuffer(256, sizeof(uint32_t), true, false);
 	histogramBuffer->SetName("Luminance Histogram Buffer");
     rg::memory::SetResourceUsageHint(*histogramBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
     newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
+    newGraph->SetPassTechnique("luminanceHistogramPass", "Post Process::Exposure");
     newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
+    newGraph->SetPassTechnique("LuminanceAveragePass", "Post Process::Exposure");
 
     newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
+    newGraph->SetPassTechnique("UpscalingPass", "Post Process::Upscaling");
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());
@@ -2151,23 +2485,53 @@ void Renderer::CreateRenderGraph() {
     params.overallOpacity = 1.0f;
 
 	newGraph->BuildComputePass<DebugGridPass>("DebugGridPass", params);
+    newGraph->SetPassTechnique("DebugGridPass", "Debug::Overlays");
 
     newGraph->BuildRenderPass<TonemappingPass>("TonemappingPass");
+    newGraph->SetPassTechnique("TonemappingPass", "Post Process::Tonemapping");
 
     newGraph->BuildRenderPass<DebugResolvePass>("DebugResolvePass");
+    newGraph->SetPassTechnique("DebugResolvePass", "Debug::Visualization");
 
     newGraph->BuildRenderPass<MenuRenderPass>("MenuRenderPass");
+    newGraph->SetPassTechnique("MenuRenderPass", "Debug::UI");
 
     if (getDrawBoundingSpheres()) {
         newGraph->BuildRenderPass<DebugSpherePass>("DebugSpherePass");
+        newGraph->SetPassTechnique("DebugSpherePass", "Debug::Visualization");
     }
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
+    probeGraphBuildPhase("CreateRenderGraph before CompileStructural");
+
+    newGraph->SetStructuralMaterializeCheckpointCallback([](std::string_view passName) {
+        if (!passName.starts_with("CLodShadow::")) {
+            return;
+        }
+
+        std::string phase = "CreateRenderGraph after structural pass ";
+        phase += passName;
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), phase);
+    });
+
+    newGraph->SetStructuralMaterializeResourceCheckpointCallback([](std::string_view passName, std::string_view resourceName) {
+        if (passName != "CLodShadow::VirtualShadowSetupPass") {
+            return;
+        }
+
+        std::string phase = "CreateRenderGraph after structural resource ";
+        phase += passName;
+        phase += " :: ";
+        phase += resourceName;
+        ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), phase);
+    });
 
     //newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
 
     newGraph->CompileStructural();
+    probeGraphBuildPhase("CreateRenderGraph after CompileStructural");
     newGraph->Setup();
+    probeGraphBuildPhase("CreateRenderGraph after Setup");
 
 	rebuildRenderGraph = false;
 }

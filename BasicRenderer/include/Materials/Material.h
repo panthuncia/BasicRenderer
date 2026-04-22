@@ -64,8 +64,11 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 	if (d.aoMap.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileAOTexture;
 	}
-	if (d.metallic.texture || d.roughness.texture) {
-		tech.compileFlags |= MaterialCompileFlags::MaterialCompilePBRMaps;
+    if (d.metallic.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileMetallicTexture;
+    }
+    if (d.roughness.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileRoughnessTexture;
 	}
 	if (d.emissive.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileEmissiveTexture;
@@ -88,6 +91,7 @@ public:
     static std::shared_ptr<Material> CreateShared(const MaterialDescription& desc) {
         uint32_t materialFlags = 0;
         uint32_t psoFlags = 0;
+        OpenPBRMaterialParameters canonicalOpenPBR = BuildCanonicalOpenPBRMaterial(desc);
         const auto transparency = PickTransparency(desc);
         materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
         BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
@@ -102,10 +106,10 @@ public:
             materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.metallic.texture) {
-            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_METALLIC_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.roughness.texture) {
-            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_ROUGHNESS_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.emissive.texture) {
             materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
@@ -129,6 +133,14 @@ public:
         }
         if (desc.forceDoubleSided) {
             materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
+        }
+        if (desc.openPBRTextures.coatColor.texture ||
+            desc.openPBRTextures.coatWeight.texture ||
+            desc.openPBRTextures.coatRoughness.texture ||
+            desc.openPBRTextures.fuzzColor.texture ||
+            desc.openPBRTextures.fuzzWeight.texture ||
+            desc.openPBRTextures.fuzzRoughness.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.negateNormals) {
             materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;
@@ -178,6 +190,8 @@ public:
 			desc.geometricDisplacementMax,
 			desc.enableGeometricDisplacement,
             technique,
+            canonicalOpenPBR,
+            desc.openPBRTextures,
             desc.alphaCutoff
         );
     }
@@ -187,11 +201,14 @@ public:
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
     void SetCompileFlagsID(uint32_t id);
+    void SetOpenPBRMaterialDataIndex(uint32_t index);
     void SetRasterBucketIndex(uint32_t index);
     PSOFlags GetPSOFlags() const { return m_psoFlags; }
     MaterialFlags GetMaterialFlags() const { return static_cast<MaterialFlags>(m_materialData.materialFlags); }
     static std::shared_ptr<Material> GetDefaultMaterial();
     TechniqueDescriptor const& Technique() const { return m_technique; }
+    OpenPBRMaterialParameters const& GetOpenPBRMaterial() const { return m_openPBRMaterial; }
+    OpenPBRTextureBindings const& GetOpenPBRTextures() const { return m_openPBRTextures; }
     static void DestroyDefaultMaterial() {
         defaultMaterial.reset();
     }
@@ -233,6 +250,8 @@ private:
     PerMaterialCB m_materialData = { 0 };
     PSOFlags m_psoFlags;
     TechniqueDescriptor m_technique;
+    OpenPBRMaterialParameters m_openPBRMaterial = {};
+    OpenPBRTextureBindings m_openPBRTextures = {};
 
     Material(const std::string& name,
         MaterialFlags materialFlags, PSOFlags psoFlags);
@@ -271,6 +290,8 @@ private:
 		float geometricDisplacementMax,
 		bool geometricDisplacementEnabled,
 		TechniqueDescriptor technique,
+        OpenPBRMaterialParameters openPBRMaterial,
+        OpenPBRTextureBindings openPBRTextures,
         float alphaCutoff);
 
     static std::shared_ptr<Material> CreateShared(const std::string& name,
@@ -307,6 +328,8 @@ private:
 		float geometricDisplacementMax,
 		bool geometricDisplacementEnabled,
         TechniqueDescriptor technique,
+        OpenPBRMaterialParameters openPBRMaterial,
+        OpenPBRTextureBindings openPBRTextures,
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
             baseColorTexture, normalTexture, aoMap, heightMap,
@@ -318,6 +341,8 @@ private:
 			metallicUvSetIndex, roughnessUvSetIndex, emissiveUvSetIndex, opacityUvSetIndex,
 			heightMapScale, geometricDisplacementMin, geometricDisplacementMax, geometricDisplacementEnabled,
 			technique,
+            openPBRMaterial,
+            openPBRTextures,
             alphaCutoff));
     }
 

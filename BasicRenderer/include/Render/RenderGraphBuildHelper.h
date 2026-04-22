@@ -29,6 +29,10 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
+inline void TagPassTechnique(RenderGraph* graph, std::string_view passName, std::string_view techniquePath) {
+    graph->SetPassTechnique(std::string(passName), std::string(techniquePath));
+}
+
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -53,6 +57,8 @@ void CreateGBufferResources(RenderGraph* graph) {
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
     std::shared_ptr<PixelBuffer> albedo;
+    std::shared_ptr<PixelBuffer> coat;
+    std::shared_ptr<PixelBuffer> fuzz;
     std::shared_ptr<PixelBuffer> metallicRoughness;
     std::shared_ptr<PixelBuffer> emissive;
 
@@ -71,10 +77,40 @@ void CreateGBufferResources(RenderGraph* graph) {
     rg::memory::SetResourceUsageHint(*albedo, "GBuffer");
     graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
+    TextureDescription coatDesc;
+    coatDesc.channels = 4;
+    coatDesc.hasRTV = true;
+    coatDesc.format = rhi::Format::R16G16B16A16_Float;
+    coatDesc.hasSRV = true;
+	coatDesc.hasUAV = true;
+    coatDesc.hasNonShaderVisibleUAV = true;
+    ImageDimensions coatDims = { resolution.x, resolution.y, 0, 0 };
+    coatDesc.imageDimensions.push_back(coatDims);
+    coatDesc.allowAlias = true;
+    coat = PixelBuffer::CreateSharedUnmaterialized(coatDesc);
+    coat->SetName("OpenPBR Coat");
+    rg::memory::SetResourceUsageHint(*coat, "GBuffer");
+    graph->RegisterResource(Builtin::GBuffer::Coat, coat);
+
+    TextureDescription fuzzDesc;
+    fuzzDesc.channels = 4;
+    fuzzDesc.hasRTV = true;
+    fuzzDesc.format = rhi::Format::R16G16B16A16_Float;
+    fuzzDesc.hasSRV = true;
+	fuzzDesc.hasUAV = true;
+    fuzzDesc.hasNonShaderVisibleUAV = true;
+    ImageDimensions fuzzDims = { resolution.x, resolution.y, 0, 0 };
+    fuzzDesc.imageDimensions.push_back(fuzzDims);
+    fuzzDesc.allowAlias = true;
+    fuzz = PixelBuffer::CreateSharedUnmaterialized(fuzzDesc);
+    fuzz->SetName("OpenPBR Fuzz");
+    rg::memory::SetResourceUsageHint(*fuzz, "GBuffer");
+    graph->RegisterResource(Builtin::GBuffer::Fuzz, fuzz);
+
     TextureDescription metallicRoughnessDesc;
-    metallicRoughnessDesc.channels = 2;
+    metallicRoughnessDesc.channels = 4;
     metallicRoughnessDesc.hasRTV = true;
-    metallicRoughnessDesc.format = rhi::Format::R8G8_UNorm;
+    metallicRoughnessDesc.format = rhi::Format::R8G8B8A8_UNorm;
     metallicRoughnessDesc.hasSRV = true;
 	metallicRoughnessDesc.hasUAV = true;
 	metallicRoughnessDesc.hasNonShaderVisibleUAV = true;
@@ -125,7 +161,7 @@ void CreateDebugVisualizationResources(RenderGraph* graph) {
 void BuildBRDFIntegrationPass(RenderGraph* graph) {
 	TextureDescription brdfDesc;
     brdfDesc.arraySize = 1;
-    brdfDesc.channels = 1;
+    brdfDesc.channels = 2;
     brdfDesc.isCubemap = false;
     brdfDesc.hasRTV = true;
     brdfDesc.format = rhi::Format::R16G16_Float;
@@ -141,6 +177,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     brdfIntegrationTexture->EnableIdleDematerialization(120);
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
 	graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
+    TagPassTechnique(graph, "BRDF Integration Pass", "Environment Lighting::BRDF Integration");
 }
 
 inline void RegisterVisUtilResources(RenderGraph* graph)
@@ -199,23 +236,30 @@ void BuildGBufferPipeline(RenderGraph* graph) {
 
         // Reset material counters
         graph->BuildComputePass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");
+        TagPassTechnique(graph, "MaterialPixelCounterResetPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // Build material histogram
         graph->BuildComputePass<MaterialHistogramPass>("MaterialHistogramPass");
+        TagPassTechnique(graph, "MaterialHistogramPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // Prefix sum material histogram
         graph->BuildComputePass<MaterialBlockScanPass>("MaterialBlockScanPass");
+        TagPassTechnique(graph, "MaterialBlockScanPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         graph->BuildComputePass<MaterialBlockOffsetsPass>("MaterialBlockOffsetsPass");
+        TagPassTechnique(graph, "MaterialBlockOffsetsPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // Build pixel list
         graph->BuildComputePass<BuildPixelListPass>("BuildPixelListPass");
+        TagPassTechnique(graph, "BuildPixelListPass", "Primary Visibility::GBuffer Construction::VisUtil");
 
         // Build indirect command buffer for material passes
         graph->BuildComputePass<BuildMaterialIndirectCommandBufferPass>("BuildMaterialIndirectCommandBufferPass");
+        TagPassTechnique(graph, "BuildMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // Evaluate material groups
         graph->BuildComputePass<EvaluateMaterialGroupsPass>("EvaluateMaterialGroupsPass");
+        TagPassTechnique(graph, "EvaluateMaterialGroupsPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // PrimaryDepthCopyPass is disabled for CLod two-phase path.
     }
@@ -285,22 +329,17 @@ void RegisterGTAOResources(RenderGraph* graph) {
 
 void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCamera) {
     auto GTAOConstantBuffer = CreateIndexedConstantBuffer(sizeof(GTAOInfo),"GTAO constants");
-    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-
-    GTAOInfo gtaoInfo;
-    XeGTAO::GTAOSettings gtaoSettings;
-    XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
-    XeGTAO::GTAOUpdateConstants(gtaoConstants, resolution.x, resolution.y, gtaoSettings, false, 0, *currentCamera);
-
-    BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), rg::runtime::UploadTarget::FromShared(GTAOConstantBuffer), 0);
 
     graph->RegisterResource("Builtin::GTAO::ConstantsBuffer", GTAOConstantBuffer);
 
     graph->BuildComputePass<GTAOFilterPass>("GTAOFilterPass"); // Depth filter pass
+    TagPassTechnique(graph, "GTAOFilterPass", "Post Process::GTAO");
 
     graph->BuildComputePass<GTAOMainPass>("GTAOMainPass"); // Main pass
+    TagPassTechnique(graph, "GTAOMainPass", "Post Process::GTAO");
 
     graph->BuildComputePass<GTAODenoisePass>("GTAODenoisePass"); // Denoise pass
+    TagPassTechnique(graph, "GTAODenoisePass", "Post Process::GTAO");
 }
 
 void BuildLightClusteringPipeline(RenderGraph* graph) {
@@ -316,24 +355,31 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
     graph->BuildComputePass<ClusterGenerationPass>("ClusterGenerationPass");
+    TagPassTechnique(graph, "ClusterGenerationPass", "Lighting::Clustered Lighting");
 
     graph->BuildComputePass<LightCullingPass>("LightCullingPass");
+    TagPassTechnique(graph, "LightCullingPass", "Lighting::Clustered Lighting");
 }
 
 void BuildEnvironmentPipeline(RenderGraph* graph) {
     graph->BuildComputePass<EnvironmentConversionPass>("Environment Conversion Pass");
+    TagPassTechnique(graph, "Environment Conversion Pass", "Environment Lighting::Capture & Filtering");
 
     graph->BuildComputePass<EnvironmentSHPass>("Environment Spherical Harmonics Pass");
+    TagPassTechnique(graph, "Environment Spherical Harmonics Pass", "Environment Lighting::Capture & Filtering");
 
     graph->BuildRenderPass<EnvironmentFilterPass>("Environment Prefilter Pass");
+    TagPassTechnique(graph, "Environment Prefilter Pass", "Environment Lighting::Capture & Filtering");
 }
 
 void BuildLinearDepthDownsamplePass(RenderGraph* graph) {
     graph->BuildComputePass<DownsamplePass>("LinearDepthDownsamplePass");
+    TagPassTechnique(graph, "LinearDepthDownsamplePass", "Depth::Linear Depth");
 }
 
 void BuildLinearDepthHistoryCopyPass(RenderGraph* graph) {
     graph->BuildRenderPass<LinearDepthHistoryCopyPass>("LinearDepthHistoryCopyPass");
+    TagPassTechnique(graph, "LinearDepthHistoryCopyPass", "Post Process::Depth History");
 }
 
 void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
@@ -345,6 +391,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
 	// Uses existing GBuffer resources
     graph->BuildComputePass<DeferredShadingPass>("DeferredShadingPass");
+    TagPassTechnique(graph, "DeferredShadingPass", "Lighting::Primary Shading");
 
     // Skybox needs the final opaque depth classification. In the CLod two-phase path,
     // a second linear-depth copy is inserted immediately before DeferredShadingPass.
@@ -352,6 +399,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     // letting forward/transparent passes blend over the background.
     if (currentEnvironment != nullptr) {
         graph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");
+        TagPassTechnique(graph, "SkyboxPass", "Lighting::Primary Shading");
     }
 
 	// Forward pass for materials incompatible with deferred rendering
@@ -359,6 +407,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
         wireframe,
         meshShaders,
         indirect});
+    TagPassTechnique(graph, "Forward render pass", "Lighting::Primary Shading");
 }
 
 void BuildPPLLPipeline(RenderGraph* graph) {
@@ -460,16 +509,21 @@ void BuildBloomPipeline(RenderGraph* graph) {
 
 	// Downsample numBloomMips mips of the HDR color target
     for (unsigned int i = 0; i < numBloomMips; i++) {
-        graph->BuildRenderPass<BloomSamplePass>("BloomDownsamplePass" + std::to_string(i), BloomSamplePassInputs{ i, false });
+        const std::string passName = "BloomDownsamplePass" + std::to_string(i);
+        graph->BuildRenderPass<BloomSamplePass>(passName, BloomSamplePassInputs{ i, false });
+        graph->SetPassTechnique(passName, "Post Process::Bloom");
     }
 
 	// Upsample numBloomMips - 1 mips of the HDR color target, starting from the last mip
     for (unsigned int i = numBloomMips-1; i > 0; i--) {
-        graph->BuildRenderPass<BloomSamplePass>("BloomUpsamplePass" + std::to_string(i), BloomSamplePassInputs{ i, true });
+        const std::string passName = "BloomUpsamplePass" + std::to_string(i);
+        graph->BuildRenderPass<BloomSamplePass>(passName, BloomSamplePassInputs{ i, true });
+        graph->SetPassTechnique(passName, "Post Process::Bloom");
     }
     
     // Upsample and blend the first mip with the HDR color target
     graph->BuildRenderPass<BloomBlendPass>("BloomUpsampleAndBlendPass");
+    TagPassTechnique(graph, "BloomUpsampleAndBlendPass", "Post Process::Bloom");
 }
 
 void BuildSSRPasses(RenderGraph* graph) {
@@ -495,7 +549,9 @@ void BuildSSRPasses(RenderGraph* graph) {
     rg::memory::SetResourceUsageHint(*ssrTexture, "Post-Processing resources");
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 
-        graph->BuildComputePass<ScreenSpaceReflectionsPass>("Screen-Space Reflections Pass");
+    graph->BuildComputePass<ScreenSpaceReflectionsPass>("Screen-Space Reflections Pass");
+    TagPassTechnique(graph, "Screen-Space Reflections Pass", "Post Process::Screen-Space Reflections");
 
-        graph->BuildRenderPass<SpecularIBLPass>("Specular IBL & SSR Composite Pass");
+    graph->BuildRenderPass<SpecularIBLPass>("Specular IBL & SSR Composite Pass");
+    TagPassTechnique(graph, "Specular IBL & SSR Composite Pass", "Post Process::Screen-Space Reflections");
 }

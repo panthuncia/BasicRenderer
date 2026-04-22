@@ -34,6 +34,77 @@ namespace
         return haystack.find(needle) != std::string_view::npos;
     }
 
+    std::string LoadUtf8File(const std::filesystem::path& path)
+    {
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream) {
+            throw std::runtime_error("Failed to open file: " + path.string());
+        }
+
+        std::string text(
+            (std::istreambuf_iterator<char>(stream)),
+            std::istreambuf_iterator<char>());
+        ValidateUtf8OrThrow(text, path.string());
+        return text;
+    }
+
+    void WriteUtf8File(const std::filesystem::path& path, const std::string& text)
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        if (!stream) {
+            throw std::runtime_error("Failed to write file: " + path.string());
+        }
+
+        stream.write(text.data(), static_cast<std::streamsize>(text.size()));
+        if (!stream) {
+            throw std::runtime_error("Failed to flush file: " + path.string());
+        }
+    }
+
+    std::unordered_map<std::string, std::string> BuildSequentialReplacementMap(
+        const PreparedShaderSource& prepared)
+    {
+        std::vector<std::string> mandatoryIDs(prepared.mandatoryIDs.begin(), prepared.mandatoryIDs.end());
+        std::vector<std::string> optionalIDs(prepared.optionalIDs.begin(), prepared.optionalIDs.end());
+        std::sort(mandatoryIDs.begin(), mandatoryIDs.end());
+        std::sort(optionalIDs.begin(), optionalIDs.end());
+
+        std::unordered_map<std::string, std::string> replacementMap;
+        uint32_t nextIndex = 0;
+        for (const std::string& id : mandatoryIDs) {
+            replacementMap.emplace(id, "ResourceDescriptorIndex" + std::to_string(nextIndex++));
+        }
+        for (const std::string& id : optionalIDs) {
+            replacementMap.emplace(id, "ResourceDescriptorIndex" + std::to_string(nextIndex++));
+        }
+        return replacementMap;
+    }
+
+    int RunDumpMode(int argc, char** argv)
+    {
+        if (argc != 5) {
+            std::cerr << "Usage: ShaderPreprocessTests dump-final <preprocessed-input> <entry-point> <output>\n";
+            return 2;
+        }
+
+        const std::filesystem::path inputPath = argv[2];
+        const std::string entryPoint = argv[3];
+        const std::filesystem::path outputPath = argv[4];
+
+        const std::string source = LoadUtf8File(inputPath);
+        PreparedShaderSource prepared = PrepareShaderSourceForEntryPoint(MakeBuffer(source), entryPoint);
+        std::unordered_map<std::string, std::string> replacementMap = BuildSequentialReplacementMap(prepared);
+        const std::string finalized = FinalizePreparedShaderSource(prepared, replacementMap);
+        WriteUtf8File(outputPath, finalized);
+
+        std::cout << "entry=" << entryPoint << '\n';
+        std::cout << "mandatoryIDs=" << prepared.mandatoryIDs.size() << '\n';
+        std::cout << "optionalIDs=" << prepared.optionalIDs.size() << '\n';
+        std::cout << "diagnostics=" << FormatShaderPreprocessDiagnostics(prepared.diagnostics) << '\n';
+        std::cout << "output=" << outputPath.string() << '\n';
+        return 0;
+    }
+
     void RunTest(
         const char* name,
         const std::function<void()>& fn,
@@ -50,8 +121,12 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc > 1 && std::string_view(argv[1]) == "dump-final") {
+        return RunDumpMode(argc, argv);
+    }
+
     int failureCount = 0;
 
     RunTest("catalog handles attributes semantics prototypes and overload names", []() {

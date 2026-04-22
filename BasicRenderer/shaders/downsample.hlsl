@@ -28,8 +28,8 @@ struct spdConstants
     uint2 workGroupOffset;
     float2 invInputSize;
     
-    unsigned int mipUavDescriptorIndices[11];
-    uint pad[1];
+    unsigned int mipUavDescriptorIndices[12];
+    uint pad[4];
 };
 
 // UintRootConstant0 is the index of the global atomic buffer

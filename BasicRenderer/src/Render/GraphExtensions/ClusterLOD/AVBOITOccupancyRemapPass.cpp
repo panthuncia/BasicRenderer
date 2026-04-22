@@ -1,0 +1,81 @@
+#include "Render/GraphExtensions/ClusterLOD/AVBOITOccupancyRemapPass.h"
+
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Resources/PixelBuffer.h"
+
+#include "../shaders/PerPassRootConstants/clodAVBOITDepthWarpRootConstants.h"
+
+AVBOITOccupancyRemapPass::AVBOITOccupancyRemapPass(
+    std::shared_ptr<Buffer> configBuffer,
+    std::shared_ptr<PixelBuffer> occupancyTexture,
+    std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
+    std::shared_ptr<Buffer> depthWarpLUTBuffer)
+    : m_configBuffer(std::move(configBuffer))
+    , m_occupancyTexture(std::move(occupancyTexture))
+    , m_occupancySliceMaskTexture(std::move(occupancySliceMaskTexture))
+    , m_depthWarpLUTBuffer(std::move(depthWarpLUTBuffer))
+{
+    m_pso = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"shaders/ClusterLOD/AVBOITOccupancyRemap.hlsl",
+        L"CLodAVBOITOccupancyRemapCS",
+        {},
+        "CLod.AVBOITOccupancyRemap.PSO");
+}
+
+void AVBOITOccupancyRemapPass::DeclareResourceUsages(ComputePassBuilder* builder)
+{
+    builder->WithShaderResource(m_configBuffer, m_depthWarpLUTBuffer)
+        .WithUnorderedAccess(m_occupancyTexture, m_occupancySliceMaskTexture);
+}
+
+void AVBOITOccupancyRemapPass::Setup()
+{
+}
+
+void AVBOITOccupancyRemapPass::Update(const UpdateExecutionContext& executionContext)
+{
+    (void)executionContext;
+}
+
+PassReturn AVBOITOccupancyRemapPass::Execute(PassExecutionContext& executionContext)
+{
+    if (!m_configBuffer || !m_occupancyTexture || !m_occupancySliceMaskTexture || !m_depthWarpLUTBuffer) {
+        return {};
+    }
+
+    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    auto& context = *renderContext;
+    auto& commandList = executionContext.commandList;
+
+    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+
+    uint32_t misc[NumMiscUintRootConstants] = {};
+    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_DESCRIPTOR_INDEX] = m_depthWarpLUTBuffer->GetSRVInfo(0).slot.index;
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        misc);
+
+    const uint32_t groupCountX = (m_occupancyTexture->GetWidth() + 7u) / 8u;
+    const uint32_t groupCountY = (m_occupancyTexture->GetHeight() + 7u) / 8u;
+    if (groupCountX == 0u || groupCountY == 0u) {
+        return {};
+    }
+
+    commandList.Dispatch(groupCountX, groupCountY, 1u);
+    return {};
+}
+
+void AVBOITOccupancyRemapPass::Cleanup()
+{
+}

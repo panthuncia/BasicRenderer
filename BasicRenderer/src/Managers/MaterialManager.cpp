@@ -3,13 +3,140 @@
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RasterBucketFlags.h"
 
+#include <limits>
+
+namespace {
+	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(const Material& material) {
+		const OpenPBRMaterialParameters& materialParameters = material.GetOpenPBRMaterial();
+		const OpenPBRTextureBindings& textures = material.GetOpenPBRTextures();
+		constexpr uint32_t kInvalidDescriptor = std::numeric_limits<uint32_t>::max();
+		PerMaterialOpenPBRCB result = {};
+		result.baseWeight = materialParameters.baseWeight;
+		result.baseColor = materialParameters.baseColor;
+		result.baseDiffuseRoughness = materialParameters.baseDiffuseRoughness;
+		result.baseMetalness = materialParameters.baseMetalness;
+		result.subsurfaceWeight = materialParameters.subsurfaceWeight;
+		result.subsurfaceRadius = materialParameters.subsurfaceRadius;
+		result.subsurfaceColor = materialParameters.subsurfaceColor;
+		result.subsurfaceScatterAnisotropy = materialParameters.subsurfaceScatterAnisotropy;
+		result.subsurfaceRadiusScale = materialParameters.subsurfaceRadiusScale;
+		result.specularWeight = materialParameters.specularWeight;
+		result.specularColor = materialParameters.specularColor;
+		result.specularRoughness = materialParameters.specularRoughness;
+		result.specularRoughnessAnisotropy = materialParameters.specularRoughnessAnisotropy;
+		result.specularIor = materialParameters.specularIor;
+		result.specularAnisotropyRotationCosSin = materialParameters.specularAnisotropyRotationCosSin;
+		result.coatWeight = materialParameters.coatWeight;
+		result.coatColor = materialParameters.coatColor;
+		result.coatRoughness = materialParameters.coatRoughness;
+		result.coatRoughnessAnisotropy = materialParameters.coatRoughnessAnisotropy;
+		result.coatIor = materialParameters.coatIor;
+		result.coatDarkening = materialParameters.coatDarkening;
+		result.coatAnisotropyRotationCosSin = materialParameters.coatAnisotropyRotationCosSin;
+		result.fuzzWeight = materialParameters.fuzzWeight;
+		result.fuzzColor = materialParameters.fuzzColor;
+		result.fuzzRoughness = materialParameters.fuzzRoughness;
+		result.transmissionWeight = materialParameters.transmissionWeight;
+		result.transmissionColor = materialParameters.transmissionColor;
+		result.transmissionDepth = materialParameters.transmissionDepth;
+		result.transmissionScatter = materialParameters.transmissionScatter;
+		result.transmissionScatterAnisotropy = materialParameters.transmissionScatterAnisotropy;
+		result.transmissionDispersionScale = materialParameters.transmissionDispersionScale;
+		result.transmissionDispersionAbbeNumber = materialParameters.transmissionDispersionAbbeNumber;
+		result.thinFilmWeight = materialParameters.thinFilmWeight;
+		result.thinFilmThickness = materialParameters.thinFilmThickness;
+		result.thinFilmIor = materialParameters.thinFilmIor;
+		result.emissionLuminance = materialParameters.emissionLuminance;
+		result.emissionColor = materialParameters.emissionColor;
+		result.geometryOpacity = materialParameters.geometryOpacity;
+		result.geometryThinWalled = materialParameters.geometryThinWalled ? 1u : 0u;
+
+		auto initializeColorTextureMetadata = [&](const TextureAndConstant& binding,
+			uint32_t& textureIndex,
+			uint32_t& samplerIndex,
+			DirectX::XMUINT4& channels,
+			uint32_t& uvSetIndex) {
+			textureIndex = kInvalidDescriptor;
+			samplerIndex = kInvalidDescriptor;
+			uvSetIndex = binding.uvSetIndex;
+			channels = DirectX::XMUINT4(0u, 1u, 2u, 3u);
+
+			if (binding.texture == nullptr) {
+				return;
+			}
+
+			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
+			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			if (binding.channels.size() > 0u) channels.x = binding.channels[0];
+			if (binding.channels.size() > 1u) channels.y = binding.channels[1];
+			if (binding.channels.size() > 2u) channels.z = binding.channels[2];
+			if (binding.channels.size() > 3u) channels.w = binding.channels[3];
+		};
+
+		auto initializeScalarTextureMetadata = [&](const TextureAndConstant& binding,
+			uint32_t& textureIndex,
+			uint32_t& samplerIndex,
+			uint32_t& channel,
+			uint32_t& uvSetIndex) {
+			textureIndex = kInvalidDescriptor;
+			samplerIndex = kInvalidDescriptor;
+			channel = 0u;
+			uvSetIndex = binding.uvSetIndex;
+
+			if (binding.texture == nullptr) {
+				return;
+			}
+
+			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
+			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			if (!binding.channels.empty()) {
+				channel = binding.channels[0];
+			}
+		};
+
+		initializeColorTextureMetadata(textures.coatColor,
+			result.coatColorTextureIndex,
+			result.coatColorSamplerIndex,
+			result.coatColorChannels,
+			result.coatColorUvSetIndex);
+		initializeScalarTextureMetadata(textures.coatWeight,
+			result.coatWeightTextureIndex,
+			result.coatWeightSamplerIndex,
+			result.coatWeightChannel,
+			result.coatWeightUvSetIndex);
+		initializeScalarTextureMetadata(textures.coatRoughness,
+			result.coatRoughnessTextureIndex,
+			result.coatRoughnessSamplerIndex,
+			result.coatRoughnessChannel,
+			result.coatRoughnessUvSetIndex);
+		initializeColorTextureMetadata(textures.fuzzColor,
+			result.fuzzColorTextureIndex,
+			result.fuzzColorSamplerIndex,
+			result.fuzzColorChannels,
+			result.fuzzColorUvSetIndex);
+		initializeScalarTextureMetadata(textures.fuzzWeight,
+			result.fuzzWeightTextureIndex,
+			result.fuzzWeightSamplerIndex,
+			result.fuzzWeightChannel,
+			result.fuzzWeightUvSetIndex);
+		initializeScalarTextureMetadata(textures.fuzzRoughness,
+			result.fuzzRoughnessTextureIndex,
+			result.fuzzRoughnessSamplerIndex,
+			result.fuzzRoughnessChannel,
+			result.fuzzRoughnessUvSetIndex);
+		return result;
+	}
+}
+
 // TODO: Use LazyDynamicStructuredBuffer and active indices buffer like draw calls? Would reduce number of no-op indirect arguments
 MaterialManager::MaterialManager() {
 	auto& rm = ResourceManager::GetInstance();
 
 	// Primary material data buffer
 	m_perMaterialDataBuffer = DynamicStructuredBuffer<PerMaterialCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialDataBuffer", true);
+	m_perMaterialOpenPBRDataBuffer = DynamicStructuredBuffer<PerMaterialOpenPBRCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialOpenPBRDataBuffer", true);
 	rg::memory::SetResourceUsageHint(*m_perMaterialDataBuffer, "Material buffers");
+	rg::memory::SetResourceUsageHint(*m_perMaterialOpenPBRDataBuffer, "Material buffers");
 
 	// Visibility buffer resources
     m_materialPixelCountBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(m_compileFlagsSlotsUsed, "VisUtil::MaterialPixelCountBuffer", true);
@@ -37,6 +164,7 @@ MaterialManager::MaterialManager() {
 	m_resources["Builtin::VisUtil::ScannedBlockSumsBuffer"] = m_scannedBlockSumsBuffer;
 	m_resources["Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer"] = m_materialEvaluationCommandBuffer;
 	m_resources[Builtin::PerMaterialDataBuffer] = m_perMaterialDataBuffer;
+	m_resources[Builtin::PerMaterialOpenPBRDataBuffer] = m_perMaterialOpenPBRDataBuffer;
 }
 
 void MaterialManager::IncrementMaterialUsageCount(Material& material) {
@@ -46,9 +174,17 @@ void MaterialManager::IncrementMaterialUsageCount(Material& material) {
 	m_compileFlagsUsageCounts[flagsSlot]++;
 	uint32_t materialID = material.GetMaterialID();
 	material.SetCompileFlagsID(flagsSlot);
-	unsigned int materialSlot = GetMaterialSlot(materialID, material.GetData());
+	UpdateMaterialDataBuffer(material);
+	unsigned int materialSlot = GetMaterialSlot(materialID);
 
 	m_materialUsageCounts[materialSlot]++;
+}
+
+void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
+	const unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
+	material.SetOpenPBRMaterialDataIndex(materialSlot);
+	m_perMaterialDataBuffer->UpdateAt(materialSlot, material.GetData());
+	m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, BuildOpenPBRMaterialData(material));
 }
 
 void MaterialManager::DecrementMaterialUsageCount(const Material& material) {
@@ -86,15 +222,24 @@ unsigned int MaterialManager::GetMaterialSlot(unsigned int materialID, std::opti
 		if (data.has_value()) {
 			m_perMaterialDataBuffer->UpdateAt(slot, data.value());
 		}
+		else {
+			m_perMaterialDataBuffer->UpdateAt(slot, PerMaterialCB{});
+		}
+		m_perMaterialOpenPBRDataBuffer->UpdateAt(slot, PerMaterialOpenPBRCB{});
 	}
 	else {
 		slot = m_materialSlotsUsed++;
 		m_materialUsageCounts.push_back(0);
 		// Resize resources to accommodate new material slot
 		m_perMaterialDataBuffer->Resize(m_materialSlotsUsed);
+		m_perMaterialOpenPBRDataBuffer->Resize(m_materialSlotsUsed);
 		if (data.has_value()) {
 			m_perMaterialDataBuffer->UpdateAt(slot, data.value());
 		}
+		else {
+			m_perMaterialDataBuffer->UpdateAt(slot, PerMaterialCB{});
+		}
+		m_perMaterialOpenPBRDataBuffer->UpdateAt(slot, PerMaterialOpenPBRCB{});
 	}
 	m_materialIDSlotMapping[materialID] = slot;
 	return slot;

@@ -26,6 +26,14 @@ enum OutputType {
 	VSM_PAGE_STATE = 22,
 	VSM_PHYSICAL_PAGE = 23,
 	VSM_RERENDERED_THIS_FRAME = 24,
+	TRANSPARENT_VBOIT_TRANSMITTANCE = 25,
+	TRANSPARENT_VBOIT_COVERAGE = 26,
+	TRANSPARENT_VBOIT_ZERO_SLICE = 27,
+	TRANSPARENT_VBOIT_VIRTUAL_SLICE_COUNT = 28,
+	TRANSPARENT_VBOIT_PHYSICAL_SLICE_COUNT = 29,
+	TRANSPARENT_VBOIT_FITTED_VIRTUAL_SLICE_COUNT = 30,
+	TRANSPARENT_VBOIT_OCCUPIED_VIRTUAL_SLICE_COUNT = 31,
+	TRANSPARENT_VBOIT_DEPTH_DISTRIBUTION_EXPONENT = 32,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -54,4 +62,12 @@ inline std::vector<std::string> OutputTypeNames = {
 	"VSM Page State",
 	"VSM Physical Page",
 	"VSM Re-rendered This Frame",
+	"Transparent VBOIT Transmittance",
+	"Transparent VBOIT Coverage",
+	"Transparent VBOIT Zero Slice",
+	"Transparent VBOIT Virtual Slice Count",
+	"Transparent VBOIT Physical Slice Count",
+	"Transparent VBOIT Fitted Virtual Slice Count",
+	"Transparent VBOIT Occupied Virtual Slice Count",
+	"Transparent VBOIT Depth Distribution Exponent",
 };

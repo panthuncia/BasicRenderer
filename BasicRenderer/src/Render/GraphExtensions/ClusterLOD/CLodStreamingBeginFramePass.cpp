@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <spdlog/spdlog.h>
+
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
@@ -29,8 +31,7 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     , m_getActiveGroupsBitsUpload(std::move(getActiveGroupsBitsUpload))
     , m_scheduleStreamingReadbacks(std::move(scheduleStreamingReadbacks))
     , m_processStreamingRequests(std::move(processStreamingRequests))
-    , m_getUploadInstance(std::move(getUploadInstance)) {
-}
+    , m_getUploadInstance(std::move(getUploadInstance)) {}
 
 void CLodStreamingBeginFramePass::DeclareResourceUsages(ComputePassBuilder* builder) {
     builder->WithUnorderedAccess(m_loadCounter, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);

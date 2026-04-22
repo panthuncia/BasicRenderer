@@ -29,10 +29,28 @@ struct LightingParameters {
     float3 fragPos;
     float3 viewDir;
     float3 normal;
+    float3 weightedBaseColor;
     float3 diffuseColor;
+    float baseDiffuseRoughness;
+    float specularAlpha;
+    float weightedSpecularIor;
+    float dielectricSpecularWeight;
+    float3 dielectricSpecularF0;
+    float metalSpecularWeight;
+    float3 metalAverageFresnel;
+    float3 metalSpecularF0;
     float metallic;
     float roughness;
     float3 F0;
+    float3 coatF0;
+    float coatWeight;
+    float3 coatColor;
+    float coatIor;
+    float coatDarkening;
+    float coatRoughness;
+    float3 fuzzColor;
+    float fuzzWeight;
+    float fuzzRoughness;
 };
 
 struct LightingOutput { // Lighting + debug info
@@ -66,6 +84,7 @@ LightFragmentData getLightParametersForFragment(LightInfo light, float3 fragPos)
     result.lightPos = light.posWorldSpace.xyz;
     result.lightColor = light.color.xyz;
     result.intensity = light.color.w;
+    result.distance = 0.0;
     
     switch (light.type) {
         case 2:{
@@ -96,20 +115,50 @@ LightFragmentData getLightParametersForFragment(LightInfo light, float3 fragPos)
 
 float3 calculateLightContributionPBR(LightFragmentData light, LightingParameters lightingParameters)
 {
-
-    float3 halfwayDir = normalize(light.lightToFrag + lightingParameters.viewDir);
     float normDotView = saturate(dot(lightingParameters.normal, lightingParameters.viewDir));
     float normDotLight = saturate(dot(lightingParameters.normal, light.lightToFrag));
-    float normDotHalf = saturate(dot(lightingParameters.normal, halfwayDir));
-    float lightDotHalf = saturate(dot(light.lightToFrag, halfwayDir));
-    
-    float3 Fr = specularLobe(lightingParameters.roughness, lightingParameters.F0, halfwayDir, normDotView, normDotLight, normDotHalf, lightDotHalf);
-    
-    float3 Fd = diffuseLobe(lightingParameters.roughness, lightingParameters.diffuseColor, normDotView, normDotLight, lightDotHalf);
+    const OpenPBRBaseLayerState baseState = MakeOpenPBRBaseLayerState(
+        lightingParameters.weightedBaseColor,
+        lightingParameters.diffuseColor,
+        lightingParameters.baseDiffuseRoughness,
+        lightingParameters.specularAlpha,
+        lightingParameters.weightedSpecularIor,
+        lightingParameters.dielectricSpecularF0,
+        lightingParameters.dielectricSpecularWeight,
+        lightingParameters.metalAverageFresnel,
+        lightingParameters.metalSpecularF0,
+        lightingParameters.metalSpecularWeight);
+    const OpenPBRCoatLayerState coatState = MakeOpenPBRCoatLayerState(
+        baseState,
+        lightingParameters.coatColor,
+        lightingParameters.coatWeight,
+        lightingParameters.coatIor,
+        lightingParameters.coatRoughness,
+        lightingParameters.coatDarkening);
+    const OpenPBRFuzzLayerState fuzzState = MakeOpenPBRFuzzLayerState(
+        lightingParameters.normal,
+        lightingParameters.viewDir,
+        lightingParameters.fuzzColor,
+        lightingParameters.fuzzWeight,
+        lightingParameters.fuzzRoughness);
+    const OpenPBRBaseLayerEvaluation baseEvaluation =
+        EvaluateOpenPBRBaseLayerDirect(baseState, lightingParameters.normal, lightingParameters.viewDir, light.lightToFrag);
+    const float fuzzLayerScale = OpenPBRFuzzBaseLayerScaleComplete(fuzzState, light.lightToFrag);
+    const float3 baseLayerScale = OpenPBRCoatBaseLayerScaleComplete(coatState, normDotView, normDotLight);
 
-    float3 energyCompensation = mx_ggx_energy_compensation(normDotView, lightingParameters.roughness, lightingParameters.F0);
-    
-    float3 BRDF = Fd + Fr * energyCompensation;
+    float3 coatFr = 0.0f.xxx;
+    if (coatState.presence > 0.0f)
+    {
+        float3 halfwayDir = normalize(light.lightToFrag + lightingParameters.viewDir);
+        float normDotHalf = saturate(dot(lightingParameters.normal, halfwayDir));
+        float lightDotHalf = saturate(dot(light.lightToFrag, halfwayDir));
+        coatFr = specularLobe(lightingParameters.coatRoughness, lightingParameters.coatF0, halfwayDir, normDotView, normDotLight, normDotHalf, lightDotHalf);
+        coatFr *= mx_ggx_energy_compensation(normDotView, lightingParameters.coatRoughness, lightingParameters.coatF0) * coatState.presence;
+    }
+
+    float3 fuzzFr = OpenPBRFuzzSheenBRDF(fuzzState, light.lightToFrag);
+    float3 baseAttenuation = fuzzLayerScale.xxx * baseLayerScale;
+    float3 BRDF = (baseEvaluation.diffuse + baseEvaluation.specular) * baseAttenuation + coatFr * fuzzLayerScale.xxx + fuzzFr;
     
     return BRDF * light.lightColor.rgb * light.intensity * light.attenuation * light.spotAttenuation * normDotLight;
 }
@@ -146,14 +195,213 @@ uint3 ComputeClusterID(float2 pixelCoords, float viewDepth,
     return uint3(tile.x, tile.y, sliceZ);
 }
 
+float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex) {
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    float3 lighting = float3(0.0, 0.0, 0.0);
+
+#if defined(PSO_IMAGE_BASED_LIGHTING)
+    float3 unusedDiffuseIBL = 0.0f.xxx;
+    float3 unusedSpecularIBL = 0.0f.xxx;
+    evaluateIBL(lighting,
+                unusedDiffuseIBL,
+                unusedSpecularIBL,
+                fragmentInfo.normalWS,
+                fragmentInfo.normalWS,
+                fragmentInfo.albedo,
+                fragmentInfo.diffuseColor,
+                fragmentInfo.diffuseAmbientOcclusion,
+                fragmentInfo.baseDiffuseRoughness,
+                fragmentInfo.dielectricSpecularF0,
+                fragmentInfo.dielectricSpecularWeight,
+                fragmentInfo.weightedSpecularIor,
+                fragmentInfo.metalAverageFresnel,
+                fragmentInfo.metalSpecularF0,
+                fragmentInfo.metalSpecularWeight,
+                fragmentInfo.reflectedWS,
+                fragmentInfo.roughness,
+                fragmentInfo.perceptualRoughness,
+                fragmentInfo.specularAlpha,
+                fragmentInfo.coatColor,
+                fragmentInfo.coatF0,
+                fragmentInfo.coatWeight,
+                fragmentInfo.coatIor,
+                fragmentInfo.coatDarkening,
+                fragmentInfo.coatRoughness,
+                fragmentInfo.coatPerceptualRoughness,
+                fragmentInfo.fuzzColor,
+                fragmentInfo.fuzzWeight,
+                fragmentInfo.fuzzRoughness,
+                fragmentInfo.NdotV,
+                activeEnvironmentIndex,
+                environmentBufferDescriptorIndex);
+#endif
+
+    if (enablePunctualLights)
+    {
+        LightingParameters lightingParameters;
+        lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
+        lightingParameters.viewDir = fragmentInfo.viewWS;
+        lightingParameters.normal = fragmentInfo.normalWS;
+        lightingParameters.weightedBaseColor = fragmentInfo.albedo;
+        lightingParameters.diffuseColor = fragmentInfo.diffuseColor;
+        lightingParameters.baseDiffuseRoughness = fragmentInfo.baseDiffuseRoughness;
+        lightingParameters.specularAlpha = fragmentInfo.specularAlpha;
+        lightingParameters.weightedSpecularIor = fragmentInfo.weightedSpecularIor;
+        lightingParameters.dielectricSpecularWeight = fragmentInfo.dielectricSpecularWeight;
+        lightingParameters.dielectricSpecularF0 = fragmentInfo.dielectricSpecularF0;
+        lightingParameters.metalSpecularWeight = fragmentInfo.metalSpecularWeight;
+        lightingParameters.metalAverageFresnel = fragmentInfo.metalAverageFresnel;
+        lightingParameters.metalSpecularF0 = fragmentInfo.metalSpecularF0;
+        lightingParameters.metallic = fragmentInfo.metallic;
+        lightingParameters.roughness = fragmentInfo.roughness;
+        lightingParameters.F0 = fragmentInfo.F0;
+        lightingParameters.coatF0 = fragmentInfo.coatF0;
+        lightingParameters.coatWeight = fragmentInfo.coatWeight;
+        lightingParameters.coatColor = fragmentInfo.coatColor;
+        lightingParameters.coatIor = fragmentInfo.coatIor;
+        lightingParameters.coatDarkening = fragmentInfo.coatDarkening;
+        lightingParameters.coatRoughness = fragmentInfo.coatRoughness;
+        lightingParameters.fuzzColor = fragmentInfo.fuzzColor;
+        lightingParameters.fuzzWeight = fragmentInfo.fuzzWeight;
+        lightingParameters.fuzzRoughness = fragmentInfo.fuzzRoughness;
+
+        StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
+        StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
+        StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::DirectionalLightCascadeBuffer)];
+        StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+
+        StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ActiveLightIndices)];
+        StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
+
+#if defined(PSO_CLUSTERED_LIGHTING)
+        StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ClusterBuffer)];
+        StructuredBuffer<LightPage> lightPagesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesBuffer)];
+
+        float3 clusterID = ComputeClusterID(fragmentInfo.pixelCoords, fragmentInfo.fragPosViewSpace.z, perFrameBuffer, cameraBuffer[perFrameBuffer.mainCameraIndex]);
+        uint clusterIndex = clusterID.x +
+                            clusterID.y * perFrameBuffer.lightClusterGridSizeX +
+                            clusterID.z * perFrameBuffer.lightClusterGridSizeX * perFrameBuffer.lightClusterGridSizeY;
+
+        Cluster activeCluster = clusterBuffer[clusterIndex];
+
+        uint remainingLights = activeCluster.numLights;
+        uint pageIndex = activeCluster.ptrFirstPage;
+        uint maxPagesToVisit = max(1u, (remainingLights + LIGHTS_PER_PAGE - 1u) / LIGHTS_PER_PAGE);
+        uint pagesVisited = 0;
+
+        while (pageIndex != LIGHT_PAGE_ADDRESS_NULL && remainingLights > 0 && pagesVisited < maxPagesToVisit) {
+            LightPage page = lightPagesBuffer[pageIndex];
+            uint lightsInPage = min(page.numLightsInPage, LIGHTS_PER_PAGE);
+            lightsInPage = min(lightsInPage, remainingLights);
+            if (lightsInPage == 0) {
+                break;
+            }
+
+            for (uint i = 0; i < lightsInPage; i++) {
+                unsigned int index = activeLightIndices[page.lightIndices[i]];
+#else
+        for (uint i = 0; i < perFrameBuffer.numLights; i++)
+        {
+            unsigned int index = activeLightIndices[i];
+#endif
+            LightInfo light = lights[index];
+            float shadow = 0.0;
+            if (enableShadows)
+            {
+                if (light.shadowViewInfoIndex != -1)
+                {
+                    switch (light.type)
+                    {
+                    case 0:{
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
+                            shadow = calculatePointShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
+                            break;
+                        }
+                    case 1:{
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
+                            uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
+                            Camera camera = cameraBuffer[spotShadowCameraIndex];
+                            shadow = calculateSpotShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
+                            break;
+                        }
+                    case 2:{
+                            shadow = calculateDirectionalVSMShadow(
+                                fragmentInfo.pixelCoords,
+                                fragmentInfo.fragPosWorldSpace,
+                                fragmentInfo.fragPosViewSpace,
+                                fragmentInfo.normalWS,
+                                light,
+                                perFrameBuffer.numDirectionalClipmaps,
+                                perFrameBuffer.shadowCascadeSplits,
+                                directionalShadowViewInfoIndexBuffer,
+                                cameraBuffer);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, fragmentInfo.fragPosWorldSpace.xyz);
+            if (light.type != 2 && lightFragmentInfo.distance > light.maxRange)
+            {
+                continue;
+            }
+            lighting += (1.0 - shadow) * calculateLightContributionPBR(lightFragmentInfo, lightingParameters);
+        }
+#if defined(PSO_CLUSTERED_LIGHTING)
+            remainingLights -= lightsInPage;
+            pageIndex = page.ptrNextPage;
+            pagesVisited++;
+        }
+#endif
+    }
+
+    const OpenPBRBaseLayerState emissiveBaseState = MakeOpenPBRBaseLayerState(
+        fragmentInfo.albedo,
+        fragmentInfo.diffuseColor,
+        fragmentInfo.baseDiffuseRoughness,
+        fragmentInfo.specularAlpha,
+        fragmentInfo.weightedSpecularIor,
+        fragmentInfo.dielectricSpecularF0,
+        fragmentInfo.dielectricSpecularWeight,
+        fragmentInfo.metalAverageFresnel,
+        fragmentInfo.metalSpecularF0,
+        fragmentInfo.metalSpecularWeight);
+    const OpenPBRCoatLayerState emissiveCoatState = MakeOpenPBRCoatLayerState(
+        emissiveBaseState,
+        fragmentInfo.coatColor,
+        fragmentInfo.coatWeight,
+        fragmentInfo.coatIor,
+        fragmentInfo.coatRoughness,
+        fragmentInfo.coatDarkening);
+    return lighting + EvaluateOpenPBREmissive(
+        fragmentInfo.emissive,
+        emissiveCoatState,
+        fragmentInfo.fuzzWeight,
+        fragmentInfo.fuzzRoughness,
+        fragmentInfo.NdotV);
+}
+
 LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex, bool isFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float3 lighting = float3(0.0, 0.0, 0.0);
+
+#if defined(PSO_IMAGE_BASED_LIGHTING)
     float3 debugDiffuse = float3(0, 0, 0);
     float3 debugSpecular = float3(0, 0, 0);
+#endif
 
     LightingOutput output;
+
+#if defined(PSO_CLUSTERED_LIGHTING)
     output.shadowDebugPayload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
+#endif
 
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     evaluateIBL(lighting,
@@ -161,20 +409,40 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                 debugSpecular,
                 fragmentInfo.normalWS, 
                 fragmentInfo.normalWS, 
+                fragmentInfo.albedo,
                 fragmentInfo.diffuseColor, 
                 fragmentInfo.diffuseAmbientOcclusion, 
-                fragmentInfo.F0, 
+                fragmentInfo.baseDiffuseRoughness,
+                fragmentInfo.dielectricSpecularF0,
+                fragmentInfo.dielectricSpecularWeight,
+                fragmentInfo.weightedSpecularIor,
+                fragmentInfo.metalAverageFresnel,
+                fragmentInfo.metalSpecularF0,
+                fragmentInfo.metalSpecularWeight,
                 fragmentInfo.reflectedWS, 
                 fragmentInfo.roughness,
                 fragmentInfo.perceptualRoughness,
+                fragmentInfo.specularAlpha,
+                fragmentInfo.coatColor,
+                fragmentInfo.coatF0,
+                fragmentInfo.coatWeight,
+                fragmentInfo.coatIor,
+                fragmentInfo.coatDarkening,
+                fragmentInfo.coatRoughness,
+                fragmentInfo.coatPerceptualRoughness,
+                fragmentInfo.fuzzColor,
+                fragmentInfo.fuzzWeight,
+                fragmentInfo.fuzzRoughness,
                 fragmentInfo.NdotV,
                 activeEnvironmentIndex, 
                 environmentBufferDescriptorIndex);
 #endif // IMAGE_BASED_LIGHTING
 
     // Direct lighting
+#if defined(PSO_CLUSTERED_LIGHTING)
     uint clusterIndex = 0; // Which light cluster this fragment belongs to
     uint clusterLightCount = 0; // Number of lights in the cluster
+#endif
         
     if (enablePunctualLights)
     {
@@ -182,10 +450,28 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
         lightingParameters.viewDir = fragmentInfo.viewWS;
         lightingParameters.normal = fragmentInfo.normalWS;
+        lightingParameters.weightedBaseColor = fragmentInfo.albedo;
         lightingParameters.diffuseColor = fragmentInfo.diffuseColor;
+        lightingParameters.baseDiffuseRoughness = fragmentInfo.baseDiffuseRoughness;
+        lightingParameters.specularAlpha = fragmentInfo.specularAlpha;
+        lightingParameters.weightedSpecularIor = fragmentInfo.weightedSpecularIor;
+        lightingParameters.dielectricSpecularWeight = fragmentInfo.dielectricSpecularWeight;
+        lightingParameters.dielectricSpecularF0 = fragmentInfo.dielectricSpecularF0;
+        lightingParameters.metalSpecularWeight = fragmentInfo.metalSpecularWeight;
+        lightingParameters.metalAverageFresnel = fragmentInfo.metalAverageFresnel;
+        lightingParameters.metalSpecularF0 = fragmentInfo.metalSpecularF0;
         lightingParameters.metallic = fragmentInfo.metallic;
         lightingParameters.roughness = fragmentInfo.roughness;
         lightingParameters.F0 = fragmentInfo.F0;
+        lightingParameters.coatF0 = fragmentInfo.coatF0;
+        lightingParameters.coatWeight = fragmentInfo.coatWeight;
+        lightingParameters.coatColor = fragmentInfo.coatColor;
+        lightingParameters.coatIor = fragmentInfo.coatIor;
+        lightingParameters.coatDarkening = fragmentInfo.coatDarkening;
+        lightingParameters.coatRoughness = fragmentInfo.coatRoughness;
+        lightingParameters.fuzzColor = fragmentInfo.fuzzColor;
+        lightingParameters.fuzzWeight = fragmentInfo.fuzzWeight;
+        lightingParameters.fuzzRoughness = fragmentInfo.fuzzRoughness;
         
         // TODO: Parallax shadows will require a forward pass
         //parallaxShadowParameters parallaxShadowParams;
@@ -273,18 +559,18 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                             break;
                         }
                     case 2:{// Directional light
-                            CLodVirtualShadowDebugInfo shadowDebugInfo;
-                            shadow = calculateDirectionalVSMShadowDetailed(
-                                fragmentInfo.pixelCoords,
-                                fragmentInfo.fragPosWorldSpace,
-                                fragmentInfo.fragPosViewSpace,
-                                fragmentInfo.normalWS,
-                                light,
-                                perFrameBuffer.numDirectionalClipmaps,
-                                perFrameBuffer.shadowCascadeSplits,
-                                directionalShadowViewInfoIndexBuffer,
-                                cameraBuffer,
-                                shadowDebugInfo);
+                            CLodVirtualShadowDebugInfo shadowDebugInfo = CLodVirtualShadowInitDebugInfo(0xFFFFFFFFu);
+	                         shadow = calculateDirectionalVSMShadowDetailed(
+	                             fragmentInfo.pixelCoords,
+	                             fragmentInfo.fragPosWorldSpace,
+	                             fragmentInfo.fragPosViewSpace,
+	                             fragmentInfo.normalWS,
+	                             light,
+	                             perFrameBuffer.numDirectionalClipmaps,
+	                             perFrameBuffer.shadowCascadeSplits,
+	                             directionalShadowViewInfoIndexBuffer,
+	                             cameraBuffer,
+	                             shadowDebugInfo);
 
                             if (output.shadowDebugPayload.x == DEBUG_SENTINEL)
                             {
@@ -318,7 +604,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             // {
             //     continue; // skip light if shadowed
             // }
-            if (lightFragmentInfo.distance > light.maxRange && light.type != 2)
+            if (light.type != 2 && lightFragmentInfo.distance > light.maxRange)
             {
                 continue;
             }
@@ -336,7 +622,30 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif
     }
 
-    lighting += fragmentInfo.emissive;
+    const OpenPBRBaseLayerState emissiveBaseState = MakeOpenPBRBaseLayerState(
+        fragmentInfo.albedo,
+        fragmentInfo.diffuseColor,
+        fragmentInfo.baseDiffuseRoughness,
+        fragmentInfo.specularAlpha,
+        fragmentInfo.weightedSpecularIor,
+        fragmentInfo.dielectricSpecularF0,
+        fragmentInfo.dielectricSpecularWeight,
+        fragmentInfo.metalAverageFresnel,
+        fragmentInfo.metalSpecularF0,
+        fragmentInfo.metalSpecularWeight);
+    const OpenPBRCoatLayerState emissiveCoatState = MakeOpenPBRCoatLayerState(
+        emissiveBaseState,
+        fragmentInfo.coatColor,
+        fragmentInfo.coatWeight,
+        fragmentInfo.coatIor,
+        fragmentInfo.coatRoughness,
+        fragmentInfo.coatDarkening);
+    lighting += EvaluateOpenPBREmissive(
+        fragmentInfo.emissive,
+        emissiveCoatState,
+        fragmentInfo.fuzzWeight,
+        fragmentInfo.fuzzRoughness,
+        fragmentInfo.NdotV);
     
     output.lighting = lighting;
     

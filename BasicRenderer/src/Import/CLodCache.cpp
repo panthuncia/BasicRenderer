@@ -23,6 +23,8 @@
 
 #include "Utilities/CachePathUtilities.h"
 
+#include "../shaders/Common/defines.h"
+
 namespace CLodCache {
 
 	namespace {
@@ -531,7 +533,7 @@ namespace CLodCache {
 	}
 
 	namespace {
-		bool SaveImpl(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
+		bool SaveImpl(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload, ClusterLODPrebuiltData* outSavedPrebuiltData)
 		{
 			const std::wstring fileName = BuildCacheFileName(key, buildConfigHash);
 			const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
@@ -591,7 +593,17 @@ namespace CLodCache {
 					.Set(groupIndex);
 			}
 
-			return stage->GetRootLayer()->Save();
+			if (!stage->GetRootLayer()->Save()) {
+				return false;
+			}
+
+			if (outSavedPrebuiltData != nullptr) {
+				*outSavedPrebuiltData = prebuiltData;
+				outSavedPrebuiltData->groupDiskLocators = std::move(groupDiskLocators);
+				outSavedPrebuiltData->cacheSource = std::move(cacheSource);
+			}
+
+			return true;
 		}
 	}
 
@@ -599,7 +611,7 @@ namespace CLodCache {
 	{
 		size_t seed = 0;
 		boost::hash_combine(seed, static_cast<uint32_t>(kSchemaVersion));
-		boost::hash_combine(seed, static_cast<uint32_t>(64)); // MS_MESHLET_SIZE expectation
+		boost::hash_combine(seed, static_cast<uint32_t>(MS_MESHLET_SIZE));
 		boost::hash_combine(seed, static_cast<uint32_t>(32)); // target bucket clusters
 		boost::hash_combine(seed, static_cast<uint32_t>(4));  // max group children
 		boost::hash_combine(seed, static_cast<uint32_t>(4));  // traversal node fanout
@@ -712,12 +724,17 @@ namespace CLodCache {
 			return false;
 		}
 		ClusterLODCacheBuildPayload payload{};
-		return SaveImpl(key, data.buildConfigHash, data.prebuiltData, payload);
+		return SaveImpl(key, data.buildConfigHash, data.prebuiltData, payload, nullptr);
 	}
 
 	bool Save(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
 	{
-		return SaveImpl(key, buildConfigHash, prebuiltData, payload);
+		return SaveImpl(key, buildConfigHash, prebuiltData, payload, nullptr);
+	}
+
+	bool Save(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload, ClusterLODPrebuiltData* outSavedPrebuiltData)
+	{
+		return SaveImpl(key, buildConfigHash, prebuiltData, payload, outSavedPrebuiltData);
 	}
 
 	bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload)

@@ -247,6 +247,7 @@ size_t clodBuildEx(clodConfig config, clodMesh mesh, OutputEx output)
 // Brian Karis. Nanite: A Deep Dive. 2021
 #include <float.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <algorithm>
@@ -791,6 +792,28 @@ clodConfig clodDefaultConfigRT(size_t max_triangles)
 size_t clodBuildEx(clodConfig config, clodMesh mesh, void* output_context, clodOutputEx output_callback, const clodBuildParallelConfig* parallel_config)
 {
 	using namespace clod;
+
+	const bool missingIndices = mesh.index_count > 0 && mesh.indices == NULL;
+	const bool missingPositions = mesh.vertex_count > 0 && mesh.vertex_positions == NULL;
+	const bool missingAttributes = mesh.attribute_count > 0 && mesh.vertex_attributes == NULL;
+	const bool emptyGeometry = mesh.index_count == 0 || mesh.vertex_count == 0;
+	const bool invalidPositionStride = mesh.vertex_positions_stride < sizeof(float) * 3;
+	const bool invalidAttributeStride = mesh.attribute_count > 0 && mesh.vertex_attributes_stride < mesh.attribute_count * sizeof(float);
+
+	if (emptyGeometry || missingIndices || missingPositions || missingAttributes || invalidPositionStride || invalidAttributeStride)
+	{
+		fprintf(stderr,
+		    "clusterlod: skipping mesh with invalid or empty geometry (index_count=%zu, vertex_count=%zu, indices=%p, positions=%p, position_stride=%zu, attribute_count=%zu, attributes=%p, attribute_stride=%zu)\n",
+		    mesh.index_count,
+		    mesh.vertex_count,
+		    static_cast<const void*>(mesh.indices),
+		    static_cast<const void*>(mesh.vertex_positions),
+		    mesh.vertex_positions_stride,
+		    mesh.attribute_count,
+		    static_cast<const void*>(mesh.vertex_attributes),
+		    mesh.vertex_attributes_stride);
+		return 0;
+	}
 
 	assert(mesh.vertex_attributes_stride % sizeof(float) == 0);
 	assert(mesh.attribute_count * sizeof(float) <= mesh.vertex_attributes_stride);

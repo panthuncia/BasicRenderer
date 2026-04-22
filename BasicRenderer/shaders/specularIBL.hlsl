@@ -49,7 +49,31 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
     FragmentInfo fragmentInfo;
     GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS, positionWS, enableGTAO, fragmentInfo);
     
-    float3 specularIBL = evaluateSpecularIBLFromSSR(reflectionColor.rgb, fragmentInfo.normalWS, fragmentInfo.normalWS, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.F0, fragmentInfo.roughness, fragmentInfo.perceptualRoughness, fragmentInfo.NdotV);
+    float3 specularIBL = evaluateSpecularIBLFromSSR(
+        reflectionColor.rgb,
+        fragmentInfo.normalWS,
+        fragmentInfo.normalWS,
+        fragmentInfo.diffuseAmbientOcclusion,
+        fragmentInfo.albedo,
+        fragmentInfo.dielectricSpecularF0,
+        fragmentInfo.dielectricSpecularWeight,
+        fragmentInfo.weightedSpecularIor,
+        fragmentInfo.metalAverageFresnel,
+        fragmentInfo.metalSpecularF0,
+        fragmentInfo.metalSpecularWeight,
+        fragmentInfo.roughness,
+        fragmentInfo.perceptualRoughness,
+        fragmentInfo.specularAlpha,
+        fragmentInfo.coatColor,
+        fragmentInfo.coatF0,
+        fragmentInfo.coatWeight,
+        fragmentInfo.coatIor,
+        fragmentInfo.coatDarkening,
+        fragmentInfo.coatRoughness,
+        fragmentInfo.fuzzColor,
+        fragmentInfo.fuzzWeight,
+        fragmentInfo.fuzzRoughness,
+        fragmentInfo.NdotV);
 
     if (perFrameBuffer.outputType == OUTPUT_SPECULAR_IBL) {
         RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];

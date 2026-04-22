@@ -18,3 +18,4 @@ models/
 textures/
 /ThirdParty/
 cmake-build-*
+openpbr-bsdf

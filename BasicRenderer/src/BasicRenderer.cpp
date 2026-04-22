@@ -332,8 +332,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto carScene = LoadModel("models/porche.glb");
     //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
     //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
-    auto sphereScene = LoadModel("models/sphere.glb");
-
+    //auto sphereScene = LoadModel("models/sphere.glb");
 
 	//auto mountainScene = LoadModel("models/terrain.glb");
 	//mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
@@ -357,11 +356,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//auto island = LoadModel("models/island/usd/elements/isMountainB/instance.usda");
 
-	auto quad = LoadModel("models/quad.usdz");
-
+	//auto quad = LoadModel("models/quad.usdz");
+	
 	//auto cubes = LoadModel("models/cubes/suspicious_cubes.usda");
 
+    //auto barbershop = LoadModel("models/barbershop.glb");
+
+	//auto subway = LoadModel("models/subway.glb");
+
     renderer.SetCurrentScene(baseScene);
+
+	//renderer.GetCurrentScene()->AppendScene(subway->Clone());
+
+	//renderer.GetCurrentScene()->AppendScene(barbershop->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(cubes->Clone());
     
@@ -376,8 +383,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//renderer.GetCurrentScene()->AppendScene(zorah->Clone());
 
     //mountainScene = LoadModel("models/terrain.glb");
-    //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-    //mountainScene->GetRoot().set<Components::Position>({ 0.0, -10.0, 0.0 });
+ //   mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+ //   mountainScene->GetRoot().set<Components::Position>({ 0.0, -10.0, 0.0 });
 	//renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
@@ -388,7 +395,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.GetCurrentScene()->AppendScene(bistro->Clone());
 
-	sphereScene->GetRoot().set<Components::Position>({ 0.0, 2.0, 0.0 });
+	//sphereScene->GetRoot().set<Components::Position>({ 0.0, 2.0, 0.0 });
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 
     //for (int i = 0; i < 5; i++) {

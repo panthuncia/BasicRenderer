@@ -93,10 +93,13 @@ public:
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,
-            Builtin::CLod::MeshMetadata)
+            Builtin::CLod::MeshMetadata,
+            Builtin::PerMaterialOpenPBRDataBuffer)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
+                Builtin::GBuffer::Coat,
                 Builtin::GBuffer::Emissive,
+                Builtin::GBuffer::Fuzz,
                 Builtin::GBuffer::MetallicRoughness,
                 Builtin::GBuffer::MotionVectors,
                 Builtin::DebugVisualization)

@@ -134,8 +134,10 @@ struct PrePassPSOutput
     float2 motionVector;
     float linearDepth;
     float4 albedo;
-    float2 metallicRoughness;
+    float4 coat;
+    float4 metallicRoughness;
     float4 emissive;
+    float4 fuzz;
 };
 
 PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
@@ -153,7 +155,7 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     //float3 outNorm = SignedOctEncode(fragmentInfo.normalWS);
     
     PrePassPSOutput output;
-    output.normal = float4(fragmentInfo.normalWS, 1.0);
+    output.normal = float4(fragmentInfo.normalWS, (float)fragmentInfo.openPBRMaterialDataIndex);
     output.linearDepth = -input.positionViewSpace.z;
     
     // Motion vector
@@ -163,8 +165,10 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     
 #if defined(PSO_DEFERRED)
     output.albedo = float4(fragmentInfo.albedo.xyz, fragmentInfo.ambientOcclusion);
-    output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);
+    output.coat = float4(fragmentInfo.coatColor, fragmentInfo.coatWeight);
+    output.metallicRoughness = float4(fragmentInfo.metallic, fragmentInfo.roughness, fragmentInfo.coatRoughness, fragmentInfo.fuzzWeight);
     output.emissive = float4(fragmentInfo.emissive.xyz, 0.0);
+    output.fuzz = float4(fragmentInfo.fuzzColor, fragmentInfo.fuzzRoughness);
 #endif
     return output;
 }

@@ -736,6 +736,102 @@ PRIVATE
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )
 
+if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
+    target_link_directories(${PROJECT_NAME} PRIVATE
+        "${CMAKE_BINARY_DIR}/External/lib"
+    )
+
+    set(_basicrenderer_stage_reshape_debug_backend OFF)
+    set(_basicrenderer_stage_reshape_waterfall_backend OFF)
+    set(_basicrenderer_stage_reshape_device_commands_backend OFF)
+    set(_basicrenderer_stage_reshape_loop_backend OFF)
+    set(_basicrenderer_stage_reshape_export_stability_backend OFF)
+
+    set(_basicrenderer_reshape_plugins)
+    set(_basicrenderer_reshape_plugin_copy_commands)
+
+    function(br_add_reshape_plugin plugin_target plugin_manifest)
+        if(TARGET ${plugin_target})
+            get_filename_component(plugin_manifest_name "${plugin_manifest}" NAME)
+            list(APPEND _basicrenderer_reshape_plugins ${plugin_target})
+            list(APPEND _basicrenderer_reshape_plugin_copy_commands
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:${plugin_target}>"
+                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/$<TARGET_FILE_NAME:${plugin_target}>"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${plugin_manifest}"
+                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/${plugin_manifest_name}"
+            )
+            set(_basicrenderer_reshape_plugins "${_basicrenderer_reshape_plugins}" PARENT_SCOPE)
+            set(_basicrenderer_reshape_plugin_copy_commands "${_basicrenderer_reshape_plugin_copy_commands}" PARENT_SCOPE)
+        endif()
+    endfunction()
+
+    br_add_reshape_plugin(GRS.Features.Descriptor.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Descriptor/Descriptor.xml")
+    br_add_reshape_plugin(GRS.Features.ResourceBounds.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/ResourceBounds/ResourceBounds.xml")
+    br_add_reshape_plugin(GRS.Features.Initialization.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Initialization/Initialization.xml")
+    br_add_reshape_plugin(GRS.Features.Concurrency.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Concurrency/Concurrency.xml")
+    if(_basicrenderer_stage_reshape_loop_backend)
+        br_add_reshape_plugin(GRS.Features.Loop.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Loop/Loop.xml")
+    endif()
+    if(_basicrenderer_stage_reshape_debug_backend)
+        br_add_reshape_plugin(GRS.Features.Debug.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Debug/Debug.xml")
+    endif()
+    if(_basicrenderer_stage_reshape_waterfall_backend)
+        br_add_reshape_plugin(GRS.Features.Waterfall.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/Waterfall/Waterfall.xml")
+    endif()
+    if(_basicrenderer_stage_reshape_device_commands_backend)
+        br_add_reshape_plugin(GRS.Features.DeviceCommands.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/DeviceCommands/DeviceCommands.xml")
+    endif()
+    if(_basicrenderer_stage_reshape_export_stability_backend)
+        br_add_reshape_plugin(GRS.Features.ExportStability.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/ExportStability/ExportStability.xml")
+    endif()
+    br_add_reshape_plugin(GRS.Features.ExportIndices.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/ExportIndices/ExportIndices.xml")
+
+    add_dependencies(${PROJECT_NAME}
+        GRS.Backends.DX12.Layer
+        ${_basicrenderer_reshape_plugins}
+    )
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxil.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxil.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxcompiler.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxcompiler.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxilconv.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxilconv.dll"
+        ${_basicrenderer_reshape_plugin_copy_commands}
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Debug.Backend.dll"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Debug.xml"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Waterfall.Backend.dll"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Waterfall.xml"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.DeviceCommands.Backend.dll"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/DeviceCommands.xml"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Loop.Backend.dll"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Loop.xml"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.ExportStability.Backend.dll"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/ExportStability.xml"
+    )
+endif()
+
 target_link_libraries(ShaderPreprocessTests
 PRIVATE
     unofficial::tree-sitter::tree-sitter

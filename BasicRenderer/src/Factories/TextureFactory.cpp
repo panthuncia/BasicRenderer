@@ -471,11 +471,139 @@ std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
     return pb;
 }
 
+bool TextureFactory::MipmappingPass::TryGetValueType(const PixelBuffer& tex, MipmapValueType& outValueType)
+{
+    const auto& desc = tex.GetDescription();
+    const rhi::Format format = desc.uavFormat != rhi::Format::Unknown
+        ? desc.uavFormat
+        : rhi::helpers::stripSrgb(desc.format);
+
+    switch (format) {
+    case rhi::Format::R8_UNorm:
+    case rhi::Format::R8_SNorm:
+    case rhi::Format::R16_Float:
+    case rhi::Format::R16_UNorm:
+    case rhi::Format::R16_SNorm:
+    case rhi::Format::R32_Float:
+        outValueType = MipmapValueType::Float1;
+        return true;
+
+    case rhi::Format::R8G8_UNorm:
+    case rhi::Format::R8G8_SNorm:
+    case rhi::Format::R16G16_Float:
+    case rhi::Format::R16G16_UNorm:
+    case rhi::Format::R16G16_SNorm:
+    case rhi::Format::R32G32_Float:
+        outValueType = MipmapValueType::Float2;
+        return true;
+
+    case rhi::Format::R8G8B8A8_UNorm:
+    case rhi::Format::R8G8B8A8_SNorm:
+    case rhi::Format::R16G16B16A16_Float:
+    case rhi::Format::R16G16B16A16_UNorm:
+    case rhi::Format::R16G16B16A16_SNorm:
+    case rhi::Format::R32G32B32A32_Float:
+        outValueType = MipmapValueType::Float4;
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+PipelineState TextureFactory::MipmappingPass::CreatePipeline(MipmapValueType valueType, bool isArray) const
+{
+    auto& psoManager = PSOManager::GetInstance();
+    auto& layout = psoManager.GetComputeRootSignature();
+
+    std::vector<DxcDefine> defines;
+    if (valueType == MipmapValueType::Float1) {
+        defines.push_back(DxcDefine{ L"MIPMAP_FLOAT1", L"1" });
+    }
+    else if (valueType == MipmapValueType::Float2) {
+        defines.push_back(DxcDefine{ L"MIPMAP_FLOAT2", L"1" });
+    }
+
+    if (isArray) {
+        defines.push_back(DxcDefine{ L"MIPMAP_ARRAY", L"1" });
+    }
+
+    const char* debugName = nullptr;
+    switch (valueType) {
+    case MipmapValueType::Float1:
+        debugName = isArray ? "MipmapSPD[Float1Array]" : "MipmapSPD[Float12D]";
+        break;
+    case MipmapValueType::Float2:
+        debugName = isArray ? "MipmapSPD[Float2Array]" : "MipmapSPD[Float22D]";
+        break;
+    case MipmapValueType::Float4:
+        debugName = isArray ? "MipmapSPD[Float4Array]" : "MipmapSPD[Float42D]";
+        break;
+    }
+
+    return psoManager.MakeComputePipeline(
+        layout.GetHandle(),
+        L"shaders/Utilities/mipmapping.hlsl",
+        L"MipmapCSMain",
+        std::move(defines),
+        debugName);
+}
+
+PipelineState& TextureFactory::MipmappingPass::GetOrCreatePipeline(MipmapValueType valueType, bool isArray)
+{
+    switch (valueType) {
+    case MipmapValueType::Float1:
+        if (isArray) {
+            if (!m_hasPsoFloat1_Array) {
+                m_psoFloat1_Array = CreatePipeline(valueType, true);
+                m_hasPsoFloat1_Array = true;
+            }
+            return m_psoFloat1_Array;
+        }
+        if (!m_hasPsoFloat1_2D) {
+            m_psoFloat1_2D = CreatePipeline(valueType, false);
+            m_hasPsoFloat1_2D = true;
+        }
+        return m_psoFloat1_2D;
+
+    case MipmapValueType::Float2:
+        if (isArray) {
+            if (!m_hasPsoFloat2_Array) {
+                m_psoFloat2_Array = CreatePipeline(valueType, true);
+                m_hasPsoFloat2_Array = true;
+            }
+            return m_psoFloat2_Array;
+        }
+        if (!m_hasPsoFloat2_2D) {
+            m_psoFloat2_2D = CreatePipeline(valueType, false);
+            m_hasPsoFloat2_2D = true;
+        }
+        return m_psoFloat2_2D;
+
+    case MipmapValueType::Float4:
+        if (isArray) {
+            if (!m_hasPsoFloat4_Array) {
+                m_psoFloat4_Array = CreatePipeline(valueType, true);
+                m_hasPsoFloat4_Array = true;
+            }
+            return m_psoFloat4_Array;
+        }
+        if (!m_hasPsoFloat4_2D) {
+            m_psoFloat4_2D = CreatePipeline(valueType, false);
+            m_hasPsoFloat4_2D = true;
+        }
+        return m_psoFloat4_2D;
+    }
+
+    throw std::runtime_error("MipmappingPass: unsupported pipeline variant");
+}
+
 void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb) {
     if (!tex) return;
 
     if (tex->IsBlockCompressed()) {
         spdlog::warn("MipmappingPass: skipping block compressed texture");
+        return;
     }
 
     const uint32_t mipLevels = tex->GetMipLevels();
@@ -499,8 +627,14 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
     j.sliceCount = (std::max)(1u, slices);
     j.isArray = (j.sliceCount > 1);
 
-    // Decide scalar vs vector (keep it simple: 1-channel => scalar, else vector)
-    j.isScalar = (tex->GetChannelCount() == 1);
+    if (!TryGetValueType(*tex, j.valueType)) {
+        const auto& desc = tex->GetDescription();
+        const rhi::Format format = desc.uavFormat != rhi::Format::Unknown
+            ? desc.uavFormat
+            : rhi::helpers::stripSrgb(desc.format);
+        spdlog::warn("MipmappingPass: unsupported UAV format {} for GPU mip generation", static_cast<uint32_t>(format));
+        return;
+    }
 
     // SPD setup
     unsigned int workGroupOffset[2]{};
@@ -588,7 +722,7 @@ PassReturn TextureFactory::MipmappingPass::Execute(PassExecutionContext& executi
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-    commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+    commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
 
     const uint32_t constantsSrvIndex = m_pMipConstants->GetSRVInfo(0).slot.index;
 
@@ -602,16 +736,9 @@ PassReturn TextureFactory::MipmappingPass::Execute(PassExecutionContext& executi
             ? j.texture->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index
             : j.texture->GetSRVInfo(0).slot.index;
 
-        // Pick pipeline
-        PipelineState* pso = nullptr;
-        if (j.isScalar) {
-            pso = j.isArray ? &m_psoScalarArray : &m_psoScalar2D;
-        }
-        else {
-            pso = j.isArray ? &m_psoVecArray : &m_psoVec2D;
-        }
+        PipelineState& pso = GetOrCreatePipeline(j.valueType, j.isArray);
 
-        commandList.BindPipeline(pso->GetAPIPipelineState().GetHandle());
+        commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
         unsigned int root[NumMiscUintRootConstants]{};
         root[UintRootConstant0] = j.counter->GetUAVShaderVisibleInfo(0).slot.index;

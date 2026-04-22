@@ -12,11 +12,12 @@ enum MaterialCompileFlags : uint64_t {
 	MaterialCompileDoubleSided = 1 << 2,
 	MaterialCompileBaseColorTexture = 1 << 3,
 	MaterialCompileNormalMap = 1 << 4,
-	MaterialCompilePBRMaps = 1 << 5,
-	MaterialCompileAOTexture = 1 << 6,
-	MaterialCompileEmissiveTexture = 1 << 7,
-	MaterialCompileParallax = 1 << 8,
-	MaterialCompileGeometricDisplacement = 1 << 9,
+	MaterialCompileMetallicTexture = 1 << 5,
+	MaterialCompileRoughnessTexture = 1 << 6,
+	MaterialCompileAOTexture = 1 << 7,
+	MaterialCompileEmissiveTexture = 1 << 8,
+	MaterialCompileParallax = 1 << 9,
+	MaterialCompileGeometricDisplacement = 1 << 10,
 };
 
 // |= operator for MaterialCompileFlags

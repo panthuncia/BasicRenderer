@@ -1,5 +1,5 @@
 // Page-job VSM rasterization: three-node work-graph pipeline.
-// Build → Expand → RasterPage.
+// Build -> Expand -> RasterPage.
 //
 // Extracted into its own compilation unit so that groupshared memory is
 // NOT charged with the 16+ KB batch accumulators from workGraphCulling.hlsl.
@@ -16,9 +16,7 @@
 #include "include/clodPageJobRasterShared.hlsli"
 #include "include/visibleClusterPacking.hlsli"
 
-// ---------------------------------------------------------------------------
 // Telemetry
-// ---------------------------------------------------------------------------
 
 static const uint PJ_COUNTER_BUILD_CLUSTERS_PROCESSED = 68;
 static const uint PJ_COUNTER_BUILD_TILES_EMITTED      = 69;
@@ -34,9 +32,7 @@ void PJTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
-// ===========================================================================
-// Node 1: PageJobBuild — emits tile-level expand records
-// ===========================================================================
+// Node 1: PageJobBuild: emits tile-level expand records
 //
 // Groupshared for Build only: screen positions + tile state scalars.
 // Total: 128 * 8 bytes + ~40 bytes = ~1064 bytes.
@@ -219,9 +215,7 @@ void WG_PageJobBuild(
     pjOut.OutputComplete();
 }
 
-// ===========================================================================
-// Node 2: PageJobExpand — scans tile for dirty pages, emits per-page records
-// ===========================================================================
+// Node 2: PageJobExpand: scans tile for dirty pages, emits per-page records
 //
 // Groupshared: atomic dirty-page counter + slot array.
 // Total: 4 + 64*4 = 260 bytes (trivial).
@@ -253,7 +247,7 @@ void WG_PageJobExpand(
     }
     GroupMemoryBarrierWithGroupSync();
 
-    // Each thread checks one page in the tile. Max 64 threads = 8×8 pages.
+    // Each thread checks one page in the tile. Max 64 threads = 8x8 pages.
     const uint tilePageCount = (maxPageCoord.x - minPageCoord.x + 1u) * (maxPageCoord.y - minPageCoord.y + 1u);
 
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
@@ -310,9 +304,7 @@ void WG_PageJobExpand(
     rasterOut.OutputComplete();
 }
 
-// ===========================================================================
-// Node 3: PageJobRasterPage — rasterizes one cluster onto one physical page
-// ===========================================================================
+// Node 3: PageJobRasterPage: rasterizes one cluster onto one physical page
 //
 // Groupshared: screen positions (1 KB) + linear depths (0.5 KB) = 1.5 KB.
 // Only 1 barrier (vertex sync). No per-page loop. No pageHadPixels tracking.
@@ -484,7 +476,7 @@ void WG_PageJobRasterPage(
 
     // Unconditionally mark this page as content-valid. The Expand node already
     // confirmed the page was dirty+allocated, so this is always correct.
-    // No barrier needed — each thread writes the same idempotent OR.
+    // No barrier needed: each thread writes the same idempotent OR.
     if (anyPixelWritten) {
         uint ignored = 0u;
         InterlockedOr(

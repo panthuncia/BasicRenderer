@@ -28,21 +28,32 @@ public:
 			Builtin::Light::DirectionalLightCascadeBuffer,
 			Builtin::Light::SpotLightMatrixBuffer,
 			Builtin::Environment::InfoBuffer,
+			Builtin::PerMaterialOpenPBRDataBuffer,
 			Builtin::GBuffer::Normals,
 			Builtin::GBuffer::Albedo,
+			Builtin::GBuffer::Coat,
 			Builtin::GBuffer::Emissive,
+			Builtin::GBuffer::Fuzz,
 			Builtin::GBuffer::MetallicRoughness,
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
-			Builtin::Shadows::CLodClipmapInfo,
-			Builtin::Shadows::CLodCompactMainCamera,
-			Builtin::Shadows::CLodCompactShadowCameras,
-			Builtin::Shadows::CLodDirectionalPageViewInfo,
-			Builtin::Shadows::CLodPageTable,
-			Builtin::Shadows::CLodPhysicalPages,
+			Builtin::OpenPBR::FuzzLTC,
+			Builtin::OpenPBR::IdealMetalEnergyComplement,
+			Builtin::OpenPBR::IdealMetalAverageEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
+			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
 			Builtin::Noise::BlueNoise2D)
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget,
 				Builtin::DebugVisualization);
+
+			if (getShadowsEnabled()) {
+				builder->WithShaderResource(Builtin::Shadows::CLodClipmapInfo,
+					Builtin::Shadows::CLodCompactMainCamera,
+					Builtin::Shadows::CLodCompactShadowCameras,
+					Builtin::Shadows::CLodDirectionalPageViewInfo,
+					Builtin::Shadows::CLodPageTable,
+					Builtin::Shadows::CLodPhysicalPages);
+			}
 
 		if (m_clusteredLightingEnabled) {
 			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
@@ -56,7 +67,10 @@ public:
 	}
 
 	void Setup() override {
-		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
+		if (getShadowsEnabled()) {
+			RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+		}
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

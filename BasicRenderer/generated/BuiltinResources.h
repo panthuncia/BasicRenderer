@@ -47,7 +47,9 @@ struct Builtin {
   };
   struct GBuffer {
     inline static constexpr std::string_view Albedo = "Builtin::GBuffer::Albedo";
+    inline static constexpr std::string_view Coat = "Builtin::GBuffer::Coat";
     inline static constexpr std::string_view Emissive = "Builtin::GBuffer::Emissive";
+    inline static constexpr std::string_view Fuzz = "Builtin::GBuffer::Fuzz";
     inline static constexpr std::string_view MetallicRoughness = "Builtin::GBuffer::MetallicRoughness";
     inline static constexpr std::string_view MotionVectors = "Builtin::GBuffer::MotionVectors";
     inline static constexpr std::string_view Normals = "Builtin::GBuffer::Normals";
@@ -86,6 +88,16 @@ struct Builtin {
     inline static constexpr std::string_view BlueNoise2D = "Builtin::Noise::BlueNoise2D";
   };
   inline static constexpr std::string_view NormalMatrixBuffer = "Builtin::NormalMatrixBuffer";
+  struct OpenPBR {
+    inline static constexpr std::string_view FuzzLTC = "Builtin::OpenPBR::FuzzLTC";
+    inline static constexpr std::string_view IdealDielectricAverageEnergyComplement = "Builtin::OpenPBR::IdealDielectricAverageEnergyComplement";
+    inline static constexpr std::string_view IdealDielectricEnergyComplement = "Builtin::OpenPBR::IdealDielectricEnergyComplement";
+    inline static constexpr std::string_view IdealDielectricReflectionRatio = "Builtin::OpenPBR::IdealDielectricReflectionRatio";
+    inline static constexpr std::string_view IdealMetalAverageEnergyComplement = "Builtin::OpenPBR::IdealMetalAverageEnergyComplement";
+    inline static constexpr std::string_view IdealMetalEnergyComplement = "Builtin::OpenPBR::IdealMetalEnergyComplement";
+    inline static constexpr std::string_view OpaqueDielectricAverageEnergyComplement = "Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement";
+    inline static constexpr std::string_view OpaqueDielectricEnergyComplement = "Builtin::OpenPBR::OpaqueDielectricEnergyComplement";
+  };
   struct PPLL {
     inline static constexpr std::string_view Counter = "Builtin::PPLL::Counter";
     inline static constexpr std::string_view DataBuffer = "Builtin::PPLL::DataBuffer";
@@ -93,6 +105,7 @@ struct Builtin {
   };
   inline static constexpr std::string_view PerFrameBuffer = "Builtin::PerFrameBuffer";
   inline static constexpr std::string_view PerMaterialDataBuffer = "Builtin::PerMaterialDataBuffer";
+  inline static constexpr std::string_view PerMaterialOpenPBRDataBuffer = "Builtin::PerMaterialOpenPBRDataBuffer";
   inline static constexpr std::string_view PerMeshBuffer = "Builtin::PerMeshBuffer";
   inline static constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
   inline static constexpr std::string_view PerObjectBuffer = "Builtin::PerObjectBuffer";

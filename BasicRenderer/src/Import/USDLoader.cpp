@@ -1,5 +1,6 @@
 #include <spdlog/spdlog.h>
 #include <DirectXMath.h>
+#include <array>
 #include <filesystem>
 #include <vector>
 #include <cstring>
@@ -224,33 +225,329 @@ namespace USDLoader {
         return varnameStr;
 	}
 
-    TextureAndConstant* GetTextureBindingForInput(MaterialDescription& result, const TfToken& name) {
-        if (name == TfToken("diffuseColor")) {
-            return &result.baseColor;
-        }
-        if (name == TfToken("metallic")) {
-            return &result.metallic;
-        }
-        if (name == TfToken("roughness")) {
-            return &result.roughness;
-        }
-        if (name == TfToken("opacity")) {
-            return &result.opacity;
-        }
-        if (name == TfToken("emissiveColor")) {
-            return &result.emissive;
-        }
-        if (name == TfToken("normal")) {
-            return &result.normal;
-        }
-        if (name == TfToken("displacement")) {
-            return &result.heightMap;
-        }
-        if (name == TfToken("ambientOcclusion")) {
-            return &result.aoMap;
-        }
-        return nullptr;
-    }
+		struct MaterialTextureBindingEntry {
+			const char* inputName;
+			TextureAndConstant MaterialDescription::*binding;
+		};
+
+		constexpr std::array<MaterialTextureBindingEntry, 8> kMaterialTextureBindings = {{
+			{ "diffuseColor", &MaterialDescription::baseColor },
+			{ "metallic", &MaterialDescription::metallic },
+			{ "roughness", &MaterialDescription::roughness },
+			{ "opacity", &MaterialDescription::opacity },
+			{ "emissiveColor", &MaterialDescription::emissive },
+			{ "normal", &MaterialDescription::normal },
+			{ "displacement", &MaterialDescription::heightMap },
+			{ "ambientOcclusion", &MaterialDescription::aoMap },
+		}};
+
+		struct OpenPBRTextureBindingEntry {
+			const char* inputName;
+			TextureAndConstant OpenPBRTextureBindings::*binding;
+		};
+
+		constexpr std::array<OpenPBRTextureBindingEntry, 6> kOpenPBRTextureBindings = {{
+			{ "basecoatcolor", &OpenPBRTextureBindings::coatColor },
+			{ "basecoatweight", &OpenPBRTextureBindings::coatWeight },
+			{ "basecoatroughness", &OpenPBRTextureBindings::coatRoughness },
+			{ "fuzzcolor", &OpenPBRTextureBindings::fuzzColor },
+			{ "fuzzweight", &OpenPBRTextureBindings::fuzzWeight },
+			{ "fuzzroughness", &OpenPBRTextureBindings::fuzzRoughness },
+		}};
+
+		TextureAndConstant* FindTextureBinding(MaterialDescription& result, const TfToken& name) {
+			for (const auto& entry : kMaterialTextureBindings) {
+				if (name == TfToken(entry.inputName)) {
+					return &(result.*(entry.binding));
+				}
+			}
+
+			std::string normalized;
+			normalized.reserve(name.GetString().size());
+			for (unsigned char ch : name.GetString()) {
+				if (std::isalnum(ch)) {
+					normalized.push_back(static_cast<char>(std::tolower(ch)));
+				}
+			}
+			for (const auto& entry : kOpenPBRTextureBindings) {
+				if (normalized == entry.inputName) {
+					return &(result.openPBRTextures.*(entry.binding));
+				}
+			}
+
+			return nullptr;
+		}
+
+		template <typename Fn>
+		void ForEachMaterialTextureBinding(MaterialDescription& desc, Fn&& fn) {
+			for (const auto& entry : kMaterialTextureBindings) {
+				fn(desc.*(entry.binding));
+			}
+			for (const auto& entry : kOpenPBRTextureBindings) {
+				fn(desc.openPBRTextures.*(entry.binding));
+			}
+		}
+
+		template <typename Fn>
+		void ForEachMaterialTextureBinding(const MaterialDescription& desc, Fn&& fn) {
+			for (const auto& entry : kMaterialTextureBindings) {
+				fn(desc.*(entry.binding));
+			}
+			for (const auto& entry : kOpenPBRTextureBindings) {
+				fn(desc.openPBRTextures.*(entry.binding));
+			}
+		}
+
+	std::string NormalizeUsdIdentifier(std::string value) {
+		std::string normalized;
+		normalized.reserve(value.size());
+		for (unsigned char ch : value) {
+			if (std::isalnum(ch)) {
+				normalized.push_back(static_cast<char>(std::tolower(ch)));
+			}
+		}
+
+		return normalized;
+	}
+
+	bool IsUsdPreviewSurfaceShaderId(const pxr::TfToken& id) {
+		return NormalizeUsdIdentifier(id.GetString()) == "usdpreviewsurface";
+	}
+
+	bool IsOpenPBRShaderId(const pxr::TfToken& id) {
+		return NormalizeUsdIdentifier(id.GetString()).find("openpbr") != std::string::npos;
+	}
+
+	std::optional<float> ReadFloatInputValue(const pxr::UsdShadeInput& input) {
+		float floatValue = 0.0f;
+		if (input.Get(&floatValue)) {
+			return floatValue;
+		}
+
+		double doubleValue = 0.0;
+		if (input.Get(&doubleValue)) {
+			return static_cast<float>(doubleValue);
+		}
+
+		int intValue = 0;
+		if (input.Get(&intValue)) {
+			return static_cast<float>(intValue);
+		}
+
+		return std::nullopt;
+	}
+
+	std::optional<DirectX::XMFLOAT3> ReadFloat3InputValue(const pxr::UsdShadeInput& input) {
+		pxr::GfVec3f vec3fValue;
+		if (input.Get(&vec3fValue)) {
+			return DirectX::XMFLOAT3(vec3fValue[0], vec3fValue[1], vec3fValue[2]);
+		}
+
+		pxr::GfVec3d vec3dValue;
+		if (input.Get(&vec3dValue)) {
+			return DirectX::XMFLOAT3(
+				static_cast<float>(vec3dValue[0]),
+				static_cast<float>(vec3dValue[1]),
+				static_cast<float>(vec3dValue[2]));
+		}
+
+		return std::nullopt;
+	}
+
+	std::optional<bool> ReadBoolInputValue(const pxr::UsdShadeInput& input) {
+		bool boolValue = false;
+		if (input.Get(&boolValue)) {
+			return boolValue;
+		}
+
+		int intValue = 0;
+		if (input.Get(&intValue)) {
+			return intValue != 0;
+		}
+
+		return std::nullopt;
+	}
+
+	bool IsBlack(const DirectX::XMFLOAT4& value) {
+		return value.x == 0.0f && value.y == 0.0f && value.z == 0.0f;
+	}
+
+	std::optional<pxr::TfToken> MapOpenPBRInputToLegacyTextureSlot(const pxr::TfToken& name) {
+		const std::string normalized = NormalizeUsdIdentifier(name.GetString());
+		if (normalized == "basecolor") {
+			return pxr::TfToken("diffuseColor");
+		}
+		if (normalized == "basemetalness") {
+			return pxr::TfToken("metallic");
+		}
+		if (normalized == "specularroughness") {
+			return pxr::TfToken("roughness");
+		}
+		if (normalized == "geometryopacity") {
+			return pxr::TfToken("opacity");
+		}
+		if (normalized == "emissioncolor") {
+			return pxr::TfToken("emissiveColor");
+		}
+		if (normalized == "geometrynormal" || normalized == "normal") {
+			return pxr::TfToken("normal");
+		}
+		if (normalized == "displacement") {
+			return pxr::TfToken("displacement");
+		}
+		if (normalized == "ambientocclusion") {
+			return pxr::TfToken("ambientOcclusion");
+		}
+		if (normalized == "coatcolor") {
+			return pxr::TfToken("basecoatcolor");
+		}
+		if (normalized == "coatweight") {
+			return pxr::TfToken("basecoatweight");
+		}
+		if (normalized == "coatroughness") {
+			return pxr::TfToken("basecoatroughness");
+		}
+		if (normalized == "fuzzcolor") {
+			return pxr::TfToken("fuzzcolor");
+		}
+		if (normalized == "fuzzweight") {
+			return pxr::TfToken("fuzzweight");
+		}
+		if (normalized == "fuzzroughness") {
+			return pxr::TfToken("fuzzroughness");
+		}
+
+		return std::nullopt;
+	}
+
+	bool ApplyOpenPBRConstantInput(MaterialDescription& result, const pxr::UsdShadeInput& input) {
+		const std::string normalized = NormalizeUsdIdentifier(input.GetBaseName().GetString());
+
+		if (normalized == "baseweight") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.baseWeight = std::clamp(*value, 0.0f, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "basecolor") {
+			if (const auto value = ReadFloat3InputValue(input)) {
+				result.openPBR.baseColor = *value;
+				result.diffuseColor.x = value->x;
+				result.diffuseColor.y = value->y;
+				result.diffuseColor.z = value->z;
+			}
+			return true;
+		}
+		if (normalized == "basemetalness") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.baseMetalness = std::clamp(*value, 0.0f, 1.0f);
+				result.metallic.factor = result.openPBR.baseMetalness;
+			}
+			return true;
+		}
+		if (normalized == "specularweight") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.specularWeight = std::clamp(*value, 0.0f, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "specularcolor") {
+			if (const auto value = ReadFloat3InputValue(input)) {
+				result.openPBR.specularColor = *value;
+			}
+			return true;
+		}
+		if (normalized == "specularroughness") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.specularRoughness = std::clamp(*value, 0.0f, 1.0f);
+				result.roughness.factor = result.openPBR.specularRoughness;
+			}
+			return true;
+		}
+		if (normalized == "specularior") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.specularIor = std::max(*value, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "coatweight") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.coatWeight = std::clamp(*value, 0.0f, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "coatcolor") {
+			if (const auto value = ReadFloat3InputValue(input)) {
+				result.openPBR.coatColor = *value;
+			}
+			return true;
+		}
+		if (normalized == "coatroughness") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.coatRoughness = std::clamp(*value, 0.0f, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "coatior") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.coatIor = std::max(*value, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "coatdarkening") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.coatDarkening = std::clamp(*value, 0.0f, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "fuzzweight") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.fuzzWeight = std::clamp(*value, 0.0f, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "fuzzcolor") {
+			if (const auto value = ReadFloat3InputValue(input)) {
+				result.openPBR.fuzzColor = *value;
+			}
+			return true;
+		}
+		if (normalized == "fuzzroughness") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.fuzzRoughness = std::clamp(*value, 0.0f, 1.0f);
+			}
+			return true;
+		}
+		if (normalized == "emissioncolor") {
+			if (const auto value = ReadFloat3InputValue(input)) {
+				result.openPBR.emissionColor = *value;
+				result.emissiveColor = { value->x, value->y, value->z, 1.0f };
+			}
+			return true;
+		}
+		if (normalized == "emissionluminance") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.emissionLuminance = std::max(*value, 0.0f);
+				result.emissive.factor = result.openPBR.emissionLuminance;
+			}
+			return true;
+		}
+		if (normalized == "geometryopacity") {
+			if (const auto value = ReadFloatInputValue(input)) {
+				result.openPBR.geometryOpacity = std::clamp(*value, 0.0f, 1.0f);
+				result.opacity.factor = result.openPBR.geometryOpacity;
+			}
+			return true;
+		}
+		if (normalized == "geometrythinwalled") {
+			if (const auto value = ReadBoolInputValue(input)) {
+				result.openPBR.geometryThinWalled = *value;
+			}
+			return true;
+		}
+
+		return false;
+	}
 
     std::vector<std::string> CollectReferencedUvSetNames(const MaterialDescription& desc) {
         std::vector<std::string> names;
@@ -261,14 +558,7 @@ namespace USDLoader {
             }
         };
 
-        appendIfValid(desc.baseColor);
-        appendIfValid(desc.normal);
-        appendIfValid(desc.metallic);
-        appendIfValid(desc.roughness);
-        appendIfValid(desc.emissive);
-        appendIfValid(desc.aoMap);
-        appendIfValid(desc.heightMap);
-        appendIfValid(desc.opacity);
+			ForEachMaterialTextureBinding(desc, appendIfValid);
         return names;
     }
 
@@ -346,7 +636,7 @@ namespace USDLoader {
 						surfSources[0].sourceName,
 						&cache);
 					if (resolvedSurf) {
-                        if (TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name)) {
+                        if (TextureAndConstant* textureBinding = FindTextureBinding(result, name)) {
                             textureBinding->uvSetName = ProcessUVReader(resolvedSurf);
                         }
 					}
@@ -369,7 +659,7 @@ namespace USDLoader {
 
 				auto tex = texIt->second;
 				std::string swizzle = src.sourceName.GetString();
-                TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name);
+				TextureAndConstant* textureBinding = FindTextureBinding(result, name);
                 if (textureBinding == nullptr) {
                     spdlog::warn("Unknown texture input: {}", name.GetString());
                     return;
@@ -384,6 +674,9 @@ namespace USDLoader {
                     result.negateNormals = tex->Meta().fileType == ImageFiletype::DDS ? true : false;
                     result.invertNormalGreen = false;
                 }
+				if (name == TfToken("emissiveColor") && IsBlack(result.emissiveColor)) {
+					result.emissiveColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+				}
 			}
 		}
 	}
@@ -488,9 +781,9 @@ namespace USDLoader {
 
 		pxr::UsdShadeShader surfaceShader = resolvedSurf->shader;
 
-		// Check it's UsdPreviewSurface, then parse inputs
+		// Check supported material terminal type, then parse inputs
 		pxr::TfToken id;
-		if (!surfaceShader.GetIdAttr().Get(&id) || id != pxr::TfToken("UsdPreviewSurface"))
+		if (!surfaceShader.GetIdAttr().Get(&id))
 			return result;
 
 		result.name = material.GetPrim().GetName().GetString();
@@ -498,11 +791,28 @@ namespace USDLoader {
 		result.negateNormals = false;
         result.alphaCutoff = 0.0f;
 
+		const bool isPreviewSurface = IsUsdPreviewSurfaceShaderId(id);
+		const bool isOpenPBRSurface = IsOpenPBRShaderId(id);
+		if (!isPreviewSurface && !isOpenPBRSurface) {
+			spdlog::warn("Unsupported surface shader '{}' in material {}", id.GetString(), material.GetPrim().GetPath().GetString());
+			return result;
+		}
+
+		if (isOpenPBRSurface) {
+			result.materialModel = MaterialModel::OpenPBR;
+			result.emissiveColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+			result.emissive.factor = 0.0f;
+		}
+
 		for (auto const& input : surfaceShader.GetInputs()) {
 			const auto name = input.GetBaseName();
 
 			// Read constants if unconnected
 			if (input.GetConnectedSources().empty()) {
+				if (isOpenPBRSurface && ApplyOpenPBRConstantInput(result, input)) {
+					continue;
+				}
+
 				TfToken texName = input.GetBaseName();
 				if (texName == TfToken("diffuseColor") && input.GetConnectedSources().empty()) {
 					GfVec3f c; input.Get(&c);
@@ -535,7 +845,10 @@ namespace USDLoader {
 					}
 				}
 				else {
-					spdlog::warn("Unknown input '{}' with no connections in UsdPreviewSurface", name.GetString());
+					spdlog::warn(
+						"Unknown input '{}' with no connections in {}",
+						name.GetString(),
+						isOpenPBRSurface ? "OpenPBR surface" : "UsdPreviewSurface");
 				}
 				continue;
 			}
@@ -553,16 +866,28 @@ namespace USDLoader {
 				pxr::TfToken prodId;
 				r->shader.GetIdAttr().Get(&prodId);
 
+				const std::optional<pxr::TfToken> legacyTextureName =
+					isOpenPBRSurface ? MapOpenPBRInputToLegacyTextureSlot(name) : std::optional<pxr::TfToken>(name);
+
 				if (prodId == pxr::TfToken("UsdUVTexture")) {
-					if (name == TfToken("displacement")) {
+					if (!legacyTextureName.has_value()) {
+						spdlog::warn("Unsupported OpenPBR texture input '{}' in material {}", name.GetString(), material.GetPrim().GetPath().GetString());
+						continue;
+					}
+					if (*legacyTextureName == TfToken("displacement")) {
 						MarkDisplacementEnabled(result, result.heightMapScale);
 					}
-					ProcessTexture(result, src, stage, name, material);
+					ProcessTexture(result, src, stage, *legacyTextureName, material);
 				}
 				else if (prodId == pxr::TfToken("UsdPrimvarReader_float2")) {
-                    if (TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name)) {
-                        textureBinding->uvSetName = ProcessUVReader(r);
-                    }
+					if (legacyTextureName.has_value()) {
+						if (TextureAndConstant* textureBinding = FindTextureBinding(result, *legacyTextureName)) {
+							textureBinding->uvSetName = ProcessUVReader(r);
+						}
+					}
+					else if (isOpenPBRSurface) {
+						spdlog::warn("Unsupported OpenPBR primvar input '{}' in material {}", name.GetString(), material.GetPrim().GetPath().GetString());
+					}
 				}
 				else {
 					spdlog::warn("Unsupported shader producer: {} in material {}", prodId.GetString(), material.GetPrim().GetPath().GetString());
@@ -573,11 +898,11 @@ namespace USDLoader {
         ProcessDisplacementTerminal(result, material, stage, cache);
 
 		//Post-process to assign 1.0 to undefined factors with a valid texture
-		for (auto& tex : { &result.baseColor, &result.metallic, &result.roughness, &result.opacity, &result.emissive, &result.normal, &result.heightMap, &result.aoMap }) {
-			if (tex->texture && !tex->factor.HasValue()) {
-				tex->factor = 1.0f; // Unlike glTF, USD does not require a factor to be set if a texture is present
+		ForEachMaterialTextureBinding(result, [](TextureAndConstant& binding) {
+			if (binding.texture && !binding.factor.HasValue()) {
+				binding.factor = 1.0f; // Unlike glTF, USD does not require a factor to be set if a texture is present
 			}
-		}
+		});
 
         spdlog::info(
             "USD material '{}' displacement: enabled={}, hasHeightMap={}, scale={}, range=[{}, {}]",
@@ -635,6 +960,12 @@ namespace USDLoader {
             std::to_string(resolvedDesc.aoMap.uvSetIndex) + "|" +
             std::to_string(resolvedDesc.heightMap.uvSetIndex) + "|" +
             std::to_string(resolvedDesc.opacity.uvSetIndex) + "|" +
+			std::to_string(resolvedDesc.openPBRTextures.coatColor.uvSetIndex) + "|" +
+			std::to_string(resolvedDesc.openPBRTextures.coatWeight.uvSetIndex) + "|" +
+			std::to_string(resolvedDesc.openPBRTextures.coatRoughness.uvSetIndex) + "|" +
+			std::to_string(resolvedDesc.openPBRTextures.fuzzColor.uvSetIndex) + "|" +
+			std::to_string(resolvedDesc.openPBRTextures.fuzzWeight.uvSetIndex) + "|" +
+			std::to_string(resolvedDesc.openPBRTextures.fuzzRoughness.uvSetIndex) + "|" +
             std::to_string(resolvedDesc.forceDoubleSided ? 1 : 0);
     }
 
@@ -673,6 +1004,12 @@ namespace USDLoader {
         resolvedDesc.aoMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.aoMap, uvSets, materialPath, "ambientOcclusion");
         resolvedDesc.heightMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.heightMap, uvSets, materialPath, "heightMap");
         resolvedDesc.opacity.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.opacity, uvSets, materialPath, "opacity");
+		resolvedDesc.openPBRTextures.coatColor.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.openPBRTextures.coatColor, uvSets, materialPath, "coatColor");
+		resolvedDesc.openPBRTextures.coatWeight.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.openPBRTextures.coatWeight, uvSets, materialPath, "coatWeight");
+		resolvedDesc.openPBRTextures.coatRoughness.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.openPBRTextures.coatRoughness, uvSets, materialPath, "coatRoughness");
+		resolvedDesc.openPBRTextures.fuzzColor.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.openPBRTextures.fuzzColor, uvSets, materialPath, "fuzzColor");
+		resolvedDesc.openPBRTextures.fuzzWeight.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.openPBRTextures.fuzzWeight, uvSets, materialPath, "fuzzWeight");
+		resolvedDesc.openPBRTextures.fuzzRoughness.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.openPBRTextures.fuzzRoughness, uvSets, materialPath, "fuzzRoughness");
         resolvedDesc.forceDoubleSided = forceDoubleSided;
 
         const std::string cacheKey = BuildResolvedMaterialCacheKey(materialPath, resolvedDesc);
@@ -737,7 +1074,9 @@ namespace USDLoader {
 			// Phase 2: GPU mesh creation
 			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-			outMeshes.push_back(mPtr);
+			if (mPtr != nullptr) {
+				outMeshes.push_back(mPtr);
+			}
 		}
 		else {
 			// Otherwise: one mesh per subset
@@ -758,7 +1097,9 @@ namespace USDLoader {
 				// Phase 2: GPU mesh creation
 				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
 				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-				outMeshes.push_back(mPtr);
+				if (mPtr != nullptr) {
+					outMeshes.push_back(mPtr);
+				}
 			}
 		}
 

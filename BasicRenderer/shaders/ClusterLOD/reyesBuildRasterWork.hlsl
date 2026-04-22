@@ -29,8 +29,12 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWStructuredBuffer<CLodReyesRasterWorkEntry> rasterWorkBuffer = ResourceDescriptorHeap[CLOD_REYES_BUILD_RASTER_WORK_OUTPUT_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> rasterWorkCounter = ResourceDescriptorHeap[CLOD_REYES_BUILD_RASTER_WORK_OUTPUT_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_BUILD_RASTER_WORK_TELEMETRY_DESCRIPTOR_INDEX];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstances = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    StructuredBuffer<PerMeshBuffer> perMeshes = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
     const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
+    const PerMeshInstanceBuffer meshInstance = perMeshInstances[diceEntry.instanceID];
+    const PerMeshBuffer perMesh = perMeshes[meshInstance.perMeshBufferIndex];
     const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
     if (microTriangleCount == 0u)
     {
@@ -64,7 +68,7 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         workEntry.diceQueueIndex = diceIndex;
         workEntry.microTriangleOffset = batchIndex * CLodReyesRasterBatchMicroTriangleCount;
         workEntry.microTriangleCount = min(CLodReyesRasterBatchMicroTriangleCount, microTriangleCount - workEntry.microTriangleOffset);
-        workEntry.reserved = 0u;
+        workEntry.rasterBucketIndex = perMesh.rasterBucketIndex;
         rasterWorkBuffer[firstRasterWorkIndex + batchIndex] = workEntry;
         emittedMicroTriangleCount += workEntry.microTriangleCount;
     }
@@ -73,5 +77,6 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         InterlockedAdd(telemetryBuffer[0].patchRasterizedPatchCount, 1u);
         InterlockedAdd(telemetryBuffer[0].patchRasterizedMicroTriangleCount, emittedMicroTriangleCount);
+        InterlockedAdd(telemetryBuffer[0].rasterWorkEntryCount, availableRasterWorkCount);
     }
 }

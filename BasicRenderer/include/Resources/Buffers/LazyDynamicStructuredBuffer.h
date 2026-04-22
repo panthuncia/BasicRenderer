@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <deque>
+#include <spdlog/spdlog.h>
 #include <rhi.h>
 
 #include "OpenRenderGraph/OpenRenderGraph.h"

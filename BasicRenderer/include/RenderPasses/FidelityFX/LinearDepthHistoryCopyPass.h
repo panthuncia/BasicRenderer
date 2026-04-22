@@ -32,6 +32,9 @@ public:
             if (!view || !view->gpu.linearDepthMap || !view->gpu.lastFrameLinearDepthMap) {
                 return;
             }
+
+            // Once a view participates in the history copy, phase-1 occlusion can safely consume it.
+            view->gpu.lastFrameLinearDepthValid = true;
             
             const auto& source = view->gpu.linearDepthMap;
             const auto& history = view->gpu.lastFrameLinearDepthMap;

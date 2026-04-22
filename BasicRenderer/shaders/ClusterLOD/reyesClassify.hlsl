@@ -6,9 +6,10 @@
 #include "PerPassRootConstants/clodReyesRootConstants.h"
 
 static const uint REYES_CLASSIFY_GROUP_SIZE = 64u;
-static const uint REYES_OUTCOME_FLAG_SKINNED = 1u << 0;
-static const uint REYES_OUTCOME_FLAG_DISPLACEMENT_ENABLED = 1u << 1;
 static const uint REYES_BARYCENTRIC_COORD_MAX = 0xFFFFu;
+static const uint REYES_CLASSIFY_MODE_DEFAULT = 0u;
+static const uint REYES_CLASSIFY_MODE_SHADOW_FINE_DISPLACED_ONLY = 1u;
+static const uint REYES_CLASSIFY_MODE_SHADOW_COARSE_LARGE_ONLY = 2u;
 
 bool TryAppendBudgetedEntry(RWStructuredBuffer<uint> counterBuffer, uint capacity, out uint dst)
 {
@@ -37,6 +38,11 @@ uint GetReyesClassifyVisibleClusterReadIndex(uint linearizedID)
 
 void MarkVisibleClusterOwnedByReyes(uint visibleClusterReadIndex)
 {
+    if (CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX == 0xFFFFFFFFu)
+    {
+        return;
+    }
+
     RWStructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX];
     const uint ownershipWordIndex = visibleClusterReadIndex >> 5u;
     const uint ownershipBitMask = 1u << (visibleClusterReadIndex & 31u);
@@ -73,7 +79,33 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const bool displacementEnabled = materialInfo.geometricDisplacementEnabled != 0u;
     const float displacementSpan = max(0.0f, materialInfo.geometricDisplacementMax - materialInfo.geometricDisplacementMin);
     const bool skinned = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
-    const uint commonFlags = (skinned ? REYES_OUTCOME_FLAG_SKINNED : 0u) | (displacementEnabled ? REYES_OUTCOME_FLAG_DISPLACEMENT_ENABLED : 0u);
+    const bool hasMeaningfulDisplacement = displacementEnabled && displacementSpan > 1e-5f;
+    const uint classifyMode = CLOD_REYES_CLASSIFY_MODE;
+    uint routeKind = CLOD_REYES_ROUTE_VISIBILITY;
+    bool emitOwnedCluster = false;
+    bool emitFullCluster = false;
+
+    if (classifyMode == REYES_CLASSIFY_MODE_DEFAULT)
+    {
+        routeKind = CLOD_REYES_ROUTE_VISIBILITY;
+        emitOwnedCluster = hasMeaningfulDisplacement;
+        emitFullCluster = !emitOwnedCluster;
+    }
+    else if (classifyMode == REYES_CLASSIFY_MODE_SHADOW_FINE_DISPLACED_ONLY)
+    {
+        routeKind = CLOD_REYES_ROUTE_FINE_MICROPOLY_VSM;
+        emitOwnedCluster = hasMeaningfulDisplacement;
+    }
+    else if (classifyMode == REYES_CLASSIFY_MODE_SHADOW_COARSE_LARGE_ONLY)
+    {
+        routeKind = CLOD_REYES_ROUTE_COARSE_HARDWARE_VSM;
+        emitOwnedCluster = !hasMeaningfulDisplacement;
+    }
+
+    const uint commonFlags =
+        (skinned ? CLOD_REYES_FLAG_SKINNED : 0u) |
+        (displacementEnabled ? CLOD_REYES_FLAG_DISPLACEMENT_ENABLED : 0u) |
+        ((routeKind << CLOD_REYES_FLAG_ROUTE_SHIFT) & CLOD_REYES_FLAG_ROUTE_MASK);
 
     if (clusterLinearIndex == 0u)
     {
@@ -82,7 +114,7 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         telemetryBuffer[0].phaseIndex = CLOD_REYES_CLASSIFY_PHASE_INDEX;
     }
 
-    if (!displacementEnabled || displacementSpan <= 1e-5f)
+    if (emitFullCluster)
     {
         RWStructuredBuffer<uint> fullCounter = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_FULL_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
         RWStructuredBuffer<CLodReyesFullClusterOutput> fullClusters = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_FULL_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
@@ -102,6 +134,11 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    if (!emitOwnedCluster)
+    {
+        return;
+    }
+
     RWStructuredBuffer<uint> ownedClusterCounter = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReyesOwnedClusterEntry> ownedClusters = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
@@ -116,4 +153,7 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     ownedClusters[dst].instanceID = instanceID;
     ownedClusters[dst].materialIndex = materialIndex;
     ownedClusters[dst].flags = commonFlags;
+
+    RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_TELEMETRY_DESCRIPTOR_INDEX];
+    InterlockedAdd(telemetryBuffer[0].ownedClusterOutputCount, 1u);
 }
