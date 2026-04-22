@@ -7,25 +7,27 @@ An advanced DX12 research renderer, written to experiment with real-time renderi
 
 Feature development is driven purely by what I'm interested in at the moment.
 
-## Graphical features
+## Graphical Features
 
 - Nanite-style virtualized geometry using a novel work-graph approach, capable of real-time rendering of scenes with tens of billions of triangles
 - Image-based lighting
 - Normal mapping & contact-refinement parallax heightmaps
 - Support for arbitrary numbers of point, spot, and directional lights using clustered lighting
-- Shadow mapping for all light types
+- Directional shadow mapping
 - Skinned meshes
-- Order-independent transparency using a per-pixel linked-list
+- Order-independent transparency using a per-pixel linked-list OR adaptive voxel-based OIT
 - SSAO with XeGTAO
 - Downsample/upsample bloom
 - Screen-space reflections with FidelityFX SSSR
 - TAA/upscaling with DLSS/FSR
   
-## Technical features
+## Technical Features
 - A powerful render graph for automatic resource transitions and queue synchronization. Supports both retained-mode and immediate-mode GPU command execution.
 - Low-level RHI (Only DX12 backend implemented, for now, but built to support Vulkan)
+- Shader-instrumentation debugging, using [GPU Reshape](https://github.com/GPUOpen-Tools/GPU-Reshape)'s backend
 - GPU-driven rendering with compute culling & ExecuteIndirect
 - Visibility buffer (UE5-style), Deferred, and forward+ rendering
+- Virtual shadow mapping (directional-only for now) with multiple raster modes
 - Clustered lighting with a paged linked-list
 - Async-compute
 - Compute-based skinning
@@ -44,11 +46,11 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ![SSR example](images/SSR.png)
 
-## Supported file formats
+## Supported File Formats
 - USD using OpenUSD, https://github.com/PixarAnimationStudios/OpenUSD
 - Partial assimp loader implemented, https://github.com/assimp/assimp/blob/master/doc/Fileformats.md
 
-## Third-party dependancies
+## Notable Third-Party Dependancies
 
 - [nlohmann-json](https://github.com/nlohmann/json)
 - [meshoptimizer](https://github.com/zeux/meshoptimizer)
@@ -62,8 +64,19 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [FSR](https://www.amd.com/en/products/graphics/technologies/fidelityfx/super-resolution.html)
 - [DLSS](https://www.nvidia.com/en-us/geforce/technologies/dlss/)
 - [OpenUSD](https://github.com/PixarAnimationStudios/OpenUSD)
+- [GPU Reshape](https://github.com/GPUOpen-Tools/GPU-Reshape)
+- [OneTBB](https://github.com/uxlfoundation/oneTBB)
+- [SLang](https://github.com/shader-slang/slang)
+- [Tracy](https://github.com/wolfpld/tracy)
+- [Tree-Sitter](https://github.com/tree-sitter/tree-sitter)
   
-## Notable sources for development ideas
+## Notable Sources and References for Development
+
+[Timberdoodle](https://github.com/Sunset-Flock/Timberdoodle) research engine
+
+[Sparse Virtual Shadow Maps](https://ktstephano.github.io/rendering/stratusgfx/svsm), by J. Stephano
+
+[Adaptive Voxel-based order-independant transparency](https://advances.realtimerendering.com/s2025/content/AVBOIT_SIG2025_MDROBOT-final.pdf), Siggraph 2025, Michal Drobot
 
 [Nvidia tessellated clusters sample](https://github.com/nvpro-samples/vk_tessellated_clusters)
 
