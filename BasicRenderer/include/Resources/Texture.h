@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <mutex>
 
 #include <string>
 #include <variant>
@@ -10,6 +11,69 @@
 #include "Resources/Sampler.h"
 
 struct RenderContext;
+struct TextureProcessingJobHandle;
+
+enum class TextureSemantic : uint8_t {
+    Unknown = 0,
+    BaseColor,
+    Emissive,
+    Normal,
+    Height,
+    AO,
+    Opacity,
+    Metallic,
+    Roughness,
+    MetallicRoughness,
+    OpenPBRColor,
+    OpenPBRScalar,
+};
+
+enum class NormalMapConvention : uint8_t {
+    DirectX = 0,
+    OpenGL,
+};
+
+struct TextureProcessingSettings {
+    TextureSemantic semantic = TextureSemantic::Unknown;
+    bool isParticipatingMaterialTexture = false;
+    bool requestMipChain = false;
+    bool requestBlockCompression = false;
+    bool allowAsyncPlaceholder = false;
+    bool preferSRGB = false;
+    bool preservePackedChannels = false;
+    NormalMapConvention normalConvention = NormalMapConvention::DirectX;
+    std::string sourceIdentity;
+};
+
+inline TextureProcessingSettings MakeMaterialTextureProcessingSettings(
+    TextureSemantic semantic,
+    bool preferSRGB,
+    std::string sourceIdentity = {},
+    bool preservePackedChannels = false,
+    NormalMapConvention normalConvention = NormalMapConvention::DirectX)
+{
+    TextureProcessingSettings settings{};
+    settings.semantic = semantic;
+    settings.isParticipatingMaterialTexture = true;
+    settings.requestMipChain = true;
+    settings.requestBlockCompression = semantic != TextureSemantic::Height;
+    settings.allowAsyncPlaceholder = true;
+    settings.preferSRGB = preferSRGB;
+    settings.preservePackedChannels = preservePackedChannels;
+    settings.normalConvention = normalConvention;
+    settings.sourceIdentity = std::move(sourceIdentity);
+    return settings;
+}
+
+struct TextureSourceData {
+    using BytesPtr = std::shared_ptr<std::vector<uint8_t>>;
+    using BytesList = std::vector<BytesPtr>;
+
+    TextureDescription desc;
+    BytesList subresources;
+    bool hasFullMipChain = false;
+    bool isBlockCompressed = false;
+};
 
 //enum class ImageFiletype {
 //	UNKNOWN,
@@ -24,6 +88,9 @@ struct TextureFileMeta {
 	ImageFiletype fileType = ImageFiletype::UNKNOWN;
 	ImageLoader loader{};
 	bool alphaIsAllOpaque = true;
+    bool preferSRGB = false;
+    bool isProcessingCacheArtifact = false;
+    TextureProcessingSettings processing = {};
 };
 
 // Helper for std::visit with multiple lambdas
@@ -58,7 +125,7 @@ public:
     }
     
 	// Resolve to a vector of bytes
-    const BytesList& ResolveToBytes()
+    const BytesList& ResolveToBytes() const
     {
         // Something we can safely return by reference in "empty" cases.
         static const BytesList kEmpty = {};
@@ -88,6 +155,12 @@ public:
     UINT SamplerDescriptorIndex() const { return m_sampler->GetDescriptorIndex(); }
 
     const TextureFileMeta& Meta() const { return m_meta; }
+    TextureFileMeta& Meta() { return m_meta; }
+
+    const TextureProcessingSettings& ProcessingSettings() const { return m_meta.processing; }
+    void SetProcessingSettings(TextureProcessingSettings settings) { m_meta.processing = std::move(settings); }
+
+    std::shared_ptr<TextureSourceData> BuildSourceData() const;
 
     void SetName(const std::string& name)
     {
@@ -97,18 +170,7 @@ public:
         }
     }
 
-    void EnsureUploaded(const TextureFactory& factory) {
-	    if (!m_image) {
-            m_image = factory.CreateAlwaysResidentPixelBuffer(m_desc, TextureFactory::TextureInitialData::FromBytes(ResolveToBytes()), m_name);
-			// If we're uploading from raw bytes, we can clear the initial storage to save memory. Revert to path storage if needed again.
-			if (m_initialDataString != "") {
-				m_initialStorage = m_initialDataString;
-            }
-            else {
-                m_initialStorage = std::monostate{};
-            }
-	    }
-    }
+    void EnsureUploaded(const TextureFactory& factory);
 
     unsigned int GetWidth() const {
         return m_desc.imageDimensions[0].width;
@@ -131,6 +193,7 @@ private:
         , m_meta(std::move(meta)) {
         if (std::holds_alternative<std::shared_ptr<PixelBuffer>>(m_initialStorage)) { // Already initialized
             m_image = std::get<std::shared_ptr<PixelBuffer>>(m_initialStorage);
+			m_hasUploadedFinalImage = true;
         }
 		if (std::holds_alternative<std::string>(m_initialStorage)) { // Store path for potential re-use
             m_initialDataString = std::get<std::string>(m_initialStorage);
@@ -140,6 +203,9 @@ private:
     std::shared_ptr<PixelBuffer> m_image;
     std::shared_ptr<Sampler> m_sampler;
     TextureFileMeta m_meta;
+	std::shared_ptr<TextureProcessingJobHandle> m_processingHandle;
     std::string m_initialDataString;
     std::string m_name;
+	bool m_hasUploadedPlaceholder = false;
+	bool m_hasUploadedFinalImage = false;
 };

@@ -163,6 +163,9 @@ std::shared_ptr<Material> Material::GetDefaultMaterial() {
 }
 
 void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
+	const uint32_t negateNormalsFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_NEGATE_NORMALS);
+	const uint32_t invertNormalGreenFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN);
+
     if (m_baseColorTexture) {
         m_baseColorTexture->SetGenerateMipmaps(true);
         m_baseColorTexture->EnsureUploaded(factory);
@@ -170,6 +173,16 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_normalTexture) {
         m_normalTexture->SetGenerateMipmaps(true);
         m_normalTexture->EnsureUploaded(factory);
+        const bool useCanonicalCachedNormalFormat =
+            m_normalTexture->Meta().isProcessingCacheArtifact &&
+            m_normalTexture->Meta().processing.semantic == TextureSemantic::Normal;
+        if (useCanonicalCachedNormalFormat) {
+            m_materialData.materialFlags |= negateNormalsFlag;
+            m_materialData.materialFlags &= ~invertNormalGreenFlag;
+        }
+        else {
+            m_materialData.materialFlags &= ~negateNormalsFlag;
+        }
 	}
     if (m_aoMap) {
         m_aoMap->SetGenerateMipmaps(true);

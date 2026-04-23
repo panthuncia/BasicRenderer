@@ -66,7 +66,7 @@ void DeviceManager::Initialize() {
         enableStreamline = false;
     }
 
-    const bool enableDebug = IsDiagnosticsBuild();
+    const bool enableDebug = false;// IsDiagnosticsBuild();
 
     bool enableRuntimeInstrumentation = false;
     bool enableSynchronousRecording = false;

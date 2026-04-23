@@ -59,12 +59,14 @@ TaskSchedulerManager& TaskSchedulerManager::GetInstance() {
     return instance;
 }
 
-void TaskSchedulerManager::Initialize(uint32_t ioThreadCount, uint32_t externalTaskThreads, uint32_t backgroundThreadCount) {
+void TaskSchedulerManager::Initialize(uint32_t ioThreadCount, uint32_t backgroundThreadCount) {
     if (m_initialized) {
         return;
     }
 
     const uint32_t detectedConcurrency = (std::max)(std::thread::hardware_concurrency(), 1u);
+    const uint32_t resolvedBackgroundThreadCount =
+        backgroundThreadCount != 0 ? backgroundThreadCount : (std::clamp)(detectedConcurrency / 4u, 1u, 4u);
     m_workerThreadCount = detectedConcurrency;
     m_runtimeState = std::make_unique<RuntimeState>();
     m_runtimeState->parallelismControl = std::make_unique<tbb::global_control>(
@@ -79,32 +81,25 @@ void TaskSchedulerManager::Initialize(uint32_t ioThreadCount, uint32_t externalT
     m_ioThreads.clear();
     m_backgroundThreads.clear();
     m_ioThreads.reserve(ioThreadCount);
-    m_backgroundThreads.reserve(backgroundThreadCount);
+    m_backgroundThreads.reserve(resolvedBackgroundThreadCount);
     for (uint32_t ioThreadIndex = 0; ioThreadIndex < ioThreadCount; ++ioThreadIndex) {
         m_ioThreads.emplace_back([this]() {
             IoWorkerLoop();
         });
     }
-    for (uint32_t backgroundThreadIndex = 0; backgroundThreadIndex < backgroundThreadCount; ++backgroundThreadIndex) {
+    for (uint32_t backgroundThreadIndex = 0; backgroundThreadIndex < resolvedBackgroundThreadCount; ++backgroundThreadIndex) {
         m_backgroundThreads.emplace_back([this]() {
             BackgroundWorkerLoop();
         });
     }
 
-    if (externalTaskThreads != 0) {
-        spdlog::info(
-            "TaskSchedulerManager: externalTaskThreads={} is currently ignored by the oneTBB backend",
-            externalTaskThreads);
-    }
-
     m_initialized = true;
 
     spdlog::info(
-        "TaskSchedulerManager initialized: workerThreads={}, ioThreads={}, backgroundThreads={}, externalTaskThreads={}",
+        "TaskSchedulerManager initialized: workerThreads={}, ioThreads={}, backgroundThreads={}",
         m_workerThreadCount,
         static_cast<uint32_t>(m_ioThreads.size()),
-        static_cast<uint32_t>(m_backgroundThreads.size()),
-        externalTaskThreads);
+        static_cast<uint32_t>(m_backgroundThreads.size()));
 }
 
 void TaskSchedulerManager::RunIoTask(std::function<void()>&& task) {
@@ -264,6 +259,10 @@ void TaskSchedulerManager::RunBackgroundTask(std::string_view taskName, std::fun
             task();
         }
         RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::BackgroundService, taskStart, std::chrono::steady_clock::now());
+        return;
+    }
+
+    if (m_backgroundShutdownRequested.load(std::memory_order_acquire)) {
         return;
     }
 

@@ -217,7 +217,10 @@ std::string BuildTextureResourceKey(
     const std::filesystem::path& sourcePath,
     const GlTFMaterialCache& cache,
     size_t textureIndex,
-    bool preferSRGB)
+    bool preferSRGB,
+    TextureSemantic semantic,
+    bool preservePackedChannels,
+    NormalMapConvention normalConvention)
 {
     const auto& textures = gltf.at("textures");
     if (textureIndex >= textures.size()) {
@@ -228,7 +231,10 @@ std::string BuildTextureResourceKey(
     const size_t imageIndex = ResolveTextureImageIndex(textureNode);
     const std::string imageIdentity = BuildGlTFImageIdentity(gltf, sourcePath, cache.sourceKey, imageIndex);
     const std::string samplerSignature = BuildGlTFSamplerSignature(gltf, textureNode);
-    return imageIdentity + "|" + samplerSignature + (preferSRGB ? "|srgb" : "|linear");
+    return imageIdentity + "|" + samplerSignature + (preferSRGB ? "|srgb" : "|linear") +
+        "|semantic:" + std::to_string(static_cast<uint32_t>(semantic)) +
+        (preservePackedChannels ? "|packed" : "|unpadded") +
+        "|normalconv:" + std::to_string(static_cast<uint32_t>(normalConvention));
 }
 
 uint64_t GetFileSize(const std::filesystem::path& path) {
@@ -881,9 +887,12 @@ std::shared_ptr<TextureAsset> LoadTexture(
     const std::filesystem::path& sourcePath,
     GlTFMaterialCache& cache,
     size_t textureIndex,
-    bool preferSRGB)
+    bool preferSRGB,
+    TextureSemantic semantic,
+    bool preservePackedChannels = false,
+    NormalMapConvention normalConvention = NormalMapConvention::DirectX)
 {
-    const std::string cacheKey = BuildTextureResourceKey(gltf, sourcePath, cache, textureIndex, preferSRGB);
+    const std::string cacheKey = BuildTextureResourceKey(gltf, sourcePath, cache, textureIndex, preferSRGB, semantic, preservePackedChannels, normalConvention);
     auto existingTexture = cache.textureCache.find(cacheKey);
     if (existingTexture != cache.textureCache.end()) {
         return existingTexture->second;
@@ -914,6 +923,7 @@ std::shared_ptr<TextureAsset> LoadTexture(
     auto textureBytes = ReadImageBytes(gltf, sourcePath, cache.bufferSources, imageIndex);
     auto sampler = CreateTextureSampler(gltf, textureNode);
     auto texture = LoadTextureFromMemory(textureBytes.data(), textureBytes.size(), sampler, {}, preferSRGB);
+    texture->SetProcessingSettings(MakeMaterialTextureProcessingSettings(semantic, preferSRGB, cacheKey, preservePackedChannels, normalConvention));
     texture->SetGenerateMipmaps(true);
     cache.textureCache[cacheKey] = texture;
 
@@ -991,7 +1001,7 @@ std::shared_ptr<Material> LoadMaterial(
     desc.aoMap = { nullptr, 1.0f, { 0 } };
     desc.heightMap = { nullptr, 1.0f, { 0 } };
     desc.normal = { nullptr, 1.0f, { 0, 1, 2 } };
-    desc.invertNormalGreen = true;
+    desc.invertNormalGreen = false;
 
     if (materialNode.contains("pbrMetallicRoughness")) {
         const auto& pbr = materialNode["pbrMetallicRoughness"];
@@ -1007,13 +1017,13 @@ std::shared_ptr<Material> LoadMaterial(
         if (pbr.contains("baseColorTexture")) {
             const auto& textureInfo = pbr["baseColorTexture"];
             const size_t textureIndex = textureInfo.at("index").get<size_t>();
-            desc.baseColor.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, true);
+            desc.baseColor.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, true, TextureSemantic::BaseColor);
             desc.baseColor.uvSetIndex = ReadTextureUvSetIndex(textureInfo);
         }
         if (pbr.contains("metallicRoughnessTexture")) {
             const auto& textureInfo = pbr["metallicRoughnessTexture"];
             const size_t textureIndex = textureInfo.at("index").get<size_t>();
-            auto texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false);
+            auto texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false, TextureSemantic::MetallicRoughness, true);
             desc.metallic.texture = texture;
             desc.roughness.texture = texture;
             const uint32_t uvSetIndex = ReadTextureUvSetIndex(textureInfo);
@@ -1025,14 +1035,14 @@ std::shared_ptr<Material> LoadMaterial(
     if (materialNode.contains("normalTexture")) {
         const auto& textureInfo = materialNode["normalTexture"];
         const size_t textureIndex = textureInfo.at("index").get<size_t>();
-        desc.normal.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false);
+        desc.normal.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false, TextureSemantic::Normal, false, NormalMapConvention::OpenGL);
         desc.normal.uvSetIndex = ReadTextureUvSetIndex(textureInfo);
     }
 
     if (materialNode.contains("occlusionTexture")) {
         const auto& occlusion = materialNode["occlusionTexture"];
         const size_t textureIndex = occlusion.at("index").get<size_t>();
-        desc.aoMap.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false);
+        desc.aoMap.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false, TextureSemantic::AO);
         desc.aoMap.uvSetIndex = ReadTextureUvSetIndex(occlusion);
         if (occlusion.contains("strength")) {
             desc.aoMap.factor = occlusion["strength"].get<float>();
@@ -1046,7 +1056,7 @@ std::shared_ptr<Material> LoadMaterial(
     if (materialNode.contains("emissiveTexture")) {
         const auto& textureInfo = materialNode["emissiveTexture"];
         const size_t textureIndex = textureInfo.at("index").get<size_t>();
-        desc.emissive.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, true);
+        desc.emissive.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, true, TextureSemantic::Emissive);
         desc.emissive.uvSetIndex = ReadTextureUvSetIndex(textureInfo);
     }
 

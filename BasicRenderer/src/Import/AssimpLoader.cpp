@@ -47,6 +47,31 @@ namespace AssimpLoader {
         }
     }
 
+    static TextureSemantic aiTextureTypeToSemantic(aiTextureType type) {
+        switch (type) {
+        case aiTextureType_DIFFUSE:
+        case aiTextureType_BASE_COLOR:
+            return TextureSemantic::BaseColor;
+        case aiTextureType_NORMALS:
+            return TextureSemantic::Normal;
+        case aiTextureType_METALNESS:
+            return TextureSemantic::Metallic;
+        case aiTextureType_DIFFUSE_ROUGHNESS:
+            return TextureSemantic::Roughness;
+        case aiTextureType_AMBIENT_OCCLUSION:
+        case aiTextureType_LIGHTMAP:
+            return TextureSemantic::AO;
+        case aiTextureType_EMISSIVE:
+        case aiTextureType_EMISSION_COLOR:
+            return TextureSemantic::Emissive;
+        case aiTextureType_HEIGHT:
+        case aiTextureType_DISPLACEMENT:
+            return TextureSemantic::Height;
+        default:
+            return TextureSemantic::Unknown;
+        }
+    }
+
     static std::shared_ptr<TextureAsset> loadAiTexture(
         const aiScene* scene,
         const std::string& texPath,          // "*0" for embedded or file path
@@ -114,6 +139,7 @@ namespace AssimpLoader {
             	
             	TextureFileMeta meta;
                 meta.filePath = aiTex->mFilename.C_Str();
+				meta.preferSRGB = preferSRGB;
 
                 return TextureAsset::CreateShared(desc, vec, sampler, meta);
             }
@@ -190,8 +216,15 @@ namespace AssimpLoader {
                     {
                         std::string texPath = aiTexPath.C_Str(); // e.g. "*0" or "texture.png"
                         // Check if we already loaded it:
-                        auto it = loadedTextures.find(texPath);
                         const bool preferSRGB = isSRGBTextureType(tType);
+                        const TextureSemantic semantic = aiTextureTypeToSemantic(tType);
+                        const NormalMapConvention normalConvention = semantic == TextureSemantic::Normal
+                            ? NormalMapConvention::DirectX
+                            : NormalMapConvention::DirectX;
+                        const std::string textureCacheKey = texPath + "|semantic:" + std::to_string(static_cast<uint32_t>(semantic)) +
+                            (preferSRGB ? "|srgb" : "|linear") +
+                            "|normalconv:" + std::to_string(static_cast<uint32_t>(normalConvention));
+                        auto it = loadedTextures.find(textureCacheKey);
 
                         if (it == loadedTextures.end())
                         {
@@ -223,7 +256,8 @@ namespace AssimpLoader {
                                     preferSRGB
                                 );
                                 if (newTex) {
-                                    loadedTextures[texPath] = newTex;
+                                    newTex->SetProcessingSettings(MakeMaterialTextureProcessingSettings(semantic, preferSRGB, textureCacheKey, false, normalConvention));
+                                    loadedTextures[textureCacheKey] = newTex;
                                     materialTextures[tType] = newTex;
                                 }
                             }

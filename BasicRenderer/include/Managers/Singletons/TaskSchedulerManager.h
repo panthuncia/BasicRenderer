@@ -24,7 +24,7 @@ class TaskSchedulerManager {
 public:
     static TaskSchedulerManager& GetInstance();
 
-    void Initialize(uint32_t ioThreadCount = 2, uint32_t externalTaskThreads = 0, uint32_t backgroundThreadCount = 1);
+    void Initialize(uint32_t ioThreadCount = 2, uint32_t backgroundThreadCount = 0);
     void Cleanup();
     void RunIoTask(std::function<void()>&& task);
     void RunIoTask(std::string_view taskName, std::function<void()>&& task);

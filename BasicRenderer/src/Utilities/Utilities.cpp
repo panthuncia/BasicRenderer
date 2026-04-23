@@ -142,38 +142,20 @@ ImageData LoadSTBImage(const char* filename) {
     return img;
 }
 
-struct RawImage {
-    uint32_t width = 0;
-    uint32_t height = 0;
-    uint32_t channels = 4;               // 1,2,3,4
-    rhi::Format format = rhi::Format::R8G8B8A8_UNorm;
-    uint32_t rowPitch = 0;
-    uint32_t slicePitch = 0;
-    const uint8_t* pixels = nullptr;
+struct DecodedTexture {
+    TextureDescription desc;
+    TextureAsset::BytesList subresources;
     bool alphaAllOpaque = true;
-
     std::string filepathUtf8;
     std::optional<ImageFiletype> fileType;
 };
 
 static std::shared_ptr<TextureAsset>
-CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool allowRTV, bool allowUAV)
+CreateTextureFromDecoded(DecodedTexture img, std::shared_ptr<Sampler> sampler, bool allowRTV, bool allowUAV)
 {
-    ImageDimensions dim{};
-    dim.width = img.width;
-    dim.height = img.height;
-    dim.rowPitch = img.rowPitch;
-    dim.slicePitch = img.slicePitch;
-
-    TextureDescription desc{};
-    desc.imageDimensions.push_back(dim);
-    desc.channels = static_cast<unsigned short>(img.channels);
-    desc.format = img.format;
-    desc.generateMipMaps = false; // TODO: Allow mipmapping
-	desc.hasRTV = allowRTV;
-	desc.hasUAV = allowUAV;
-
-    //auto buffer = PixelBuffer::CreateShared(desc, { img.pixels });
+    img.desc.hasRTV = allowRTV;
+    img.desc.hasUAV = allowUAV;
+    img.desc.generateMipMaps = false;
 
     if (!sampler) sampler = Sampler::GetDefaultSampler();
 
@@ -181,13 +163,9 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool
 	meta.fileType = img.fileType.value_or(ImageFiletype::UNKNOWN);
 	meta.filePath = img.filepathUtf8;
 	meta.alphaIsAllOpaque = img.alphaAllOpaque;
+	meta.preferSRGB = rhi::helpers::IsSRGB(img.desc.format);
 
-    std::vector dataPtr = { std::make_shared<std::vector<uint8_t>>() };
-	// Copy data, since RawImage may go out of scope
-	dataPtr[0]->assign(img.pixels, img.pixels + img.slicePitch);
-
-    auto texture = TextureAsset::CreateShared(desc, dataPtr, sampler, meta);
-    return texture;
+    return TextureAsset::CreateShared(img.desc, std::move(img.subresources), sampler, std::move(meta));
 }
 
 //static RawImage RawFromSTBI(const ImageData& in)
@@ -249,15 +227,15 @@ static DXGI_FORMAT ToRGBAEquivalent(DXGI_FORMAT fmt) {
     }
 }
 
-static RawImage RawFromDXT(
+static DecodedTexture DecodedFromDXT(
     const DirectX::ScratchImage& image,
     const DirectX::TexMetadata& meta,
     std::string filepathUtf8,
     std::optional<ImageFiletype> fileType,
     DXGI_FORMAT overrideFormat = DXGI_FORMAT_UNKNOWN)
 {
-    const DirectX::Image* img0 = image.GetImage(0, 0, 0); // mip 0, array 0, depth 0
-    if (!img0) throw std::runtime_error("DirectXTex: missing base image");
+    const DirectX::Image* images = image.GetImages();
+    if (!images || image.GetImageCount() == 0) throw std::runtime_error("DirectXTex: missing image data");
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
     if (meta.width > std::numeric_limits<uint32_t>::max() ||
@@ -268,14 +246,41 @@ static RawImage RawFromDXT(
     }
 #endif
 
-    RawImage out{};
-    out.width = static_cast<uint32_t>(meta.width);
-    out.height = static_cast<uint32_t>(meta.height);
-    out.channels = rhi::helpers::FormatChannelCount(rhi::helpers::ToRHI(img0->format));
-    out.format = rhi::helpers::ToRHI((overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat);
-    out.rowPitch = static_cast<uint32_t>(img0->rowPitch);
-    out.slicePitch = static_cast<uint32_t>(img0->slicePitch);
-    out.pixels = img0->pixels;
+    DecodedTexture out{};
+    out.desc.format = rhi::helpers::ToRHI((overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat);
+    out.desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(out.desc.format));
+    out.desc.isCubemap = meta.IsCubemap();
+    out.desc.isArray = meta.arraySize > 1 && !out.desc.isCubemap;
+    out.desc.arraySize = out.desc.isCubemap
+        ? static_cast<uint32_t>((std::max)(size_t(1), meta.arraySize / size_t(6)))
+        : static_cast<uint32_t>((std::max)(size_t(1), meta.arraySize));
+    out.desc.imageDimensions.reserve(image.GetImageCount());
+    out.subresources.reserve(image.GetImageCount());
+
+    for (size_t imageIndex = 0; imageIndex < image.GetImageCount(); ++imageIndex) {
+        const DirectX::Image& src = images[imageIndex];
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+        if (src.width > std::numeric_limits<uint32_t>::max() ||
+            src.height > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("Texture dimensions exceed maximum limit");
+        }
+        if (!src.pixels || src.slicePitch == 0) {
+            throw std::runtime_error("Unexpected null pixels / zero slicePitch.");
+        }
+#endif
+
+        ImageDimensions dims{};
+        dims.width = static_cast<uint32_t>(src.width);
+        dims.height = static_cast<uint32_t>(src.height);
+        dims.rowPitch = src.rowPitch;
+        dims.slicePitch = src.slicePitch;
+        out.desc.imageDimensions.push_back(dims);
+
+        const auto* first = reinterpret_cast<const uint8_t*>(src.pixels);
+        out.subresources.push_back(std::make_shared<std::vector<uint8_t>>(first, first + src.slicePitch));
+    }
+
     out.alphaAllOpaque = image.IsAlphaAllOpaque();
     out.filepathUtf8 = std::move(filepathUtf8);
     out.fileType = fileType;
@@ -395,24 +400,24 @@ LoadTextureFromMemory(const void* bytes,
             static_cast<const uint8_t*>(bytes), byteCount, flags.dds, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load DDS from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
-        auto raw = RawFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::HDR: {
         hr = DirectX::LoadFromHDRMemory(
             static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load HDR from memory");
         // HDR stays in float formats; do not force sRGB
-        auto raw = RawFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::TGA: {
         hr = DirectX::LoadFromTGAMemory(
             static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load TGA from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
-        auto raw = RawFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::WIC: {
         // WIC: let caller preference drive sRGB/linear
@@ -441,12 +446,12 @@ LoadTextureFromMemory(const void* bytes,
                 throw std::runtime_error("Failed to convert WIC texture to RGBA");
             }
 
-            auto raw = RawFromDXT(convertedImg, convertedImg.GetMetadata(), "", ImageFiletype::WIC, convertedFormat);
-            return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+            auto decoded = DecodedFromDXT(convertedImg, convertedImg.GetMetadata(), "", ImageFiletype::WIC, convertedFormat);
+            return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
         }
 
-        auto raw = RawFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     }
 
@@ -467,7 +472,12 @@ LoadTextureFromFile(const std::wstring& filePath,
     localFlags.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
 
     const auto data = detail::ReadFileBytes(filePath);
-    return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
+    auto texture = LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
+    if (texture) {
+        texture->Meta().filePath = utf8;
+        texture->Meta().preferSRGB = preferSRGB;
+    }
+    return texture;
 }
 
 std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
@@ -560,11 +570,10 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool
 	desc.channels = 4;
     desc.format = rhi::helpers::ToRHI(metadata.format);
 	desc.isCubemap = true;
+    desc.arraySize = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)));
 	desc.hasRTV = allowRTV;
 	desc.hasUAV = allowUAV;
-    if (metadata.mipLevels != 1) {
-		desc.generateMipMaps = true;
-    }
+    desc.generateMipMaps = false;
 
 	auto buffer = PixelBuffer::CreateShared(desc);
 
@@ -574,6 +583,7 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool
 	meta.fileType = ImageFiletype::DDS;
 	meta.filePath = ws2s(ddsFilePath);
 	meta.alphaIsAllOpaque = image.IsAlphaAllOpaque();
+    meta.preferSRGB = rhi::helpers::IsSRGB(desc.format);
 
     return TextureAsset::CreateShared(desc, dataPtrs, sampler, meta);
 }
