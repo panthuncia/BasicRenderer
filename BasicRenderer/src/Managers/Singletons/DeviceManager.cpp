@@ -39,7 +39,7 @@ bool IsStreamlineDisabledByEnvironment() {
 }
 
 bool IsDiagnosticsBuild() {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG //|| BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
     return true;
 #else
     return false;
@@ -66,7 +66,7 @@ void DeviceManager::Initialize() {
         enableStreamline = false;
     }
 
-    const bool enableDebug = false;// IsDiagnosticsBuild();
+    const bool enableDebug = IsDiagnosticsBuild();
 
     bool enableRuntimeInstrumentation = false;
     bool enableSynchronousRecording = false;

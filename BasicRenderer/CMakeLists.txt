@@ -672,10 +672,10 @@ endif()
 
 # Link‐only: /DEBUG on RelWithDebInfo
 target_link_options(${PROJECT_NAME} PRIVATE
-  $<$<AND:$<CONFIG:RelWithDebInfo>>:/DEBUG>
+    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
 target_link_options(ShaderPreprocessTests PRIVATE
-  $<$<AND:$<CONFIG:RelWithDebInfo>>:/DEBUG>
+    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
