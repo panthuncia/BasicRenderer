@@ -99,6 +99,102 @@ find_package(Boost REQUIRED COMPONENTS container_hash)
 find_package(Tracy REQUIRED CONFIG)
 find_package(slang CONFIG REQUIRED)
 
+option(BASICRENDERER_ENABLE_DIRECTSTORAGE "Enable DirectStorage integration when the SDK is available" ON)
+set(BASICRENDERER_DIRECTSTORAGE_SDK_ROOT "" CACHE PATH "Optional DirectStorage SDK root containing include/dstorage.h and a dstorage import library")
+
+set(BASICRENDERER_HAS_DIRECTSTORAGE FALSE)
+unset(BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR CACHE)
+unset(BASICRENDERER_DIRECTSTORAGE_LIBRARY CACHE)
+unset(BASICRENDERER_DIRECTSTORAGE_DLL CACHE)
+unset(BASICRENDERER_DIRECTSTORAGE_CORE_DLL CACHE)
+
+if(WIN32 AND BASICRENDERER_ENABLE_DIRECTSTORAGE)
+    set(_basicrenderer_directstorage_roots)
+    set(_basicrenderer_directstorage_repo_root "${BASICRENDERER_SOURCE_ROOT}/ThirdParty/DirectStorage")
+
+    if(CMAKE_VS_PLATFORM_NAME STREQUAL "ARM64")
+        set(_basicrenderer_directstorage_arch_dir "ARM64")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_basicrenderer_directstorage_arch_dir "x64")
+    else()
+        set(_basicrenderer_directstorage_arch_dir "x86")
+    endif()
+
+    if(EXISTS "${BASICRENDERER_SOURCE_ROOT}/include/ThirdParty/DirectStorage/dstorage.h")
+        set(BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR "${BASICRENDERER_SOURCE_ROOT}/include/ThirdParty/DirectStorage")
+    endif()
+
+    if(EXISTS "${_basicrenderer_directstorage_repo_root}/lib/${_basicrenderer_directstorage_arch_dir}/dstorage.lib")
+        set(BASICRENDERER_DIRECTSTORAGE_LIBRARY "${_basicrenderer_directstorage_repo_root}/lib/${_basicrenderer_directstorage_arch_dir}/dstorage.lib")
+    endif()
+
+    if(EXISTS "${_basicrenderer_directstorage_repo_root}/bin/${_basicrenderer_directstorage_arch_dir}/dstorage.dll")
+        set(BASICRENDERER_DIRECTSTORAGE_DLL "${_basicrenderer_directstorage_repo_root}/bin/${_basicrenderer_directstorage_arch_dir}/dstorage.dll")
+    endif()
+
+    if(EXISTS "${_basicrenderer_directstorage_repo_root}/bin/${_basicrenderer_directstorage_arch_dir}/dstoragecore.dll")
+        set(BASICRENDERER_DIRECTSTORAGE_CORE_DLL "${_basicrenderer_directstorage_repo_root}/bin/${_basicrenderer_directstorage_arch_dir}/dstoragecore.dll")
+    endif()
+
+    if(BASICRENDERER_DIRECTSTORAGE_SDK_ROOT)
+        list(APPEND _basicrenderer_directstorage_roots "${BASICRENDERER_DIRECTSTORAGE_SDK_ROOT}")
+    endif()
+    if(DEFINED ENV{DIRECTSTORAGE_SDK_ROOT} AND NOT "$ENV{DIRECTSTORAGE_SDK_ROOT}" STREQUAL "")
+        list(APPEND _basicrenderer_directstorage_roots "$ENV{DIRECTSTORAGE_SDK_ROOT}")
+    endif()
+
+    foreach(_basicrenderer_directstorage_root IN LISTS _basicrenderer_directstorage_roots)
+        if(NOT BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR)
+            if(EXISTS "${_basicrenderer_directstorage_root}/include/dstorage.h")
+                set(BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR "${_basicrenderer_directstorage_root}/include")
+            elseif(EXISTS "${_basicrenderer_directstorage_root}/dstorage.h")
+                set(BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR "${_basicrenderer_directstorage_root}")
+            endif()
+        endif()
+
+        if(NOT BASICRENDERER_DIRECTSTORAGE_LIBRARY)
+            find_library(BASICRENDERER_DIRECTSTORAGE_LIBRARY
+                NAMES dstorage
+                PATHS
+                    "${_basicrenderer_directstorage_root}/lib/${_basicrenderer_directstorage_arch_dir}"
+                    "${_basicrenderer_directstorage_root}/lib/x64"
+                    "${_basicrenderer_directstorage_root}/lib"
+                NO_DEFAULT_PATH)
+        endif()
+
+        if(NOT BASICRENDERER_DIRECTSTORAGE_DLL)
+            find_file(BASICRENDERER_DIRECTSTORAGE_DLL
+                NAMES dstorage.dll
+                PATHS
+                    "${_basicrenderer_directstorage_root}/bin/${_basicrenderer_directstorage_arch_dir}"
+                    "${_basicrenderer_directstorage_root}/bin/x64"
+                    "${_basicrenderer_directstorage_root}/bin"
+                NO_DEFAULT_PATH)
+        endif()
+
+        if(NOT BASICRENDERER_DIRECTSTORAGE_CORE_DLL)
+            find_file(BASICRENDERER_DIRECTSTORAGE_CORE_DLL
+                NAMES dstoragecore.dll
+                PATHS
+                    "${_basicrenderer_directstorage_root}/bin/${_basicrenderer_directstorage_arch_dir}"
+                    "${_basicrenderer_directstorage_root}/bin/x64"
+                    "${_basicrenderer_directstorage_root}/bin"
+                NO_DEFAULT_PATH)
+        endif()
+    endforeach()
+
+    if(BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR AND BASICRENDERER_DIRECTSTORAGE_LIBRARY)
+        add_library(BasicRenderer_DirectStorage UNKNOWN IMPORTED)
+        set_target_properties(BasicRenderer_DirectStorage PROPERTIES
+            IMPORTED_LOCATION "${BASICRENDERER_DIRECTSTORAGE_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR}")
+        set(BASICRENDERER_HAS_DIRECTSTORAGE TRUE)
+        message(STATUS "BasicRenderer: DirectStorage SDK found at ${BASICRENDERER_DIRECTSTORAGE_INCLUDE_DIR}")
+    else()
+        message(STATUS "BasicRenderer: DirectStorage SDK not found. Runtime support will compile as a fallback-only stub.")
+    endif()
+endif()
+
 # Build tool for code generation
 add_executable(resource_codegen
   "generators/resource_codegen.cpp"
@@ -688,6 +784,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   $<$<CONFIG:Debug>:BUILD_TYPE=BUILD_TYPE_DEBUG>
   $<$<CONFIG:Release>:BUILD_TYPE=BUILD_TYPE_RELEASE>
   $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
+    BASICRENDERER_HAS_DIRECTSTORAGE=$<IF:$<BOOL:${BASICRENDERER_HAS_DIRECTSTORAGE}>,1,0>
 )
 target_compile_definitions(ShaderPreprocessTests PRIVATE
   BUILD_TYPE_DEBUG=0
@@ -735,6 +832,30 @@ PRIVATE
     "${BASICRENDERER_SOURCE_ROOT}/ffx_sssr_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )
+
+if(TARGET BasicRenderer_DirectStorage)
+    target_link_libraries(${PROJECT_NAME} PRIVATE BasicRenderer_DirectStorage)
+endif()
+
+if(BASICRENDERER_DIRECTSTORAGE_DLL)
+    set(DIRECTSTORAGE_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/dstorage.dll")
+    add_symlink_or_copy_per_config(
+        "${BASICRENDERER_DIRECTSTORAGE_DLL}"
+        "${DIRECTSTORAGE_DEST_FILE}"
+        FALSE
+        "directstorage_dll"
+    )
+endif()
+
+if(BASICRENDERER_DIRECTSTORAGE_CORE_DLL)
+    set(DIRECTSTORAGE_CORE_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/dstoragecore.dll")
+    add_symlink_or_copy_per_config(
+        "${BASICRENDERER_DIRECTSTORAGE_CORE_DLL}"
+        "${DIRECTSTORAGE_CORE_DEST_FILE}"
+        FALSE
+        "directstoragecore_dll"
+    )
+endif()
 
 if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
     target_link_directories(${PROJECT_NAME} PRIVATE

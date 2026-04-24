@@ -15,6 +15,7 @@
 #include <rhi_helpers.h>
 
 #include "DefaultDirection.h"
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
@@ -321,8 +322,153 @@ static DecodedTexture DecodedFromDXT(
 
 namespace detail {
 
-    inline std::vector<std::byte> ReadFileBytes(const std::wstring& path)
+    struct ReadFileBytesResult {
+        std::vector<std::byte> data;
+        bool usedDirectStorage = false;
+        std::string detail;
+    };
+
+    bool IsDDSPath(const std::wstring& filePath) {
+        auto extension = std::filesystem::path(filePath).extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+        return extension == L".dds";
+    }
+
+    std::shared_ptr<TextureAsset> TryLoadDDSDirectToVRAM(
+        const std::wstring& filePath,
+        std::shared_ptr<Sampler> sampler,
+        bool preferSRGB,
+        const LoadFlags& flags,
+        bool requireCubemap,
+        bool allowRTV,
+        bool allowUAV)
     {
+        if (!DirectStorageManager::GetInstance().CanServiceQueue(br::DirectStorageQueueKind::Gpu)) {
+            return {};
+        }
+
+        DirectX::TexMetadata metadata{};
+        const HRESULT metadataHr = DirectX::GetMetadataFromDDSFile(filePath.c_str(), flags.dds, metadata);
+        if (FAILED(metadataHr)) {
+            return {};
+        }
+
+        if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.depth != 1) {
+            return {};
+        }
+
+        if (requireCubemap && !(metadata.miscFlags & DirectX::TEX_MISC_TEXTURECUBE)) {
+            return {};
+        }
+
+        size_t headerSize = 0;
+        const HRESULT headerHr = DirectX::EncodeDDSHeader(
+            metadata,
+            flags.dds,
+            nullptr,
+            (std::numeric_limits<size_t>::max)(),
+            headerSize);
+        if (FAILED(headerHr) || headerSize == 0) {
+            return {};
+        }
+
+        const DXGI_FORMAT chosenFormat = preferSRGB ? DirectX::MakeSRGB(metadata.format) : ToLinearIfSRGB(metadata.format);
+
+        TextureDescription desc{};
+        desc.format = rhi::helpers::ToRHI(chosenFormat);
+        desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(desc.format));
+        desc.isCubemap = metadata.IsCubemap();
+        desc.isArray = metadata.arraySize > 1 && !desc.isCubemap;
+        desc.arraySize = desc.isCubemap
+            ? static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)))
+            : static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+        desc.hasRTV = allowRTV;
+        desc.hasUAV = allowUAV;
+        desc.generateMipMaps = false;
+
+        const uint32_t arraySlices = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+        const uint32_t mipLevels = static_cast<uint32_t>((std::max)(size_t(1), metadata.mipLevels));
+
+        std::vector<br::DirectStorageTextureRegionCopy> regions;
+        regions.reserve(static_cast<size_t>(arraySlices) * mipLevels);
+        desc.imageDimensions.reserve(static_cast<size_t>(arraySlices) * mipLevels);
+
+        uint64_t currentOffset = static_cast<uint64_t>(headerSize);
+        for (uint32_t arraySlice = 0; arraySlice < arraySlices; ++arraySlice) {
+            for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+                const size_t mipWidth = (std::max)(size_t(1), metadata.width >> mip);
+                const size_t mipHeight = (std::max)(size_t(1), metadata.height >> mip);
+
+                size_t rowPitch = 0;
+                size_t slicePitch = 0;
+                const HRESULT pitchHr = DirectX::ComputePitch(chosenFormat, mipWidth, mipHeight, rowPitch, slicePitch);
+                if (FAILED(pitchHr) || slicePitch == 0 || slicePitch > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
+                    return {};
+                }
+
+                ImageDimensions dims{};
+                dims.width = static_cast<uint32_t>(mipWidth);
+                dims.height = static_cast<uint32_t>(mipHeight);
+                dims.rowPitch = rowPitch;
+                dims.slicePitch = slicePitch;
+                desc.imageDimensions.push_back(dims);
+
+                br::DirectStorageTextureRegionCopy region{};
+                region.sourceOffset = currentOffset;
+                region.sourceSizeBytes = static_cast<uint32_t>(slicePitch);
+                region.uncompressedSizeBytes = static_cast<uint32_t>(slicePitch);
+                region.subresourceIndex = mip + arraySlice * mipLevels;
+                region.width = dims.width;
+                region.height = dims.height;
+                region.depth = 1;
+                regions.push_back(region);
+
+                currentOffset += slicePitch;
+            }
+        }
+
+        auto pixelBuffer = PixelBuffer::CreateShared(desc);
+        std::string directStorageMessage;
+        if (!DirectStorageManager::GetInstance().UploadTextureRegionsFromFile(filePath, pixelBuffer->GetAPIResource(), regions, &directStorageMessage)) {
+            if (!directStorageMessage.empty()) {
+                spdlog::debug("TryLoadDDSDirectToVRAM: DirectStorage fallback for '{}' because {}", ws2s(filePath), directStorageMessage);
+            }
+            return {};
+        }
+
+        if (!sampler) {
+            sampler = Sampler::GetDefaultSampler();
+        }
+
+        TextureFileMeta meta{};
+        meta.filePath = ws2s(filePath);
+        meta.fileType = ImageFiletype::DDS;
+        meta.loader = ImageLoader::DirectXTex;
+        meta.preferSRGB = preferSRGB;
+
+        auto texture = TextureAsset::CreateShared(desc, ws2s(filePath), sampler, std::move(meta));
+        texture->AdoptUploadedImage(pixelBuffer);
+        texture->RecordLoadPath(TextureLoadPathTelemetry::DirectStorageGpuDirect, "DDS file uploaded directly into GPU texture through DirectStorage");
+        texture->RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, "final texture residency established through DirectStorage GPU queue");
+        return texture;
+    }
+
+    inline ReadFileBytesResult ReadFileBytes(const std::wstring& path)
+    {
+        ReadFileBytesResult result{};
+        std::vector<std::byte> directStorageData;
+        std::string directStorageMessage;
+        if (DirectStorageManager::GetInstance().ReadFileToMemory(path, directStorageData, &directStorageMessage)) {
+            result.data = std::move(directStorageData);
+            result.usedDirectStorage = true;
+            result.detail = "file bytes loaded through DirectStorage system-memory queue";
+            return result;
+        }
+
+        if (!directStorageMessage.empty() && DirectStorageManager::GetInstance().IsEnabled()) {
+            spdlog::debug("LoadTextureFromFile: DirectStorage fallback for '{}' because {}", ws2s(path), directStorageMessage);
+        }
+
         std::ifstream f(path, std::ios::binary | std::ios::ate);
         if (!f) { throw std::runtime_error("Failed to open file: " + ws2s(path)); }
         const auto size = static_cast<size_t>(f.tellg());
@@ -331,7 +477,9 @@ namespace detail {
         if (size && !f.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(size))) {
             throw std::runtime_error("Failed to read file: " + ws2s(path));
         }
-        return data;
+        result.data = std::move(data);
+        result.detail = "file bytes loaded through std::ifstream";
+        return result;
     }
 
     inline bool ProbeImageContainer(const void* bytes, size_t byteCount,
@@ -471,11 +619,22 @@ LoadTextureFromFile(const std::wstring& filePath,
     // For WIC paths, FORCE_* ensures consistent format choice even if the file has metadata
     localFlags.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
 
-    const auto data = detail::ReadFileBytes(filePath);
-    auto texture = LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
+    if (detail::IsDDSPath(filePath)) {
+        if (auto directStorageTexture = detail::TryLoadDDSDirectToVRAM(filePath, sampler, preferSRGB, localFlags, false, allowRTV, allowUAV)) {
+            directStorageTexture->Meta().filePath = utf8;
+            directStorageTexture->Meta().preferSRGB = preferSRGB;
+            return directStorageTexture;
+        }
+    }
+
+    const auto fileBytes = detail::ReadFileBytes(filePath);
+    auto texture = LoadTextureFromMemory(fileBytes.data.data(), fileBytes.data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
     if (texture) {
         texture->Meta().filePath = utf8;
         texture->Meta().preferSRGB = preferSRGB;
+        texture->RecordLoadPath(
+            fileBytes.usedDirectStorage ? TextureLoadPathTelemetry::DirectStorageSystemMemoryRead : TextureLoadPathTelemetry::CpuFileRead,
+            fileBytes.detail);
     }
     return texture;
 }
@@ -516,6 +675,10 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const cha
 }
 
 std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV, bool allowUAV) {
+    if (auto directStorageTexture = detail::TryLoadDDSDirectToVRAM(ddsFilePath, Sampler::GetDefaultSampler(), false, {}, true, allowRTV, allowUAV)) {
+        return directStorageTexture;
+    }
+
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);

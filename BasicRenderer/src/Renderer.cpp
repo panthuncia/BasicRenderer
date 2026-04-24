@@ -58,6 +58,7 @@
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "Render/GraphExtensions/IOExtension.h"
 #include "Render/GraphExtensions/CLodExtension.h"
@@ -114,6 +115,17 @@ bool IsStreamlineDisabledByEnvironment() {
     return disabled;
 }
 
+bool IsDirectStorageDisabledByEnvironment() {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, "BASICRENDERER_DISABLE_DIRECTSTORAGE") != 0 || value == nullptr) {
+        return false;
+    }
+    const bool disabled = value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y';
+    free(value);
+    return disabled;
+}
+
 bool DefaultEnableReShapeForBuild() {
 #if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
     return true;
@@ -157,18 +169,21 @@ flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stable
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     auto& settingsManager = SettingsManager::GetInstance();
     const bool enableStreamline = !IsStreamlineDisabledByEnvironment();
+    const bool enableDirectStorage = !IsDirectStorageDisabledByEnvironment();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
+    settingsManager.registerSetting<bool>("enableDirectStorage", enableDirectStorage);
     settingsManager.registerSetting<bool>("enableReShape", DefaultEnableReShapeForBuild());
     settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
     settingsManager.registerSetting<bool>("reshapeTexelAddressing", true);
     settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
     settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", false);
     LoadPipeline(hwnd, x_res, y_res);
+    DirectStorageManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
     UpscalingManager::GetInstance().InitFFX(); // Needs device
@@ -2076,6 +2091,7 @@ void Renderer::Cleanup() {
 	spdlog::info("Cleaning up swap chain");
     m_swapChain.Reset();
 	spdlog::info("Cleaning up device manager");
+    DirectStorageManager::GetInstance().Cleanup();
     DeviceManager::GetInstance().Cleanup();
 	spdlog::info("Cleanup complete");
 }

@@ -33,6 +33,24 @@ enum class NormalMapConvention : uint8_t {
     OpenGL,
 };
 
+enum class TextureLoadPathTelemetry : uint8_t {
+    Unknown = 0,
+    DirectStorageGpuDirect,
+    DirectStorageSystemMemoryRead,
+    CpuFileRead,
+    InMemoryContainer,
+};
+
+enum class TextureUploadPathTelemetry : uint8_t {
+    Unknown = 0,
+    DirectStorageGpuDirect,
+    CpuImmediateUpload,
+    AsyncProcessingPlaceholder,
+    AsyncProcessingReadyUpload,
+    ProcessingCacheUpload,
+    ProcessingFailedFallback,
+};
+
 struct TextureProcessingSettings {
     TextureSemantic semantic = TextureSemantic::Unknown;
     bool isParticipatingMaterialTexture = false;
@@ -90,6 +108,10 @@ struct TextureFileMeta {
 	bool alphaIsAllOpaque = true;
     bool preferSRGB = false;
     bool isProcessingCacheArtifact = false;
+    TextureLoadPathTelemetry loadPath = TextureLoadPathTelemetry::Unknown;
+    TextureUploadPathTelemetry uploadPath = TextureUploadPathTelemetry::Unknown;
+    std::string loadPathDetail;
+    std::string uploadPathDetail;
     TextureProcessingSettings processing = {};
 };
 
@@ -158,7 +180,11 @@ public:
     TextureFileMeta& Meta() { return m_meta; }
 
     const TextureProcessingSettings& ProcessingSettings() const { return m_meta.processing; }
-    void SetProcessingSettings(TextureProcessingSettings settings) { m_meta.processing = std::move(settings); }
+    void SetProcessingSettings(TextureProcessingSettings settings);
+
+    void AdoptUploadedImage(std::shared_ptr<PixelBuffer> image);
+    void RecordLoadPath(TextureLoadPathTelemetry path, std::string detail = {});
+    void RecordUploadPath(TextureUploadPathTelemetry path, std::string detail = {});
 
     std::shared_ptr<TextureSourceData> BuildSourceData() const;
 
@@ -208,4 +234,6 @@ private:
     std::string m_name;
 	bool m_hasUploadedPlaceholder = false;
 	bool m_hasUploadedFinalImage = false;
+    TextureLoadPathTelemetry m_lastReportedLoadPath = TextureLoadPathTelemetry::Unknown;
+    TextureUploadPathTelemetry m_lastReportedUploadPath = TextureUploadPathTelemetry::Unknown;
 };
