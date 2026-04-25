@@ -1,8 +1,10 @@
 #include "Managers/Singletons/TextureProcessingManager.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -15,8 +17,10 @@
 #include <rhi_dx12.h>
 #include <rhi_helpers.h>
 
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Utilities/CachePathUtilities.h"
+#include "Utilities/ProcessedTextureCache.h"
 
 using namespace DirectX;
 
@@ -138,6 +142,146 @@ std::wstring BuildProcessingCachePath(const std::string& key) {
 	return GetCacheFilePath(s2ws(fileName.str()), L"textures");
 }
 
+std::wstring BuildProcessingConditionedCachePath(const std::string& key) {
+	size_t seed = 0;
+	boost::hash_combine(seed, key);
+
+	std::wostringstream fileName;
+	fileName << L"processed_"
+		<< std::hex
+		<< std::setw(static_cast<int>(sizeof(size_t) * 2))
+		<< std::setfill(L'0')
+		<< seed
+		<< br::processed_texture_cache::kExtension;
+	return GetCacheFilePath(fileName.str(), L"textures");
+}
+
+uint32_t GetTextureTotalArraySlices(const TextureDescription& desc) {
+	if (desc.isCubemap) {
+		return 6u * (std::max)(1u, desc.arraySize);
+	}
+	if (desc.isArray) {
+		return (std::max)(1u, desc.arraySize);
+	}
+	return 1u;
+}
+
+uint32_t GetTextureMipLevelCount(const TextureSourceData& sourceData) {
+	const uint32_t totalArraySlices = GetTextureTotalArraySlices(sourceData.desc);
+	if (totalArraySlices == 0 || sourceData.desc.imageDimensions.empty() ||
+		(sourceData.desc.imageDimensions.size() % totalArraySlices) != 0) {
+		return 0;
+	}
+	return static_cast<uint32_t>(sourceData.desc.imageDimensions.size() / totalArraySlices);
+}
+
+bool TryWriteConditionedTextureCache(const std::wstring& cachePath, const TextureSourceData& sourceData) {
+	if (sourceData.desc.imageDimensions.empty() || sourceData.subresources.empty()) {
+		return false;
+	}
+
+	const uint32_t totalArraySlices = GetTextureTotalArraySlices(sourceData.desc);
+	const uint32_t mipLevels = GetTextureMipLevelCount(sourceData);
+	const uint32_t subresourceCount = static_cast<uint32_t>(sourceData.desc.imageDimensions.size());
+	if (mipLevels == 0 || subresourceCount != sourceData.subresources.size()) {
+		return false;
+	}
+
+	auto* nativeDevice = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
+	if (nativeDevice == nullptr) {
+		return false;
+	}
+
+	D3D12_RESOURCE_DESC resourceDesc{};
+	resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	resourceDesc.Alignment = 0;
+	resourceDesc.Width = sourceData.desc.imageDimensions[0].width;
+	resourceDesc.Height = sourceData.desc.imageDimensions[0].height;
+	resourceDesc.DepthOrArraySize = static_cast<uint16_t>(totalArraySlices);
+	resourceDesc.MipLevels = static_cast<uint16_t>(mipLevels);
+	resourceDesc.Format = rhi::ToDxgi(sourceData.desc.format);
+	resourceDesc.SampleDesc.Count = 1;
+	resourceDesc.SampleDesc.Quality = 0;
+	resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+	std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(subresourceCount);
+	std::vector<UINT> numRows(subresourceCount);
+	std::vector<UINT64> rowSizes(subresourceCount);
+	UINT64 totalBytes = 0;
+	nativeDevice->GetCopyableFootprints(
+		&resourceDesc,
+		0,
+		subresourceCount,
+		0,
+		layouts.data(),
+		numRows.data(),
+		rowSizes.data(),
+		&totalBytes);
+
+	if (totalBytes == 0 || totalBytes > static_cast<UINT64>((std::numeric_limits<size_t>::max)())) {
+		return false;
+	}
+
+	std::vector<uint8_t> conditionedData(static_cast<size_t>(totalBytes), 0u);
+	for (uint32_t subresourceIndex = 0; subresourceIndex < subresourceCount; ++subresourceIndex) {
+		const auto& dims = sourceData.desc.imageDimensions[subresourceIndex];
+		const auto& bytes = sourceData.subresources[subresourceIndex];
+		if (!bytes || bytes->size() < dims.slicePitch) {
+			return false;
+		}
+
+		const auto& layout = layouts[subresourceIndex];
+		const size_t copyRowSize = static_cast<size_t>(rowSizes[subresourceIndex]);
+		const size_t srcRowPitch = static_cast<size_t>(dims.rowPitch);
+		const size_t dstRowPitch = static_cast<size_t>(layout.Footprint.RowPitch);
+		uint8_t* dstBase = conditionedData.data() + static_cast<size_t>(layout.Offset);
+		const uint8_t* srcBase = bytes->data();
+		for (UINT row = 0; row < numRows[subresourceIndex]; ++row) {
+			std::memcpy(
+				dstBase + static_cast<size_t>(row) * dstRowPitch,
+				srcBase + static_cast<size_t>(row) * srcRowPitch,
+				copyRowSize);
+		}
+	}
+
+	br::processed_texture_cache::FileHeader header{};
+	header.flags = 0;
+	if (sourceData.desc.isCubemap) {
+		header.flags |= br::processed_texture_cache::FlagIsCubemap;
+	}
+	if (sourceData.desc.isArray) {
+		header.flags |= br::processed_texture_cache::FlagIsArray;
+	}
+	if (sourceData.hasFullMipChain) {
+		header.flags |= br::processed_texture_cache::FlagHasFullMipChain;
+	}
+	if (sourceData.isBlockCompressed) {
+		header.flags |= br::processed_texture_cache::FlagIsBlockCompressed;
+	}
+	header.format = static_cast<uint32_t>(sourceData.desc.format);
+	header.channels = sourceData.desc.channels;
+	header.baseWidth = sourceData.desc.imageDimensions[0].width;
+	header.baseHeight = sourceData.desc.imageDimensions[0].height;
+	header.mipLevels = mipLevels;
+	header.arraySize = (std::max)(1u, sourceData.desc.arraySize);
+	header.totalArraySlices = totalArraySlices;
+	header.subresourceCount = subresourceCount;
+	header.dataOffset = sizeof(header);
+	header.dataSizeBytes = totalBytes;
+
+	std::error_code ec;
+	std::filesystem::create_directories(std::filesystem::path(cachePath).parent_path(), ec);
+	std::ofstream file(cachePath, std::ios::binary | std::ios::trunc);
+	if (!file) {
+		return false;
+	}
+
+	file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+	file.write(reinterpret_cast<const char*>(conditionedData.data()), static_cast<std::streamsize>(conditionedData.size()));
+	return file.good();
+}
+
 DXGI_FORMAT ChooseWorkingFormat(const TextureFileMeta& meta) {
 	switch (meta.processing.semantic) {
 	case TextureSemantic::Normal:
@@ -153,6 +297,7 @@ DXGI_FORMAT ChooseWorkingFormat(const TextureFileMeta& meta) {
 		return meta.preferSRGB ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
 	}
 }
+
 
 DXGI_FORMAT ChooseCompressedFormat(const TextureSourceData& sourceData, const TextureFileMeta& meta) {
 	if (!meta.processing.requestBlockCompression) {
@@ -290,6 +435,7 @@ std::shared_ptr<TextureSourceData> TryLoadTextureSourceDataFromCache(const std::
 
 void TryWriteTextureSourceDataToCache(const std::string& key, const TextureSourceData& sourceData) {
 	const std::wstring cachePath = BuildProcessingCachePath(key);
+	const std::wstring conditionedCachePath = BuildProcessingConditionedCachePath(key);
 	ScratchImage cachedImage;
 	const HRESULT initHr = InitializeScratchImageFromSource(sourceData, cachedImage);
 	if (FAILED(initHr)) {
@@ -305,10 +451,67 @@ void TryWriteTextureSourceDataToCache(const std::string& key, const TextureSourc
 		cachePath.c_str());
 	if (FAILED(writeHr)) {
 		spdlog::warn("TextureProcessingManager: failed to write cache file '{}'", ws2s(cachePath));
+		return;
+	}
+
+	spdlog::info(
+		"TextureProcessingManager: wrote cache file '{}' format={} subresources={} fullMipChain={} blockCompressed={}",
+		ws2s(cachePath),
+		static_cast<uint32_t>(sourceData.desc.format),
+		sourceData.subresources.size(),
+		sourceData.hasFullMipChain,
+		sourceData.isBlockCompressed);
+
+	if (TryWriteConditionedTextureCache(conditionedCachePath, sourceData)) {
+		spdlog::info(
+			"TextureProcessingManager: wrote conditioned cache file '{}' format={} subresources={}",
+			ws2s(conditionedCachePath),
+			static_cast<uint32_t>(sourceData.desc.format),
+			sourceData.subresources.size());
+	}
+	else {
+		spdlog::warn("TextureProcessingManager: failed to write conditioned cache file '{}'", ws2s(conditionedCachePath));
 	}
 }
 
-std::shared_ptr<TextureSourceData> ProcessTextureSourceData(
+constexpr bool kEnableGpuBc7Compression = false;
+
+struct PreparedTextureProcessingData {
+	std::shared_ptr<TextureSourceData> preparedSourceData;
+	std::shared_ptr<TextureSourceData> finalResult;
+	bool requiresGpuCompression = false;
+};
+
+bool ShouldUseGpuBc7Backend(const TextureSourceData& sourceData, const TextureFileMeta& meta) {
+	if (!kEnableGpuBc7Compression) {
+		return false;
+	}
+
+	if (!meta.processing.requestBlockCompression || sourceData.isBlockCompressed) {
+		return false;
+	}
+
+	if (sourceData.desc.isArray || sourceData.desc.isCubemap || sourceData.desc.arraySize > 1) {
+		return false;
+	}
+
+	if (sourceData.desc.imageDimensions.empty() || sourceData.desc.channels != 4) {
+		return false;
+	}
+
+	switch (rhi::helpers::stripSrgb(sourceData.desc.format)) {
+	case rhi::Format::R8G8B8A8_UNorm:
+	case rhi::Format::B8G8R8A8_UNorm:
+		break;
+	default:
+		return false;
+	}
+
+	const DXGI_FORMAT compressedFormat = ChooseCompressedFormat(sourceData, meta);
+	return compressedFormat == DXGI_FORMAT_BC7_UNORM || compressedFormat == DXGI_FORMAT_BC7_UNORM_SRGB;
+}
+
+std::shared_ptr<TextureSourceData> PrepareTextureSourceDataForBackend(
 	const std::shared_ptr<TextureSourceData>& sourceData,
 	const TextureFileMeta& meta)
 {
@@ -383,11 +586,29 @@ std::shared_ptr<TextureSourceData> ProcessTextureSourceData(
 		currentImage = &mipChainImage;
 	}
 
+	return BuildSourceDataFromScratchImage(*currentImage);
+}
+
+std::shared_ptr<TextureSourceData> FinalizeTextureSourceDataOnCpu(
+	const std::shared_ptr<TextureSourceData>& preparedSourceData,
+	const TextureFileMeta& meta)
+{
+	if (!preparedSourceData) {
+		throw std::runtime_error("TextureProcessingManager: prepared source data is null");
+	}
+
 	if (!meta.processing.requestBlockCompression) {
-		return BuildSourceDataFromScratchImage(*currentImage);
+		return preparedSourceData;
+	}
+
+	ScratchImage preparedImage;
+	HRESULT hr = InitializeScratchImageFromSource(*preparedSourceData, preparedImage);
+	if (FAILED(hr)) {
+		throw std::runtime_error("TextureProcessingManager: failed to initialize prepared scratch image");
 	}
 
 	ScratchImage compressedImage;
+	const DXGI_FORMAT targetFormat = ChooseCompressedFormat(*preparedSourceData, meta);
 	TEX_COMPRESS_FLAGS flags = TEX_COMPRESS_DEFAULT;
 	if (meta.processing.semantic != TextureSemantic::BaseColor &&
 		meta.processing.semantic != TextureSemantic::Emissive &&
@@ -397,11 +618,24 @@ std::shared_ptr<TextureSourceData> ProcessTextureSourceData(
 	}
 	flags = static_cast<TEX_COMPRESS_FLAGS>(flags | TEX_COMPRESS_PARALLEL);
 
+	spdlog::info(
+		"TextureProcessingManager: CPU finalize begin semantic={} srcFormat={} targetFormat={} dims={}x{} subresources={} fullMipChain={} preservePackedChannels={} preferSRGB={}",
+		TextureSemanticToString(meta.processing.semantic),
+		static_cast<uint32_t>(preparedSourceData->desc.format),
+		static_cast<uint32_t>(targetFormat),
+		preparedSourceData->desc.imageDimensions.empty() ? 0u : preparedSourceData->desc.imageDimensions[0].width,
+		preparedSourceData->desc.imageDimensions.empty() ? 0u : preparedSourceData->desc.imageDimensions[0].height,
+		preparedSourceData->subresources.size(),
+		preparedSourceData->hasFullMipChain,
+		meta.processing.preservePackedChannels,
+		meta.preferSRGB);
+	const auto compressionStart = std::chrono::steady_clock::now();
+
 	hr = Compress(
-		currentImage->GetImages(),
-		currentImage->GetImageCount(),
-		currentImage->GetMetadata(),
-		ChooseCompressedFormat(*sourceData, meta),
+		preparedImage.GetImages(),
+		preparedImage.GetImageCount(),
+		preparedImage.GetMetadata(),
+		targetFormat,
 		flags,
 		TEX_THRESHOLD_DEFAULT,
 		compressedImage);
@@ -409,7 +643,28 @@ std::shared_ptr<TextureSourceData> ProcessTextureSourceData(
 		throw std::runtime_error("TextureProcessingManager: DirectXTex Compress failed");
 	}
 
+	const auto compressionElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - compressionStart).count();
+	spdlog::info(
+		"TextureProcessingManager: CPU finalize complete semantic={} targetFormat={} elapsedMs={}",
+		TextureSemanticToString(meta.processing.semantic),
+		static_cast<uint32_t>(targetFormat),
+		compressionElapsedMs);
+
 	return BuildSourceDataFromScratchImage(compressedImage);
+}
+
+PreparedTextureProcessingData ProcessTextureSourceData(
+	const std::shared_ptr<TextureSourceData>& sourceData,
+	const TextureFileMeta& meta)
+{
+	PreparedTextureProcessingData prepared{};
+	prepared.preparedSourceData = PrepareTextureSourceDataForBackend(sourceData, meta);
+	prepared.requiresGpuCompression = prepared.preparedSourceData && ShouldUseGpuBc7Backend(*prepared.preparedSourceData, meta);
+	if (!prepared.requiresGpuCompression) {
+		prepared.finalResult = FinalizeTextureSourceDataOnCpu(prepared.preparedSourceData, meta);
+	}
+	return prepared;
 }
 }
 
@@ -435,10 +690,41 @@ bool TextureProcessingManager::NeedsProcessing(const TextureSourceData& sourceDa
 	return needMipChain || needCompression || needDecompression || needNormalConventionConversion;
 }
 
+std::wstring TextureProcessingManager::GetExistingCachePathForFile(const TextureFileMeta& meta) const {
+	if (!ShouldProcess(meta) || meta.filePath.empty()) {
+		return {};
+	}
+
+	const std::string key = BuildProcessingKey({}, meta);
+	const std::wstring conditionedCachePath = BuildProcessingConditionedCachePath(key);
+	std::error_code ec;
+	if (std::filesystem::exists(std::filesystem::path(conditionedCachePath), ec) && !ec) {
+		return conditionedCachePath;
+	}
+
+	const std::wstring cachePath = BuildProcessingCachePath(key);
+	if (!std::filesystem::exists(std::filesystem::path(cachePath), ec) || ec) {
+		return {};
+	}
+
+	if (auto cachedSourceData = TryLoadTextureSourceDataFromCache(key)) {
+		if (TryWriteConditionedTextureCache(conditionedCachePath, *cachedSourceData)) {
+			spdlog::info(
+				"TextureProcessingManager: backfilled conditioned cache '{}' from legacy DDS cache '{}'",
+				ws2s(conditionedCachePath),
+				ws2s(cachePath));
+			return conditionedCachePath;
+		}
+	}
+
+	return cachePath;
+}
+
 std::string TextureProcessingManager::BuildProcessingKey(
 	const std::shared_ptr<TextureSourceData>& sourceData,
 	const TextureFileMeta& meta) const
 {
+	static_cast<void>(sourceData);
 	const std::string normalizedIdentity = ResolveProcessingIdentity(meta);
 	const std::string sourceVersionTag = TryGetSourceVersionTag(meta);
 
@@ -451,15 +737,6 @@ std::string TextureProcessingManager::BuildProcessingKey(
 	boost::hash_combine(seed, meta.processing.preferSRGB);
 	boost::hash_combine(seed, meta.processing.preservePackedChannels);
 	boost::hash_combine(seed, static_cast<uint32_t>(meta.processing.normalConvention));
-	boost::hash_combine(seed, static_cast<uint32_t>(sourceData ? sourceData->desc.format : rhi::Format::Unknown));
-	boost::hash_combine(seed, static_cast<uint32_t>(sourceData ? sourceData->desc.arraySize : 0u));
-	boost::hash_combine(seed, sourceData ? sourceData->hasFullMipChain : false);
-	boost::hash_combine(seed, sourceData ? sourceData->isBlockCompressed : false);
-	boost::hash_combine(seed, sourceData ? sourceData->subresources.size() : size_t{ 0 });
-	if (sourceData && !sourceData->desc.imageDimensions.empty()) {
-		boost::hash_combine(seed, sourceData->desc.imageDimensions[0].width);
-		boost::hash_combine(seed, sourceData->desc.imageDimensions[0].height);
-	}
 	return normalizedIdentity + "#" + TextureSemanticToString(meta.processing.semantic) + "#" + std::to_string(seed);
 }
 
@@ -484,6 +761,8 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 	}
 
 	auto handle = std::make_shared<TextureProcessingJobHandle>();
+	handle->requestMeta = meta;
+	handle->processingKey = key;
 	handle->state.store(TextureProcessingJobState::Queued, std::memory_order_release);
 
 	{
@@ -492,33 +771,90 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 	}
 
 	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureProcessingManager::RequestProcessing", [handle, sourceData, meta, key]() {
-		handle->state.store(TextureProcessingJobState::Processing, std::memory_order_release);
+		handle->state.store(TextureProcessingJobState::CpuPreparing, std::memory_order_release);
 		try {
+			spdlog::info(
+				"TextureProcessingManager: begin processing '{}' semantic={} srcFormat={} blockCompressed={} fullMipChain={} subresources={} dims={}x{}",
+				key,
+				TextureSemanticToString(meta.processing.semantic),
+				sourceData ? static_cast<uint32_t>(sourceData->desc.format) : 0u,
+				sourceData ? sourceData->isBlockCompressed : false,
+				sourceData ? sourceData->hasFullMipChain : false,
+				sourceData ? sourceData->subresources.size() : 0u,
+				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].width : 0u,
+				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].height : 0u);
+
 			if (auto cachedResult = TryLoadTextureSourceDataFromCache(key)) {
+				spdlog::info(
+					"TextureProcessingManager: cache hit for '{}' file='{}' semantic={} bc={} mips={} fmt={} subresources={} dims={}x{}",
+					key,
+					meta.filePath,
+					TextureSemanticToString(meta.processing.semantic),
+					meta.processing.requestBlockCompression,
+					meta.processing.requestMipChain,
+					static_cast<uint32_t>(cachedResult->desc.format),
+					cachedResult->subresources.size(),
+					cachedResult->desc.imageDimensions.empty() ? 0u : cachedResult->desc.imageDimensions[0].width,
+					cachedResult->desc.imageDimensions.empty() ? 0u : cachedResult->desc.imageDimensions[0].height);
 				{
 					std::scoped_lock lock(handle->mutex);
+					handle->preparedSourceData.reset();
 					handle->result = std::move(cachedResult);
+					handle->uploadedImage.reset();
 					handle->loadedFromCache = true;
+					handle->requiresGpuCompression = false;
+					handle->completedOnGpu = false;
 					handle->error.clear();
 				}
 				handle->state.store(TextureProcessingJobState::Ready, std::memory_order_release);
-				spdlog::info(
-					"TextureProcessingManager: cache hit for '{}' semantic={} bc={} mips={}",
-					key,
-					TextureSemanticToString(meta.processing.semantic),
-					meta.processing.requestBlockCompression,
-					meta.processing.requestMipChain);
 				return;
 			}
 
-			auto result = ProcessTextureSourceData(sourceData, meta);
+			auto prepared = ProcessTextureSourceData(sourceData, meta);
+			if (prepared.preparedSourceData) {
+				spdlog::info(
+					"TextureProcessingManager: prepared '{}' semantic={} fmt={} blockCompressed={} fullMipChain={} subresources={} dims={}x{} requiresGpuCompression={}",
+					key,
+					TextureSemanticToString(meta.processing.semantic),
+					static_cast<uint32_t>(prepared.preparedSourceData->desc.format),
+					prepared.preparedSourceData->isBlockCompressed,
+					prepared.preparedSourceData->hasFullMipChain,
+					prepared.preparedSourceData->subresources.size(),
+					prepared.preparedSourceData->desc.imageDimensions.empty() ? 0u : prepared.preparedSourceData->desc.imageDimensions[0].width,
+					prepared.preparedSourceData->desc.imageDimensions.empty() ? 0u : prepared.preparedSourceData->desc.imageDimensions[0].height,
+					prepared.requiresGpuCompression);
+			}
+			if (prepared.requiresGpuCompression) {
+				{
+					std::scoped_lock lock(handle->mutex);
+					handle->preparedSourceData = std::move(prepared.preparedSourceData);
+					handle->result.reset();
+					handle->uploadedImage.reset();
+					handle->loadedFromCache = false;
+					handle->requiresGpuCompression = true;
+					handle->completedOnGpu = false;
+					handle->error.clear();
+				}
+				handle->state.store(TextureProcessingJobState::GpuReadyToSubmit, std::memory_order_release);
+				spdlog::info(
+					"TextureProcessingManager: prepared texture '{}' semantic={} for GPU BC7 submission",
+					key,
+					TextureSemanticToString(meta.processing.semantic));
+				return;
+			}
+
+			auto result = std::move(prepared.finalResult);
 			if (result) {
 				TryWriteTextureSourceDataToCache(key, *result);
 			}
 			{
 				std::scoped_lock lock(handle->mutex);
+				handle->preparedSourceData.reset();
 				handle->result = std::move(result);
+				handle->uploadedImage.reset();
 				handle->loadedFromCache = false;
+				handle->requiresGpuCompression = false;
+				handle->completedOnGpu = false;
 				handle->error.clear();
 			}
 			handle->state.store(TextureProcessingJobState::Ready, std::memory_order_release);
@@ -540,4 +876,61 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 	});
 
 	return handle;
+}
+
+void TextureProcessingManager::MarkGpuJobSubmitted(const std::shared_ptr<TextureProcessingJobHandle>& handle) {
+	if (!handle) {
+		return;
+	}
+
+	handle->state.store(TextureProcessingJobState::GpuSubmitted, std::memory_order_release);
+}
+
+void TextureProcessingManager::MarkGpuJobReadbackPending(const std::shared_ptr<TextureProcessingJobHandle>& handle) {
+	if (!handle) {
+		return;
+	}
+
+	handle->state.store(TextureProcessingJobState::ReadbackPending, std::memory_order_release);
+}
+
+void TextureProcessingManager::CompleteGpuProcessing(
+	const std::shared_ptr<TextureProcessingJobHandle>& handle,
+	std::shared_ptr<TextureSourceData> result,
+	std::shared_ptr<PixelBuffer> uploadedImage,
+	bool writeCacheArtifact)
+{
+	if (!handle) {
+		return;
+	}
+
+	if (writeCacheArtifact && result && !handle->processingKey.empty()) {
+		TryWriteTextureSourceDataToCache(handle->processingKey, *result);
+	}
+
+	{
+		std::scoped_lock lock(handle->mutex);
+		handle->preparedSourceData.reset();
+		handle->result = std::move(result);
+		handle->uploadedImage = std::move(uploadedImage);
+		handle->loadedFromCache = false;
+		handle->requiresGpuCompression = false;
+		handle->completedOnGpu = true;
+		handle->error.clear();
+	}
+
+	handle->state.store(TextureProcessingJobState::Ready, std::memory_order_release);
+}
+
+void TextureProcessingManager::FailProcessing(const std::shared_ptr<TextureProcessingJobHandle>& handle, std::string error) {
+	if (!handle) {
+		return;
+	}
+
+	{
+		std::scoped_lock lock(handle->mutex);
+		handle->error = std::move(error);
+	}
+
+	handle->state.store(TextureProcessingJobState::Failed, std::memory_order_release);
 }

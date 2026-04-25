@@ -12,6 +12,12 @@
 class PixelBuffer;
 class Sampler;
 class BufferView;
+class Buffer;
+struct TextureProcessingJobHandle;
+
+namespace rg::runtime {
+    class IReadbackService;
+}
 
 // Central API for textures that have initial texel data.
 class TextureFactory {
@@ -39,8 +45,32 @@ public:
         std::string_view debugName = {}) const;
 
     std::shared_ptr<ComputePass> GetMipmappingPass() const { return m_mipmappingPass; }
+    std::shared_ptr<ComputePass> GetBC7CompressionPass() const { return m_bc7CompressionPass; }
+    std::shared_ptr<CopyPass> GetBC7CompressionCopyPass() const { return m_bc7CompressionCopyPass; }
+    std::shared_ptr<CopyPass> GetBC7CompressionReadbackPass() const { return m_bc7CompressionReadbackPass; }
+
+    void SetReadbackService(rg::runtime::IReadbackService* readbackService);
+    bool SubmitBC7CompressionJob(
+        const std::shared_ptr<TextureProcessingJobHandle>& handle,
+        std::string_view debugName = {}) const;
 
 private:
+
+    struct BC7CompressionSubresource {
+        rhi::CopyableFootprint footprint{};
+        uint32_t mip = 0;
+        uint32_t slice = 0;
+    };
+
+    struct BC7CompressionJob {
+        std::string debugName;
+        std::shared_ptr<TextureProcessingJobHandle> handle;
+        std::shared_ptr<PixelBuffer> workingTexture;
+        std::shared_ptr<PixelBuffer> compressedTexture;
+        std::shared_ptr<Buffer> blockBuffer;
+        std::vector<BC7CompressionSubresource> subresources;
+        uint64_t outputByteSize = 0;
+    };
 
     class MipmappingPass : public ComputePass, public IDynamicDeclaredResources {
     public:
@@ -137,9 +167,94 @@ private:
         bool m_declaredResourcesChanged = true;
     };
 
+    class BC7CompressionPass : public ComputePass, public IDynamicDeclaredResources {
+    public:
+        void Setup() override;
+
+        void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
+
+        void Update(const UpdateExecutionContext& context) override;
+
+        void DeclareResourceUsages(ComputePassBuilder* builder) override;
+
+        PassReturn Execute(PassExecutionContext& context) override;
+
+        void Cleanup() override;
+
+        bool DeclaredResourcesChanged() const override {
+            return m_declaredResourcesChanged;
+        }
+
+    private:
+        PipelineState& GetOrCreatePipeline();
+        PipelineState CreatePipeline() const;
+
+        std::vector<std::shared_ptr<BC7CompressionJob>> m_pending;
+        PipelineState m_psoMode6;
+        bool m_hasPsoMode6 = false;
+        bool m_declaredResourcesChanged = true;
+    };
+
+    class BC7CompressionCopyPass : public CopyPass, public IDynamicDeclaredResources {
+    public:
+        void Setup() override;
+
+        void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
+
+        void Update(const UpdateExecutionContext& context) override;
+
+        void DeclareResourceUsages(CopyPassBuilder* builder) override;
+
+        void RecordImmediateCommands(ImmediateExecutionContext& context) override;
+
+        void Cleanup() override;
+
+        bool DeclaredResourcesChanged() const override {
+            return m_declaredResourcesChanged;
+        }
+
+    private:
+        std::vector<std::shared_ptr<BC7CompressionJob>> m_pending;
+        bool m_declaredResourcesChanged = true;
+    };
+
+    class BC7CompressionReadbackPass : public CopyPass, public IDynamicDeclaredResources {
+    public:
+        void Setup() override;
+
+        void SetReadbackService(rg::runtime::IReadbackService* readbackService);
+        void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
+
+        void Update(const UpdateExecutionContext& context) override;
+
+        void DeclareResourceUsages(CopyPassBuilder* builder) override;
+
+        void RecordImmediateCommands(ImmediateExecutionContext& context) override;
+
+        PassReturn Execute(PassExecutionContext& context) override;
+
+        void Cleanup() override;
+
+        bool DeclaredResourcesChanged() const override {
+            return m_declaredResourcesChanged;
+        }
+
+    private:
+        std::vector<std::shared_ptr<BC7CompressionJob>> m_pending;
+        std::vector<uint64_t> m_pendingCaptureIds;
+        rg::runtime::IReadbackService* m_readbackService = nullptr;
+        bool m_declaredResourcesChanged = true;
+    };
+
     TextureFactory() {
 		m_mipmappingPass = std::make_shared<MipmappingPass>();
+		m_bc7CompressionPass = std::make_shared<BC7CompressionPass>();
+		m_bc7CompressionCopyPass = std::make_shared<BC7CompressionCopyPass>();
+		m_bc7CompressionReadbackPass = std::make_shared<BC7CompressionReadbackPass>();
     }
 
 	std::shared_ptr<ComputePass> m_mipmappingPass;
+	std::shared_ptr<ComputePass> m_bc7CompressionPass;
+	std::shared_ptr<CopyPass> m_bc7CompressionCopyPass;
+	std::shared_ptr<CopyPass> m_bc7CompressionReadbackPass;
 };

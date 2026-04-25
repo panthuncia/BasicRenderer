@@ -81,6 +81,12 @@ public:
     void ReleaseFileHandle(const std::wstring& path);
     bool HasPrimedFileHandle(const std::wstring& path) const;
     bool ReadFileToMemory(const std::wstring& path, std::vector<std::byte>& outData, std::string* outMessage = nullptr);
+    bool UploadTextureSubresourcesFromFile(
+        const std::wstring& path,
+        rhi::Resource destinationResource,
+        uint64_t sourceOffset,
+        uint32_t sourceSizeBytes,
+        std::string* outMessage = nullptr);
     bool UploadTextureRegionsFromFile(
         const std::wstring& path,
         rhi::Resource destinationResource,

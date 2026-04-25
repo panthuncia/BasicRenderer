@@ -2293,6 +2293,10 @@ void Renderer::CreateRenderGraph() {
             rg::memory::CreateECSMemorySnapshotProvider());
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
 
+        if (auto* textureFactory = m_managerInterface.GetTextureFactory()) {
+            textureFactory->SetReadbackService(currentRenderGraph->GetReadbackService());
+        }
+
         RendererECSManager::GetInstance().CreateRenderPhaseEntity(Engine::Primary::CLodTransparentPass);
 
         currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(

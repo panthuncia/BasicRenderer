@@ -526,6 +526,14 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
     }
 
     auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
+    const D3D12_RESOURCE_DESC destinationDesc = nativeResource->GetDesc();
+    const uint32_t subresourceCount = static_cast<uint32_t>(destinationDesc.MipLevels) * static_cast<uint32_t>(destinationDesc.DepthOrArraySize);
+    if (subresourceCount == 0) {
+        if (outMessage) {
+            *outMessage = "destination texture has zero subresources";
+        }
+        return false;
+    }
 
     Microsoft::WRL::ComPtr<ID3D12Device> nativeDevice;
     const HRESULT getDeviceHr = nativeResource->GetDevice(IID_PPV_ARGS(nativeDevice.ReleaseAndGetAddressOf()));
@@ -625,6 +633,173 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
 
     if (outMessage) {
         *outMessage = "uploaded texture subresources through DirectStorage GPU queue";
+    }
+    return true;
+#endif
+}
+
+bool DirectStorageManager::UploadTextureSubresourcesFromFile(
+    const std::wstring& path,
+    rhi::Resource destinationResource,
+    uint64_t sourceOffset,
+    uint32_t sourceSizeBytes,
+    std::string* outMessage) {
+    if (outMessage) {
+        outMessage->clear();
+    }
+
+    if (path.empty()) {
+        if (outMessage) {
+            *outMessage = "path is empty";
+        }
+        return false;
+    }
+
+    if (!destinationResource.IsValid()) {
+        if (outMessage) {
+            *outMessage = "destination resource is invalid";
+        }
+        return false;
+    }
+
+    if (sourceSizeBytes == 0) {
+        if (outMessage) {
+            *outMessage = "source size is zero";
+        }
+        return false;
+    }
+
+    if (!CanServiceQueue(DirectStorageQueueKind::Gpu)) {
+        if (outMessage) {
+            *outMessage = m_statusMessage.empty() ? "DirectStorage GPU queue unavailable" : m_statusMessage;
+        }
+        return false;
+    }
+
+#if !BASICRENDERER_HAS_DIRECTSTORAGE
+    if (outMessage) {
+        *outMessage = "DirectStorage SDK is not available in this build";
+    }
+    return false;
+#else
+    auto primeResult = PrimeFileHandle(path);
+    if (!primeResult.success) {
+        if (outMessage) {
+            *outMessage = primeResult.message;
+        }
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<IDStorageFile> file;
+    {
+        std::scoped_lock fileLock(m_impl->fileCacheMutex);
+        auto it = m_impl->fileCache.find(path);
+        if (it == m_impl->fileCache.end() || it->second == nullptr) {
+            if (outMessage) {
+                *outMessage = "cached DirectStorage file handle missing";
+            }
+            return false;
+        }
+        file = it->second;
+    }
+
+    rhi::D3D12ResourceInfo resourceInfo{};
+    if (!rhi::QueryNativeResource(destinationResource, rhi::RHI_IID_D3D12_RESOURCE, &resourceInfo, sizeof(resourceInfo)) || resourceInfo.resource == nullptr) {
+        if (outMessage) {
+            *outMessage = "failed to query native D3D12 texture resource";
+        }
+        return false;
+    }
+
+    auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
+    const D3D12_RESOURCE_DESC destinationDesc = nativeResource->GetDesc();
+    const uint32_t subresourceCount = static_cast<uint32_t>(destinationDesc.MipLevels) * static_cast<uint32_t>(destinationDesc.DepthOrArraySize);
+    if (subresourceCount == 0) {
+        if (outMessage) {
+            *outMessage = "destination texture has zero subresources";
+        }
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<ID3D12Device> nativeDevice;
+    const HRESULT getDeviceHr = nativeResource->GetDevice(IID_PPV_ARGS(nativeDevice.ReleaseAndGetAddressOf()));
+    if (FAILED(getDeviceHr)) {
+        if (outMessage) {
+            *outMessage = "failed to get native D3D12 device from texture resource";
+        }
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+    const HRESULT createFenceHr = nativeDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence.ReleaseAndGetAddressOf()));
+    if (FAILED(createFenceHr)) {
+        if (outMessage) {
+            *outMessage = "failed to create DirectStorage GPU completion fence";
+        }
+        return false;
+    }
+
+    ScopedWinHandle completionEvent(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+    if (completionEvent.get() == nullptr) {
+        if (outMessage) {
+            *outMessage = "failed to create DirectStorage GPU completion event";
+        }
+        return false;
+    }
+
+    constexpr uint64_t kFenceValue = 1;
+    const HRESULT setEventHr = fence->SetEventOnCompletion(kFenceValue, completionEvent.get());
+    if (FAILED(setEventHr)) {
+        if (outMessage) {
+            *outMessage = "failed to arm DirectStorage GPU completion event";
+        }
+        return false;
+    }
+
+    {
+        std::scoped_lock queueLock(m_impl->gpuQueueMutex);
+
+        DSTORAGE_REQUEST request{};
+        request.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+        request.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES_RANGE;
+        request.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+        request.Source.File.Source = file.Get();
+        request.Source.File.Offset = sourceOffset;
+        request.Source.File.Size = sourceSizeBytes;
+        request.Destination.MultipleSubresourcesRange.Resource = nativeResource;
+        request.Destination.MultipleSubresourcesRange.FirstSubresource = 0;
+        request.Destination.MultipleSubresourcesRange.NumSubresources = subresourceCount;
+        request.UncompressedSize = sourceSizeBytes;
+        request.CancellationTag = reinterpret_cast<uint64_t>(this);
+
+        m_impl->gpuQueue->EnqueueRequest(&request);
+        m_impl->gpuQueue->EnqueueSignal(fence.Get(), kFenceValue);
+        m_impl->gpuQueue->Submit();
+
+        const DWORD waitResult = WaitForSingleObject(completionEvent.get(), INFINITE);
+        if (waitResult != WAIT_OBJECT_0) {
+            if (outMessage) {
+                *outMessage = "DirectStorage GPU wait failed";
+            }
+            return false;
+        }
+
+        DSTORAGE_ERROR_RECORD errorRecord{};
+        m_impl->gpuQueue->RetrieveErrorRecord(&errorRecord);
+        if (FAILED(errorRecord.FirstFailure.HResult)) {
+            if (outMessage) {
+                *outMessage = "DirectStorage GPU upload failed";
+            }
+            spdlog::warn(
+                "DirectStorageManager: conditioned GPU upload failed for '{}' hr=0x{:08X}",
+                std::filesystem::path(path).string(),
+                static_cast<unsigned int>(errorRecord.FirstFailure.HResult));
+            return false;
+        }
+    }
+
+    if (outMessage) {
+        *outMessage = "uploaded conditioned texture cache through DirectStorage GPU queue";
     }
     return true;
 #endif

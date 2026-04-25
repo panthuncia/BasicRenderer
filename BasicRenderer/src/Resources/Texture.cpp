@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <sstream>
 
 #include <DirectXTex.h>
 
@@ -12,6 +13,35 @@
 #include "Managers/Singletons/TextureProcessingManager.h"
 
 namespace {
+const char* ToString(TextureSemantic semantic) {
+	switch (semantic) {
+	case TextureSemantic::BaseColor:
+		return "BaseColor";
+	case TextureSemantic::Emissive:
+		return "Emissive";
+	case TextureSemantic::Normal:
+		return "Normal";
+	case TextureSemantic::Height:
+		return "Height";
+	case TextureSemantic::AO:
+		return "AO";
+	case TextureSemantic::Opacity:
+		return "Opacity";
+	case TextureSemantic::Metallic:
+		return "Metallic";
+	case TextureSemantic::Roughness:
+		return "Roughness";
+	case TextureSemantic::MetallicRoughness:
+		return "MetallicRoughness";
+	case TextureSemantic::OpenPBRColor:
+		return "OpenPBRColor";
+	case TextureSemantic::OpenPBRScalar:
+		return "OpenPBRScalar";
+	default:
+		return "Unknown";
+	}
+}
+
 const char* ToString(TextureLoadPathTelemetry path) {
 	switch (path) {
 	case TextureLoadPathTelemetry::DirectStorageGpuDirect:
@@ -49,6 +79,9 @@ const char* ToString(TextureUploadPathTelemetry path) {
 std::string TextureTelemetryLabel(const TextureAsset& texture) {
 	if (!texture.Meta().filePath.empty()) {
 		return texture.Meta().filePath;
+	}
+	if (!texture.Meta().processing.sourceIdentity.empty()) {
+		return texture.Meta().processing.sourceIdentity + "|semantic:" + ToString(texture.Meta().processing.semantic);
 	}
 	return texture.GetWidth() && texture.GetHeight()
 		? std::to_string(texture.GetWidth()) + "x" + std::to_string(texture.GetHeight())
@@ -275,13 +308,41 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 
 		if (m_processingHandle) {
 			const TextureProcessingJobState state = m_processingHandle->state.load(std::memory_order_acquire);
+			if (state == TextureProcessingJobState::GpuReadyToSubmit) {
+				if (factory.SubmitBC7CompressionJob(m_processingHandle, m_name)) {
+					TextureProcessingManager::GetInstance().MarkGpuJobSubmitted(m_processingHandle);
+				}
+			}
+
 			if (state == TextureProcessingJobState::Ready) {
 				std::shared_ptr<TextureSourceData> result;
+				std::shared_ptr<PixelBuffer> uploadedImage;
 				bool loadedFromCache = false;
+				bool completedOnGpu = false;
 				{
 					std::scoped_lock lock(m_processingHandle->mutex);
 					result = m_processingHandle->result;
+					uploadedImage = m_processingHandle->uploadedImage;
 					loadedFromCache = m_processingHandle->loadedFromCache;
+					completedOnGpu = m_processingHandle->completedOnGpu;
+				}
+
+				if (uploadedImage) {
+					m_desc = uploadedImage->GetDescription();
+					m_meta.isProcessingCacheArtifact = loadedFromCache;
+					AdoptUploadedImage(std::move(uploadedImage));
+					RecordUploadPath(
+						loadedFromCache ? TextureUploadPathTelemetry::ProcessingCacheUpload : TextureUploadPathTelemetry::AsyncProcessingReadyUpload,
+						completedOnGpu
+							? "async GPU processing completed and adopted resident PixelBuffer"
+							: "async processing completed and adopted resident PixelBuffer");
+					if (!m_initialDataString.empty()) {
+						m_initialStorage = m_initialDataString;
+					}
+					else {
+						m_initialStorage = std::monostate{};
+					}
+					return;
 				}
 
 				if (result) {

@@ -1,5 +1,6 @@
 #include "Materials/Material.h"
 #include <string>
+#include <spdlog/spdlog.h>
 #include "Render/PSOFlags.h"
 #include "Utilities/Utilities.h"
 #include "Materials/MaterialFlags.h"
@@ -104,6 +105,7 @@ Material::Material(const std::string& name,
     m_materialData.roughnessUvSetIndex = m_roughnessUvSetIndex;
     m_materialData.emissiveUvSetIndex = m_emissiveUvSetIndex;
     m_materialData.opacityUvSetIndex = m_opacityUvSetIndex;
+
 }
 
 Material::~Material() {

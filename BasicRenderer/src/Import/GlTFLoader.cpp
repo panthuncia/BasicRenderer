@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
+#include "Managers/Singletons/TextureProcessingManager.h"
 #include "Animation/Animation.h"
 #include "Animation/AnimationController.h"
 #include "Animation/Skeleton.h"
@@ -920,8 +921,48 @@ std::shared_ptr<TextureAsset> LoadTexture(
     const auto& textureNode = textures[textureIndex];
     const size_t imageIndex = ResolveTextureImageIndex(textureNode);
 
-    auto textureBytes = ReadImageBytes(gltf, sourcePath, cache.bufferSources, imageIndex);
     auto sampler = CreateTextureSampler(gltf, textureNode);
+
+    const auto& imageNode = gltf.at("images").at(imageIndex);
+    std::filesystem::path cacheProbePath = sourcePath;
+    std::string cacheProbeDetail = sourcePath.string();
+    if (imageNode.contains("uri")) {
+        const std::string uri = imageNode["uri"].get<std::string>();
+        if (uri.rfind("data:", 0) != 0) {
+            cacheProbePath = sourcePath.parent_path() / std::filesystem::path(uri);
+            cacheProbeDetail = cacheProbePath.string();
+        }
+        else {
+            cacheProbeDetail = cache.sourceKey + "#image-data-uri:" + std::to_string(imageIndex);
+        }
+    }
+    else if (imageNode.contains("bufferView")) {
+        cacheProbeDetail = BuildGlTFImageIdentity(gltf, sourcePath, cache.sourceKey, imageIndex);
+    }
+
+    TextureFileMeta cacheProbeMeta{};
+    cacheProbeMeta.filePath = cacheProbePath.string();
+    cacheProbeMeta.preferSRGB = preferSRGB;
+    cacheProbeMeta.processing = MakeMaterialTextureProcessingSettings(semantic, preferSRGB, cacheKey, preservePackedChannels, normalConvention);
+
+    const std::wstring cachePath = TextureProcessingManager::GetInstance().GetExistingCachePathForFile(cacheProbeMeta);
+    if (!cachePath.empty()) {
+        auto cachedTexture = LoadTextureFromFile(cachePath, sampler, preferSRGB);
+        cachedTexture->Meta().isProcessingCacheArtifact = true;
+        cachedTexture->Meta().preferSRGB = preferSRGB;
+        cachedTexture->Meta().processing = cacheProbeMeta.processing;
+        cache.textureCache[cacheKey] = cachedTexture;
+
+        {
+            std::lock_guard<std::mutex> lock(g_gltfMaterialCacheMutex);
+            g_sharedTextureCache[sharedCacheKey] = SharedTextureCacheEntry{ cachedTexture };
+        }
+
+        spdlog::info("GlTFLoader: texture processing cache hit for '{}' -> '{}'", cacheProbeDetail, ws2s(cachePath));
+        return cachedTexture;
+    }
+
+    auto textureBytes = ReadImageBytes(gltf, sourcePath, cache.bufferSources, imageIndex);
     auto texture = LoadTextureFromMemory(textureBytes.data(), textureBytes.size(), sampler, {}, preferSRGB);
     texture->SetProcessingSettings(MakeMaterialTextureProcessingSettings(semantic, preferSRGB, cacheKey, preservePackedChannels, normalConvention));
     texture->SetGenerateMipmaps(true);
