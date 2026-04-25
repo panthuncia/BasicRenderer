@@ -512,7 +512,13 @@ namespace {
                 ? (dims.height + 3u) / 4u
                 : dims.height;
 
-            const uint64_t srcEnd = footprint.offset + static_cast<uint64_t>(footprint.rowPitch) * rows;
+            if (dims.rowPitch > footprint.rowPitch) {
+                throw std::runtime_error("BuildCompressedSourceDataFromReadback: readback row pitch is smaller than the subresource row size");
+            }
+
+            const uint64_t srcEnd = rows == 0
+                ? footprint.offset
+                : footprint.offset + static_cast<uint64_t>(footprint.rowPitch) * (rows - 1u) + dims.rowPitch;
             if (srcEnd > readback.data.size()) {
                 throw std::runtime_error("BuildCompressedSourceDataFromReadback: readback buffer is smaller than expected");
             }
@@ -1314,6 +1320,16 @@ void TextureFactory::BC7CompressionReadbackPass::RecordImmediateCommands(Immedia
                     true);
             }
             catch (const std::exception& ex) {
+                const auto& desc = job->compressedTexture->GetDescription();
+                spdlog::error(
+                    "TextureFactory: BC7 readback finalize failed for '{}' : {} (descSubresources={} readbackLayouts={} readbackBytes={} format={} mipLevels={})",
+                    job->debugName,
+                    ex.what(),
+                    desc.imageDimensions.size(),
+                    readback.layouts.size(),
+                    readback.data.size(),
+                    static_cast<uint32_t>(desc.format),
+                    job->compressedTexture->GetMipLevels());
                 TextureProcessingManager::GetInstance().FailProcessing(job->handle, ex.what());
             }
         };

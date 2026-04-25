@@ -373,12 +373,21 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				}
 			}
 			else if (state == TextureProcessingJobState::Failed) {
+				std::string processingError;
+				{
+					std::scoped_lock lock(m_processingHandle->mutex);
+					processingError = m_processingHandle->error;
+				}
 				m_meta.isProcessingCacheArtifact = false;
 				m_image = factory.CreateAlwaysResidentPixelBuffer(
 					m_desc,
 					TextureFactory::TextureInitialData::FromBytes(ResolveToBytes()),
 					m_name);
-				RecordUploadPath(TextureUploadPathTelemetry::ProcessingFailedFallback, "async processing failed; uploaded original bytes through TextureFactory");
+				RecordUploadPath(
+					TextureUploadPathTelemetry::ProcessingFailedFallback,
+					processingError.empty()
+						? "async processing failed; uploaded original bytes through TextureFactory"
+						: "async processing failed ('" + processingError + "'); uploaded original bytes through TextureFactory");
 				m_hasUploadedFinalImage = true;
 				m_hasUploadedPlaceholder = false;
 				return;

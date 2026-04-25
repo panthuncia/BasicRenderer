@@ -13,9 +13,26 @@ struct BC7Mode6Block
     uint bitPosition;
 };
 
+struct QuantizedEndpoint
+{
+    uint4 q7;
+    uint pbit;
+    uint4 bytes;
+};
+
 uint FloatToByte(float value)
 {
     return (uint)round(saturate(value) * 255.0f);
+}
+
+uint FloatByteToUInt(float value)
+{
+    return (uint)round(clamp(value, 0.0f, 255.0f));
+}
+
+float4 ClampByteRange(float4 value)
+{
+    return clamp(value, 0.0f, 255.0f);
 }
 
 void WriteBits(inout BC7Mode6Block block, uint bitCount, uint value)
@@ -39,24 +56,24 @@ uint ReconstructEndpoint(uint q7, uint pbit)
     return min(255u, (q7 << 1u) | pbit);
 }
 
-uint2 QuantizeEndpoint(float4 endpoint)
+QuantizedEndpoint QuantizeEndpoint(float4 endpointValue)
 {
     uint endpointBytes[4] = {
-        FloatToByte(endpoint.x),
-        FloatToByte(endpoint.y),
-        FloatToByte(endpoint.z),
-        FloatToByte(endpoint.w)
+        FloatByteToUInt(endpointValue.x),
+        FloatByteToUInt(endpointValue.y),
+        FloatByteToUInt(endpointValue.z),
+        FloatByteToUInt(endpointValue.w)
     };
 
     uint bestPbit = 0u;
     uint bestError = 0xffffffffu;
-    uint bestQ7Packed = 0u;
+    uint4 bestQ7 = uint4(0u, 0u, 0u, 0u);
 
     [unroll]
     for (uint pbit = 0u; pbit < 2u; ++pbit)
     {
         uint totalError = 0u;
-        uint packedQ7 = 0u;
+        uint4 candidateQ7 = uint4(0u, 0u, 0u, 0u);
 
         [unroll]
         for (uint component = 0u; component < 4u; ++component)
@@ -66,73 +83,35 @@ uint2 QuantizeEndpoint(float4 endpoint)
             const uint reconstructed = ReconstructEndpoint(q7, pbit);
             const int delta = int(value) - int(reconstructed);
             totalError += uint(delta * delta);
-            packedQ7 |= (q7 & 0x7fu) << (component * 8u);
+            candidateQ7[component] = q7;
         }
 
         if (totalError < bestError)
         {
             bestError = totalError;
             bestPbit = pbit;
-            bestQ7Packed = packedQ7;
+            bestQ7 = candidateQ7;
         }
     }
 
-    return uint2(bestQ7Packed, bestPbit);
+    QuantizedEndpoint result;
+    result.q7 = bestQ7;
+    result.pbit = bestPbit;
+    result.bytes = uint4(
+        ReconstructEndpoint(bestQ7.x, bestPbit),
+        ReconstructEndpoint(bestQ7.y, bestPbit),
+        ReconstructEndpoint(bestQ7.z, bestPbit),
+        ReconstructEndpoint(bestQ7.w, bestPbit));
+    return result;
 }
 
-uint4 LoadBlockPixels(Texture2D<float4> srcTexture, uint2 blockBase, uint2 textureSize, out uint4 alphaHigh)
+float4 PaletteColor(float4 endpoint0, float4 endpoint1, uint index)
 {
-    uint4 minRGBA = uint4(255u, 255u, 255u, 255u);
-    uint4 maxRGBA = uint4(0u, 0u, 0u, 0u);
-    alphaHigh = uint4(0u, 0u, 0u, 0u);
-
-    [unroll]
-    for (uint y = 0u; y < 4u; ++y)
-    {
-        [unroll]
-        for (uint x = 0u; x < 4u; ++x)
-        {
-            const uint2 pixel = min(blockBase + uint2(x, y), textureSize - 1u.xx);
-            const float4 sampleValue = srcTexture.Load(int3(pixel, 0));
-            const uint4 rgba = uint4(
-                FloatToByte(sampleValue.x),
-                FloatToByte(sampleValue.y),
-                FloatToByte(sampleValue.z),
-                FloatToByte(sampleValue.w));
-            minRGBA = min(minRGBA, rgba);
-            maxRGBA = max(maxRGBA, rgba);
-        }
-    }
-
-    return uint4(minRGBA.xyz, minRGBA.w) | (uint4(maxRGBA.xyz, maxRGBA.w) << 16u);
+    const float weight = float(BC7Mode6Weights[index]) * (1.0f / 64.0f);
+    return lerp(endpoint0, endpoint1, weight);
 }
 
-float4 DecodeMinEndpoint(uint4 packedMinMax)
-{
-    return float4(
-        float(packedMinMax.x & 0xffffu),
-        float(packedMinMax.y & 0xffffu),
-        float(packedMinMax.z & 0xffffu),
-        float(packedMinMax.w & 0xffffu)) * (1.0f / 255.0f);
-}
-
-float4 DecodeMaxEndpoint(uint4 packedMinMax)
-{
-    return float4(
-        float((packedMinMax.x >> 16u) & 0xffffu),
-        float((packedMinMax.y >> 16u) & 0xffffu),
-        float((packedMinMax.z >> 16u) & 0xffffu),
-        float((packedMinMax.w >> 16u) & 0xffffu)) * (1.0f / 255.0f);
-}
-
-float4 PaletteColor(uint4 endpoint0, uint4 endpoint1, uint index)
-{
-    const uint weight = BC7Mode6Weights[index];
-    const uint4 color = ((endpoint0 * (64u - weight)) + (endpoint1 * weight) + 32u) >> 6u;
-    return float4(color) * (1.0f / 255.0f);
-}
-
-uint ChooseBestIndex(float4 sampleValue, uint4 endpoint0, uint4 endpoint1)
+uint ChooseBestIndex(float4 sampleValue, float4 endpoint0, float4 endpoint1)
 {
     uint bestIndex = 0u;
     float bestError = 3.402823466e+38F;
@@ -153,44 +132,43 @@ uint ChooseBestIndex(float4 sampleValue, uint4 endpoint0, uint4 endpoint1)
     return bestIndex;
 }
 
+void RefineEndpoints(float4 samples[16], uint indices[16], inout float4 endpoint0, inout float4 endpoint1)
+{
+    float sumA2 = 0.0f;
+    float sumAB = 0.0f;
+    float sumB2 = 0.0f;
+    float4 rhsA = 0.0f.xxxx;
+    float4 rhsB = 0.0f.xxxx;
+
+    [unroll]
+    for (uint index = 0u; index < 16u; ++index)
+    {
+        const float t = float(BC7Mode6Weights[indices[index]]) * (1.0f / 64.0f);
+        const float a = 1.0f - t;
+        const float b = t;
+        sumA2 += a * a;
+        sumAB += a * b;
+        sumB2 += b * b;
+        rhsA += samples[index] * a;
+        rhsB += samples[index] * b;
+    }
+
+    const float det = sumA2 * sumB2 - sumAB * sumAB;
+    if (abs(det) < 1.0e-6f)
+    {
+        return;
+    }
+
+    endpoint0 = ClampByteRange((rhsA * sumB2 - rhsB * sumAB) / det);
+    endpoint1 = ClampByteRange((rhsB * sumA2 - rhsA * sumAB) / det);
+}
+
 BC7Mode6Block EncodeMode6(Texture2D<float4> srcTexture, uint2 blockBase, uint2 textureSize)
 {
-    uint4 alphaHigh;
-    const uint4 packedMinMax = LoadBlockPixels(srcTexture, blockBase, textureSize, alphaHigh);
-    const float4 endpointMin = DecodeMinEndpoint(packedMinMax);
-    const float4 endpointMax = DecodeMaxEndpoint(packedMinMax);
+    float4 samples[16];
+    float4 endpoint0 = float4(255.0f, 255.0f, 255.0f, 255.0f);
+    float4 endpoint1 = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    const uint2 endpoint0Quant = QuantizeEndpoint(endpointMin);
-    const uint2 endpoint1Quant = QuantizeEndpoint(endpointMax);
-
-    uint endpoint0Q7[4] = {
-        endpoint0Quant.x & 0x7fu,
-        (endpoint0Quant.x >> 8u) & 0x7fu,
-        (endpoint0Quant.x >> 16u) & 0x7fu,
-        (endpoint0Quant.x >> 24u) & 0x7fu
-    };
-    uint endpoint1Q7[4] = {
-        endpoint1Quant.x & 0x7fu,
-        (endpoint1Quant.x >> 8u) & 0x7fu,
-        (endpoint1Quant.x >> 16u) & 0x7fu,
-        (endpoint1Quant.x >> 24u) & 0x7fu
-    };
-
-    const uint endpoint0Pbit = endpoint0Quant.y;
-    const uint endpoint1Pbit = endpoint1Quant.y;
-
-    uint4 endpoint0 = uint4(
-        ReconstructEndpoint(endpoint0Q7[0], endpoint0Pbit),
-        ReconstructEndpoint(endpoint0Q7[1], endpoint0Pbit),
-        ReconstructEndpoint(endpoint0Q7[2], endpoint0Pbit),
-        ReconstructEndpoint(endpoint0Q7[3], endpoint0Pbit));
-    uint4 endpoint1 = uint4(
-        ReconstructEndpoint(endpoint1Q7[0], endpoint1Pbit),
-        ReconstructEndpoint(endpoint1Q7[1], endpoint1Pbit),
-        ReconstructEndpoint(endpoint1Q7[2], endpoint1Pbit),
-        ReconstructEndpoint(endpoint1Q7[3], endpoint1Pbit));
-
-    uint indices[16];
     [unroll]
     for (uint y = 0u; y < 4u; ++y)
     {
@@ -199,57 +177,58 @@ BC7Mode6Block EncodeMode6(Texture2D<float4> srcTexture, uint2 blockBase, uint2 t
         {
             const uint linearIndex = y * 4u + x;
             const uint2 pixel = min(blockBase + uint2(x, y), textureSize - 1u.xx);
-            const float4 sampleValue = srcTexture.Load(int3(pixel, 0));
-            indices[linearIndex] = ChooseBestIndex(sampleValue, endpoint0, endpoint1);
+            const float4 sampleBytes = ClampByteRange(srcTexture.Load(int3(pixel, 0)) * 255.0f);
+            samples[linearIndex] = sampleBytes;
+            endpoint0 = min(endpoint0, sampleBytes);
+            endpoint1 = max(endpoint1, sampleBytes);
         }
     }
 
+    uint indices[16];
+
+    QuantizedEndpoint endpoint0Quant;
+    QuantizedEndpoint endpoint1Quant;
+    [unroll]
+    for (uint iteration = 0u; iteration < 3u; ++iteration)
+    {
+        endpoint0Quant = QuantizeEndpoint(endpoint0);
+        endpoint1Quant = QuantizeEndpoint(endpoint1);
+
+        [unroll]
+        for (uint sampleIndex = 0u; sampleIndex < 16u; ++sampleIndex)
+        {
+            indices[sampleIndex] = ChooseBestIndex(
+                samples[sampleIndex],
+                float4(endpoint0Quant.bytes),
+                float4(endpoint1Quant.bytes));
+        }
+
+        if (iteration < 2u)
+        {
+            RefineEndpoints(samples, indices, endpoint0, endpoint1);
+        }
+    }
+
+    uint4 endpoint0Q7 = endpoint0Quant.q7;
+    uint4 endpoint1Q7 = endpoint1Quant.q7;
+    uint endpoint0Pbit = endpoint0Quant.pbit;
+    uint endpoint1Pbit = endpoint1Quant.pbit;
+
     if (indices[0] >= 8u)
     {
-        const uint4 swappedEndpoint = endpoint0;
-        endpoint0 = endpoint1;
-        endpoint1 = swappedEndpoint;
+        const uint4 swappedQ7 = endpoint0Q7;
+        endpoint0Q7 = endpoint1Q7;
+        endpoint1Q7 = swappedQ7;
 
         const uint swappedPbit = endpoint0Pbit;
-        const uint endpoint0PbitLocal = endpoint1Pbit;
-        const uint endpoint1PbitLocal = swappedPbit;
-
-        endpoint0Q7[0] = (endpoint1.x >> 1u) & 0x7fu;
-        endpoint0Q7[1] = (endpoint1.y >> 1u) & 0x7fu;
-        endpoint0Q7[2] = (endpoint1.z >> 1u) & 0x7fu;
-        endpoint0Q7[3] = (endpoint1.w >> 1u) & 0x7fu;
-        endpoint1Q7[0] = (endpoint0.x >> 1u) & 0x7fu;
-        endpoint1Q7[1] = (endpoint0.y >> 1u) & 0x7fu;
-        endpoint1Q7[2] = (endpoint0.z >> 1u) & 0x7fu;
-        endpoint1Q7[3] = (endpoint0.w >> 1u) & 0x7fu;
+        endpoint0Pbit = endpoint1Pbit;
+        endpoint1Pbit = swappedPbit;
 
         [unroll]
         for (uint index = 0u; index < 16u; ++index)
         {
             indices[index] = 15u - indices[index];
         }
-
-        BC7Mode6Block tempBlock = (BC7Mode6Block)0;
-        tempBlock.bitPosition = 0u;
-        WriteBits(tempBlock, 6u, 0u);
-        WriteBits(tempBlock, 1u, 1u);
-
-        [unroll]
-        for (uint component = 0u; component < 4u; ++component)
-        {
-            WriteBits(tempBlock, 7u, endpoint0Q7[component]);
-            WriteBits(tempBlock, 7u, endpoint1Q7[component]);
-        }
-
-        WriteBits(tempBlock, 1u, endpoint0PbitLocal);
-        WriteBits(tempBlock, 1u, endpoint1PbitLocal);
-        WriteBits(tempBlock, 3u, indices[0]);
-        [unroll]
-        for (uint index = 1u; index < 16u; ++index)
-        {
-            WriteBits(tempBlock, 4u, indices[index]);
-        }
-        return tempBlock;
     }
 
     BC7Mode6Block block = (BC7Mode6Block)0;

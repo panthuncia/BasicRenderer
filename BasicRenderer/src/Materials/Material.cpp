@@ -199,10 +199,14 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_normalTexture) {
         m_normalTexture->SetGenerateMipmaps(true);
         m_normalTexture->EnsureUploaded(factory);
-        const bool useCanonicalCachedNormalFormat =
-            m_normalTexture->Meta().isProcessingCacheArtifact &&
-            m_normalTexture->Meta().processing.semantic == TextureSemantic::Normal;
-        if (useCanonicalCachedNormalFormat) {
+        const auto uploadPath = m_normalTexture->Meta().uploadPath;
+        const bool useCanonicalProcessedNormalFormat =
+            m_normalTexture->Meta().fileType == ImageFiletype::DDS ||
+            (m_normalTexture->Meta().processing.semantic == TextureSemantic::Normal &&
+                (m_normalTexture->Meta().isProcessingCacheArtifact ||
+                 uploadPath == TextureUploadPathTelemetry::AsyncProcessingReadyUpload ||
+                 uploadPath == TextureUploadPathTelemetry::ProcessingCacheUpload));
+        if (useCanonicalProcessedNormalFormat) {
             m_materialData.materialFlags |= negateNormalsFlag;
             m_materialData.materialFlags &= ~invertNormalGreenFlag;
         }

@@ -927,10 +927,21 @@ void TextureProcessingManager::FailProcessing(const std::shared_ptr<TextureProce
 		return;
 	}
 
+	std::string key;
+	{
+		std::scoped_lock lock(handle->mutex);
+		key = handle->processingKey;
+	}
+
 	{
 		std::scoped_lock lock(handle->mutex);
 		handle->error = std::move(error);
 	}
+
+	spdlog::error(
+		"TextureProcessingManager: async processing failed for '{}': {}",
+		key,
+		handle->error);
 
 	handle->state.store(TextureProcessingJobState::Failed, std::memory_order_release);
 }
