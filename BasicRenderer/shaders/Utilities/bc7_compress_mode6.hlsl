@@ -1,4 +1,4 @@
-#include "../include/cbuffers.hlsli"
+#include "Include/cbuffers.hlsli"
 
 static const uint BC7Mode6Weights[16] = {
     0u, 4u, 9u, 13u,
