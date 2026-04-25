@@ -77,6 +77,94 @@ static inline size_t GetNormalizedShaderSourceSize(const char* source, size_t so
     return sourceSize;
 }
 
+static inline bool IsPreprocessedLineDirective(std::string_view line)
+{
+    size_t position = 0;
+    while (position < line.size() && (line[position] == ' ' || line[position] == '\t')) {
+        ++position;
+    }
+
+    if (position >= line.size() || line[position] != '#') {
+        return false;
+    }
+
+    ++position;
+    while (position < line.size() && (line[position] == ' ' || line[position] == '\t')) {
+        ++position;
+    }
+
+    const size_t keywordStart = position;
+    while (position < line.size() && std::isalpha(static_cast<unsigned char>(line[position])) != 0) {
+        ++position;
+    }
+
+    if (keywordStart != position) {
+        const std::string_view keyword = line.substr(keywordStart, position - keywordStart);
+        if (keyword != "line") {
+            return false;
+        }
+    }
+
+    while (position < line.size() && (line[position] == ' ' || line[position] == '\t')) {
+        ++position;
+    }
+
+    const size_t numberStart = position;
+    while (position < line.size() && std::isdigit(static_cast<unsigned char>(line[position])) != 0) {
+        ++position;
+    }
+
+    return numberStart != position;
+}
+
+static inline std::string CanonicalizePreprocessedShaderSourceForHash(
+    const char* source,
+    size_t sourceSize)
+{
+    sourceSize = GetNormalizedShaderSourceSize(source, sourceSize);
+    if (!source || sourceSize == 0) {
+        return {};
+    }
+
+    std::string canonical;
+    canonical.reserve(sourceSize);
+
+    size_t lineStart = 0;
+    while (lineStart < sourceSize) {
+        size_t lineEnd = lineStart;
+        while (lineEnd < sourceSize && source[lineEnd] != '\n' && source[lineEnd] != '\r') {
+            ++lineEnd;
+        }
+
+        const std::string_view line(source + lineStart, lineEnd - lineStart);
+        if (!IsPreprocessedLineDirective(line)) {
+            canonical.append(line.data(), line.size());
+            if (lineEnd < sourceSize) {
+                if (source[lineEnd] == '\r' && lineEnd + 1 < sourceSize && source[lineEnd + 1] == '\n') {
+                    canonical.push_back('\n');
+                    lineEnd += 2;
+                }
+                else {
+                    canonical.push_back('\n');
+                    ++lineEnd;
+                }
+            }
+        }
+        else {
+            if (lineEnd < sourceSize && source[lineEnd] == '\r' && lineEnd + 1 < sourceSize && source[lineEnd + 1] == '\n') {
+                lineEnd += 2;
+            }
+            else if (lineEnd < sourceSize) {
+                ++lineEnd;
+            }
+        }
+
+        lineStart = lineEnd;
+    }
+
+    return canonical;
+}
+
 static inline TSNode FindFunctionNameNodeInDeclarator(TSNode node)
 {
     if (ts_node_is_null(node)) {

@@ -75,6 +75,7 @@ ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
 }
 
 HierarchialCullingPass::HierarchialCullingPass(
+    std::string stablePassIdentifier,
     HierarchialCullingPassInputs inputs,
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
@@ -101,7 +102,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_rasterOutputKind = inputs.rasterOutputKind;
     m_isFirstPass = inputs.isFirstPass;
     m_workGraphComputePageJobDescriptorResourceId =
-        std::string(CLodWorkGraphComputePageJobDescriptorBufferId) + "." + std::to_string(reinterpret_cast<uintptr_t>(this));
+        std::string(CLodWorkGraphComputePageJobDescriptorBufferId) + "." + std::move(stablePassIdentifier);
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),

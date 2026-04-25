@@ -67,6 +67,19 @@ uint64_t HashPreprocessedBuffer(const DxcBuffer& buffer)
     return HashBytesStable(source, sourceSize);
 }
 
+uint64_t HashCanonicalPreprocessedBuffer(const DxcBuffer& buffer)
+{
+    const char* source = static_cast<const char*>(buffer.Ptr);
+    const std::string canonicalSource = CanonicalizePreprocessedShaderSourceForHash(source, buffer.Size);
+    return HashBytesStable(canonicalSource.data(), canonicalSource.size());
+}
+
+size_t GetCanonicalPreprocessedBufferSize(const DxcBuffer& buffer)
+{
+    const char* source = static_cast<const char*>(buffer.Ptr);
+    return CanonicalizePreprocessedShaderSourceForHash(source, buffer.Size).size();
+}
+
 std::string NormalizePathUtf8(const std::filesystem::path& path)
 {
     return NormalizeCacheSourcePath(ws2s(path.wstring()));
@@ -91,8 +104,8 @@ uint64_t BuildBundleIdentityHash(
             return;
         }
 
-        util::hash_combine_u64(seed, HashPreprocessedBuffer(buffer));
-        util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(buffer.Ptr), buffer.Size));
+        util::hash_combine_u64(seed, HashCanonicalPreprocessedBuffer(buffer));
+        util::hash_combine_u64(seed, GetCanonicalPreprocessedBufferSize(buffer));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->entryPoint)));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->target)));
         util::hash_combine_u64(seed, ShouldSkipValidationForEntryPoint(slot->entryPoint) ? 1u : 0u);
@@ -111,8 +124,8 @@ uint64_t BuildLibraryIdentityHash(
     const DxcBuffer& preprocessedBuffer)
 {
     uint64_t seed = 0;
-    util::hash_combine_u64(seed, HashPreprocessedBuffer(preprocessedBuffer));
-    util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(preprocessedBuffer.Ptr), preprocessedBuffer.Size));
+    util::hash_combine_u64(seed, HashCanonicalPreprocessedBuffer(preprocessedBuffer));
+    util::hash_combine_u64(seed, GetCanonicalPreprocessedBufferSize(preprocessedBuffer));
     util::hash_combine_u64(seed, HashStringStable(ws2s(info.target)));
     return seed;
 }
@@ -1956,9 +1969,12 @@ ShaderLibraryBundle PSOManager::CompileShaderLibrary(const ShaderLibraryInfo& li
         defines,
         outBlob
 	);
+
     dxcPreprocessBuff.Ptr = outBlob->GetBufferPointer();
     dxcPreprocessBuff.Size = outBlob->GetBufferSize();
     dxcPreprocessBuff.Encoding = 0;
+
+    std::string debug_shader_string((const char*)dxcPreprocessBuff.Ptr, dxcPreprocessBuff.Size);
 
     const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash();
     const shadercache::CacheKey cacheKey{

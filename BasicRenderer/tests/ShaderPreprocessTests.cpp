@@ -315,6 +315,29 @@ void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             "fallback rewritten shader should not contain unresolved descriptor calls");
         }, failureCount);
 
+    RunTest("hash canonicalization ignores preprocessor line filenames", []() {
+        const std::string sourceA =
+            "#line 1 \"C:/temp/run-a/workGraphCulling.hlsl\"\n"
+            "#line 12 \"C:/temp/run-a/include/common.hlsli\"\n"
+            "[Shader(\"node\")]\n"
+            "void WG_ObjectCull() {}\n";
+        const std::string sourceB =
+            "#line 1 \"D:/different/session/workGraphCulling.hlsl\"\r\n"
+            "#line 12 \"D:/different/session/include/common.hlsli\"\r\n"
+            "[Shader(\"node\")]\r\n"
+            "void WG_ObjectCull() {}\r\n";
+
+        const std::string canonicalA = CanonicalizePreprocessedShaderSourceForHash(sourceA.data(), sourceA.size());
+        const std::string canonicalB = CanonicalizePreprocessedShaderSourceForHash(sourceB.data(), sourceB.size());
+
+        Require(canonicalA == canonicalB,
+            "canonicalized preprocessed sources should ignore varying #line filenames and newline styles");
+        Require(!Contains(canonicalA, "#line"),
+            "canonicalized source should drop line directives from the hash input");
+        Require(Contains(canonicalA, "WG_ObjectCull"),
+            "canonicalized source should preserve shader code");
+        }, failureCount);
+
     RunTest("invalid utf8 is rejected", []() {
         const std::string invalidUtf8("\xC3\x28", 2);
         bool threw = false;
