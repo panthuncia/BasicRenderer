@@ -899,20 +899,6 @@ std::shared_ptr<TextureAsset> LoadTexture(
         return existingTexture->second;
     }
 
-    const std::string sharedCacheKey = cacheKey;
-    {
-        std::lock_guard<std::mutex> lock(g_gltfMaterialCacheMutex);
-        auto sharedIt = g_sharedTextureCache.find(sharedCacheKey);
-        if (sharedIt != g_sharedTextureCache.end()) {
-            if (auto texture = sharedIt->second.texture.lock()) {
-                cache.textureCache[cacheKey] = texture;
-                return texture;
-            }
-
-            g_sharedTextureCache.erase(sharedIt);
-        }
-    }
-
     const auto& textures = gltf.at("textures");
     if (textureIndex >= textures.size()) {
         throw std::runtime_error("glTF texture index out of range");
@@ -945,10 +931,13 @@ std::shared_ptr<TextureAsset> LoadTexture(
     cacheProbeMeta.preferSRGB = preferSRGB;
     cacheProbeMeta.processing = MakeMaterialTextureProcessingSettings(semantic, preferSRGB, cacheKey, preservePackedChannels, normalConvention);
 
+    const std::string sharedCacheKey = cacheKey;
+
     const std::wstring cachePath = TextureProcessingManager::GetInstance().GetExistingCachePathForFile(cacheProbeMeta);
     if (!cachePath.empty()) {
         auto cachedTexture = LoadTextureFromFile(cachePath, sampler, preferSRGB);
         cachedTexture->Meta().isProcessingCacheArtifact = true;
+        cachedTexture->Meta().filePath = cacheProbeMeta.filePath;
         cachedTexture->Meta().preferSRGB = preferSRGB;
         cachedTexture->Meta().processing = cacheProbeMeta.processing;
         cache.textureCache[cacheKey] = cachedTexture;
@@ -962,8 +951,22 @@ std::shared_ptr<TextureAsset> LoadTexture(
         return cachedTexture;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(g_gltfMaterialCacheMutex);
+        auto sharedIt = g_sharedTextureCache.find(sharedCacheKey);
+        if (sharedIt != g_sharedTextureCache.end()) {
+            if (auto texture = sharedIt->second.texture.lock()) {
+                cache.textureCache[cacheKey] = texture;
+                return texture;
+            }
+
+            g_sharedTextureCache.erase(sharedIt);
+        }
+    }
+
     auto textureBytes = ReadImageBytes(gltf, sourcePath, cache.bufferSources, imageIndex);
     auto texture = LoadTextureFromMemory(textureBytes.data(), textureBytes.size(), sampler, {}, preferSRGB);
+    texture->Meta().filePath = cacheProbeMeta.filePath;
     texture->SetProcessingSettings(MakeMaterialTextureProcessingSettings(semantic, preferSRGB, cacheKey, preservePackedChannels, normalConvention));
     texture->SetGenerateMipmaps(true);
     cache.textureCache[cacheKey] = texture;
