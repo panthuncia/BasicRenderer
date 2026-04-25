@@ -45,6 +45,7 @@ public:
                               Builtin::PerMeshInstanceBuffer,
                               Builtin::PerMeshBuffer,
                               Builtin::PerMaterialDataBuffer,
+                              Builtin::Material::TextureGroup,
                               "Builtin::VisUtil::MaterialOffsetBuffer")
          .WithUnorderedAccess("Builtin::VisUtil::MaterialWriteCursorBuffer",
                               "Builtin::VisUtil::PixelListBuffer");

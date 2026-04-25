@@ -111,6 +111,30 @@ Material::Material(const std::string& name,
 Material::~Material() {
 }
 
+void Material::ForEachReferencedTexture(const std::function<void(const std::shared_ptr<TextureAsset>&)>& visitor) const {
+    auto visitTexture = [&](const std::shared_ptr<TextureAsset>& texture) {
+        if (texture) {
+            visitor(texture);
+        }
+    };
+
+    visitTexture(m_baseColorTexture);
+    visitTexture(m_normalTexture);
+    visitTexture(m_aoMap);
+    visitTexture(m_heightMap);
+    visitTexture(m_metallicTexture);
+    visitTexture(m_roughnessTexture);
+    visitTexture(m_emissiveTexture);
+    visitTexture(m_opacityTexture);
+
+    visitTexture(m_openPBRTextures.coatColor.texture);
+    visitTexture(m_openPBRTextures.coatWeight.texture);
+    visitTexture(m_openPBRTextures.coatRoughness.texture);
+    visitTexture(m_openPBRTextures.fuzzColor.texture);
+    visitTexture(m_openPBRTextures.fuzzWeight.texture);
+    visitTexture(m_openPBRTextures.fuzzRoughness.texture);
+}
+
 void Material::SetHeightmap(std::shared_ptr<TextureAsset> heightmap) {
     m_materialData.materialFlags |= MaterialFlags::MATERIAL_PARALLAX;
     m_heightMap = heightmap;

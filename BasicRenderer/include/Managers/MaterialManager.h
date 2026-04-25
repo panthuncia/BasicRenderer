@@ -5,6 +5,7 @@
 #include "Materials/Material.h"
 #include "Interfaces/IResourceProvider.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
+#include "Resources/ResourceGroup.h"
 #include "Render/IndirectCommand.h"
 #include "Render/RasterBucketFlags.h"
 
@@ -29,6 +30,8 @@ public:
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
+	std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
+	std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 
 	const std::vector<unsigned int>& GetActiveCompileFlagsSlots() const { return m_activeCompileFlagsSlots; }
 	const std::vector<MaterialCompileFlags>& GetActiveCompileFlags() const { return m_activeCompileFlags; }
@@ -52,8 +55,15 @@ public:
 	}
 private:
 	MaterialManager();
+	void UpdateMaterialTextureUsage(const Material& material, int delta);
+	void RefreshMaterialTextureUsage(const Material& material);
+	void UpdateTrackedMaterialTextureRefs(const std::vector<std::shared_ptr<Resource>>& textures, int delta);
 
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
+	std::shared_ptr<ResourceGroup> m_activeMaterialTextureGroup;
+	std::unordered_map<uint64_t, uint32_t> m_materialTextureUsageCounts;
+	std::unordered_map<uint32_t, std::vector<std::shared_ptr<Resource>>> m_trackedMaterialTextures;
 	std::unordered_map <MaterialCompileFlags, unsigned int> m_compileFlagsSlotMapping;
 	std::atomic<unsigned int> m_nextCompileFlagsSlot;
 	std::vector<unsigned int> m_freeCompileFlagsSlots;

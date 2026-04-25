@@ -474,7 +474,7 @@ void TryWriteTextureSourceDataToCache(const std::string& key, const TextureSourc
 	}
 }
 
-constexpr bool kEnableGpuBc7Compression = false;
+constexpr bool kEnableGpuBc7Compression = true;
 
 struct PreparedTextureProcessingData {
 	std::shared_ptr<TextureSourceData> preparedSourceData;

@@ -43,7 +43,8 @@ public:
                               //Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
                               Builtin::PerMeshBuffer,
-                              Builtin::PerMaterialDataBuffer)
+                                                            Builtin::PerMaterialDataBuffer,
+                                                            Builtin::Material::TextureGroup)
          .WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer");
 		b->WithConstantBuffer(Builtin::PerFrameBuffer);
     }

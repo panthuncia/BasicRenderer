@@ -2,6 +2,9 @@
   "Builtin": {
     "Backbuffer": {},
     "LastFrameLinearDepthMaps": {},
+    "Material": {
+      "TextureGroup": {}
+    },
     "PerMaterialDataBuffer": {},
     "PerMaterialOpenPBRDataBuffer": {},
     "PrimaryCamera": {

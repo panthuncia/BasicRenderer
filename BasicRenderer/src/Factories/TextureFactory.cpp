@@ -647,8 +647,13 @@ bool TextureFactory::SubmitBC7CompressionJob(
         return false;
     }
 
+    const std::string jobName = debugName.empty() ? fallbackName : std::string(debugName);
+
     auto* readbackPass = std::static_pointer_cast<BC7CompressionReadbackPass>(m_bc7CompressionReadbackPass).get();
-    if (!readbackPass) {
+    if (!readbackPass || !readbackPass->HasReadbackService()) {
+        spdlog::warn(
+            "TextureFactory: BC7 compression job '{}' skipped because readback service is unavailable",
+            jobName);
         return false;
     }
 
@@ -658,7 +663,6 @@ bool TextureFactory::SubmitBC7CompressionJob(
     workingDesc.hasUAV = false;
     workingDesc.uavFormat = rhi::Format::Unknown;
 
-    const std::string jobName = debugName.empty() ? fallbackName : std::string(debugName);
     auto workingTexture = CreateAlwaysResidentPixelBuffer(
         workingDesc,
         TextureInitialData::FromBytes(preparedSourceData->subresources),
@@ -1147,13 +1151,12 @@ void TextureFactory::BC7CompressionCopyPass::Update(const UpdateExecutionContext
     (void)context;
 }
 
-void TextureFactory::BC7CompressionCopyPass::DeclareResourceUsages(CopyPassBuilder* builder)
+void TextureFactory::BC7CompressionCopyPass::DeclareResourceUsages(RenderPassBuilder* builder)
 {
     if (m_pending.empty()) {
         return;
     }
 
-    builder->PreferQueue(QueueKind::Copy);
     for (const auto& job : m_pending) {
         if (!job || !job->blockBuffer || !job->compressedTexture) {
             continue;
@@ -1235,6 +1238,17 @@ void TextureFactory::BC7CompressionReadbackPass::DeclareResourceUsages(CopyPassB
 void TextureFactory::BC7CompressionReadbackPass::RecordImmediateCommands(ImmediateExecutionContext& context)
 {
     if (!m_readbackService) {
+        for (const auto& job : m_pending) {
+            if (!job || !job->handle) {
+                continue;
+            }
+
+            TextureProcessingManager::GetInstance().FailProcessing(
+                job->handle,
+                "TextureFactory: BC7 readback service is unavailable");
+        }
+        m_pending.clear();
+        m_declaredResourcesChanged = true;
         return;
     }
 
@@ -1267,10 +1281,10 @@ void TextureFactory::BC7CompressionReadbackPass::RecordImmediateCommands(Immedia
         for (size_t index = 0; index < job->subresources.size(); ++index) {
             const auto& subresource = job->subresources[index];
             context.list.CopyTextureToBuffer(
-                job->compressedTexture.get(),
+                job->compressedTexture,
                 subresource.mip,
                 subresource.slice,
-                readbackBuffer.get(),
+                readbackBuffer,
                 footprints[index],
                 0,
                 0,

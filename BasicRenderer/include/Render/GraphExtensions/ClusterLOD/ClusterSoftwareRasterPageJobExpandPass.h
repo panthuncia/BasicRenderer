@@ -93,6 +93,7 @@ public:
         builder->WithShaderResource(
                 Builtin::PerMeshBuffer,
                 Builtin::PerMaterialDataBuffer,
+                Builtin::Material::TextureGroup,
                 Builtin::PerMeshInstanceBuffer,
                 Builtin::PerObjectBuffer,
                 Builtin::CullingCameraBuffer,

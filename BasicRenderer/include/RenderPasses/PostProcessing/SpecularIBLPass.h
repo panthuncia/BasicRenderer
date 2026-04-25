@@ -20,6 +20,7 @@ public:
         builder->WithShaderResource(Builtin::PostProcessing::ScreenSpaceReflections, 
             Builtin::Environment::InfoBuffer,
             Builtin::PerMaterialOpenPBRDataBuffer,
+            Builtin::Material::TextureGroup,
             Builtin::GBuffer::Normals,
             Builtin::GBuffer::Albedo,
             Builtin::GBuffer::Coat,

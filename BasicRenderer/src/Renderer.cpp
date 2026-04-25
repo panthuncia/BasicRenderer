@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <unordered_set>
 #include <typeindex>
 #include <utility>
 
@@ -284,6 +285,9 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
     m_pTextureFactory = TextureFactory::CreateUnique();
+    if (currentRenderGraph) {
+        m_pTextureFactory->SetReadbackService(currentRenderGraph->GetReadbackService());
+    }
 
     CreateGlobalResources();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after CreateGlobalResources");
@@ -583,7 +587,7 @@ void Renderer::RunRenderResourceSyncStage() {
     auto& world = RendererECSManager::GetInstance().GetWorld();
 
     if (!m_renderSyncQueriesBuilt) {
-        m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo>()
+        m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo, Components::MeshInstances>()
             .with<Components::Active>()
             .build();
         m_renderSyncCameraQuery = world.query_builder<Components::Matrix, Components::Camera, Components::RenderViewRef>()
@@ -603,18 +607,55 @@ void Renderer::RunRenderResourceSyncStage() {
         Components::Matrix* worldMatrix;
         Components::RenderableObject* object;
         Components::ObjectDrawInfo* drawInfo;
+        Components::MeshInstances* meshInstances;
     };
     std::vector<ObjectSyncItem> objectItems;
+    std::vector<Material*> activeMaterials;
+    std::unordered_set<uint32_t> activeMaterialIds;
     m_renderSyncObjectQuery.run([&](flecs::iter& it) {
         while (it.next()) {
             auto matrices = it.field<Components::Matrix>(0);
             auto objects = it.field<Components::RenderableObject>(1);
             auto drawInfos = it.field<Components::ObjectDrawInfo>(2);
+            auto meshInstances = it.field<Components::MeshInstances>(3);
             for (auto i : it) {
-                objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i] });
+                objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i], &meshInstances[i] });
+
+                for (const auto& meshInstance : meshInstances[i].meshInstances) {
+                    if (!meshInstance) {
+                        continue;
+                    }
+
+                    auto mesh = meshInstance->GetMesh();
+                    if (!mesh || !mesh->material) {
+                        continue;
+                    }
+
+                    Material* material = mesh->material.get();
+                    if (!material) {
+                        continue;
+                    }
+
+                    if (activeMaterialIds.insert(material->GetMaterialID()).second) {
+                        activeMaterials.push_back(material);
+                    }
+                }
             }
         }
     });
+
+    auto* textureFactory = m_managerInterface.GetTextureFactory();
+    auto* materialManager = m_managerInterface.GetMaterialManager();
+    if (textureFactory && materialManager) {
+        for (Material* material : activeMaterials) {
+            if (!material) {
+                continue;
+            }
+
+            material->EnsureTexturesUploaded(*textureFactory);
+            materialManager->UpdateMaterialDataBuffer(*material);
+        }
+    }
 
     auto* objectManager = m_managerInterface.GetObjectManager();
     size_t perObjectDirtyBegin = 0;
@@ -656,7 +697,10 @@ void Renderer::RunRenderResourceSyncStage() {
 
     TaskSchedulerManager::GetInstance().ParallelFor("ObjectSync", objectItems.size(),
         [&objectItems, &perObjectHandle, &normalMatrixHandle](size_t idx) {
-            auto& [worldMatrix, object, drawInfo] = objectItems[idx];
+            auto& item = objectItems[idx];
+            auto* worldMatrix = item.worldMatrix;
+            auto* object = item.object;
+            auto* drawInfo = item.drawInfo;
             object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
             object->perObjectCB.modelMatrix = worldMatrix->matrix;
 

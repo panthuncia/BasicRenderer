@@ -46,7 +46,7 @@ public:
 
     std::shared_ptr<ComputePass> GetMipmappingPass() const { return m_mipmappingPass; }
     std::shared_ptr<ComputePass> GetBC7CompressionPass() const { return m_bc7CompressionPass; }
-    std::shared_ptr<CopyPass> GetBC7CompressionCopyPass() const { return m_bc7CompressionCopyPass; }
+    std::shared_ptr<RenderPass> GetBC7CompressionCopyPass() const { return m_bc7CompressionCopyPass; }
     std::shared_ptr<CopyPass> GetBC7CompressionReadbackPass() const { return m_bc7CompressionReadbackPass; }
 
     void SetReadbackService(rg::runtime::IReadbackService* readbackService);
@@ -195,7 +195,7 @@ private:
         bool m_declaredResourcesChanged = true;
     };
 
-    class BC7CompressionCopyPass : public CopyPass, public IDynamicDeclaredResources {
+    class BC7CompressionCopyPass : public RenderPass, public IDynamicDeclaredResources {
     public:
         void Setup() override;
 
@@ -203,7 +203,7 @@ private:
 
         void Update(const UpdateExecutionContext& context) override;
 
-        void DeclareResourceUsages(CopyPassBuilder* builder) override;
+        void DeclareResourceUsages(RenderPassBuilder* builder) override;
 
         void RecordImmediateCommands(ImmediateExecutionContext& context) override;
 
@@ -223,6 +223,7 @@ private:
         void Setup() override;
 
         void SetReadbackService(rg::runtime::IReadbackService* readbackService);
+        bool HasReadbackService() const { return m_readbackService != nullptr; }
         void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
 
         void Update(const UpdateExecutionContext& context) override;
@@ -255,6 +256,6 @@ private:
 
 	std::shared_ptr<ComputePass> m_mipmappingPass;
 	std::shared_ptr<ComputePass> m_bc7CompressionPass;
-	std::shared_ptr<CopyPass> m_bc7CompressionCopyPass;
+	std::shared_ptr<RenderPass> m_bc7CompressionCopyPass;
 	std::shared_ptr<CopyPass> m_bc7CompressionReadbackPass;
 };

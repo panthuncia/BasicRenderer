@@ -90,6 +90,7 @@ public:
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::PerMaterialDataBuffer,
+            Builtin::Material::TextureGroup,
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,

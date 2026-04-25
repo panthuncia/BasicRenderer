@@ -93,6 +93,7 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
             Builtin::PerMeshBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::PerMaterialOpenPBRDataBuffer,
+            Builtin::Material::TextureGroup,
             Builtin::CullingCameraBuffer,
             Builtin::CameraBuffer,
 			Builtin::Shadows::CLodCompactShadowCameras)

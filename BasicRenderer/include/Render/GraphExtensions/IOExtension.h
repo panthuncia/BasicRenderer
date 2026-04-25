@@ -61,7 +61,7 @@ public:
 
 			if (auto bc7Copy = m_textureFactory->GetBC7CompressionCopyPass()) {
 				outPasses.push_back(
-					RenderGraph::ExternalPassDesc::Copy("Builtin::BC7CompressionCopy", bc7Copy)
+					RenderGraph::ExternalPassDesc::Render("Builtin::BC7CompressionCopy", bc7Copy)
 						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/3)));
 			}
 

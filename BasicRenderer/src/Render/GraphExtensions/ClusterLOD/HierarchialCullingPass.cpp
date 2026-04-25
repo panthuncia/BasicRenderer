@@ -208,6 +208,7 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             m_visibleClustersCounterBuffer,
             m_occlusionReplayStateBuffer,
             Builtin::PerMaterialDataBuffer,
+            Builtin::Material::TextureGroup,
             m_workGraphComputePageJobDescriptorResourceId.c_str())
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 

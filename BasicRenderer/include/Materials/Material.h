@@ -4,6 +4,7 @@
 #include <string>
 #include <array>
 #include <unordered_set>
+#include <functional>
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Materials/BlendState.h"
@@ -215,6 +216,7 @@ public:
     uint32_t GetMaterialID() const { return m_materialID; }
 	PerMaterialCB const& GetData() const { return m_materialData; }
     void EnsureTexturesUploaded(const TextureFactory& factory);
+    void ForEachReferencedTexture(const std::function<void(const std::shared_ptr<TextureAsset>&)>& visitor) const;
 private:
 	inline static std::atomic<uint32_t> globalMaterialCount;
 	const uint32_t m_materialID = globalMaterialCount.fetch_add(1, std::memory_order_relaxed);

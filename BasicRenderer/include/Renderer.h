@@ -247,7 +247,7 @@ private:
     bool m_loggedSwapChainNotReady = false;
 
     // Cached renderer ECS queries for RunRenderResourceSyncStage
-    flecs::query<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo> m_renderSyncObjectQuery;
+    flecs::query<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo, Components::MeshInstances> m_renderSyncObjectQuery;
     flecs::query<Components::Matrix, Components::Camera, Components::RenderViewRef> m_renderSyncCameraQuery;
     flecs::query<Components::Matrix, Components::Light> m_renderSyncLightQuery;
     flecs::query<> m_renderTransformUpdatedCleanupQuery;
