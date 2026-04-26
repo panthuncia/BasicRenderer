@@ -54,6 +54,20 @@ struct ClodShadingSample
     MaterialInputs materialInputs;
 };
 
+struct ClodGBufferColorSample
+{
+    float2 motionVector;
+    MaterialInputs materialInputs;
+};
+
+struct ClodGBufferDebugSample
+{
+    uint meshletIndex;
+    float3 normalOS;
+    float2 motionVector;
+    MaterialInputs materialInputs;
+};
+
 BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
 {
     BarycentricDeriv ret = (BarycentricDeriv)0;
@@ -447,29 +461,33 @@ void BuildClodMaterialUvData(
         }
     }
 
+    const uint uv0CacheIndex = cacheIndexByUvSet[0u];
+
+#if defined(PSO_OPENPBR_COAT_COLOR_TEXTURE) || defined(PSO_OPENPBR_COAT_WEIGHT_TEXTURE) || defined(PSO_OPENPBR_COAT_ROUGHNESS_TEXTURE) || defined(PSO_OPENPBR_FUZZ_COLOR_TEXTURE) || defined(PSO_OPENPBR_FUZZ_WEIGHT_TEXTURE) || defined(PSO_OPENPBR_FUZZ_ROUGHNESS_TEXTURE)
+    const OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(materialInfo.openPBRMaterialDataIndex);
     const uint uvSetIndices[6] = {
-        materialInfo.coatColorUvSetIndex,
-        materialInfo.coatWeightUvSetIndex,
-        materialInfo.coatRoughnessUvSetIndex,
-        materialInfo.fuzzColorUvSetIndex,
-        materialInfo.fuzzWeightUvSetIndex,
-        materialInfo.fuzzRoughnessUvSetIndex
+        openPBRMaterialInfo.coatColorUvSetIndex,
+        openPBRMaterialInfo.coatWeightUvSetIndex,
+        openPBRMaterialInfo.coatRoughnessUvSetIndex,
+        openPBRMaterialInfo.fuzzColorUvSetIndex,
+        openPBRMaterialInfo.fuzzWeightUvSetIndex,
+        openPBRMaterialInfo.fuzzRoughnessUvSetIndex
     };
     const uint textureIndices[6] = {
-        materialInfo.coatColorTextureIndex,
-        materialInfo.coatWeightTextureIndex,
-        materialInfo.coatRoughnessTextureIndex,
-        materialInfo.fuzzColorTextureIndex,
-        materialInfo.fuzzWeightTextureIndex,
-        materialInfo.fuzzRoughnessTextureIndex
+        openPBRMaterialInfo.coatColorTextureIndex,
+        openPBRMaterialInfo.coatWeightTextureIndex,
+        openPBRMaterialInfo.coatRoughnessTextureIndex,
+        openPBRMaterialInfo.fuzzColorTextureIndex,
+        openPBRMaterialInfo.fuzzWeightTextureIndex,
+        openPBRMaterialInfo.fuzzRoughnessTextureIndex
     };
     const uint samplerIndices[6] = {
-        materialInfo.coatColorSamplerIndex,
-        materialInfo.coatWeightSamplerIndex,
-        materialInfo.coatRoughnessSamplerIndex,
-        materialInfo.fuzzColorSamplerIndex,
-        materialInfo.fuzzWeightSamplerIndex,
-        materialInfo.fuzzRoughnessSamplerIndex
+        openPBRMaterialInfo.coatColorSamplerIndex,
+        openPBRMaterialInfo.coatWeightSamplerIndex,
+        openPBRMaterialInfo.coatRoughnessSamplerIndex,
+        openPBRMaterialInfo.fuzzColorSamplerIndex,
+        openPBRMaterialInfo.fuzzWeightSamplerIndex,
+        openPBRMaterialInfo.fuzzRoughnessSamplerIndex
     };
 
     [unroll]
@@ -496,8 +514,6 @@ void BuildClodMaterialUvData(
         }
     }
 
-    const uint uv0CacheIndex = cacheIndexByUvSet[0u];
-
     [unroll]
     for (uint slot = 0u; slot < OPENPBR_TEXTURE_SLOT_COUNT; ++slot)
     {
@@ -519,6 +535,7 @@ void BuildClodMaterialUvData(
 
         bindings.openPBRCacheIndexBySlot[slot] = cacheIndex;
     }
+#endif
 
     [unroll]
     for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
@@ -1131,6 +1148,46 @@ bool ResolveClodShadingSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool 
 bool ResolveClodShadingSampleFromVisKey(uint64_t vis, uint2 pixel, out ClodShadingSample sample)
 {
     return ResolveClodShadingSampleFromVisKeyWithFace(vis, pixel, false, sample);
+}
+
+bool ResolveClodGBufferColorSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodGBufferColorSample sample)
+{
+    ClodResolvedSample resolvedSample;
+    if (!ResolveClodSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
+    {
+        sample = (ClodGBufferColorSample)0;
+        return false;
+    }
+
+    sample.motionVector = resolvedSample.motionVector;
+    sample.materialInputs = resolvedSample.materialInputs;
+    return true;
+}
+
+bool ResolveClodGBufferColorSampleFromVisKey(uint64_t vis, uint2 pixel, out ClodGBufferColorSample sample)
+{
+    return ResolveClodGBufferColorSampleFromVisKeyWithFace(vis, pixel, false, sample);
+}
+
+bool ResolveClodGBufferDebugSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodGBufferDebugSample sample)
+{
+    ClodResolvedSample resolvedSample;
+    if (!ResolveClodSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
+    {
+        sample = (ClodGBufferDebugSample)0;
+        return false;
+    }
+
+    sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.normalOS = resolvedSample.normalOS;
+    sample.motionVector = resolvedSample.motionVector;
+    sample.materialInputs = resolvedSample.materialInputs;
+    return true;
+}
+
+bool ResolveClodGBufferDebugSampleFromVisKey(uint64_t vis, uint2 pixel, out ClodGBufferDebugSample sample)
+{
+    return ResolveClodGBufferDebugSampleFromVisKeyWithFace(vis, pixel, false, sample);
 }
 
 bool ResolveClodSampleFromVisKey(uint64_t vis, uint2 pixel, out ClodResolvedSample sample)

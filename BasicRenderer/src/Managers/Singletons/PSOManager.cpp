@@ -163,25 +163,25 @@ uint64_t ComputeShaderCacheBuildConfigHash()
     return seed;
 }
 
-void LogFailedShaderSource(
-    const std::wstring& filename,
-    const std::wstring& entryPoint,
-    const std::wstring& target,
-    const DxcBuffer& sourceBuffer)
-{
-    if (sourceBuffer.Ptr == nullptr || sourceBuffer.Size == 0) {
-        return;
-    }
-
-    const char* source = static_cast<const char*>(sourceBuffer.Ptr);
-    const size_t sourceSize = GetNormalizedShaderSourceSize(source, sourceBuffer.Size);
-    spdlog::error(
-        "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
-        ws2s(filename),
-        ws2s(entryPoint),
-        ws2s(target),
-        std::string(source, sourceSize));
-}
+//void LogFailedShaderSource(
+//    const std::wstring& filename,
+//    const std::wstring& entryPoint,
+//    const std::wstring& target,
+//    const DxcBuffer& sourceBuffer)
+//{
+//    if (sourceBuffer.Ptr == nullptr || sourceBuffer.Size == 0) {
+//        return;
+//    }
+//
+//    const char* source = static_cast<const char*>(sourceBuffer.Ptr);
+//    const size_t sourceSize = GetNormalizedShaderSourceSize(source, sourceBuffer.Size);
+//    spdlog::error(
+//        "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
+//        ws2s(filename),
+//        ws2s(entryPoint),
+//        ws2s(target),
+//        std::string(source, sourceSize));
+//}
 
 bool CreateBlobFromBytes(
     IDxcUtils* utils,
@@ -2388,7 +2388,7 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
         }
         if (errs && errs->GetStringLength())
             spdlog::error("Shader compile error: {}", errs->GetStringPointer());
-        LogFailedShaderSource(filename, entryPoint, target, src);
+        //LogFailedShaderSource(filename, entryPoint, target, src);
         ThrowIfFailed(hr);
     }
 
@@ -2398,7 +2398,7 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
         if (errs && errs->GetStringLength()) {
             spdlog::error("Shader compile warnings: {}", errs->GetStringPointer());
             if (strstr(errs->GetStringPointer(), "error")) {
-                LogFailedShaderSource(filename, entryPoint, target, src);
+                //LogFailedShaderSource(filename, entryPoint, target, src);
                 ThrowIfFailed(E_FAIL);
             }
         }

@@ -131,7 +131,6 @@ namespace {
 
 	PerMaterialEvalCB BuildMaterialEvalData(const Material& material) {
 		const PerMaterialCB& base = material.GetData();
-		const PerMaterialOpenPBRCB openPBR = BuildOpenPBRMaterialData(material);
 		PerMaterialEvalCB result = {};
 		result.materialFlags = base.materialFlags;
 		result.baseColorTextureIndex = base.baseColorTextureIndex;
@@ -174,40 +173,6 @@ namespace {
 		result.aoUvSetIndex = base.aoUvSetIndex;
 		result.heightUvSetIndex = base.heightUvSetIndex;
 		result.opacityUvSetIndex = base.opacityUvSetIndex;
-		result.coatWeight = openPBR.coatWeight;
-		result.coatColor = openPBR.coatColor;
-		result.coatRoughness = openPBR.coatRoughness;
-		result.coatDarkening = openPBR.coatDarkening;
-		result.fuzzWeight = openPBR.fuzzWeight;
-		result.fuzzColor = openPBR.fuzzColor;
-		result.fuzzRoughness = openPBR.fuzzRoughness;
-		result.emissionLuminance = openPBR.emissionLuminance;
-		result.emissionColor = openPBR.emissionColor;
-		result.geometryOpacity = openPBR.geometryOpacity;
-		result.coatColorTextureIndex = openPBR.coatColorTextureIndex;
-		result.coatColorSamplerIndex = openPBR.coatColorSamplerIndex;
-		result.coatWeightTextureIndex = openPBR.coatWeightTextureIndex;
-		result.coatWeightSamplerIndex = openPBR.coatWeightSamplerIndex;
-		result.coatRoughnessTextureIndex = openPBR.coatRoughnessTextureIndex;
-		result.coatRoughnessSamplerIndex = openPBR.coatRoughnessSamplerIndex;
-		result.fuzzColorTextureIndex = openPBR.fuzzColorTextureIndex;
-		result.fuzzColorSamplerIndex = openPBR.fuzzColorSamplerIndex;
-		result.fuzzWeightTextureIndex = openPBR.fuzzWeightTextureIndex;
-		result.fuzzWeightSamplerIndex = openPBR.fuzzWeightSamplerIndex;
-		result.fuzzRoughnessTextureIndex = openPBR.fuzzRoughnessTextureIndex;
-		result.fuzzRoughnessSamplerIndex = openPBR.fuzzRoughnessSamplerIndex;
-		result.coatColorChannels = openPBR.coatColorChannels;
-		result.coatWeightChannel = openPBR.coatWeightChannel;
-		result.coatRoughnessChannel = openPBR.coatRoughnessChannel;
-		result.coatColorUvSetIndex = openPBR.coatColorUvSetIndex;
-		result.coatWeightUvSetIndex = openPBR.coatWeightUvSetIndex;
-		result.coatRoughnessUvSetIndex = openPBR.coatRoughnessUvSetIndex;
-		result.fuzzColorChannels = openPBR.fuzzColorChannels;
-		result.fuzzWeightChannel = openPBR.fuzzWeightChannel;
-		result.fuzzRoughnessChannel = openPBR.fuzzRoughnessChannel;
-		result.fuzzColorUvSetIndex = openPBR.fuzzColorUvSetIndex;
-		result.fuzzWeightUvSetIndex = openPBR.fuzzWeightUvSetIndex;
-		result.fuzzRoughnessUvSetIndex = openPBR.fuzzRoughnessUvSetIndex;
 		return result;
 	}
 

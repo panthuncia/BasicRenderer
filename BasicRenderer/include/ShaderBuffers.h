@@ -245,51 +245,10 @@ struct PerMaterialEvalCB {
     unsigned int aoUvSetIndex;
     unsigned int heightUvSetIndex;
     unsigned int opacityUvSetIndex;
-
-    float coatWeight;
-    DirectX::XMFLOAT3 coatColor;
-    float coatRoughness;
-    float coatDarkening;
-
-    float fuzzWeight;
-    DirectX::XMFLOAT3 fuzzColor;
-    float fuzzRoughness;
-    float emissionLuminance;
-
-    DirectX::XMFLOAT3 emissionColor;
-    float geometryOpacity;
-    unsigned int coatColorTextureIndex;
-    unsigned int coatColorSamplerIndex;
-
-    unsigned int coatWeightTextureIndex;
-    unsigned int coatWeightSamplerIndex;
-    unsigned int coatRoughnessTextureIndex;
-    unsigned int coatRoughnessSamplerIndex;
-
-    unsigned int fuzzColorTextureIndex;
-    unsigned int fuzzColorSamplerIndex;
-    unsigned int fuzzWeightTextureIndex;
-    unsigned int fuzzWeightSamplerIndex;
-
-    unsigned int fuzzRoughnessTextureIndex;
-    unsigned int fuzzRoughnessSamplerIndex;
-    DirectX::XMUINT4 coatColorChannels;
-    unsigned int coatWeightChannel;
-
-    unsigned int coatRoughnessChannel;
-    unsigned int coatColorUvSetIndex;
-    unsigned int coatWeightUvSetIndex;
-    unsigned int coatRoughnessUvSetIndex;
-
-    DirectX::XMUINT4 fuzzColorChannels;
-    unsigned int fuzzWeightChannel;
-    unsigned int fuzzRoughnessChannel;
-    unsigned int fuzzColorUvSetIndex;
-
-    unsigned int fuzzWeightUvSetIndex;
-    unsigned int fuzzRoughnessUvSetIndex;
     unsigned int perMaterialEvalPad0;
     unsigned int perMaterialEvalPad1;
+    unsigned int perMaterialEvalPad2;
+    unsigned int perMaterialEvalPad3;
 };
 
 struct PerMaterialOpenPBRCB {
