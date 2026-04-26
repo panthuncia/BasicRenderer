@@ -21,6 +21,9 @@
 
 #include <spdlog/spdlog.h>
 
+#if BASICRENDERER_HAS_DIRECTSTORAGE
+#include "Managers/Singletons/DirectStorageManager.h"
+#endif
 #include "Utilities/CachePathUtilities.h"
 
 #include "../shaders/Common/defines.h"
@@ -267,6 +270,63 @@ namespace CLodCache {
 			// Followed by pageCount x uint32_t page blob sizes,
 			// then pageCount page blobs in sequence.
 		};
+
+		bool ReadGroupPayloadLayout(std::ifstream& file,
+			const ClusterLODGroupDiskLocator& locator,
+			std::optional<ClusterLODGroupChunk>& outGroupChunkMetadata,
+			std::vector<uint32_t>& outPageBlobSizes,
+			std::vector<uint64_t>& outPageBlobOffsets)
+		{
+			if (locator.blobSizeBytes < sizeof(GroupPayloadHeader)) {
+				return false;
+			}
+
+			if (locator.blobOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
+				return false;
+			}
+
+			file.seekg(static_cast<std::streamoff>(locator.blobOffset), std::ios::beg);
+			if (!file.good()) {
+				return false;
+			}
+
+			GroupPayloadHeader groupHeader{};
+			file.read(reinterpret_cast<char*>(&groupHeader), sizeof(groupHeader));
+			if (!file.good()) {
+				return false;
+			}
+
+			outGroupChunkMetadata = groupHeader.groupChunkMetadata;
+
+			const uint32_t pageCount = groupHeader.pageCount;
+			const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
+
+			outPageBlobSizes.resize(pageCount);
+			if (pageCount > 0) {
+				file.read(reinterpret_cast<char*>(outPageBlobSizes.data()),
+					static_cast<std::streamsize>(sizeTableBytes));
+				if (!file.good()) {
+					return false;
+				}
+			}
+
+			uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
+			for (uint32_t s : outPageBlobSizes) {
+				totalBlobBytes += s;
+			}
+			if (totalBlobBytes != static_cast<uint64_t>(locator.blobSizeBytes)) {
+				return false;
+			}
+
+			outPageBlobOffsets.resize(pageCount);
+			uint64_t currentBlobOffset = locator.blobOffset + sizeof(GroupPayloadHeader) + sizeTableBytes;
+			for (uint32_t pi = 0; pi < pageCount; ++pi) {
+				outPageBlobOffsets[pi] = currentBlobOffset;
+				currentBlobOffset += outPageBlobSizes[pi];
+			}
+
+			return true;
+		}
 
 		std::wstring BuildGroupContainerFileName(const CacheKey& key, uint64_t buildConfigHash)
 		{
@@ -746,6 +806,15 @@ namespace CLodCache {
 		return LoadGroupPayload(prebuilt.cacheSource, groupLocalIndex, outPayload);
 	}
 
+	std::wstring ResolveContainerPath(const ClusterLODCacheSource& cacheSource)
+	{
+		if (cacheSource.containerFileName.empty()) {
+			return {};
+		}
+
+		return GetCacheFilePathBySource(cacheSource.containerFileName, cacheSource.sourceIdentifier);
+	}
+
 	bool LoadGroupPayload(const ClusterLODCacheSource& cacheSource, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload)
 	{
 		if (cacheSource.containerFileName.empty()) {
@@ -938,6 +1007,91 @@ namespace CLodCache {
 		}
 
 		return true;
+	}
+
+	bool GetGroupPayloadLayout(std::ifstream& file,
+		const ClusterLODGroupDiskLocator& locator,
+		GroupPayloadLayoutMetadata& outLayout)
+	{
+		outLayout.Clear();
+		return ReadGroupPayloadLayout(
+			file,
+			locator,
+			outLayout.groupChunkMetadata,
+			outLayout.pageBlobSizes,
+			outLayout.pageBlobOffsets);
+	}
+
+	bool LoadGroupPayloadSelectiveDirectStorage(std::ifstream& file,
+		const std::wstring& containerPath,
+		const ClusterLODGroupDiskLocator& locator,
+		const std::vector<bool>& segmentNeedsFetch,
+		LoadedGroupPayload& outPayload,
+		std::string* outMessage)
+	{
+	#if !BASICRENDERER_HAS_DIRECTSTORAGE
+		(void)file;
+		(void)containerPath;
+		(void)locator;
+		(void)segmentNeedsFetch;
+		(void)outPayload;
+		if (outMessage) {
+			*outMessage = "DirectStorage support is not compiled into this target";
+		}
+		return false;
+	#else
+		if (outMessage) {
+			outMessage->clear();
+		}
+
+		if (segmentNeedsFetch.empty()) {
+			if (outMessage) {
+				*outMessage = "segment mask empty; use standard full-read path";
+			}
+			return false;
+		}
+
+		if (!DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
+			if (outMessage) {
+				*outMessage = "DirectStorage system-memory queue unavailable";
+			}
+			return false;
+		}
+
+		std::vector<uint32_t> pageBlobSizes;
+		std::vector<uint64_t> pageBlobOffsets;
+		if (!ReadGroupPayloadLayout(file, locator, outPayload.groupChunkMetadata, pageBlobSizes, pageBlobOffsets)) {
+			if (outMessage) {
+				*outMessage = "failed to read CLod group header or size table";
+			}
+			return false;
+		}
+
+		outPayload.pageBlobs.resize(pageBlobSizes.size());
+		for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBlobSizes.size()); ++pi) {
+			if (pi < static_cast<uint32_t>(segmentNeedsFetch.size()) && !segmentNeedsFetch[pi]) {
+				continue;
+			}
+
+			std::string readMessage;
+			if (!DirectStorageManager::GetInstance().ReadFileRegionToMemory(
+				containerPath,
+				pageBlobOffsets[pi],
+				pageBlobSizes[pi],
+				outPayload.pageBlobs[pi],
+				&readMessage)) {
+				if (outMessage) {
+					*outMessage = readMessage.empty() ? "DirectStorage CLod page read failed" : readMessage;
+				}
+				return false;
+			}
+		}
+
+		if (outMessage) {
+			*outMessage = "loaded selected CLod page blobs through DirectStorage";
+		}
+		return true;
+	#endif
 	}
 
 	bool OpenContainerFile(const ClusterLODCacheSource& cacheSource,

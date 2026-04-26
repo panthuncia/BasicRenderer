@@ -42,6 +42,14 @@ struct DirectStorageTextureRegionCopy {
     uint32_t depth = 1;
 };
 
+struct DirectStorageBufferRegionCopy {
+    uint64_t sourceOffset = 0;
+    uint32_t sourceSizeBytes = 0;
+    uint32_t uncompressedSizeBytes = 0;
+    rhi::Resource destinationResource{};
+    uint64_t destinationOffset = 0;
+};
+
 
 class DirectStorageManager {
 public:
@@ -80,7 +88,17 @@ public:
     DirectStorageOpenFileResult PrimeFileHandle(const std::wstring& path);
     void ReleaseFileHandle(const std::wstring& path);
     bool HasPrimedFileHandle(const std::wstring& path) const;
+    bool ReadFileRegionToMemory(
+        const std::wstring& path,
+        uint64_t sourceOffset,
+        uint32_t sourceSizeBytes,
+        std::vector<std::byte>& outData,
+        std::string* outMessage = nullptr);
     bool ReadFileToMemory(const std::wstring& path, std::vector<std::byte>& outData, std::string* outMessage = nullptr);
+    bool UploadBufferRegionsFromFile(
+        const std::wstring& path,
+        const std::vector<DirectStorageBufferRegionCopy>& regions,
+        std::string* outMessage = nullptr);
     bool UploadTextureSubresourcesFromFile(
         const std::wstring& path,
         rhi::Resource destinationResource,
@@ -110,3 +128,5 @@ private:
 }
 
 using DirectStorageManager = br::DirectStorageManager;
+using DirectStorageQueueKind = br::DirectStorageQueueKind;
+using DirectStorageBufferRegionCopy = br::DirectStorageBufferRegionCopy;

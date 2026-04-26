@@ -206,6 +206,7 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     m_pageOwnerGroup.clear();
     m_pageOwnerSegment.clear();
     m_groupOwnedPages.clear();
+    ClearPrefetchedChildLayouts();
     m_preAllocatedPagesByGroup.clear();
     m_groupsUsingPinnedStorage.clear();
     m_readbackGapPinnedGroups.clear();
@@ -628,6 +629,8 @@ void CLodStreamingSystem::EnsurePageTrackingCapacity(MeshManager* meshManager) {
 }
 
 void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager) {
+    EvictPrefetchedChildLayoutsForOwner(groupIndex);
+
     auto it = m_groupOwnedPages.find(groupIndex);
     if (it == m_groupOwnedPages.end()) {
         SetGroupUsesPinnedStorage(groupIndex, false);
@@ -673,6 +676,66 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
 
     m_groupOwnedPages.erase(it);
     SetGroupUsesPinnedStorage(groupIndex, false);
+}
+
+void CLodStreamingSystem::PrefetchChildGroupLayouts(uint32_t parentGroupIndex, MeshManager* meshManager) {
+    if (meshManager == nullptr) {
+        return;
+    }
+
+    const auto childIt = m_childGroupsByGlobal.find(parentGroupIndex);
+    if (childIt == m_childGroupsByGlobal.end() || childIt->second.empty()) {
+        return;
+    }
+
+    EvictPrefetchedChildLayoutsForOwner(parentGroupIndex);
+
+    std::vector<uint32_t> insertedChildren;
+    insertedChildren.reserve(childIt->second.size());
+
+    for (uint32_t childGroupIndex : childIt->second) {
+        CLodCache::GroupPayloadLayoutMetadata layout;
+        std::string message;
+        if (!meshManager->TryGetCLodGroupPayloadLayout(childGroupIndex, layout, &message) || !layout.IsValid()) {
+            spdlog::debug(
+                "CLod streaming: child header prefetch miss for parent {} child {}: {}",
+                parentGroupIndex,
+                childGroupIndex,
+                message.empty() ? "layout unavailable" : message);
+            continue;
+        }
+
+        CachedChildGroupLayout cachedLayout{};
+        cachedLayout.ownerGroupIndex = parentGroupIndex;
+        cachedLayout.layout = std::move(layout);
+        m_prefetchedChildLayoutsByGroup[childGroupIndex] = std::move(cachedLayout);
+        insertedChildren.push_back(childGroupIndex);
+    }
+
+    if (!insertedChildren.empty()) {
+        m_prefetchedChildLayoutKeysByOwner[parentGroupIndex] = std::move(insertedChildren);
+    }
+}
+
+void CLodStreamingSystem::EvictPrefetchedChildLayoutsForOwner(uint32_t ownerGroupIndex) {
+    auto ownerIt = m_prefetchedChildLayoutKeysByOwner.find(ownerGroupIndex);
+    if (ownerIt == m_prefetchedChildLayoutKeysByOwner.end()) {
+        return;
+    }
+
+    for (uint32_t childGroupIndex : ownerIt->second) {
+        auto layoutIt = m_prefetchedChildLayoutsByGroup.find(childGroupIndex);
+        if (layoutIt != m_prefetchedChildLayoutsByGroup.end() && layoutIt->second.ownerGroupIndex == ownerGroupIndex) {
+            m_prefetchedChildLayoutsByGroup.erase(layoutIt);
+        }
+    }
+
+    m_prefetchedChildLayoutKeysByOwner.erase(ownerIt);
+}
+
+void CLodStreamingSystem::ClearPrefetchedChildLayouts() {
+    m_prefetchedChildLayoutsByGroup.clear();
+    m_prefetchedChildLayoutKeysByOwner.clear();
 }
 
 std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshManager* meshManager) {
@@ -953,6 +1016,7 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
             std::copy_n(m_cachedDomainSnapshot.parentGroupByGlobal.begin(), copyCount, m_streamingParentGroupByGlobal.begin());
         }
 
+        ClearPrefetchedChildLayouts();
         m_childGroupsByGlobal.clear();
         for (uint32_t childGlobal = 0; childGlobal < static_cast<uint32_t>(m_streamingParentGroupByGlobal.size()); ++childGlobal) {
             const int32_t parent = m_streamingParentGroupByGlobal[childGlobal];
@@ -1229,6 +1293,7 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
             }
 
             TouchGroupPages(groupIndex);
+            PrefetchChildGroupLayouts(groupIndex, meshManager);
         }
         else {
             if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
@@ -1620,6 +1685,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         // Build segment fetch mask and page ID list from pre-allocated pages.
         std::vector<bool> segmentNeedsFetch;
         std::vector<uint32_t> preAllocPageIDs;
+        const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout = nullptr;
         auto paIt = m_preAllocatedPagesByGroup.find(groupIndex);
         if (paIt != m_preAllocatedPagesByGroup.end()) {
             const auto& pa = paIt->second;
@@ -1627,9 +1693,18 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             preAllocPageIDs = pa.pagesBySegment;
         }
 
+        auto prefetchedIt = m_prefetchedChildLayoutsByGroup.find(groupIndex);
+        if (prefetchedIt != m_prefetchedChildLayoutsByGroup.end() && prefetchedIt->second.layout.IsValid()) {
+            prefetchedLayout = &prefetchedIt->second.layout;
+            spdlog::debug(
+                "CLod streaming: queueing group {} with prefetched child header metadata from owner {}",
+                groupIndex,
+                prefetchedIt->second.ownerGroupIndex);
+        }
+
         // Queue disk I/O with the segment fetch mask and pre-allocated pages.
         const uint32_t ioPriority = GetPendingLoadPriority(groupIndex);
-        const bool queued = meshManager->QueueCLodGroupDiskIO(groupIndex, segmentNeedsFetch, preAllocPageIDs, ioPriority);
+        const bool queued = meshManager->QueueCLodGroupDiskIO(groupIndex, segmentNeedsFetch, preAllocPageIDs, ioPriority, prefetchedLayout);
         if (queued) {
             MarkStreamingRequestInProgress(groupIndex);
         }

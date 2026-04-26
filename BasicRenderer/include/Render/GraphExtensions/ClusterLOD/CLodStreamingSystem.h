@@ -47,6 +47,11 @@ private:
         uint32_t priority = 0u;
     };
 
+    struct CachedChildGroupLayout {
+        uint32_t ownerGroupIndex = 0;
+        CLodCache::GroupPayloadLayoutMetadata layout;
+    };
+
     static uint32_t BitWordAddress(uint32_t key);
     static uint32_t BitMask(uint32_t key);
     static uint32_t UnpackStreamingRequestPriority(const CLodStreamingRequest& req);
@@ -68,6 +73,9 @@ private:
     void SetGroupUsesPinnedStorage(uint32_t groupIndex, bool usesPinnedStorage);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
     void TouchGroupPages(uint32_t groupIndex);
+    void PrefetchChildGroupLayouts(uint32_t parentGroupIndex, MeshManager* meshManager);
+    void EvictPrefetchedChildLayoutsForOwner(uint32_t ownerGroupIndex);
+    void ClearPrefetchedChildLayouts();
     void PollCompletedReadbackSlots();
     void StreamingWorkerMain();
     void ProcessStreamingRequestsBudgeted();
@@ -104,6 +112,8 @@ private:
     std::vector<uint32_t> m_usedGroupsBitsCpu; // groups reported as visible by the GPU last frame
     std::vector<int32_t> m_streamingParentGroupByGlobal;
 	std::unordered_map<uint32_t, std::vector<uint32_t>> m_childGroupsByGlobal; // parent to children
+    std::unordered_map<uint32_t, CachedChildGroupLayout> m_prefetchedChildLayoutsByGroup;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> m_prefetchedChildLayoutKeysByOwner;
     std::vector<float> m_groupOriginalErrorByGlobal;
     std::unordered_set<uint32_t> m_errorOverriddenGroups; // groups whose GPU error is currently 0
     CLodPageLRU m_pageLru;
