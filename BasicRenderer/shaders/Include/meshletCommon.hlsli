@@ -172,93 +172,6 @@ bool InitializeMeshletInternal(
     return true;
 }
 
-bool InitializeMeshletInternalCLod(
-    uint visibleMeshletIndex,
-    out MeshletSetup setup)
-{
-
-    ByteAddressBuffer visibleClusters =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
-    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, visibleMeshletIndex);
-    StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-
-    setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
-    setup.meshInstanceBuffer =  meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
-    setup.viewID = CLodVisibleClusterViewID(packedCluster);
-    setup.shadowClipmapIndex = CLodVisibleClusterShadowClipmapIndex(packedCluster);
-    setup.virtualShadowPayload = CLodVisibleClusterVsmPayload(packedCluster);
-
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-
-    setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
-    setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
-
-    // Use pre-resolved page address from VisibleCluster
-    const uint pageSlabDesc = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
-    const uint pageSlabOff  = CLodVisibleClusterPageSlabByteOffset(packedCluster);
-    if (pageSlabDesc == 0)
-    {
-        return false;
-    }
-
-    CLodPageHeader hdr = LoadPageHeader(pageSlabDesc, pageSlabOff);
-
-    // meshletIndex is page-local
-    if (setup.meshletIndex >= hdr.meshletCount)
-    {
-        return false;
-    }
-
-    // Load per-meshlet descriptor
-    CLodMeshletDescriptor desc = LoadMeshletDescriptor(
-        pageSlabDesc, pageSlabOff, hdr.descriptorOffset, setup.meshletIndex);
-
-    setup.meshlet = (Meshlet)0; // Not used in CLod path
-    setup.vertCount = CLodDescVertexCount(desc);
-    setup.triCount = CLodDescTriangleCount(desc);
-    if (!HasValidMeshShaderOutputCounts(setup.vertCount, setup.triCount))
-    {
-        return false;
-    }
-    setup.vertOffset = 0;
-
-    // Per-meshlet compression from descriptor
-    setup.bitsX = CLodDescBitsX(desc);
-    setup.bitsY = CLodDescBitsY(desc);
-    setup.bitsZ = CLodDescBitsZ(desc);
-    setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
-    setup.positionBitOffset = desc.positionBitOffset;
-    setup.vertexAttributeOffset = desc.vertexAttributeOffset;
-    setup.triangleByteOffset = desc.triangleByteOffset;
-    setup.boneListOffset = desc.boneListOffset;
-    setup.boneCount = CLodDescBoneCount(desc);
-    setup.pageAttributeMask = hdr.attributeMask;
-    setup.uvSetCount = hdr.uvSetCount;
-
-    // Page-level stream base offsets (absolute in slab)
-    setup.pageByteOffset = pageSlabOff;
-    setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
-    setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
-    setup.colorArrayBase = pageSlabOff + hdr.colorArrayOffset;
-    setup.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
-    setup.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
-    setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;
-    setup.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
-    setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
-    setup.boneIndexStreamBase = pageSlabOff + hdr.boneIndexStreamOffset;
-
-    setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
-    setup.pagePoolSlabDescriptorIndex = pageSlabDesc;
-
-    // Non-CLod fields unused
-    setup.groupMeshletTrianglesByteOffset = 0;
-    setup.postSkinningBufferOffset = 0;
-    setup.prevPostSkinningBufferOffset = 0;
-
-    return true;
-}
-
 // per-draw invocation (mesh shader path uses global root constants set externally)
 // Mesh shader path (root constant perMeshInstanceBufferIndex already set)
 bool InitializeMeshlet(uint meshletLocalIndex, out MeshletSetup setup)
@@ -274,15 +187,6 @@ bool InitializeMeshletFromDrawCall(uint drawCallID, uint meshletLocalIndex, out 
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstance = meshInstanceBuffer[drawCallID];
     return InitializeMeshletInternal(meshletLocalIndex, meshInstance, setup);
-}
-
-// Cluster LOD path:
-bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSetup setup)
-{
-    ByteAddressBuffer visibleClusters =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
-    (void)visibleClusters;
-    return InitializeMeshletInternalCLod(visibleClusterIndex, setup);
 }
 
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
