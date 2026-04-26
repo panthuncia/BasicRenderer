@@ -154,30 +154,49 @@ uint ReadPackedBits32_BA(ByteAddressBuffer buf, uint startBit, uint bitCount)
     return packed & mask;
 }
 
-float2 DecodeCompressedUV(uint meshletLocalVertex, uint uvSetIndex, MeshletResolveData d)
+struct MeshletUvDecodeInfo
 {
+    CLodMeshletUvDescriptor uvDesc;
+    uint uvBitstreamBase;
+    bool isValid;
+};
+
+MeshletUvDecodeInfo LoadMeshletUvDecodeInfo(uint uvSetIndex, MeshletResolveData d)
+{
+    MeshletUvDecodeInfo uvInfo = (MeshletUvDecodeInfo)0;
     if (uvSetIndex >= d.uvSetCount)
     {
-        return float2(0.0f, 0.0f);
+        return uvInfo;
     }
 
-    CLodMeshletUvDescriptor uvDesc = LoadMeshletUvDescriptor(
+    uvInfo.uvDesc = LoadMeshletUvDescriptor(
         d.pagePoolSlabDescriptorIndex,
         d.pageByteOffset,
         d.uvDescriptorBase - d.pageByteOffset,
         d.uvSetCount,
         d.drawcallAndMeshlet.y,
         uvSetIndex);
-    uint uvBitstreamBase = d.pageByteOffset + LoadPageUvBitstreamOffset(
+    uvInfo.uvBitstreamBase = d.pageByteOffset + LoadPageUvBitstreamOffset(
         d.pagePoolSlabDescriptorIndex,
         d.pageByteOffset,
         d.uvBitstreamDirectoryBase - d.pageByteOffset,
         uvSetIndex);
-    uint uvBitsU = CLodUvDescBitsU(uvDesc);
-    uint uvBitsV = CLodUvDescBitsV(uvDesc);
+    uvInfo.isValid = true;
+    return uvInfo;
+}
+
+float2 DecodeCompressedUV(uint meshletLocalVertex, MeshletUvDecodeInfo uvInfo, MeshletResolveData d)
+{
+    if (!uvInfo.isValid)
+    {
+        return float2(0.0f, 0.0f);
+    }
+
+    const uint uvBitsU = CLodUvDescBitsU(uvInfo.uvDesc);
+    const uint uvBitsV = CLodUvDescBitsV(uvInfo.uvDesc);
 
     uint bitsPerVertex = uvBitsU + uvBitsV;
-    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + meshletLocalVertex * bitsPerVertex;
+    uint bitCursor = uvInfo.uvBitstreamBase * 8u + uvInfo.uvDesc.uvBitOffset + meshletLocalVertex * bitsPerVertex;
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
     uint encodedU = ReadPackedBits32_BA(slab, bitCursor, uvBitsU);
@@ -185,14 +204,20 @@ float2 DecodeCompressedUV(uint meshletLocalVertex, uint uvSetIndex, MeshletResol
     uint encodedV = ReadPackedBits32_BA(slab, bitCursor, uvBitsV);
 
     return float2(
-        uvDesc.uvMinU + float(encodedU) * uvDesc.uvScaleU,
-        uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
+        uvInfo.uvDesc.uvMinU + float(encodedU) * uvInfo.uvDesc.uvScaleU,
+        uvInfo.uvDesc.uvMinV + float(encodedV) * uvInfo.uvDesc.uvScaleV);
+}
+
+float2 DecodeCompressedUV(uint meshletLocalVertex, uint uvSetIndex, MeshletResolveData d)
+{
+    return DecodeCompressedUV(meshletLocalVertex, LoadMeshletUvDecodeInfo(uvSetIndex, d), d);
 }
 
 void AppendClodMaterialUvSample(
     inout MaterialUvCache cache,
     uint uvSetIndex,
     uint3 triIdx,
+    MeshletUvDecodeInfo uvInfo,
     MeshletResolveData md,
     BarycentricDeriv bary)
 {
@@ -201,9 +226,9 @@ void AppendClodMaterialUvSample(
         return;
     }
 
-    float2 uv0 = DecodeCompressedUV(triIdx.x, uvSetIndex, md);
-    float2 uv1 = DecodeCompressedUV(triIdx.y, uvSetIndex, md);
-    float2 uv2 = DecodeCompressedUV(triIdx.z, uvSetIndex, md);
+    float2 uv0 = DecodeCompressedUV(triIdx.x, uvInfo, md);
+    float2 uv1 = DecodeCompressedUV(triIdx.y, uvInfo, md);
+    float2 uv2 = DecodeCompressedUV(triIdx.z, uvInfo, md);
 
     float3 interpU = InterpolateWithDeriv(bary, uv0.x, uv1.x, uv2.x);
     float3 interpV = InterpolateWithDeriv(bary, uv0.y, uv1.y, uv2.y);
@@ -218,34 +243,52 @@ void AppendClodMaterialUvSample(
     cache.count++;
 }
 
-MaterialUvCache BuildClodMaterialUvCache(
+void BuildClodMaterialUvData(
     MaterialInfo materialInfo,
     uint materialFlags,
     MeshletResolveData md,
     uint3 triIdx,
-    BarycentricDeriv bary)
+    BarycentricDeriv bary,
+    out MaterialUvCache cache,
+    out MaterialUvBindings bindings)
 {
-    MaterialUvCache cache = (MaterialUvCache)0;
+    cache = (MaterialUvCache)0;
+    InitializeMaterialUvBindings(bindings);
+
+    uint cacheIndexByUvSet[MATERIAL_MAX_UNIQUE_UV_SETS];
+
+    [unroll]
+    for (uint uvSetIndex = 0u; uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS; ++uvSetIndex)
+    {
+        cacheIndexByUvSet[uvSetIndex] = MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
 
     [unroll]
     for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
     {
-        MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        const MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
         if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
         {
             continue;
         }
 
-        uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
-        if (FindMaterialUvCacheIndex(cache, uvSetIndex) != MATERIAL_INVALID_UV_CACHE_INDEX)
+        const uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS &&
+            cacheIndexByUvSet[uvSetIndex] != MATERIAL_INVALID_UV_CACHE_INDEX)
         {
             continue;
         }
 
-        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, md, bary);
+        const uint cacheIndex = cache.count;
+        const MeshletUvDecodeInfo uvInfo = LoadMeshletUvDecodeInfo(uvSetIndex, md);
+        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, uvInfo, md, bary);
+        if (cache.count > cacheIndex && uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndexByUvSet[uvSetIndex] = cacheIndex;
+        }
     }
 
-    OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(materialInfo);
+    const OpenPBRMaterialInfo openPBRMaterialInfo = LoadOpenPBRMaterialInfo(materialInfo);
     const uint uvSetIndices[6] = {
         openPBRMaterialInfo.coatColorUvSetIndex,
         openPBRMaterialInfo.coatWeightUvSetIndex,
@@ -280,15 +323,241 @@ MaterialUvCache BuildClodMaterialUvCache(
         }
 
         const uint uvSetIndex = uvSetIndices[i];
-        if (FindMaterialUvCacheIndex(cache, uvSetIndex) != MATERIAL_INVALID_UV_CACHE_INDEX)
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS &&
+            cacheIndexByUvSet[uvSetIndex] != MATERIAL_INVALID_UV_CACHE_INDEX)
         {
             continue;
         }
 
-        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, md, bary);
+        const uint cacheIndex = cache.count;
+        const MeshletUvDecodeInfo uvInfo = LoadMeshletUvDecodeInfo(uvSetIndex, md);
+        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, uvInfo, md, bary);
+        if (cache.count > cacheIndex && uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndexByUvSet[uvSetIndex] = cacheIndex;
+        }
     }
 
-    return cache;
+    const uint uv0CacheIndex = cacheIndexByUvSet[0u];
+
+    [unroll]
+    for (uint slot = 0u; slot < OPENPBR_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        if (!HasOpenPBRTexture(textureIndices[slot], samplerIndices[slot]))
+        {
+            continue;
+        }
+
+        uint cacheIndex = MATERIAL_INVALID_UV_CACHE_INDEX;
+        const uint uvSetIndex = uvSetIndices[slot];
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndex = cacheIndexByUvSet[uvSetIndex];
+        }
+        if (cacheIndex == MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            cacheIndex = uv0CacheIndex;
+        }
+
+        bindings.openPBRCacheIndexBySlot[slot] = cacheIndex;
+    }
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        const MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
+        {
+            continue;
+        }
+
+        uint cacheIndex = MATERIAL_INVALID_UV_CACHE_INDEX;
+        const uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndex = cacheIndexByUvSet[uvSetIndex];
+        }
+        if (cacheIndex == MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            cacheIndex = uv0CacheIndex;
+        }
+
+        bindings.cacheIndexBySlot[slot] = cacheIndex;
+    }
+    if ((materialFlags & MATERIAL_NORMAL_MAP) != 0u)
+    {
+        bindings.tbnCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_NORMAL];
+        bindings.hasTbnSource = bindings.tbnCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+    else if ((materialFlags & MATERIAL_PARALLAX) != 0u)
+    {
+        bindings.tbnCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_HEIGHT];
+        bindings.hasTbnSource = bindings.tbnCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+
+    if ((materialFlags & MATERIAL_PARALLAX) != 0u)
+    {
+        bindings.heightCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_HEIGHT];
+        bindings.hasHeightSource = bindings.heightCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+}
+
+void BuildClodMaterialUvData(
+    MaterialEvalInfo materialInfo,
+    uint materialFlags,
+    MeshletResolveData md,
+    uint3 triIdx,
+    BarycentricDeriv bary,
+    out MaterialUvCache cache,
+    out MaterialUvBindings bindings)
+{
+    cache = (MaterialUvCache)0;
+    InitializeMaterialUvBindings(bindings);
+
+    uint cacheIndexByUvSet[MATERIAL_MAX_UNIQUE_UV_SETS];
+
+    [unroll]
+    for (uint uvSetIndex = 0u; uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS; ++uvSetIndex)
+    {
+        cacheIndexByUvSet[uvSetIndex] = MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        const MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
+        {
+            continue;
+        }
+
+        const uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS &&
+            cacheIndexByUvSet[uvSetIndex] != MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            continue;
+        }
+
+        const uint cacheIndex = cache.count;
+        const MeshletUvDecodeInfo uvInfo = LoadMeshletUvDecodeInfo(uvSetIndex, md);
+        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, uvInfo, md, bary);
+        if (cache.count > cacheIndex && uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndexByUvSet[uvSetIndex] = cacheIndex;
+        }
+    }
+
+    const uint uvSetIndices[6] = {
+        materialInfo.coatColorUvSetIndex,
+        materialInfo.coatWeightUvSetIndex,
+        materialInfo.coatRoughnessUvSetIndex,
+        materialInfo.fuzzColorUvSetIndex,
+        materialInfo.fuzzWeightUvSetIndex,
+        materialInfo.fuzzRoughnessUvSetIndex
+    };
+    const uint textureIndices[6] = {
+        materialInfo.coatColorTextureIndex,
+        materialInfo.coatWeightTextureIndex,
+        materialInfo.coatRoughnessTextureIndex,
+        materialInfo.fuzzColorTextureIndex,
+        materialInfo.fuzzWeightTextureIndex,
+        materialInfo.fuzzRoughnessTextureIndex
+    };
+    const uint samplerIndices[6] = {
+        materialInfo.coatColorSamplerIndex,
+        materialInfo.coatWeightSamplerIndex,
+        materialInfo.coatRoughnessSamplerIndex,
+        materialInfo.fuzzColorSamplerIndex,
+        materialInfo.fuzzWeightSamplerIndex,
+        materialInfo.fuzzRoughnessSamplerIndex
+    };
+
+    [unroll]
+    for (uint i = 0u; i < 6u; ++i)
+    {
+        if (!HasOpenPBRTexture(textureIndices[i], samplerIndices[i]))
+        {
+            continue;
+        }
+
+        const uint uvSetIndex = uvSetIndices[i];
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS &&
+            cacheIndexByUvSet[uvSetIndex] != MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            continue;
+        }
+
+        const uint cacheIndex = cache.count;
+        const MeshletUvDecodeInfo uvInfo = LoadMeshletUvDecodeInfo(uvSetIndex, md);
+        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, uvInfo, md, bary);
+        if (cache.count > cacheIndex && uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndexByUvSet[uvSetIndex] = cacheIndex;
+        }
+    }
+
+    const uint uv0CacheIndex = cacheIndexByUvSet[0u];
+
+    [unroll]
+    for (uint slot = 0u; slot < OPENPBR_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        if (!HasOpenPBRTexture(textureIndices[slot], samplerIndices[slot]))
+        {
+            continue;
+        }
+
+        uint cacheIndex = MATERIAL_INVALID_UV_CACHE_INDEX;
+        const uint uvSetIndex = uvSetIndices[slot];
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndex = cacheIndexByUvSet[uvSetIndex];
+        }
+        if (cacheIndex == MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            cacheIndex = uv0CacheIndex;
+        }
+
+        bindings.openPBRCacheIndexBySlot[slot] = cacheIndex;
+    }
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        const MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
+        {
+            continue;
+        }
+
+        uint cacheIndex = MATERIAL_INVALID_UV_CACHE_INDEX;
+        const uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (uvSetIndex < MATERIAL_MAX_UNIQUE_UV_SETS)
+        {
+            cacheIndex = cacheIndexByUvSet[uvSetIndex];
+        }
+        if (cacheIndex == MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            cacheIndex = uv0CacheIndex;
+        }
+
+        bindings.cacheIndexBySlot[slot] = cacheIndex;
+    }
+    if ((materialFlags & MATERIAL_NORMAL_MAP) != 0u)
+    {
+        bindings.tbnCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_NORMAL];
+        bindings.hasTbnSource = bindings.tbnCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+    else if ((materialFlags & MATERIAL_PARALLAX) != 0u)
+    {
+        bindings.tbnCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_HEIGHT];
+        bindings.hasTbnSource = bindings.tbnCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
+
+    if ((materialFlags & MATERIAL_PARALLAX) != 0u)
+    {
+        bindings.heightCacheIndex = bindings.cacheIndexBySlot[MATERIAL_TEXTURE_SLOT_HEIGHT];
+        bindings.hasHeightSource = bindings.heightCacheIndex != MATERIAL_INVALID_UV_CACHE_INDEX;
+    }
 }
 
 float3 DecodeCompressedPosition(uint meshletLocalVertex, MeshletResolveData d)
@@ -668,8 +937,13 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
 
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer obj = perObjectBuffer[md.objAndMesh.x];
+#if defined(VISUTIL_USE_COMPACT_MATERIAL_EVAL)
+    StructuredBuffer<MaterialEvalInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialEvalDataBuffer)];
+    MaterialEvalInfo materialInfo = materialDataBuffer[md.materialDataIndex];
+#else
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[md.materialDataIndex];
+#endif
     uint materialFlags = materialInfo.materialFlags;
 
     float4x4 viewProj = mul(cam.view, cam.projection);
@@ -776,10 +1050,24 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     float3x3 normalMatrix = (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex];
     float3 worldNormal = normalize(mul(normalOS, normalMatrix));
 
-    MaterialUvCache uvCache = BuildClodMaterialUvCache(materialInfo, materialFlags, md, triIdx, bary);
-    MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
+    MaterialUvCache uvCache;
+    MaterialUvBindings uvBindings;
+    BuildClodMaterialUvData(materialInfo, materialFlags, md, triIdx, bary, uvCache, uvBindings);
 
     MaterialInputs materialInputs;
+#if defined(VISUTIL_SPECIALIZED_MATERIAL_EVAL)
+    SampleMaterialEvalFromUvCache(
+        uvCache,
+        uvBindings,
+        worldNormal,
+        worldPosition,
+        vertexColor,
+        materialInfo,
+        materialFlags,
+        dpdx,
+        dpdy,
+        materialInputs);
+#else
     SampleMaterialFromUvCacheRuntime(
         uvCache,
         uvBindings,
@@ -791,6 +1079,7 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
         dpdx,
         dpdy,
         materialInputs);
+    #endif
 
     float3 positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
 
@@ -812,7 +1101,11 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
         obj.prevModel,
         mul(cam.view, cam.unjitteredProjection),
         mul(cam.prevView, cam.prevUnjitteredProjection));
+#if defined(VISUTIL_USE_COMPACT_MATERIAL_EVAL)
+    sample.materialInfo = (MaterialInfo)0;
+#else
     sample.materialInfo = materialInfo;
+#endif
     sample.materialFlags = materialFlags;
     sample.materialInputs = materialInputs;
     return true;

@@ -1796,6 +1796,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_EMISSIVE_TEXTURE";
         defines.insert(defines.begin(), macro);
     }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpacityTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPACITY_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
     if (materialFlags & MaterialCompileFlags::MaterialCompileMetallicTexture) {
         DxcDefine macro;
         macro.Value = L"1";
@@ -1814,6 +1820,42 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_AO_TEXTURE";
         defines.insert(defines.begin(), macro);
 	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRCoatColorTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_COAT_COLOR_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRCoatWeightTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_COAT_WEIGHT_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRCoatRoughnessTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_COAT_ROUGHNESS_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRFuzzColorTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_FUZZ_COLOR_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRFuzzWeightTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_FUZZ_WEIGHT_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRFuzzRoughnessTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_FUZZ_ROUGHNESS_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
 
     if (psoFlags & PSOFlags::PSO_SHADOW) {
         DxcDefine macro;

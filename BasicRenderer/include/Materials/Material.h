@@ -74,6 +74,9 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 	if (d.emissive.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileEmissiveTexture;
 	}
+    if (d.opacity.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpacityTexture;
+    }
 	if (d.heightMap.texture) {
         if (d.enableGeometricDisplacement) {
             tech.compileFlags |= MaterialCompileFlags::MaterialCompileGeometricDisplacement;
@@ -83,6 +86,24 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
             tech.compileFlags |= MaterialCompileFlags::MaterialCompileParallax;
         }
 	}
+    if (d.openPBRTextures.coatColor.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRCoatColorTexture;
+    }
+    if (d.openPBRTextures.coatWeight.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRCoatWeightTexture;
+    }
+    if (d.openPBRTextures.coatRoughness.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRCoatRoughnessTexture;
+    }
+    if (d.openPBRTextures.fuzzColor.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRFuzzColorTexture;
+    }
+    if (d.openPBRTextures.fuzzWeight.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRFuzzWeightTexture;
+    }
+    if (d.openPBRTextures.fuzzRoughness.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRFuzzRoughnessTexture;
+    }
 
     return tech;
 }

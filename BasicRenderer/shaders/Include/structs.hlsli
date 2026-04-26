@@ -308,6 +308,105 @@ struct MaterialInfo {
     uint3 perMaterialPad1;
 };
 
+struct MaterialEvalInfo {
+    uint materialFlags;
+    uint baseColorTextureIndex;
+    uint baseColorSamplerIndex;
+    uint normalTextureIndex;
+
+    uint normalSamplerIndex;
+    uint metallicTextureIndex;
+    uint metallicSamplerIndex;
+    uint roughnessTextureIndex;
+
+    uint roughnessSamplerIndex;
+    uint emissiveTextureIndex;
+    uint emissiveSamplerIndex;
+    uint aoMapIndex;
+
+    uint aoSamplerIndex;
+    uint heightMapIndex;
+    uint heightSamplerIndex;
+    uint opacityTextureIndex;
+
+    uint opacitySamplerIndex;
+    float metallicFactor;
+    float roughnessFactor;
+    float heightMapScale;
+
+    float alphaCutoff;
+    float geometricDisplacementMin;
+    float geometricDisplacementMax;
+    uint geometricDisplacementEnabled;
+
+    float4 baseColorFactor;
+    float4 emissiveFactor;
+    uint4 baseColorChannels;
+
+    uint aoChannel;
+    uint heightChannel;
+    uint metallicChannel;
+    uint roughnessChannel;
+
+    uint3 emissiveChannels;
+    uint openPBRMaterialDataIndex;
+
+    uint baseColorUvSetIndex;
+    uint normalUvSetIndex;
+    uint metallicUvSetIndex;
+    uint roughnessUvSetIndex;
+
+    uint emissiveUvSetIndex;
+    uint aoUvSetIndex;
+    uint heightUvSetIndex;
+    uint opacityUvSetIndex;
+
+    float coatWeight;
+    float3 coatColor;
+    float coatRoughness;
+    float coatDarkening;
+
+    float fuzzWeight;
+    float3 fuzzColor;
+    float fuzzRoughness;
+    float emissionLuminance;
+
+    float3 emissionColor;
+    float geometryOpacity;
+    uint coatColorTextureIndex;
+    uint coatColorSamplerIndex;
+
+    uint coatWeightTextureIndex;
+    uint coatWeightSamplerIndex;
+    uint coatRoughnessTextureIndex;
+    uint coatRoughnessSamplerIndex;
+
+    uint fuzzColorTextureIndex;
+    uint fuzzColorSamplerIndex;
+    uint fuzzWeightTextureIndex;
+    uint fuzzWeightSamplerIndex;
+
+    uint fuzzRoughnessTextureIndex;
+    uint fuzzRoughnessSamplerIndex;
+    uint4 coatColorChannels;
+    uint coatWeightChannel;
+
+    uint coatRoughnessChannel;
+    uint coatColorUvSetIndex;
+    uint coatWeightUvSetIndex;
+    uint coatRoughnessUvSetIndex;
+
+    uint4 fuzzColorChannels;
+    uint fuzzWeightChannel;
+    uint fuzzRoughnessChannel;
+    uint fuzzColorUvSetIndex;
+
+    uint fuzzWeightUvSetIndex;
+    uint fuzzRoughnessUvSetIndex;
+    uint perMaterialEvalPad0;
+    uint perMaterialEvalPad1;
+};
+
 struct OpenPBRMaterialInfo {
     float baseWeight;
     float3 baseColor;
