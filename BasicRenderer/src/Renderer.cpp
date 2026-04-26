@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <unordered_set>
 #include <typeindex>
 #include <utility>
 
@@ -58,6 +59,7 @@
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "Render/GraphExtensions/IOExtension.h"
 #include "Render/GraphExtensions/CLodExtension.h"
@@ -114,6 +116,17 @@ bool IsStreamlineDisabledByEnvironment() {
     return disabled;
 }
 
+bool IsDirectStorageDisabledByEnvironment() {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, "BASICRENDERER_DISABLE_DIRECTSTORAGE") != 0 || value == nullptr) {
+        return false;
+    }
+    const bool disabled = value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y';
+    free(value);
+    return disabled;
+}
+
 bool DefaultEnableReShapeForBuild() {
 #if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
     return true;
@@ -157,18 +170,21 @@ flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stable
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     auto& settingsManager = SettingsManager::GetInstance();
     const bool enableStreamline = !IsStreamlineDisabledByEnvironment();
+    const bool enableDirectStorage = !IsDirectStorageDisabledByEnvironment();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("enableStreamline", enableStreamline);
+    settingsManager.registerSetting<bool>("enableDirectStorage", enableDirectStorage);
     settingsManager.registerSetting<bool>("enableReShape", DefaultEnableReShapeForBuild());
     settingsManager.registerSetting<bool>("reshapeSynchronousRecording", false);
     settingsManager.registerSetting<bool>("reshapeTexelAddressing", true);
     settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
     settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", false);
     LoadPipeline(hwnd, x_res, y_res);
+    DirectStorageManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
     UpscalingManager::GetInstance().InitFFX(); // Needs device
@@ -269,6 +285,9 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
     m_pTextureFactory = TextureFactory::CreateUnique();
+    if (currentRenderGraph) {
+        m_pTextureFactory->SetReadbackService(currentRenderGraph->GetReadbackService());
+    }
 
     CreateGlobalResources();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after CreateGlobalResources");
@@ -568,7 +587,7 @@ void Renderer::RunRenderResourceSyncStage() {
     auto& world = RendererECSManager::GetInstance().GetWorld();
 
     if (!m_renderSyncQueriesBuilt) {
-        m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo>()
+        m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo, Components::MeshInstances>()
             .with<Components::Active>()
             .build();
         m_renderSyncCameraQuery = world.query_builder<Components::Matrix, Components::Camera, Components::RenderViewRef>()
@@ -588,18 +607,55 @@ void Renderer::RunRenderResourceSyncStage() {
         Components::Matrix* worldMatrix;
         Components::RenderableObject* object;
         Components::ObjectDrawInfo* drawInfo;
+        Components::MeshInstances* meshInstances;
     };
     std::vector<ObjectSyncItem> objectItems;
+    std::vector<Material*> activeMaterials;
+    std::unordered_set<uint32_t> activeMaterialIds;
     m_renderSyncObjectQuery.run([&](flecs::iter& it) {
         while (it.next()) {
             auto matrices = it.field<Components::Matrix>(0);
             auto objects = it.field<Components::RenderableObject>(1);
             auto drawInfos = it.field<Components::ObjectDrawInfo>(2);
+            auto meshInstances = it.field<Components::MeshInstances>(3);
             for (auto i : it) {
-                objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i] });
+                objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i], &meshInstances[i] });
+
+                for (const auto& meshInstance : meshInstances[i].meshInstances) {
+                    if (!meshInstance) {
+                        continue;
+                    }
+
+                    auto mesh = meshInstance->GetMesh();
+                    if (!mesh || !mesh->material) {
+                        continue;
+                    }
+
+                    Material* material = mesh->material.get();
+                    if (!material) {
+                        continue;
+                    }
+
+                    if (activeMaterialIds.insert(material->GetMaterialID()).second) {
+                        activeMaterials.push_back(material);
+                    }
+                }
             }
         }
     });
+
+    auto* textureFactory = m_managerInterface.GetTextureFactory();
+    auto* materialManager = m_managerInterface.GetMaterialManager();
+    if (textureFactory && materialManager) {
+        for (Material* material : activeMaterials) {
+            if (!material) {
+                continue;
+            }
+
+            material->EnsureTexturesUploaded(*textureFactory);
+            materialManager->UpdateMaterialDataBuffer(*material);
+        }
+    }
 
     auto* objectManager = m_managerInterface.GetObjectManager();
     size_t perObjectDirtyBegin = 0;
@@ -641,7 +697,10 @@ void Renderer::RunRenderResourceSyncStage() {
 
     TaskSchedulerManager::GetInstance().ParallelFor("ObjectSync", objectItems.size(),
         [&objectItems, &perObjectHandle, &normalMatrixHandle](size_t idx) {
-            auto& [worldMatrix, object, drawInfo] = objectItems[idx];
+            auto& item = objectItems[idx];
+            auto* worldMatrix = item.worldMatrix;
+            auto* object = item.object;
+            auto* drawInfo = item.drawInfo;
             object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
             object->perObjectCB.modelMatrix = worldMatrix->matrix;
 
@@ -2076,6 +2135,7 @@ void Renderer::Cleanup() {
 	spdlog::info("Cleaning up swap chain");
     m_swapChain.Reset();
 	spdlog::info("Cleaning up device manager");
+    DirectStorageManager::GetInstance().Cleanup();
     DeviceManager::GetInstance().Cleanup();
 	spdlog::info("Cleanup complete");
 }
@@ -2276,6 +2336,10 @@ void Renderer::CreateRenderGraph() {
         currentRenderGraph->GetMemorySnapshotProvider().SetProvider(
             rg::memory::CreateECSMemorySnapshotProvider());
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
+
+        if (auto* textureFactory = m_managerInterface.GetTextureFactory()) {
+            textureFactory->SetReadbackService(currentRenderGraph->GetReadbackService());
+        }
 
         RendererECSManager::GetInstance().CreateRenderPhaseEntity(Engine::Primary::CLodTransparentPass);
 

@@ -2605,6 +2605,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     auto cullPassDesc = RenderGraph::ExternalPassDesc::Compute(
         cullPassName,
         std::make_shared<HierarchialCullingPass>(
+            cullPassName,
             cullPassInputs,
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
@@ -3772,9 +3773,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         cullPassInputs2.clodOnlyWorkloads = true;
         cullPassInputs2.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
         cullPassInputs2.rasterOutputKind = traits.rasterOutputKind;
+        const std::string cullPassName2 = MakeVariantPassName(traits, "HierarchialCullingPass2");
         auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
-            MakeVariantPassName(traits, "HierarchialCullingPass2"),
+            cullPassName2,
             std::make_shared<HierarchialCullingPass>(
+                cullPassName2,
                 cullPassInputs2,
                 m_visibleClustersBuffer,
                 m_visibleClustersCounterBufferPhase2,

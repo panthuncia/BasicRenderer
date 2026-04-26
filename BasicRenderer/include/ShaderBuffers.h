@@ -193,6 +193,64 @@ struct PerMaterialCB {
 	unsigned int perMaterialPad1[3];
 };
 
+struct PerMaterialEvalCB {
+    unsigned int materialFlags;
+    unsigned int baseColorTextureIndex;
+    unsigned int baseColorSamplerIndex;
+    unsigned int normalTextureIndex;
+
+    unsigned int normalSamplerIndex;
+    unsigned int metallicTextureIndex;
+    unsigned int metallicSamplerIndex;
+    unsigned int roughnessTextureIndex;
+
+    unsigned int roughnessSamplerIndex;
+    unsigned int emissiveTextureIndex;
+    unsigned int emissiveSamplerIndex;
+    unsigned int aoMapIndex;
+
+    unsigned int aoSamplerIndex;
+    unsigned int heightMapIndex;
+    unsigned int heightSamplerIndex;
+    unsigned int opacityTextureIndex;
+
+    unsigned int opacitySamplerIndex;
+    float metallicFactor;
+    float roughnessFactor;
+    float heightMapScale;
+
+    float alphaCutoff;
+    float geometricDisplacementMin;
+    float geometricDisplacementMax;
+    unsigned int geometricDisplacementEnabled;
+
+    DirectX::XMFLOAT4 baseColorFactor;
+    DirectX::XMFLOAT4 emissiveFactor;
+    DirectX::XMUINT4 baseColorChannels;
+
+    unsigned int aoChannel;
+    unsigned int heightChannel;
+    unsigned int metallicChannel;
+    unsigned int roughnessChannel;
+
+    DirectX::XMUINT3 emissiveChannels;
+    unsigned int openPBRMaterialDataIndex;
+
+    unsigned int baseColorUvSetIndex;
+    unsigned int normalUvSetIndex;
+    unsigned int metallicUvSetIndex;
+    unsigned int roughnessUvSetIndex;
+
+    unsigned int emissiveUvSetIndex;
+    unsigned int aoUvSetIndex;
+    unsigned int heightUvSetIndex;
+    unsigned int opacityUvSetIndex;
+    unsigned int perMaterialEvalPad0;
+    unsigned int perMaterialEvalPad1;
+    unsigned int perMaterialEvalPad2;
+    unsigned int perMaterialEvalPad3;
+};
+
 struct PerMaterialOpenPBRCB {
     float baseWeight;
     DirectX::XMFLOAT3 baseColor;

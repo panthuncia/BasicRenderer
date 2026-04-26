@@ -90,6 +90,8 @@ public:
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::PerMaterialDataBuffer,
+            "Builtin::PerMaterialEvalDataBuffer",
+            Builtin::Material::TextureGroup,
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,
@@ -201,13 +203,16 @@ public:
 			// Bind pipeline for this material compile flag set
             auto psoIter = m_psoCache.find(flags);
             if (psoIter == m_psoCache.end()) {
+                auto shaderDefines = psoMgr.GetShaderDefines(0, flags);
+                shaderDefines.push_back({L"VISUTIL_SPECIALIZED_MATERIAL_EVAL", L"1"});
+                shaderDefines.push_back({L"VISUTIL_USE_COMPACT_MATERIAL_EVAL", L"1"});
                 auto [newIter, _] = m_psoCache.emplace(
                     flags,
                     psoMgr.MakeComputePipeline(
                         psoMgr.GetComputeRootSignature().GetHandle(),
                         L"shaders/VisUtilEvaluate.hlsl",
                         L"EvaluateMaterialGroupCS",
-                        psoMgr.GetShaderDefines(0, flags),
+                        shaderDefines,
                         "VisUtil_EvaluateMaterialGroupPSO"));
                 psoIter = newIter;
             }

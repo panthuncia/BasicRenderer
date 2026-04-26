@@ -5,9 +5,51 @@ void EvaluateGBufferOptimized(uint2 pixel)
 {
     Texture2D<uint64_t> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     uint64_t vis = visibilityTexture[pixel];
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
+    uint outputType = perFrame.outputType;
+
+    RWTexture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
+    RWTexture2D<float4> albedoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Albedo)];
+    RWTexture2D<float4> coatTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Coat)];
+    RWTexture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Emissive)];
+    RWTexture2D<float4> fuzzTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Fuzz)];
+    RWTexture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
+    RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
+
+    if (outputType == OUTPUT_COLOR)
+    {
+        ClodGBufferColorSample sample;
+        if (!ResolveClodGBufferColorSampleFromVisKey(vis, pixel, sample))
+        {
+            return;
+        }
+
+        normalsTexture[pixel] = float4(sample.materialInputs.normalWS, (float)sample.materialInputs.openPBRMaterialDataIndex);
+        albedoTexture[pixel] = float4(sample.materialInputs.albedo, sample.materialInputs.ambientOcclusion);
+        coatTexture[pixel] = float4(sample.materialInputs.coatColor, sample.materialInputs.coatWeight);
+        emissiveTexture[pixel].xyz = sample.materialInputs.emissive;
+        fuzzTexture[pixel] = float4(sample.materialInputs.fuzzColor, sample.materialInputs.fuzzRoughness);
+        metallicRoughnessTexture[pixel] = float4(sample.materialInputs.metallic, sample.materialInputs.roughness, sample.materialInputs.coatRoughness, sample.materialInputs.fuzzWeight);
+        motionVectorTexture[pixel] = sample.motionVector;
+        return;
+    }
+
+    ClodGBufferDebugSample sample;
+    if (!ResolveClodGBufferDebugSampleFromVisKey(vis, pixel, sample))
+    {
+        return;
+    }
+
+    normalsTexture[pixel] = float4(sample.materialInputs.normalWS, (float)sample.materialInputs.openPBRMaterialDataIndex);
+    albedoTexture[pixel] = float4(sample.materialInputs.albedo, sample.materialInputs.ambientOcclusion);
+    coatTexture[pixel] = float4(sample.materialInputs.coatColor, sample.materialInputs.coatWeight);
+    emissiveTexture[pixel].xyz = sample.materialInputs.emissive;
+    fuzzTexture[pixel] = float4(sample.materialInputs.fuzzColor, sample.materialInputs.fuzzRoughness);
+    metallicRoughnessTexture[pixel] = float4(sample.materialInputs.metallic, sample.materialInputs.roughness, sample.materialInputs.coatRoughness, sample.materialInputs.fuzzWeight);
+    motionVectorTexture[pixel] = sample.motionVector;
 
     bool isReyesPatch = false;
-    if (vis != 0xFFFFFFFFFFFFFFFF)
+    if (outputType == OUTPUT_REYES_GEOMETRY_PATH && vis != 0xFFFFFFFFFFFFFFFF)
     {
         float visDepth;
         uint visClusterIndex;
@@ -18,68 +60,42 @@ void EvaluateGBufferOptimized(uint2 pixel)
             VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX != 0xFFFFFFFFu;
     }
 
-    ClodResolvedSample sample;
-    if (!ResolveClodSampleFromVisKey(vis, pixel, sample))
-    {
-        return;
+    RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
+    uint2 payload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
+    switch (outputType) {
+        case OUTPUT_NORMAL:
+            payload = PackDebugFloat3(sample.materialInputs.normalWS * 0.5 + 0.5);
+            break;
+        case OUTPUT_ALBEDO:
+            payload = PackDebugFloat3(sample.materialInputs.albedo);
+            break;
+        case OUTPUT_METALLIC:
+            payload = PackDebugFloat3(sample.materialInputs.metallic.xxx);
+            break;
+        case OUTPUT_ROUGHNESS:
+            payload = PackDebugFloat3(sample.materialInputs.roughness.xxx);
+            break;
+        case OUTPUT_EMISSIVE:
+            payload = PackDebugFloat3(sample.materialInputs.emissive);
+            break;
+        case OUTPUT_AO:
+            payload = PackDebugFloat3(sample.materialInputs.ambientOcclusion.xxx);
+            break;
+        case OUTPUT_MESHLETS:
+            payload = PackDebugUint(sample.meshletIndex);
+            break;
+        case OUTPUT_MODEL_NORMALS:
+            payload = PackDebugFloat3(sample.normalOS * 0.5 + 0.5);
+            break;
+        case OUTPUT_MOTION_VECTORS:
+            payload = PackDebugFloat3(float3(sample.motionVector * 0.5 + 0.5, 0.5));
+            break;
+        case OUTPUT_REYES_GEOMETRY_PATH:
+            payload = PackDebugFloat3(isReyesPatch ? float3(0.10, 0.95, 0.20) : float3(0.95, 0.15, 0.15));
+            break;
     }
-
-    RWTexture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
-    RWTexture2D<float4> albedoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Albedo)];
-    RWTexture2D<float4> coatTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Coat)];
-    RWTexture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Emissive)];
-    RWTexture2D<float4> fuzzTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Fuzz)];
-    RWTexture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
-    RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
-
-    normalsTexture[pixel] = float4(sample.materialInputs.normalWS, (float)sample.materialInputs.openPBRMaterialDataIndex);
-    albedoTexture[pixel] = float4(sample.materialInputs.albedo, sample.materialInputs.ambientOcclusion);
-    coatTexture[pixel] = float4(sample.materialInputs.coatColor, sample.materialInputs.coatWeight);
-    emissiveTexture[pixel].xyz = sample.materialInputs.emissive;
-    fuzzTexture[pixel] = float4(sample.materialInputs.fuzzColor, sample.materialInputs.fuzzRoughness);
-    metallicRoughnessTexture[pixel] = float4(sample.materialInputs.metallic, sample.materialInputs.roughness, sample.materialInputs.coatRoughness, sample.materialInputs.fuzzWeight);
-    motionVectorTexture[pixel] = sample.motionVector;
-
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
-    uint outputType = perFrame.outputType;
-    if (outputType != OUTPUT_COLOR) {
-        RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
-        uint2 payload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
-        switch (outputType) {
-            case OUTPUT_NORMAL:
-                payload = PackDebugFloat3(sample.materialInputs.normalWS * 0.5 + 0.5);
-                break;
-            case OUTPUT_ALBEDO:
-                payload = PackDebugFloat3(sample.materialInputs.albedo);
-                break;
-            case OUTPUT_METALLIC:
-                payload = PackDebugFloat3(sample.materialInputs.metallic.xxx);
-                break;
-            case OUTPUT_ROUGHNESS:
-                payload = PackDebugFloat3(sample.materialInputs.roughness.xxx);
-                break;
-            case OUTPUT_EMISSIVE:
-                payload = PackDebugFloat3(sample.materialInputs.emissive);
-                break;
-            case OUTPUT_AO:
-                payload = PackDebugFloat3(sample.materialInputs.ambientOcclusion.xxx);
-                break;
-            case OUTPUT_MESHLETS:
-                payload = PackDebugUint(sample.meshletIndex);
-                break;
-            case OUTPUT_MODEL_NORMALS:
-                payload = PackDebugFloat3(sample.normalOS * 0.5 + 0.5);
-                break;
-            case OUTPUT_MOTION_VECTORS:
-                payload = PackDebugFloat3(float3(sample.motionVector * 0.5 + 0.5, 0.5));
-                break;
-            case OUTPUT_REYES_GEOMETRY_PATH:
-                payload = PackDebugFloat3(isReyesPatch ? float3(0.10, 0.95, 0.20) : float3(0.95, 0.15, 0.15));
-                break;
-        }
-        if (payload.x != DEBUG_SENTINEL) {
-            WriteDebugPixel(debugVisTex, pixel, payload);
-        }
+    if (payload.x != DEBUG_SENTINEL) {
+        WriteDebugPixel(debugVisTex, pixel, payload);
     }
 }
 

@@ -4,6 +4,7 @@
 #include <string>
 #include <array>
 #include <unordered_set>
+#include <functional>
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Materials/BlendState.h"
@@ -73,6 +74,9 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 	if (d.emissive.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileEmissiveTexture;
 	}
+    if (d.opacity.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpacityTexture;
+    }
 	if (d.heightMap.texture) {
         if (d.enableGeometricDisplacement) {
             tech.compileFlags |= MaterialCompileFlags::MaterialCompileGeometricDisplacement;
@@ -82,6 +86,24 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
             tech.compileFlags |= MaterialCompileFlags::MaterialCompileParallax;
         }
 	}
+    if (d.openPBRTextures.coatColor.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRCoatColorTexture;
+    }
+    if (d.openPBRTextures.coatWeight.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRCoatWeightTexture;
+    }
+    if (d.openPBRTextures.coatRoughness.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRCoatRoughnessTexture;
+    }
+    if (d.openPBRTextures.fuzzColor.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRFuzzColorTexture;
+    }
+    if (d.openPBRTextures.fuzzWeight.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRFuzzWeightTexture;
+    }
+    if (d.openPBRTextures.fuzzRoughness.texture) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRFuzzRoughnessTexture;
+    }
 
     return tech;
 }
@@ -215,6 +237,7 @@ public:
     uint32_t GetMaterialID() const { return m_materialID; }
 	PerMaterialCB const& GetData() const { return m_materialData; }
     void EnsureTexturesUploaded(const TextureFactory& factory);
+    void ForEachReferencedTexture(const std::function<void(const std::shared_ptr<TextureAsset>&)>& visitor) const;
 private:
 	inline static std::atomic<uint32_t> globalMaterialCount;
 	const uint32_t m_materialID = globalMaterialCount.fetch_add(1, std::memory_order_relaxed);

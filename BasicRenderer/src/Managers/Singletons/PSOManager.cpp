@@ -67,6 +67,19 @@ uint64_t HashPreprocessedBuffer(const DxcBuffer& buffer)
     return HashBytesStable(source, sourceSize);
 }
 
+uint64_t HashCanonicalPreprocessedBuffer(const DxcBuffer& buffer)
+{
+    const char* source = static_cast<const char*>(buffer.Ptr);
+    const std::string canonicalSource = CanonicalizePreprocessedShaderSourceForHash(source, buffer.Size);
+    return HashBytesStable(canonicalSource.data(), canonicalSource.size());
+}
+
+size_t GetCanonicalPreprocessedBufferSize(const DxcBuffer& buffer)
+{
+    const char* source = static_cast<const char*>(buffer.Ptr);
+    return CanonicalizePreprocessedShaderSourceForHash(source, buffer.Size).size();
+}
+
 std::string NormalizePathUtf8(const std::filesystem::path& path)
 {
     return NormalizeCacheSourcePath(ws2s(path.wstring()));
@@ -91,8 +104,8 @@ uint64_t BuildBundleIdentityHash(
             return;
         }
 
-        util::hash_combine_u64(seed, HashPreprocessedBuffer(buffer));
-        util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(buffer.Ptr), buffer.Size));
+        util::hash_combine_u64(seed, HashCanonicalPreprocessedBuffer(buffer));
+        util::hash_combine_u64(seed, GetCanonicalPreprocessedBufferSize(buffer));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->entryPoint)));
         util::hash_combine_u64(seed, HashStringStable(ws2s(slot->target)));
         util::hash_combine_u64(seed, ShouldSkipValidationForEntryPoint(slot->entryPoint) ? 1u : 0u);
@@ -111,8 +124,8 @@ uint64_t BuildLibraryIdentityHash(
     const DxcBuffer& preprocessedBuffer)
 {
     uint64_t seed = 0;
-    util::hash_combine_u64(seed, HashPreprocessedBuffer(preprocessedBuffer));
-    util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(preprocessedBuffer.Ptr), preprocessedBuffer.Size));
+    util::hash_combine_u64(seed, HashCanonicalPreprocessedBuffer(preprocessedBuffer));
+    util::hash_combine_u64(seed, GetCanonicalPreprocessedBufferSize(preprocessedBuffer));
     util::hash_combine_u64(seed, HashStringStable(ws2s(info.target)));
     return seed;
 }
@@ -150,25 +163,25 @@ uint64_t ComputeShaderCacheBuildConfigHash()
     return seed;
 }
 
-void LogFailedShaderSource(
-    const std::wstring& filename,
-    const std::wstring& entryPoint,
-    const std::wstring& target,
-    const DxcBuffer& sourceBuffer)
-{
-    if (sourceBuffer.Ptr == nullptr || sourceBuffer.Size == 0) {
-        return;
-    }
-
-    const char* source = static_cast<const char*>(sourceBuffer.Ptr);
-    const size_t sourceSize = GetNormalizedShaderSourceSize(source, sourceBuffer.Size);
-    spdlog::error(
-        "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
-        ws2s(filename),
-        ws2s(entryPoint),
-        ws2s(target),
-        std::string(source, sourceSize));
-}
+//void LogFailedShaderSource(
+//    const std::wstring& filename,
+//    const std::wstring& entryPoint,
+//    const std::wstring& target,
+//    const DxcBuffer& sourceBuffer)
+//{
+//    if (sourceBuffer.Ptr == nullptr || sourceBuffer.Size == 0) {
+//        return;
+//    }
+//
+//    const char* source = static_cast<const char*>(sourceBuffer.Ptr);
+//    const size_t sourceSize = GetNormalizedShaderSourceSize(source, sourceBuffer.Size);
+//    spdlog::error(
+//        "DXC input dump for failed compile file='{}' entry='{}' target='{}':\n{}",
+//        ws2s(filename),
+//        ws2s(entryPoint),
+//        ws2s(target),
+//        std::string(source, sourceSize));
+//}
 
 bool CreateBlobFromBytes(
     IDxcUtils* utils,
@@ -1783,6 +1796,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_EMISSIVE_TEXTURE";
         defines.insert(defines.begin(), macro);
     }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpacityTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPACITY_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
     if (materialFlags & MaterialCompileFlags::MaterialCompileMetallicTexture) {
         DxcDefine macro;
         macro.Value = L"1";
@@ -1801,6 +1820,42 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_AO_TEXTURE";
         defines.insert(defines.begin(), macro);
 	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRCoatColorTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_COAT_COLOR_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRCoatWeightTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_COAT_WEIGHT_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRCoatRoughnessTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_COAT_ROUGHNESS_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRFuzzColorTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_FUZZ_COLOR_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRFuzzWeightTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_FUZZ_WEIGHT_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileOpenPBRFuzzRoughnessTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_OPENPBR_FUZZ_ROUGHNESS_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
 
     if (psoFlags & PSOFlags::PSO_SHADOW) {
         DxcDefine macro;
@@ -1956,9 +2011,12 @@ ShaderLibraryBundle PSOManager::CompileShaderLibrary(const ShaderLibraryInfo& li
         defines,
         outBlob
 	);
+
     dxcPreprocessBuff.Ptr = outBlob->GetBufferPointer();
     dxcPreprocessBuff.Size = outBlob->GetBufferSize();
     dxcPreprocessBuff.Encoding = 0;
+
+    std::string debug_shader_string((const char*)dxcPreprocessBuff.Ptr, dxcPreprocessBuff.Size);
 
     const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash();
     const shadercache::CacheKey cacheKey{
@@ -2330,7 +2388,7 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
         }
         if (errs && errs->GetStringLength())
             spdlog::error("Shader compile error: {}", errs->GetStringPointer());
-        LogFailedShaderSource(filename, entryPoint, target, src);
+        //LogFailedShaderSource(filename, entryPoint, target, src);
         ThrowIfFailed(hr);
     }
 
@@ -2340,7 +2398,7 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
         if (errs && errs->GetStringLength()) {
             spdlog::error("Shader compile warnings: {}", errs->GetStringPointer());
             if (strstr(errs->GetStringPointer(), "error")) {
-                LogFailedShaderSource(filename, entryPoint, target, src);
+                //LogFailedShaderSource(filename, entryPoint, target, src);
                 ThrowIfFailed(E_FAIL);
             }
         }

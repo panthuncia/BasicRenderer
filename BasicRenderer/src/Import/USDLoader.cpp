@@ -58,6 +58,7 @@
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/TextureProcessingManager.h"
 
 #include "Import/USDLoader.h"
 #include "Import/CLodCacheLoader.h"
@@ -230,7 +231,7 @@ namespace USDLoader {
 			TextureAndConstant MaterialDescription::*binding;
 		};
 
-		constexpr std::array<MaterialTextureBindingEntry, 8> kMaterialTextureBindings = {{
+		constexpr std::array<MaterialTextureBindingEntry, 9> kMaterialTextureBindings = {{
 			{ "diffuseColor", &MaterialDescription::baseColor },
 			{ "metallic", &MaterialDescription::metallic },
 			{ "roughness", &MaterialDescription::roughness },
@@ -239,6 +240,7 @@ namespace USDLoader {
 			{ "normal", &MaterialDescription::normal },
 			{ "displacement", &MaterialDescription::heightMap },
 			{ "ambientOcclusion", &MaterialDescription::aoMap },
+			{ "occlusion", &MaterialDescription::aoMap },
 		}};
 
 		struct OpenPBRTextureBindingEntry {
@@ -570,6 +572,42 @@ namespace USDLoader {
 		result.geometricDisplacementMax = std::max(result.geometricDisplacementMax, displacementScale);
 	}
 
+	TextureSemantic GetTextureSemanticForUsdInput(const TfToken& name)
+	{
+		if (name == TfToken("diffuseColor") || name == TfToken("baseColor") || name == TfToken("coatColor") || name == TfToken("fuzzColor")) {
+			return TextureSemantic::BaseColor;
+		}
+		if (name == TfToken("emissiveColor")) {
+			return TextureSemantic::Emissive;
+		}
+		if (name == TfToken("normal")) {
+			return TextureSemantic::Normal;
+		}
+		if (name == TfToken("displacement") || name == TfToken("height") || name == TfToken("heightMap")) {
+			return TextureSemantic::Height;
+		}
+		if (name == TfToken("ambientOcclusion") || name == TfToken("occlusion")) {
+			return TextureSemantic::AO;
+		}
+		if (name == TfToken("opacity")) {
+			return TextureSemantic::Opacity;
+		}
+		if (name == TfToken("metallic") || name == TfToken("metalness") || name == TfToken("coatWeight") || name == TfToken("fuzzWeight")) {
+			return TextureSemantic::Metallic;
+		}
+		if (name == TfToken("roughness") || name == TfToken("coatRoughness") || name == TfToken("fuzzRoughness")) {
+			return TextureSemantic::Roughness;
+		}
+		return TextureSemantic::Unknown;
+	}
+
+	std::string BuildUsdTextureCacheKey(const std::string& logicalPath, TextureSemantic semantic, bool preferSRGB, NormalMapConvention normalConvention)
+	{
+		return logicalPath + "|semantic:" + std::to_string(static_cast<uint32_t>(semantic)) +
+			(preferSRGB ? "|srgb" : "|linear") +
+			"|normalconv:" + std::to_string(static_cast<uint32_t>(normalConvention));
+	}
+
 	void ProcessTexture(MaterialDescription& result, const UsdShadeConnectionSourceInfo& src, const UsdStageRefPtr& stage, const TfToken& name, const UsdShadeMaterial& material) {
 		if (auto srcShader = UsdShadeShader(src.source)) {
 			TfToken srcId;
@@ -582,21 +620,26 @@ namespace USDLoader {
 				// Resolve asset path
 				std::string logicalPath = asset.GetResolvedPath();
 
-				if (!loadingCache.textureCache.contains(logicalPath)) {
+				UsdShadeInput csInput = srcShader.GetInput(TfToken("sourceColorSpace"));
+				TfToken colorSpaceToken;
+				std::string colorSpace = "linear";
+				if (csInput && csInput.Get(&colorSpaceToken)) {
+					colorSpace = colorSpaceToken.GetString();
+				} // TODO: Use this to set texture color space instead of correcting in shader
+				std::string csLower = colorSpace;
+				std::transform(csLower.begin(), csLower.end(), csLower.begin(),
+					[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				const bool preferSRGB = (csLower == "srgb");
+				const TextureSemantic semantic = GetTextureSemanticForUsdInput(name);
+				const NormalMapConvention normalConvention = semantic == TextureSemantic::Normal
+					? NormalMapConvention::OpenGL
+					: NormalMapConvention::DirectX;
+				const std::string cacheKey = BuildUsdTextureCacheKey(logicalPath, semantic, preferSRGB, normalConvention);
+
+				if (!loadingCache.textureCache.contains(cacheKey)) {
 					spdlog::info("Found texture  {} in material", src.source.GetPrim().GetName().GetString());
 					//auto texPath = asset.GetAssetPath();
 					//spdlog::info("Loading texture from path: {}", texPath);
-
-					UsdShadeInput csInput = srcShader.GetInput(TfToken("sourceColorSpace"));
-					TfToken colorSpaceToken;
-					std::string colorSpace = "linear";
-					if (csInput && csInput.Get(&colorSpaceToken)) {
-						colorSpace = colorSpaceToken.GetString();
-					} // TODO: Use this to set texture color space instead of correcting in shader
-					std::string csLower = colorSpace;
-					std::transform(csLower.begin(), csLower.end(), csLower.begin(),
-						[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-					const bool preferSRGB = (csLower == "srgb");
 
 					auto& resolver = ArGetResolver();
 					auto ctx = stage->GetPathResolverContext();
@@ -604,23 +647,39 @@ namespace USDLoader {
 
 					ArResolvedPath resolved = resolver.Resolve(logicalPath);
 
-					// Open the asset
-					std::shared_ptr<ArAsset> arAsset = resolver.OpenAsset(resolved);
-					if (!arAsset) {
-						throw std::runtime_error(
-							"Unable to open asset at " + logicalPath);
+					TextureFileMeta cacheProbeMeta{};
+					cacheProbeMeta.filePath = resolved.GetPathString();
+					cacheProbeMeta.preferSRGB = preferSRGB;
+					cacheProbeMeta.processing = MakeMaterialTextureProcessingSettings(semantic, preferSRGB, cacheKey, false, normalConvention);
+					const std::wstring cachePath = TextureProcessingManager::GetInstance().GetExistingCachePathForFile(cacheProbeMeta);
+					if (!cachePath.empty()) {
+						auto tex = LoadTextureFromFile(cachePath, nullptr, preferSRGB);
+						tex->Meta().isProcessingCacheArtifact = true;
+						tex->Meta().preferSRGB = preferSRGB;
+						tex->Meta().processing = cacheProbeMeta.processing;
+						loadingCache.textureCache[cacheKey] = tex;
+						spdlog::info("USDLoader: texture processing cache hit for '{}' -> '{}'", resolved.GetPathString(), ws2s(cachePath));
 					}
+					else {
+						// Open the asset
+						std::shared_ptr<ArAsset> arAsset = resolver.OpenAsset(resolved);
+						if (!arAsset) {
+							throw std::runtime_error(
+								"Unable to open asset at " + logicalPath);
+						}
 
-					auto tex = LoadTextureFromMemory(
-						static_cast<const void*>(arAsset->GetBuffer().get()),
-						arAsset->GetSize(),
-						nullptr,
-						{},              // default flags; loader will force WIC sRGB/linear as needed
-						preferSRGB);
+						auto tex = LoadTextureFromMemory(
+							static_cast<const void*>(arAsset->GetBuffer().get()),
+							arAsset->GetSize(),
+							nullptr,
+							{},              // default flags; loader will force WIC sRGB/linear as needed
+							preferSRGB);
+						tex->SetProcessingSettings(MakeMaterialTextureProcessingSettings(semantic, preferSRGB, cacheKey, false, normalConvention));
 
-					tex->SetGenerateMipmaps(true); // TODO: There will be textures where we don't want this
+						tex->SetGenerateMipmaps(true); // TODO: There will be textures where we don't want this
 
-					loadingCache.textureCache[logicalPath] = tex;
+						loadingCache.textureCache[cacheKey] = tex;
+					}
 
 				}
 			}
@@ -654,7 +713,21 @@ namespace USDLoader {
 			srcShader.GetInput(TfToken("file")).Get(&asset);
 			// Resolve asset path
 			std::string logicalPath = asset.GetResolvedPath();
-			auto texIt = loadingCache.textureCache.find(logicalPath);
+			UsdShadeInput csInput = srcShader.GetInput(TfToken("sourceColorSpace"));
+			TfToken colorSpaceToken;
+			std::string colorSpace = "linear";
+			if (csInput && csInput.Get(&colorSpaceToken)) {
+				colorSpace = colorSpaceToken.GetString();
+			}
+			std::transform(colorSpace.begin(), colorSpace.end(), colorSpace.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			const bool preferSRGB = (colorSpace == "srgb");
+			const TextureSemantic semantic = GetTextureSemanticForUsdInput(name);
+			const NormalMapConvention normalConvention = semantic == TextureSemantic::Normal
+				? NormalMapConvention::OpenGL
+				: NormalMapConvention::DirectX;
+			const std::string cacheKey = BuildUsdTextureCacheKey(logicalPath, semantic, preferSRGB, normalConvention);
+			auto texIt = loadingCache.textureCache.find(cacheKey);
 			if (texIt != loadingCache.textureCache.end()) {
 
 				auto tex = texIt->second;
@@ -670,8 +743,10 @@ namespace USDLoader {
                 if (name == TfToken("diffuseColor") && textureBinding->channels.size() == 3) {
                     textureBinding->channels.push_back(3);
                 }
-                if (name == TfToken("normal")) {
-                    result.negateNormals = tex->Meta().fileType == ImageFiletype::DDS ? true : false;
+				if (name == TfToken("normal")) {
+					result.negateNormals =
+						tex->Meta().fileType == ImageFiletype::DDS ||
+						(tex->Meta().isProcessingCacheArtifact && tex->Meta().processing.semantic == TextureSemantic::Normal);
                     result.invertNormalGreen = false;
                 }
 				if (name == TfToken("emissiveColor") && IsBlack(result.emissiveColor)) {
@@ -787,7 +862,7 @@ namespace USDLoader {
 			return result;
 
 		result.name = material.GetPrim().GetName().GetString();
-		result.invertNormalGreen = true; // TODO: What is the best way to deal with this?
+		result.invertNormalGreen = false;
 		result.negateNormals = false;
         result.alphaCutoff = 0.0f;
 

@@ -28,6 +28,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 - GPU-driven rendering with compute culling & ExecuteIndirect
 - Visibility buffer (UE5-style), Deferred, and forward+ rendering
 - Virtual shadow mapping (directional-only for now) with multiple raster modes
+- DirectStorage integration for low-latency, high-throughput data streaming
+- GPU BC7 compressor for rapid asset optimization
 - Clustered lighting with a paged linked-list
 - Async-compute
 - Compute-based skinning
@@ -69,6 +71,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [SLang](https://github.com/shader-slang/slang)
 - [Tracy](https://github.com/wolfpld/tracy)
 - [Tree-Sitter](https://github.com/tree-sitter/tree-sitter)
+- [DirectStorage](https://github.com/microsoft/DirectStorage)
   
 ## Notable Sources and References for Development
 

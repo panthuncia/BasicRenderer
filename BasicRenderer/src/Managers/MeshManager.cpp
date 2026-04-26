@@ -2,6 +2,7 @@
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Mesh/Mesh.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Buffers/BufferView.h"
@@ -150,6 +151,8 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			[this, request = std::move(request)]() mutable {
 			CLodDiskStreamingResult result{};
 			result.groupGlobalIndex = request.groupGlobalIndex;
+			result.cacheSource = request.cacheSource;
+			result.segmentNeedsFetch = request.segmentNeedsFetch;
 			result.generation = request.generation;
 
 			struct TLContainerState {
@@ -205,9 +208,70 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			}
 
 			CLodCache::LoadedGroupPayload payload{};
-			if (CLodCache::LoadGroupPayloadSelective(tls.file, locator, request.segmentNeedsFetch, payload)) {
-				result.groupChunkMetadata = payload.groupChunkMetadata;
-				result.pageBlobs = std::move(payload.pageBlobs);
+			bool loaded = false;
+			const std::wstring containerPath = CLodCache::ResolveContainerPath(request.cacheSource);
+			if (DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu) && !containerPath.empty()) {
+				if (request.prefetchedLayout.has_value() && request.prefetchedLayout->IsValid()) {
+					result.groupChunkMetadata = request.prefetchedLayout->groupChunkMetadata;
+					result.directStoragePageBlobSizes = request.prefetchedLayout->pageBlobSizes;
+					result.directStoragePageBlobOffsets = request.prefetchedLayout->pageBlobOffsets;
+					loaded = true;
+				}
+
+				if (!loaded) {
+					CLodCache::GroupPayloadLayoutMetadata layout;
+					loaded = CLodCache::GetGroupPayloadLayout(tls.file, locator, layout);
+					if (loaded) {
+						result.groupChunkMetadata = std::move(layout.groupChunkMetadata);
+						result.directStoragePageBlobSizes = std::move(layout.pageBlobSizes);
+						result.directStoragePageBlobOffsets = std::move(layout.pageBlobOffsets);
+					}
+				}
+				if (loaded) {
+					result.uploadPathLabel = "DirectStorageGpuDirect";
+					result.directStorageGpuUploadPending = true;
+				}
+				else {
+					tls.file.clear();
+					spdlog::debug(
+						"CLod streaming: DirectStorage GPU upload prep fallback for group {}",
+						request.groupGlobalIndex);
+				}
+			}
+
+			if (!loaded && DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
+				const std::wstring containerPath = CLodCache::ResolveContainerPath(request.cacheSource);
+				if (!containerPath.empty()) {
+					std::string directStorageMessage;
+					loaded = CLodCache::LoadGroupPayloadSelectiveDirectStorage(
+						tls.file,
+						containerPath,
+						locator,
+						request.segmentNeedsFetch,
+						payload,
+						&directStorageMessage);
+					if (loaded) {
+						result.uploadPathLabel = "DirectStorageSystemMemoryThenCpuUpload";
+					}
+					if (!loaded) {
+						tls.file.clear();
+						spdlog::debug(
+							"CLod streaming: DirectStorage page read fallback for group {}: {}",
+							request.groupGlobalIndex,
+							directStorageMessage);
+					}
+				}
+			}
+
+			if (!loaded) {
+				loaded = CLodCache::LoadGroupPayloadSelective(tls.file, locator, request.segmentNeedsFetch, payload);
+			}
+
+			if (loaded) {
+				if (!result.directStorageGpuUploadPending) {
+					result.groupChunkMetadata = payload.groupChunkMetadata;
+					result.pageBlobs = std::move(payload.pageBlobs);
+				}
 				result.preAllocatedPages = std::move(request.preAllocatedPages);
 				result.success = true;
 			}
@@ -707,7 +771,7 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 	return it->state;
 }
 
-bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority) {
+	bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout) {
 	outQueued = false;
 	if (state.mesh == nullptr) {
 		return false;
@@ -757,6 +821,9 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 		request.groupGlobalIndex = groupGlobalIndex;
 		request.groupLocalIndex = groupLocalIndex;
 		request.cacheSource = mesh->GetCLodCacheSource();
+		if (prefetchedLayout != nullptr && prefetchedLayout->IsValid()) {
+			request.prefetchedLayout = *prefetchedLayout;
+		}
 		request.segmentNeedsFetch = segmentNeedsFetch;
 		request.preAllocatedPages = preAllocatedPages;
 		request.generation = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
@@ -800,10 +867,20 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 	}
 	const auto& group = meshGroups[localIndex];
 	const uint32_t sCount = group.pageCount;
+	const bool useDirectStorageGpuUpload = result.directStorageGpuUploadPending;
 
-	if (result.pageBlobs.size() != sCount) {
+	const size_t streamedPageCount = useDirectStorageGpuUpload
+		? result.directStoragePageBlobSizes.size()
+		: result.pageBlobs.size();
+	if (streamedPageCount != sCount) {
 		spdlog::error("CLod streaming: group {} (local {}) expected {} page blobs but got {}",
-			result.groupGlobalIndex, localIndex, sCount, result.pageBlobs.size());
+			result.groupGlobalIndex, localIndex, sCount, streamedPageCount);
+		return DiskStreamingApplyResult::FailedPermanent;
+	}
+
+	if (useDirectStorageGpuUpload && result.directStoragePageBlobOffsets.size() != sCount) {
+		spdlog::error("CLod streaming: group {} (local {}) expected {} page blob offsets but got {}",
+			result.groupGlobalIndex, localIndex, sCount, result.directStoragePageBlobOffsets.size());
 		return DiskStreamingApplyResult::FailedPermanent;
 	}
 
@@ -815,11 +892,23 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 
 	// Upload blobs to pre-allocated pages.
 	size_t totalBlobBytes = 0;
+	uint32_t fetchedPageCount = 0;
 	std::vector<GroupPageMapEntry> pageMapEntries(sCount);
+	std::vector<br::DirectStorageBufferRegionCopy> directStorageCopies;
+	if (useDirectStorageGpuUpload) {
+		directStorageCopies.reserve(sCount);
+	}
 
 	for (uint32_t ci = 0; ci < sCount; ++ci) {
-		const auto& blob = result.pageBlobs[ci];
-		totalBlobBytes += blob.size();
+		const bool needsFetch = result.segmentNeedsFetch.empty()
+			|| (ci < static_cast<uint32_t>(result.segmentNeedsFetch.size()) && result.segmentNeedsFetch[ci]);
+		const size_t blobSize = useDirectStorageGpuUpload
+			? static_cast<size_t>(result.directStoragePageBlobSizes[ci])
+			: result.pageBlobs[ci].size();
+		if (needsFetch) {
+			++fetchedPageCount;
+			totalBlobBytes += blobSize;
+		}
 
 		const uint32_t pageID = preAllocatedPages[ci];
 		PagePool::PageAllocation pageAlloc{ pageID, 1 };
@@ -827,13 +916,56 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 		// Only upload if we fetched this segment (blob non-empty).
 		// Skipped segments still have valid data on the slab from a
 		// previous partial eviction.
-		if (!blob.empty()) {
-			m_clodPagePool->UploadToPage(pageID, 0, blob.data(), blob.size());
+		if (useDirectStorageGpuUpload) {
+			if (needsFetch) {
+				if (blobSize > m_clodPagePool->GetPageSize()) {
+					spdlog::error("CLod streaming: group {} page {} size {} exceeds page pool size {}",
+						result.groupGlobalIndex,
+						ci,
+						blobSize,
+						m_clodPagePool->GetPageSize());
+					return DiskStreamingApplyResult::FailedPermanent;
+				}
+
+				br::DirectStorageBufferRegionCopy copy{};
+				copy.sourceOffset = result.directStoragePageBlobOffsets[ci];
+				copy.sourceSizeBytes = result.directStoragePageBlobSizes[ci];
+				copy.uncompressedSizeBytes = result.directStoragePageBlobSizes[ci];
+				copy.destinationResource = m_clodPagePool->GetSlab(m_clodPagePool->PageToSlabIndex(pageID))->GetAPIResource();
+				copy.destinationOffset = m_clodPagePool->PageToSlabByteOffset(pageID);
+				directStorageCopies.push_back(copy);
+			}
+		} else {
+			const auto& blob = result.pageBlobs[ci];
+			if (!blob.empty()) {
+				m_clodPagePool->UploadToPage(pageID, 0, blob.data(), blob.size());
+			}
 		}
 
 		pageMapEntries[ci].slabDescriptorIndex = m_clodPagePool->GetSlabDescriptorIndex(pageAlloc);
 		pageMapEntries[ci].slabByteOffset = static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(pageID));
 		residentAllocations.pageAllocations.push_back(pageAlloc);
+	}
+
+	if (useDirectStorageGpuUpload && !directStorageCopies.empty()) {
+		const std::wstring containerPath = CLodCache::ResolveContainerPath(result.cacheSource);
+		if (containerPath.empty()) {
+			spdlog::error("CLod streaming: DirectStorage upload container path was empty for group {}",
+				result.groupGlobalIndex);
+			return DiskStreamingApplyResult::FailedPermanent;
+		}
+
+		std::string directStorageMessage;
+		if (!DirectStorageManager::GetInstance().UploadBufferRegionsFromFile(
+				containerPath,
+				directStorageCopies,
+				&directStorageMessage)) {
+			spdlog::error(
+				"CLod streaming: DirectStorage page-pool upload failed for group {}: {}",
+				result.groupGlobalIndex,
+				directStorageMessage);
+			return DiskStreamingApplyResult::FailedPermanent;
+		}
 	}
 
 	// Upload GroupPageMap entries for this group
@@ -848,6 +980,14 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 	}
 
 	// Page slab info is now stored per-page in GroupPageMapEntry, not in the group chunk.
+	spdlog::info(
+		"CLod streaming: group {} applied via {} (fetchedPages={}/{}, bytes={}, reusedPages={})",
+		result.groupGlobalIndex,
+		fetchedPageCount == 0u ? "ReusedExistingPages" : result.uploadPathLabel.c_str(),
+		fetchedPageCount,
+		sCount,
+		totalBlobBytes,
+		sCount - fetchedPageCount);
 
 	// Commit chunk updates.
 	sharedState->baselineGroupChunks[localIndex] = chunk;
@@ -888,7 +1028,7 @@ bool MeshManager::IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const {
 	return m_clodDiskStreamingQueuedGroups.count(groupGlobalIndex) != 0;
 }
 
-bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority) {
+bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout) {
 	uint32_t localIndex = 0u;
 	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
 	if (sharedState == nullptr || sharedState->mesh == nullptr) {
@@ -896,8 +1036,68 @@ bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vec
 	}
 
 	bool queued = false;
-	QueueCLodDiskStreamingRequest(groupGlobalIndex, *sharedState, localIndex, queued, segmentNeedsFetch, preAllocatedPages, priority);
+	QueueCLodDiskStreamingRequest(groupGlobalIndex, *sharedState, localIndex, queued, segmentNeedsFetch, preAllocatedPages, priority, prefetchedLayout);
 	return queued;
+}
+
+bool MeshManager::TryGetCLodGroupPayloadLayout(uint32_t groupGlobalIndex, CLodCache::GroupPayloadLayoutMetadata& outLayout, std::string* outMessage) {
+	outLayout.Clear();
+	if (outMessage) {
+		outMessage->clear();
+	}
+
+	uint32_t groupLocalIndex = 0u;
+	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, groupLocalIndex);
+	if (sharedState == nullptr || sharedState->mesh == nullptr) {
+		if (outMessage) {
+			*outMessage = "streaming state not found for group";
+		}
+		return false;
+	}
+
+	auto* mesh = sharedState->mesh;
+	if (!mesh->HasCLodDiskStreamingSource()) {
+		if (outMessage) {
+			*outMessage = "mesh has no CLod disk streaming source";
+		}
+		return false;
+	}
+
+	const auto& groupDiskLocators = mesh->GetCLodGroupDiskLocators();
+	if (groupLocalIndex >= groupDiskLocators.size()) {
+		if (outMessage) {
+			*outMessage = "group disk locator missing";
+		}
+		return false;
+	}
+
+	std::ifstream file;
+	uint32_t groupCount = 0u;
+	if (!CLodCache::OpenContainerFile(mesh->GetCLodCacheSource(), file, groupCount)) {
+		if (outMessage) {
+			*outMessage = "failed to open CLod container";
+		}
+		return false;
+	}
+
+	if (groupLocalIndex >= groupCount) {
+		if (outMessage) {
+			*outMessage = "group local index is out of bounds for CLod container";
+		}
+		return false;
+	}
+
+	if (!CLodCache::GetGroupPayloadLayout(file, groupDiskLocators[groupLocalIndex], outLayout)) {
+		if (outMessage) {
+			*outMessage = "failed to read CLod group payload layout";
+		}
+		return false;
+	}
+
+	if (outMessage) {
+		*outMessage = "read CLod group payload layout";
+	}
+	return true;
 }
 
 MeshManager::CLodGroupStreamingInfo MeshManager::GetCLodGroupStreamingInfo(uint32_t groupGlobalIndex) const {
@@ -1269,8 +1469,18 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 
 		auto getCompletedResultSizeBytes = [](const CLodDiskStreamingResult& result) -> uint64_t {
 			uint64_t total = 0;
-			for (const auto& blob : result.pageBlobs) {
-				total += static_cast<uint64_t>(blob.size());
+			if (result.directStorageGpuUploadPending) {
+				for (uint32_t i = 0; i < static_cast<uint32_t>(result.directStoragePageBlobSizes.size()); ++i) {
+					const bool needsFetch = result.segmentNeedsFetch.empty()
+						|| (i < static_cast<uint32_t>(result.segmentNeedsFetch.size()) && result.segmentNeedsFetch[i]);
+					if (needsFetch) {
+						total += static_cast<uint64_t>(result.directStoragePageBlobSizes[i]);
+					}
+				}
+			} else {
+				for (const auto& blob : result.pageBlobs) {
+					total += static_cast<uint64_t>(blob.size());
+				}
 			}
 			return total;
 		};

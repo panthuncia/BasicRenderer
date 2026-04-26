@@ -1,9 +1,11 @@
 #include "Managers/MaterialManager.h"
 #include "../generated/BuiltinResources.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RasterBucketFlags.h"
 
 #include <limits>
+#include <unordered_set>
 
 namespace {
 	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(const Material& material) {
@@ -126,16 +128,84 @@ namespace {
 			result.fuzzRoughnessUvSetIndex);
 		return result;
 	}
+
+	PerMaterialEvalCB BuildMaterialEvalData(const Material& material) {
+		const PerMaterialCB& base = material.GetData();
+		PerMaterialEvalCB result = {};
+		result.materialFlags = base.materialFlags;
+		result.baseColorTextureIndex = base.baseColorTextureIndex;
+		result.baseColorSamplerIndex = base.baseColorSamplerIndex;
+		result.normalTextureIndex = base.normalTextureIndex;
+		result.normalSamplerIndex = base.normalSamplerIndex;
+		result.metallicTextureIndex = base.metallicTextureIndex;
+		result.metallicSamplerIndex = base.metallicSamplerIndex;
+		result.roughnessTextureIndex = base.roughnessTextureIndex;
+		result.roughnessSamplerIndex = base.roughnessSamplerIndex;
+		result.emissiveTextureIndex = base.emissiveTextureIndex;
+		result.emissiveSamplerIndex = base.emissiveSamplerIndex;
+		result.aoMapIndex = base.aoMapIndex;
+		result.aoSamplerIndex = base.aoSamplerIndex;
+		result.heightMapIndex = base.heightMapIndex;
+		result.heightSamplerIndex = base.heightSamplerIndex;
+		result.opacityTextureIndex = base.opacityTextureIndex;
+		result.opacitySamplerIndex = base.opacitySamplerIndex;
+		result.metallicFactor = base.metallicFactor;
+		result.roughnessFactor = base.roughnessFactor;
+		result.heightMapScale = base.heightMapScale;
+		result.alphaCutoff = base.alphaCutoff;
+		result.geometricDisplacementMin = base.geometricDisplacementMin;
+		result.geometricDisplacementMax = base.geometricDisplacementMax;
+		result.geometricDisplacementEnabled = base.geometricDisplacementEnabled;
+		result.baseColorFactor = base.baseColorFactor;
+		result.emissiveFactor = base.emissiveFactor;
+		result.baseColorChannels = base.baseColorChannels;
+		result.aoChannel = base.aoChannel;
+		result.heightChannel = base.heightChannel;
+		result.metallicChannel = base.metallicChannel;
+		result.roughnessChannel = base.roughnessChannel;
+		result.emissiveChannels = base.emissiveChannels;
+		result.openPBRMaterialDataIndex = base.openPBRMaterialDataIndex;
+		result.baseColorUvSetIndex = base.baseColorUvSetIndex;
+		result.normalUvSetIndex = base.normalUvSetIndex;
+		result.metallicUvSetIndex = base.metallicUvSetIndex;
+		result.roughnessUvSetIndex = base.roughnessUvSetIndex;
+		result.emissiveUvSetIndex = base.emissiveUvSetIndex;
+		result.aoUvSetIndex = base.aoUvSetIndex;
+		result.heightUvSetIndex = base.heightUvSetIndex;
+		result.opacityUvSetIndex = base.opacityUvSetIndex;
+		return result;
+	}
+
+	std::vector<std::shared_ptr<Resource>> CollectMaterialTextureResources(const Material& material) {
+		std::vector<std::shared_ptr<Resource>> textures;
+		std::unordered_set<uint64_t> seenResourceIds;
+
+		material.ForEachReferencedTexture([&](const std::shared_ptr<TextureAsset>& texture) {
+			std::shared_ptr<Resource> image = texture ? texture->ImagePtr() : nullptr;
+			if (!image) {
+				return;
+			}
+
+			if (seenResourceIds.insert(image->GetGlobalResourceID()).second) {
+				textures.push_back(std::move(image));
+			}
+		});
+
+		return textures;
+	}
 }
 
 // TODO: Use LazyDynamicStructuredBuffer and active indices buffer like draw calls? Would reduce number of no-op indirect arguments
 MaterialManager::MaterialManager() {
 	auto& rm = ResourceManager::GetInstance();
+	m_activeMaterialTextureGroup = std::make_shared<ResourceGroup>("ActiveMaterialTextures");
 
 	// Primary material data buffer
 	m_perMaterialDataBuffer = DynamicStructuredBuffer<PerMaterialCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialDataBuffer", true);
+	m_perMaterialEvalDataBuffer = DynamicStructuredBuffer<PerMaterialEvalCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialEvalDataBuffer", true);
 	m_perMaterialOpenPBRDataBuffer = DynamicStructuredBuffer<PerMaterialOpenPBRCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialOpenPBRDataBuffer", true);
 	rg::memory::SetResourceUsageHint(*m_perMaterialDataBuffer, "Material buffers");
+	rg::memory::SetResourceUsageHint(*m_perMaterialEvalDataBuffer, "Material buffers");
 	rg::memory::SetResourceUsageHint(*m_perMaterialOpenPBRDataBuffer, "Material buffers");
 
 	// Visibility buffer resources
@@ -164,7 +234,9 @@ MaterialManager::MaterialManager() {
 	m_resources["Builtin::VisUtil::ScannedBlockSumsBuffer"] = m_scannedBlockSumsBuffer;
 	m_resources["Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer"] = m_materialEvaluationCommandBuffer;
 	m_resources[Builtin::PerMaterialDataBuffer] = m_perMaterialDataBuffer;
+	m_resources["Builtin::PerMaterialEvalDataBuffer"] = m_perMaterialEvalDataBuffer;
 	m_resources[Builtin::PerMaterialOpenPBRDataBuffer] = m_perMaterialOpenPBRDataBuffer;
+	m_resolvers[Builtin::Material::TextureGroup] = std::make_shared<ResourceGroupResolver>(m_activeMaterialTextureGroup);
 }
 
 void MaterialManager::IncrementMaterialUsageCount(Material& material) {
@@ -178,13 +250,18 @@ void MaterialManager::IncrementMaterialUsageCount(Material& material) {
 	unsigned int materialSlot = GetMaterialSlot(materialID);
 
 	m_materialUsageCounts[materialSlot]++;
+	if (m_materialUsageCounts[materialSlot] == 1u) {
+		UpdateMaterialTextureUsage(material, 1);
+	}
 }
 
 void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
 	const unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
 	material.SetOpenPBRMaterialDataIndex(materialSlot);
 	m_perMaterialDataBuffer->UpdateAt(materialSlot, material.GetData());
+	m_perMaterialEvalDataBuffer->UpdateAt(materialSlot, BuildMaterialEvalData(material));
 	m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, BuildOpenPBRMaterialData(material));
+	RefreshMaterialTextureUsage(material);
 }
 
 void MaterialManager::DecrementMaterialUsageCount(const Material& material) {
@@ -201,10 +278,141 @@ void MaterialManager::DecrementMaterialUsageCount(const Material& material) {
 
 	m_materialUsageCounts[GetMaterialSlot(material.GetMaterialID())]--;
 	if (m_materialUsageCounts[GetMaterialSlot(material.GetMaterialID())] == 0) {
+		UpdateMaterialTextureUsage(material, -1);
 		unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
 		m_freeMaterialSlots.push_back(materialSlot);
 		m_materialIDSlotMapping.erase(material.GetMaterialID());
 	}
+}
+
+void MaterialManager::UpdateMaterialTextureUsage(const Material& material, int delta) {
+	const uint32_t materialId = material.GetMaterialID();
+	if (delta > 0) {
+		auto textures = CollectMaterialTextureResources(material);
+		m_trackedMaterialTextures[materialId] = textures;
+		UpdateTrackedMaterialTextureRefs(textures, delta);
+		return;
+	}
+
+	auto trackedIt = m_trackedMaterialTextures.find(materialId);
+	if (trackedIt == m_trackedMaterialTextures.end()) {
+		return;
+	}
+
+	UpdateTrackedMaterialTextureRefs(trackedIt->second, delta);
+	m_trackedMaterialTextures.erase(trackedIt);
+}
+
+void MaterialManager::RefreshMaterialTextureUsage(const Material& material) {
+	auto slotIt = m_materialIDSlotMapping.find(material.GetMaterialID());
+	if (slotIt == m_materialIDSlotMapping.end() || slotIt->second >= m_materialUsageCounts.size()) {
+		return;
+	}
+
+	if (m_materialUsageCounts[slotIt->second] == 0u) {
+		return;
+	}
+
+	auto currentTextures = CollectMaterialTextureResources(material);
+	auto& trackedTextures = m_trackedMaterialTextures[material.GetMaterialID()];
+
+	std::unordered_set<uint64_t> currentIds;
+	currentIds.reserve(currentTextures.size());
+	for (const auto& texture : currentTextures) {
+		if (texture) {
+			currentIds.insert(texture->GetGlobalResourceID());
+		}
+	}
+
+	std::unordered_set<uint64_t> trackedIds;
+	trackedIds.reserve(trackedTextures.size());
+	for (const auto& texture : trackedTextures) {
+		if (texture) {
+			trackedIds.insert(texture->GetGlobalResourceID());
+		}
+	}
+
+	std::vector<std::shared_ptr<Resource>> removedTextures;
+	for (const auto& texture : trackedTextures) {
+		if (texture && !currentIds.contains(texture->GetGlobalResourceID())) {
+			removedTextures.push_back(texture);
+		}
+	}
+
+	std::vector<std::shared_ptr<Resource>> addedTextures;
+	for (const auto& texture : currentTextures) {
+		if (texture && !trackedIds.contains(texture->GetGlobalResourceID())) {
+			addedTextures.push_back(texture);
+		}
+	}
+
+	UpdateTrackedMaterialTextureRefs(removedTextures, -1);
+	UpdateTrackedMaterialTextureRefs(addedTextures, 1);
+	trackedTextures = std::move(currentTextures);
+}
+
+void MaterialManager::UpdateTrackedMaterialTextureRefs(const std::vector<std::shared_ptr<Resource>>& textures, int delta) {
+	if (delta == 0) {
+		return;
+	}
+
+	for (const auto& texture : textures) {
+		if (!texture) {
+			continue;
+		}
+
+		const uint64_t resourceId = texture->GetGlobalResourceID();
+		if (delta > 0) {
+			auto& usageCount = m_materialTextureUsageCounts[resourceId];
+			usageCount += static_cast<uint32_t>(delta);
+			m_activeMaterialTextureGroup->AddResource(texture);
+			continue;
+		}
+
+		auto usageIt = m_materialTextureUsageCounts.find(resourceId);
+		if (usageIt == m_materialTextureUsageCounts.end()) {
+			continue;
+		}
+
+		const uint32_t releaseCount = static_cast<uint32_t>(-delta);
+		if (usageIt->second <= releaseCount) {
+			m_materialTextureUsageCounts.erase(usageIt);
+			m_activeMaterialTextureGroup->RemoveResource(texture.get());
+			continue;
+		}
+
+		usageIt->second -= releaseCount;
+	}
+}
+
+std::shared_ptr<Resource> MaterialManager::ProvideResource(ResourceIdentifier const& key) {
+	return m_resources[key];
+}
+
+std::vector<ResourceIdentifier> MaterialManager::GetSupportedKeys() {
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources) {
+		keys.push_back(key);
+	}
+	return keys;
+}
+
+std::vector<ResourceIdentifier> MaterialManager::GetSupportedResolverKeys() {
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resolvers.size());
+	for (auto const& [key, _] : m_resolvers) {
+		keys.push_back(key);
+	}
+	return keys;
+}
+
+std::shared_ptr<IResourceResolver> MaterialManager::ProvideResolver(ResourceIdentifier const& key) {
+	auto it = m_resolvers.find(key);
+	if (it == m_resolvers.end()) {
+		return nullptr;
+	}
+	return it->second;
 }
 
 // TODO: Don't grow buffers one slot at a time
@@ -225,6 +433,7 @@ unsigned int MaterialManager::GetMaterialSlot(unsigned int materialID, std::opti
 		else {
 			m_perMaterialDataBuffer->UpdateAt(slot, PerMaterialCB{});
 		}
+		m_perMaterialEvalDataBuffer->UpdateAt(slot, PerMaterialEvalCB{});
 		m_perMaterialOpenPBRDataBuffer->UpdateAt(slot, PerMaterialOpenPBRCB{});
 	}
 	else {
@@ -232,6 +441,7 @@ unsigned int MaterialManager::GetMaterialSlot(unsigned int materialID, std::opti
 		m_materialUsageCounts.push_back(0);
 		// Resize resources to accommodate new material slot
 		m_perMaterialDataBuffer->Resize(m_materialSlotsUsed);
+		m_perMaterialEvalDataBuffer->Resize(m_materialSlotsUsed);
 		m_perMaterialOpenPBRDataBuffer->Resize(m_materialSlotsUsed);
 		if (data.has_value()) {
 			m_perMaterialDataBuffer->UpdateAt(slot, data.value());
@@ -239,6 +449,7 @@ unsigned int MaterialManager::GetMaterialSlot(unsigned int materialID, std::opti
 		else {
 			m_perMaterialDataBuffer->UpdateAt(slot, PerMaterialCB{});
 		}
+		m_perMaterialEvalDataBuffer->UpdateAt(slot, PerMaterialEvalCB{});
 		m_perMaterialOpenPBRDataBuffer->UpdateAt(slot, PerMaterialOpenPBRCB{});
 	}
 	m_materialIDSlotMapping[materialID] = slot;
@@ -342,18 +553,4 @@ void MaterialManager::ReleaseRasterBucket(MaterialRasterFlags rasterFlags) {
 			std::remove(m_freeRasterBuckets.begin(), m_freeRasterBuckets.end(), tailSlot),
 			m_freeRasterBuckets.end());
 	}
-}
-
-std::shared_ptr<Resource> MaterialManager::ProvideResource(ResourceIdentifier const& key) {
-	return m_resources[key];
-}
-
-std::vector<ResourceIdentifier> MaterialManager::GetSupportedKeys() {
-	std::vector<ResourceIdentifier> keys;
-	keys.reserve(m_resources.size());
-	for (auto const& [key, _] : m_resources) {
-		keys.push_back(key);
-	}
-
-	return keys;
 }

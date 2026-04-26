@@ -1,5 +1,6 @@
 #include "Materials/Material.h"
 #include <string>
+#include <spdlog/spdlog.h>
 #include "Render/PSOFlags.h"
 #include "Utilities/Utilities.h"
 #include "Materials/MaterialFlags.h"
@@ -104,9 +105,34 @@ Material::Material(const std::string& name,
     m_materialData.roughnessUvSetIndex = m_roughnessUvSetIndex;
     m_materialData.emissiveUvSetIndex = m_emissiveUvSetIndex;
     m_materialData.opacityUvSetIndex = m_opacityUvSetIndex;
+
 }
 
 Material::~Material() {
+}
+
+void Material::ForEachReferencedTexture(const std::function<void(const std::shared_ptr<TextureAsset>&)>& visitor) const {
+    auto visitTexture = [&](const std::shared_ptr<TextureAsset>& texture) {
+        if (texture) {
+            visitor(texture);
+        }
+    };
+
+    visitTexture(m_baseColorTexture);
+    visitTexture(m_normalTexture);
+    visitTexture(m_aoMap);
+    visitTexture(m_heightMap);
+    visitTexture(m_metallicTexture);
+    visitTexture(m_roughnessTexture);
+    visitTexture(m_emissiveTexture);
+    visitTexture(m_opacityTexture);
+
+    visitTexture(m_openPBRTextures.coatColor.texture);
+    visitTexture(m_openPBRTextures.coatWeight.texture);
+    visitTexture(m_openPBRTextures.coatRoughness.texture);
+    visitTexture(m_openPBRTextures.fuzzColor.texture);
+    visitTexture(m_openPBRTextures.fuzzWeight.texture);
+    visitTexture(m_openPBRTextures.fuzzRoughness.texture);
 }
 
 void Material::SetHeightmap(std::shared_ptr<TextureAsset> heightmap) {
@@ -163,6 +189,9 @@ std::shared_ptr<Material> Material::GetDefaultMaterial() {
 }
 
 void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
+	const uint32_t negateNormalsFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_NEGATE_NORMALS);
+	const uint32_t invertNormalGreenFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN);
+
     if (m_baseColorTexture) {
         m_baseColorTexture->SetGenerateMipmaps(true);
         m_baseColorTexture->EnsureUploaded(factory);
@@ -170,6 +199,20 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_normalTexture) {
         m_normalTexture->SetGenerateMipmaps(true);
         m_normalTexture->EnsureUploaded(factory);
+        const auto uploadPath = m_normalTexture->Meta().uploadPath;
+        const bool useCanonicalProcessedNormalFormat =
+            m_normalTexture->Meta().fileType == ImageFiletype::DDS ||
+            (m_normalTexture->Meta().processing.semantic == TextureSemantic::Normal &&
+                (m_normalTexture->Meta().isProcessingCacheArtifact ||
+                 uploadPath == TextureUploadPathTelemetry::AsyncProcessingReadyUpload ||
+                 uploadPath == TextureUploadPathTelemetry::ProcessingCacheUpload));
+        if (useCanonicalProcessedNormalFormat) {
+            m_materialData.materialFlags |= negateNormalsFlag;
+            m_materialData.materialFlags &= ~invertNormalGreenFlag;
+        }
+        else {
+            m_materialData.materialFlags &= ~negateNormalsFlag;
+        }
 	}
     if (m_aoMap) {
         m_aoMap->SetGenerateMipmaps(true);

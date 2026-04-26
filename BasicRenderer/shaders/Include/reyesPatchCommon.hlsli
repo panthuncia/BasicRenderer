@@ -497,7 +497,27 @@ float ReyesSampleDisplacementOffset(MaterialInfo materialInfo, float2 uv)
     return lerp(materialInfo.geometricDisplacementMin, materialInfo.geometricDisplacementMax, heightValue);
 }
 
+float ReyesSampleDisplacementOffset(MaterialEvalInfo materialInfo, float2 uv)
+{
+    if (materialInfo.geometricDisplacementEnabled == 0u)
+    {
+        return 0.0f;
+    }
+
+    Texture2D<float4> heightTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.heightMapIndex)];
+    SamplerState heightSampler = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.heightSamplerIndex)];
+    const float4 heightSample = heightTexture.SampleLevel(heightSampler, uv, 0.0f);
+    const float heightValue = saturate(DynamicSwizzle(heightSample, materialInfo.heightChannel));
+    return lerp(materialInfo.geometricDisplacementMin, materialInfo.geometricDisplacementMax, heightValue);
+}
+
 float3 ReyesApplyGeometricDisplacement(MaterialInfo materialInfo, float3 positionOS, float3 normalOS, float2 uv)
+{
+    const float displacementOffset = ReyesSampleDisplacementOffset(materialInfo, uv);
+    return positionOS + normalize(normalOS) * displacementOffset;
+}
+
+float3 ReyesApplyGeometricDisplacement(MaterialEvalInfo materialInfo, float3 positionOS, float3 normalOS, float2 uv)
 {
     const float displacementOffset = ReyesSampleDisplacementOffset(materialInfo, uv);
     return positionOS + normalize(normalOS) * displacementOffset;

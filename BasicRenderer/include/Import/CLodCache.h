@@ -30,6 +30,24 @@ struct LoadedGroupPayload {
 	std::vector<std::vector<std::byte>> pageBlobs;
 };
 
+struct GroupPayloadLayoutMetadata {
+	std::optional<ClusterLODGroupChunk> groupChunkMetadata;
+	std::vector<uint32_t> pageBlobSizes;
+	std::vector<uint64_t> pageBlobOffsets;
+
+	bool IsValid() const {
+		return groupChunkMetadata.has_value() && pageBlobSizes.size() == pageBlobOffsets.size();
+	}
+
+	void Clear() {
+		groupChunkMetadata.reset();
+		pageBlobSizes.clear();
+		pageBlobOffsets.clear();
+	}
+};
+
+std::wstring ResolveContainerPath(const ClusterLODCacheSource& cacheSource);
+
 uint64_t ComputeBuildConfigHash();
 std::wstring BuildCacheFileName(const CacheKey& key, uint64_t buildConfigHash);
 
@@ -56,6 +74,17 @@ bool LoadGroupPayloadSelective(std::ifstream& file,
 	const ClusterLODGroupDiskLocator& locator,
 	const std::vector<bool>& segmentNeedsFetch,
 	LoadedGroupPayload& outPayload);
+
+bool GetGroupPayloadLayout(std::ifstream& file,
+	const ClusterLODGroupDiskLocator& locator,
+	GroupPayloadLayoutMetadata& outLayout);
+
+bool LoadGroupPayloadSelectiveDirectStorage(std::ifstream& file,
+	const std::wstring& containerPath,
+	const ClusterLODGroupDiskLocator& locator,
+	const std::vector<bool>& segmentNeedsFetch,
+	LoadedGroupPayload& outPayload,
+	std::string* outMessage = nullptr);
 
 // Open a container file and validate its header.  Returns true on success.
 // The caller keeps the ifstream around for repeated LoadGroupPayloadDirect

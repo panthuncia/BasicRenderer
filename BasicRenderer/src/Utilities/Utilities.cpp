@@ -13,8 +13,12 @@
 #include <optional>
 #include <gsl/gsl>
 #include <rhi_helpers.h>
+#include <rhi_conversions_dx12.h>
+
+#include "Utilities/ProcessedTextureCache.h"
 
 #include "DefaultDirection.h"
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
@@ -142,38 +146,20 @@ ImageData LoadSTBImage(const char* filename) {
     return img;
 }
 
-struct RawImage {
-    uint32_t width = 0;
-    uint32_t height = 0;
-    uint32_t channels = 4;               // 1,2,3,4
-    rhi::Format format = rhi::Format::R8G8B8A8_UNorm;
-    uint32_t rowPitch = 0;
-    uint32_t slicePitch = 0;
-    const uint8_t* pixels = nullptr;
+struct DecodedTexture {
+    TextureDescription desc;
+    TextureAsset::BytesList subresources;
     bool alphaAllOpaque = true;
-
     std::string filepathUtf8;
     std::optional<ImageFiletype> fileType;
 };
 
 static std::shared_ptr<TextureAsset>
-CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool allowRTV, bool allowUAV)
+CreateTextureFromDecoded(DecodedTexture img, std::shared_ptr<Sampler> sampler, bool allowRTV, bool allowUAV)
 {
-    ImageDimensions dim{};
-    dim.width = img.width;
-    dim.height = img.height;
-    dim.rowPitch = img.rowPitch;
-    dim.slicePitch = img.slicePitch;
-
-    TextureDescription desc{};
-    desc.imageDimensions.push_back(dim);
-    desc.channels = static_cast<unsigned short>(img.channels);
-    desc.format = img.format;
-    desc.generateMipMaps = false; // TODO: Allow mipmapping
-	desc.hasRTV = allowRTV;
-	desc.hasUAV = allowUAV;
-
-    //auto buffer = PixelBuffer::CreateShared(desc, { img.pixels });
+    img.desc.hasRTV = allowRTV;
+    img.desc.hasUAV = allowUAV;
+    img.desc.generateMipMaps = false;
 
     if (!sampler) sampler = Sampler::GetDefaultSampler();
 
@@ -181,13 +167,9 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool
 	meta.fileType = img.fileType.value_or(ImageFiletype::UNKNOWN);
 	meta.filePath = img.filepathUtf8;
 	meta.alphaIsAllOpaque = img.alphaAllOpaque;
+	meta.preferSRGB = rhi::helpers::IsSRGB(img.desc.format);
 
-    std::vector dataPtr = { std::make_shared<std::vector<uint8_t>>() };
-	// Copy data, since RawImage may go out of scope
-	dataPtr[0]->assign(img.pixels, img.pixels + img.slicePitch);
-
-    auto texture = TextureAsset::CreateShared(desc, dataPtr, sampler, meta);
-    return texture;
+    return TextureAsset::CreateShared(img.desc, std::move(img.subresources), sampler, std::move(meta));
 }
 
 //static RawImage RawFromSTBI(const ImageData& in)
@@ -249,15 +231,15 @@ static DXGI_FORMAT ToRGBAEquivalent(DXGI_FORMAT fmt) {
     }
 }
 
-static RawImage RawFromDXT(
+static DecodedTexture DecodedFromDXT(
     const DirectX::ScratchImage& image,
     const DirectX::TexMetadata& meta,
     std::string filepathUtf8,
     std::optional<ImageFiletype> fileType,
     DXGI_FORMAT overrideFormat = DXGI_FORMAT_UNKNOWN)
 {
-    const DirectX::Image* img0 = image.GetImage(0, 0, 0); // mip 0, array 0, depth 0
-    if (!img0) throw std::runtime_error("DirectXTex: missing base image");
+    const DirectX::Image* images = image.GetImages();
+    if (!images || image.GetImageCount() == 0) throw std::runtime_error("DirectXTex: missing image data");
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
     if (meta.width > std::numeric_limits<uint32_t>::max() ||
@@ -268,14 +250,41 @@ static RawImage RawFromDXT(
     }
 #endif
 
-    RawImage out{};
-    out.width = static_cast<uint32_t>(meta.width);
-    out.height = static_cast<uint32_t>(meta.height);
-    out.channels = rhi::helpers::FormatChannelCount(rhi::helpers::ToRHI(img0->format));
-    out.format = rhi::helpers::ToRHI((overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat);
-    out.rowPitch = static_cast<uint32_t>(img0->rowPitch);
-    out.slicePitch = static_cast<uint32_t>(img0->slicePitch);
-    out.pixels = img0->pixels;
+    DecodedTexture out{};
+    out.desc.format = rhi::helpers::ToRHI((overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat);
+    out.desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(out.desc.format));
+    out.desc.isCubemap = meta.IsCubemap();
+    out.desc.isArray = meta.arraySize > 1 && !out.desc.isCubemap;
+    out.desc.arraySize = out.desc.isCubemap
+        ? static_cast<uint32_t>((std::max)(size_t(1), meta.arraySize / size_t(6)))
+        : static_cast<uint32_t>((std::max)(size_t(1), meta.arraySize));
+    out.desc.imageDimensions.reserve(image.GetImageCount());
+    out.subresources.reserve(image.GetImageCount());
+
+    for (size_t imageIndex = 0; imageIndex < image.GetImageCount(); ++imageIndex) {
+        const DirectX::Image& src = images[imageIndex];
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+        if (src.width > std::numeric_limits<uint32_t>::max() ||
+            src.height > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("Texture dimensions exceed maximum limit");
+        }
+        if (!src.pixels || src.slicePitch == 0) {
+            throw std::runtime_error("Unexpected null pixels / zero slicePitch.");
+        }
+#endif
+
+        ImageDimensions dims{};
+        dims.width = static_cast<uint32_t>(src.width);
+        dims.height = static_cast<uint32_t>(src.height);
+        dims.rowPitch = src.rowPitch;
+        dims.slicePitch = src.slicePitch;
+        out.desc.imageDimensions.push_back(dims);
+
+        const auto* first = reinterpret_cast<const uint8_t*>(src.pixels);
+        out.subresources.push_back(std::make_shared<std::vector<uint8_t>>(first, first + src.slicePitch));
+    }
+
     out.alphaAllOpaque = image.IsAlphaAllOpaque();
     out.filepathUtf8 = std::move(filepathUtf8);
     out.fileType = fileType;
@@ -316,8 +325,295 @@ static RawImage RawFromDXT(
 
 namespace detail {
 
-    inline std::vector<std::byte> ReadFileBytes(const std::wstring& path)
+    constexpr bool kForceCpuTextureLoadPath = false;
+
+    struct ReadFileBytesResult {
+        std::vector<std::byte> data;
+        bool usedDirectStorage = false;
+        std::string detail;
+    };
+
+    bool IsDDSPath(const std::wstring& filePath) {
+        auto extension = std::filesystem::path(filePath).extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+        return extension == L".dds";
+    }
+
+    bool IsProcessedTextureCachePath(const std::wstring& filePath) {
+        auto extension = std::filesystem::path(filePath).extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+        return br::processed_texture_cache::IsConditionedCacheExtension(extension);
+    }
+
+    bool ReadProcessedTextureCacheHeader(
+        const std::wstring& filePath,
+        br::processed_texture_cache::FileHeader& header)
     {
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file) {
+            return false;
+        }
+
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        if (!file || static_cast<size_t>(file.gcount()) != sizeof(header)) {
+            return false;
+        }
+
+        if (header.magic != br::processed_texture_cache::kMagic ||
+            header.version != br::processed_texture_cache::kVersion ||
+            header.headerSize != sizeof(header) ||
+            header.dataOffset < sizeof(header) ||
+            header.dataSizeBytes == 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+    std::shared_ptr<TextureAsset> TryLoadProcessedTextureCacheToVRAM(
+        const std::wstring& filePath,
+        std::shared_ptr<Sampler> sampler,
+        bool allowRTV,
+        bool allowUAV)
+    {
+        if (!DirectStorageManager::GetInstance().CanServiceQueue(br::DirectStorageQueueKind::Gpu)) {
+            return {};
+        }
+
+        br::processed_texture_cache::FileHeader header{};
+        if (!ReadProcessedTextureCacheHeader(filePath, header)) {
+            return {};
+        }
+
+        TextureDescription desc{};
+        desc.format = static_cast<rhi::Format>(header.format);
+        desc.channels = static_cast<unsigned short>(header.channels);
+        desc.isCubemap = br::processed_texture_cache::HasFlag(header, br::processed_texture_cache::FlagIsCubemap);
+        desc.isArray = br::processed_texture_cache::HasFlag(header, br::processed_texture_cache::FlagIsArray);
+        desc.arraySize = (std::max)(1u, header.arraySize);
+        desc.hasRTV = allowRTV;
+        desc.hasUAV = allowUAV;
+        desc.generateMipMaps = false;
+
+        if (header.baseWidth == 0 || header.baseHeight == 0 || header.mipLevels == 0 ||
+            header.subresourceCount == 0 || header.totalArraySlices == 0 ||
+            header.dataSizeBytes > static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())) {
+            return {};
+        }
+
+        desc.imageDimensions.reserve(header.subresourceCount);
+        const DXGI_FORMAT dxgiFormat = rhi::ToDxgi(desc.format);
+        for (uint32_t arraySlice = 0; arraySlice < header.totalArraySlices; ++arraySlice) {
+            for (uint32_t mip = 0; mip < header.mipLevels; ++mip) {
+                const size_t mipWidth = (std::max)(size_t(1), static_cast<size_t>(header.baseWidth) >> mip);
+                const size_t mipHeight = (std::max)(size_t(1), static_cast<size_t>(header.baseHeight) >> mip);
+                size_t rowPitch = 0;
+                size_t slicePitch = 0;
+                if (FAILED(DirectX::ComputePitch(dxgiFormat, mipWidth, mipHeight, rowPitch, slicePitch))) {
+                    return {};
+                }
+
+                ImageDimensions dims{};
+                dims.width = static_cast<uint32_t>(mipWidth);
+                dims.height = static_cast<uint32_t>(mipHeight);
+                dims.rowPitch = rowPitch;
+                dims.slicePitch = slicePitch;
+                desc.imageDimensions.push_back(dims);
+            }
+        }
+
+        if (desc.imageDimensions.size() != header.subresourceCount) {
+            return {};
+        }
+
+        auto pixelBuffer = PixelBuffer::CreateShared(desc);
+        std::string directStorageMessage;
+        if (!DirectStorageManager::GetInstance().UploadTextureSubresourcesFromFile(
+                filePath,
+                pixelBuffer->GetAPIResource(),
+                header.dataOffset,
+                static_cast<uint32_t>(header.dataSizeBytes),
+                &directStorageMessage)) {
+            if (!directStorageMessage.empty()) {
+                spdlog::debug("TryLoadProcessedTextureCacheToVRAM: DirectStorage fallback for '{}' because {}", ws2s(filePath), directStorageMessage);
+            }
+            return {};
+        }
+
+        if (!sampler) {
+            sampler = Sampler::GetDefaultSampler();
+        }
+
+        const std::filesystem::path conditionedPath(filePath);
+        const std::filesystem::path ddsFallbackPath = conditionedPath.parent_path() / conditionedPath.stem().replace_extension(L".dds");
+        std::error_code ec;
+        const bool hasDdsFallback = std::filesystem::exists(ddsFallbackPath, ec) && !ec;
+
+        TextureFileMeta meta{};
+        meta.filePath = ws2s(filePath);
+        meta.fileType = hasDdsFallback ? ImageFiletype::DDS : ImageFiletype::UNKNOWN;
+        meta.loader = hasDdsFallback ? ImageLoader::DirectXTex : ImageLoader{};
+        meta.preferSRGB = rhi::helpers::IsSRGB(desc.format);
+        meta.isProcessingCacheArtifact = true;
+
+        std::shared_ptr<TextureAsset> texture;
+        if (hasDdsFallback) {
+            texture = TextureAsset::CreateShared(desc, ws2s(ddsFallbackPath.wstring()), sampler, std::move(meta));
+            texture->AdoptUploadedImage(pixelBuffer);
+        }
+        else {
+            texture = TextureAsset::CreateShared(desc, pixelBuffer, sampler, std::move(meta));
+        }
+        texture->RecordLoadPath(TextureLoadPathTelemetry::DirectStorageGpuDirect, "conditioned texture cache uploaded directly into GPU texture through DirectStorage");
+        texture->RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, "processing cache residency established through DirectStorage GPU queue");
+        return texture;
+    }
+
+    std::shared_ptr<TextureAsset> TryLoadDDSDirectToVRAM(
+        const std::wstring& filePath,
+        std::shared_ptr<Sampler> sampler,
+        bool preferSRGB,
+        const LoadFlags& flags,
+        bool requireCubemap,
+        bool allowRTV,
+        bool allowUAV)
+    {
+        if (!DirectStorageManager::GetInstance().CanServiceQueue(br::DirectStorageQueueKind::Gpu)) {
+            return {};
+        }
+
+        DirectX::ScratchImage image;
+        DirectX::TexMetadata metadata{};
+        const HRESULT loadHr = DirectX::LoadFromDDSFile(filePath.c_str(), flags.dds, &metadata, image);
+        if (FAILED(loadHr)) {
+            return {};
+        }
+
+        if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.depth != 1) {
+            return {};
+        }
+
+        if (requireCubemap && !(metadata.miscFlags & DirectX::TEX_MISC_TEXTURECUBE)) {
+            return {};
+        }
+
+        size_t headerSize = 0;
+        const HRESULT headerHr = DirectX::EncodeDDSHeader(
+            metadata,
+            flags.dds,
+            nullptr,
+            (std::numeric_limits<size_t>::max)(),
+            headerSize);
+        if (FAILED(headerHr) || headerSize == 0) {
+            return {};
+        }
+
+        const DXGI_FORMAT chosenFormat = preferSRGB ? DirectX::MakeSRGB(metadata.format) : ToLinearIfSRGB(metadata.format);
+
+        TextureDescription desc{};
+        desc.format = rhi::helpers::ToRHI(chosenFormat);
+        desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(desc.format));
+        if (rhi::helpers::IsBlockCompressed(desc.format)) {
+            // DirectStorage texture-region uploads expect D3D12 upload-footprint row layout.
+            // DDS BC payloads are stored tightly packed per block row, so route them through the
+            // existing CPU/system-memory path instead of issuing invalid BC subresource copies.
+            return {};
+        }
+        desc.isCubemap = metadata.IsCubemap();
+        desc.isArray = metadata.arraySize > 1 && !desc.isCubemap;
+        desc.arraySize = desc.isCubemap
+            ? static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)))
+            : static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+        desc.hasRTV = allowRTV;
+        desc.hasUAV = allowUAV;
+        desc.generateMipMaps = false;
+
+        const uint32_t arraySlices = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+        const uint32_t mipLevels = static_cast<uint32_t>((std::max)(size_t(1), metadata.mipLevels));
+        const DirectX::Image* images = image.GetImages();
+        const size_t imageCount = image.GetImageCount();
+        if (images == nullptr || imageCount != static_cast<size_t>(arraySlices) * mipLevels) {
+            return {};
+        }
+
+        std::vector<br::DirectStorageTextureRegionCopy> regions;
+        regions.reserve(static_cast<size_t>(arraySlices) * mipLevels);
+        desc.imageDimensions.reserve(static_cast<size_t>(arraySlices) * mipLevels);
+
+        uint64_t currentOffset = static_cast<uint64_t>(headerSize);
+        for (size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex) {
+            const DirectX::Image& srcImage = images[imageIndex];
+            if (srcImage.width > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+                srcImage.height > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+                srcImage.slicePitch == 0 ||
+                srcImage.slicePitch > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
+                return {};
+            }
+
+            ImageDimensions dims{};
+            dims.width = static_cast<uint32_t>(srcImage.width);
+            dims.height = static_cast<uint32_t>(srcImage.height);
+            dims.rowPitch = srcImage.rowPitch;
+            dims.slicePitch = srcImage.slicePitch;
+            desc.imageDimensions.push_back(dims);
+
+            br::DirectStorageTextureRegionCopy region{};
+            region.sourceOffset = currentOffset;
+            region.sourceSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+            region.uncompressedSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+            region.subresourceIndex = static_cast<uint32_t>(imageIndex);
+            region.width = dims.width;
+            region.height = dims.height;
+            region.depth = 1;
+            regions.push_back(region);
+
+            currentOffset += srcImage.slicePitch;
+        }
+
+        auto pixelBuffer = PixelBuffer::CreateShared(desc);
+        std::string directStorageMessage;
+        if (!DirectStorageManager::GetInstance().UploadTextureRegionsFromFile(filePath, pixelBuffer->GetAPIResource(), regions, &directStorageMessage)) {
+            if (!directStorageMessage.empty()) {
+                spdlog::debug("TryLoadDDSDirectToVRAM: DirectStorage fallback for '{}' because {}", ws2s(filePath), directStorageMessage);
+            }
+            return {};
+        }
+
+        if (!sampler) {
+            sampler = Sampler::GetDefaultSampler();
+        }
+
+        TextureFileMeta meta{};
+        meta.filePath = ws2s(filePath);
+        meta.fileType = ImageFiletype::DDS;
+        meta.loader = ImageLoader::DirectXTex;
+        meta.preferSRGB = preferSRGB;
+
+        auto texture = TextureAsset::CreateShared(desc, ws2s(filePath), sampler, std::move(meta));
+        texture->AdoptUploadedImage(pixelBuffer);
+        texture->RecordLoadPath(TextureLoadPathTelemetry::DirectStorageGpuDirect, "DDS file uploaded directly into GPU texture through DirectStorage");
+        texture->RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, "final texture residency established through DirectStorage GPU queue");
+        return texture;
+    }
+
+    inline ReadFileBytesResult ReadFileBytes(const std::wstring& path)
+    {
+        ReadFileBytesResult result{};
+        if (!kForceCpuTextureLoadPath) {
+            std::vector<std::byte> directStorageData;
+            std::string directStorageMessage;
+            if (DirectStorageManager::GetInstance().ReadFileToMemory(path, directStorageData, &directStorageMessage)) {
+                result.data = std::move(directStorageData);
+                result.usedDirectStorage = true;
+                result.detail = "file bytes loaded through DirectStorage system-memory queue";
+                return result;
+            }
+
+            if (!directStorageMessage.empty() && DirectStorageManager::GetInstance().IsEnabled()) {
+                spdlog::debug("LoadTextureFromFile: DirectStorage fallback for '{}' because {}", ws2s(path), directStorageMessage);
+            }
+        }
+
         std::ifstream f(path, std::ios::binary | std::ios::ate);
         if (!f) { throw std::runtime_error("Failed to open file: " + ws2s(path)); }
         const auto size = static_cast<size_t>(f.tellg());
@@ -326,7 +622,9 @@ namespace detail {
         if (size && !f.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(size))) {
             throw std::runtime_error("Failed to read file: " + ws2s(path));
         }
-        return data;
+        result.data = std::move(data);
+        result.detail = "file bytes loaded through std::ifstream";
+        return result;
     }
 
     inline bool ProbeImageContainer(const void* bytes, size_t byteCount,
@@ -395,24 +693,24 @@ LoadTextureFromMemory(const void* bytes,
             static_cast<const uint8_t*>(bytes), byteCount, flags.dds, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load DDS from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
-        auto raw = RawFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::HDR: {
         hr = DirectX::LoadFromHDRMemory(
             static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load HDR from memory");
         // HDR stays in float formats; do not force sRGB
-        auto raw = RawFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::TGA: {
         hr = DirectX::LoadFromTGAMemory(
             static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load TGA from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
-        auto raw = RawFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::WIC: {
         // WIC: let caller preference drive sRGB/linear
@@ -441,12 +739,12 @@ LoadTextureFromMemory(const void* bytes,
                 throw std::runtime_error("Failed to convert WIC texture to RGBA");
             }
 
-            auto raw = RawFromDXT(convertedImg, convertedImg.GetMetadata(), "", ImageFiletype::WIC, convertedFormat);
-            return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+            auto decoded = DecodedFromDXT(convertedImg, convertedImg.GetMetadata(), "", ImageFiletype::WIC, convertedFormat);
+            return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
         }
 
-        auto raw = RawFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
-        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        auto decoded = DecodedFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
+        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
     }
     }
 
@@ -466,8 +764,39 @@ LoadTextureFromFile(const std::wstring& filePath,
     // For WIC paths, FORCE_* ensures consistent format choice even if the file has metadata
     localFlags.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
 
-    const auto data = detail::ReadFileBytes(filePath);
-    return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
+    if (detail::IsProcessedTextureCachePath(filePath)) {
+        if (!detail::kForceCpuTextureLoadPath) {
+            if (auto conditionedTexture = detail::TryLoadProcessedTextureCacheToVRAM(filePath, sampler, allowRTV, allowUAV)) {
+                conditionedTexture->Meta().preferSRGB = preferSRGB;
+                return conditionedTexture;
+            }
+        }
+
+        std::filesystem::path ddsFallbackPath = std::filesystem::path(filePath).replace_extension(L".dds");
+        std::error_code ec;
+        if (std::filesystem::exists(ddsFallbackPath, ec) && !ec) {
+            return LoadTextureFromFile(ddsFallbackPath.wstring(), sampler, preferSRGB, localFlags, allowRTV, allowUAV);
+        }
+    }
+
+    if (!detail::kForceCpuTextureLoadPath && detail::IsDDSPath(filePath)) {
+        if (auto directStorageTexture = detail::TryLoadDDSDirectToVRAM(filePath, sampler, preferSRGB, localFlags, false, allowRTV, allowUAV)) {
+            directStorageTexture->Meta().filePath = utf8;
+            directStorageTexture->Meta().preferSRGB = preferSRGB;
+            return directStorageTexture;
+        }
+    }
+
+    const auto fileBytes = detail::ReadFileBytes(filePath);
+    auto texture = LoadTextureFromMemory(fileBytes.data.data(), fileBytes.data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
+    if (texture) {
+        texture->Meta().filePath = utf8;
+        texture->Meta().preferSRGB = preferSRGB;
+        texture->RecordLoadPath(
+            fileBytes.usedDirectStorage ? TextureLoadPathTelemetry::DirectStorageSystemMemoryRead : TextureLoadPathTelemetry::CpuFileRead,
+            fileBytes.detail);
+    }
+    return texture;
 }
 
 std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
@@ -506,6 +835,10 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const cha
 }
 
 std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV, bool allowUAV) {
+    if (auto directStorageTexture = detail::TryLoadDDSDirectToVRAM(ddsFilePath, Sampler::GetDefaultSampler(), false, {}, true, allowRTV, allowUAV)) {
+        return directStorageTexture;
+    }
+
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
@@ -560,11 +893,10 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool
 	desc.channels = 4;
     desc.format = rhi::helpers::ToRHI(metadata.format);
 	desc.isCubemap = true;
+    desc.arraySize = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)));
 	desc.hasRTV = allowRTV;
 	desc.hasUAV = allowUAV;
-    if (metadata.mipLevels != 1) {
-		desc.generateMipMaps = true;
-    }
+    desc.generateMipMaps = false;
 
 	auto buffer = PixelBuffer::CreateShared(desc);
 
@@ -574,6 +906,7 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool
 	meta.fileType = ImageFiletype::DDS;
 	meta.filePath = ws2s(ddsFilePath);
 	meta.alphaIsAllOpaque = image.IsAlphaAllOpaque();
+    meta.preferSRGB = rhi::helpers::IsSRGB(desc.format);
 
     return TextureAsset::CreateShared(desc, dataPtrs, sampler, meta);
 }

@@ -40,6 +40,7 @@ struct HierarchialCullingPassInputs {
 class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
 public:
     HierarchialCullingPass(
+        std::string stablePassIdentifier,
         HierarchialCullingPassInputs inputs,
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,

@@ -104,6 +104,7 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::PerMaterialOpenPBRDataBuffer,
+            Builtin::Material::TextureGroup,
             Builtin::PostSkinningVertices,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,

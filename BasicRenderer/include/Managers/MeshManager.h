@@ -4,12 +4,14 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "ShaderBuffers.h"
 #include "Mesh/Mesh.h"
+#include "Import/CLodCache.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/PagePool.h"
 #include "Interfaces/IResourceProvider.h"
@@ -97,7 +99,8 @@ public:
 
 	// Queues disk I/O for a group without any residency side-effects.
 	// Returns true if the request was queued (or was already in the queue).
-	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u);
+	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout = nullptr);
+	bool TryGetCLodGroupPayloadLayout(uint32_t groupGlobalIndex, CLodCache::GroupPayloadLayoutMetadata& outLayout, std::string* outMessage = nullptr);
 
 	// Returns true if the group currently has disk I/O queued or in-flight.
 	bool IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const;
@@ -230,6 +233,7 @@ private:
 		uint32_t groupGlobalIndex = 0;
 		ClusterLODCacheSource cacheSource{};
 		uint32_t groupLocalIndex = 0;
+		std::optional<CLodCache::GroupPayloadLayoutMetadata> prefetchedLayout;
 		std::vector<bool> segmentNeedsFetch; // true = fetch from disk; false = reuse existing slab data
 		std::vector<uint32_t> preAllocatedPages; // page IDs pre-allocated by the LRU
 		uint64_t generation = 0; // generation at time of request
@@ -239,7 +243,13 @@ private:
 	struct CLodDiskStreamingResult {
 		uint32_t groupGlobalIndex = 0;
 		bool success = false;
+		ClusterLODCacheSource cacheSource{};
+		std::string uploadPathLabel = "CpuReadThenCpuUpload";
 		std::optional<ClusterLODGroupChunk> groupChunkMetadata;
+		std::vector<bool> segmentNeedsFetch;
+		std::vector<uint32_t> directStoragePageBlobSizes;
+		std::vector<uint64_t> directStoragePageBlobOffsets;
+		bool directStorageGpuUploadPending = false;
 		std::vector<std::vector<std::byte>> pageBlobs;
 		std::vector<uint32_t> preAllocatedPages; // forwarded from request
 		uint64_t generation = 0; // generation at time of request
@@ -270,6 +280,7 @@ private:
 
 	void DispatchCLodDiskStreamingBatch();
 	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u);
+	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout = nullptr);
 
 	enum class DiskStreamingApplyResult {
 		Applied,

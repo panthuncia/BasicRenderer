@@ -17,14 +17,61 @@
 #include "Mesh/Mesh.h"
 #include "Import/CLodCacheLoader.h"
 #include "Animation/Skeleton.h"
+#include "Managers/Singletons/TextureProcessingManager.h"
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
 #include "Resources/PixelBuffer.h"
 #include "Import/AssimpLoader.h"
 #include "Import/AssimpGeometryExtractor.h"
+#include "Utilities/Utilities.h"
 
 namespace AssimpLoader {
     constexpr uint32_t kMaterialTextureMaxAnisotropy = 16;
+
+    static std::string NormalizeTextureIdentity(const std::filesystem::path& path) {
+        std::error_code ec;
+        auto normalized = std::filesystem::weakly_canonical(path, ec);
+        if (ec) {
+            normalized = path.lexically_normal();
+        }
+
+        auto key = normalized.generic_string();
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return key;
+    }
+
+    static std::filesystem::path ResolveAssimpTexturePath(
+        const std::filesystem::path& sourceFilePath,
+        const std::string& texPath) {
+        const std::filesystem::path candidate(texPath);
+        if (candidate.is_absolute()) {
+            return candidate;
+        }
+
+        return sourceFilePath.parent_path() / candidate;
+    }
+
+    static std::string BuildAssimpTextureSourceIdentity(
+        const std::filesystem::path& sourceFilePath,
+        const std::string& texPath) {
+        if (!texPath.empty() && texPath[0] == '*') {
+            return NormalizeTextureIdentity(sourceFilePath) + "#embedded:" + texPath;
+        }
+
+        return NormalizeTextureIdentity(ResolveAssimpTexturePath(sourceFilePath, texPath));
+    }
+
+    static std::string BuildAssimpCacheProbePath(
+        const std::filesystem::path& sourceFilePath,
+        const std::string& texPath) {
+        if (!texPath.empty() && texPath[0] == '*') {
+            return (sourceFilePath.string() + "#" + texPath);
+        }
+
+        return ResolveAssimpTexturePath(sourceFilePath, texPath).string();
+    }
 
     rhi::AddressMode aiTextureMapModeToRHI(aiTextureMapMode mode) {
         switch (mode) {
@@ -47,14 +94,55 @@ namespace AssimpLoader {
         }
     }
 
+    static TextureSemantic aiTextureTypeToSemantic(aiTextureType type) {
+        switch (type) {
+        case aiTextureType_DIFFUSE:
+        case aiTextureType_BASE_COLOR:
+            return TextureSemantic::BaseColor;
+        case aiTextureType_NORMALS:
+            return TextureSemantic::Normal;
+        case aiTextureType_METALNESS:
+            return TextureSemantic::Metallic;
+        case aiTextureType_DIFFUSE_ROUGHNESS:
+            return TextureSemantic::Roughness;
+        case aiTextureType_AMBIENT_OCCLUSION:
+        case aiTextureType_LIGHTMAP:
+            return TextureSemantic::AO;
+        case aiTextureType_EMISSIVE:
+        case aiTextureType_EMISSION_COLOR:
+            return TextureSemantic::Emissive;
+        case aiTextureType_HEIGHT:
+        case aiTextureType_DISPLACEMENT:
+            return TextureSemantic::Height;
+        default:
+            return TextureSemantic::Unknown;
+        }
+    }
+
     static std::shared_ptr<TextureAsset> loadAiTexture(
         const aiScene* scene,
+        const std::filesystem::path& sourceFilePath,
         const std::string& texPath,          // "*0" for embedded or file path
-        const std::string& directory,        // base directory for external textures
+        const TextureProcessingSettings& processingSettings,
         std::shared_ptr<Sampler> sampler,
         bool preferSRGB
     )
     {
+        TextureFileMeta cacheProbeMeta{};
+        cacheProbeMeta.filePath = BuildAssimpCacheProbePath(sourceFilePath, texPath);
+        cacheProbeMeta.preferSRGB = preferSRGB;
+        cacheProbeMeta.processing = processingSettings;
+
+        const std::wstring cachePath = TextureProcessingManager::GetInstance().GetExistingCachePathForFile(cacheProbeMeta);
+        if (!cachePath.empty()) {
+            auto cachedTexture = LoadTextureFromFile(cachePath, sampler, preferSRGB);
+            cachedTexture->Meta().isProcessingCacheArtifact = true;
+            cachedTexture->Meta().preferSRGB = preferSRGB;
+            cachedTexture->Meta().processing = processingSettings;
+            spdlog::info("AssimpLoader: texture processing cache hit for '{}' -> '{}'", cacheProbeMeta.filePath, ws2s(cachePath));
+            return cachedTexture;
+        }
+
         // Embedded?
         if (!texPath.empty() && texPath[0] == '*') {
             unsigned int textureIndex = std::atoi(texPath.c_str() + 1);
@@ -74,7 +162,11 @@ namespace AssimpLoader {
                 LoadFlags lf{};
                 // WIC decode is most common; FORCE_* handles PNG/JPG without relying on file metadata.
                 lf.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
-                return LoadTextureFromMemory(bytes, byteCount, sampler, lf, preferSRGB);
+                auto texture = LoadTextureFromMemory(bytes, byteCount, sampler, lf, preferSRGB);
+                texture->Meta().filePath = cacheProbeMeta.filePath;
+                texture->Meta().preferSRGB = preferSRGB;
+                texture->SetProcessingSettings(processingSettings);
+                return texture;
             }
 
             // Raw BGRA (mHeight != 0): create PixelBuffer directly; choose sRGB format when requested
@@ -113,31 +205,30 @@ namespace AssimpLoader {
 				desc.generateMipMaps = true;
             	
             	TextureFileMeta meta;
-                meta.filePath = aiTex->mFilename.C_Str();
+				meta.filePath = cacheProbeMeta.filePath;
+				meta.preferSRGB = preferSRGB;
 
-                return TextureAsset::CreateShared(desc, vec, sampler, meta);
+                auto texture = TextureAsset::CreateShared(desc, vec, sampler, meta);
+                texture->SetProcessingSettings(processingSettings);
+                return texture;
             }
         }
 
         // External file: load from disk
         {
-            // Absolute vs relative directory handling
-            bool isRelative = true;
-            if (directory.find("://") != std::string::npos || directory.find(":/") != std::string::npos
-                || directory.find(":\\\\") != std::string::npos || directory.find(":\\") != std::string::npos) {
-                isRelative = false;
-            }
-
-            std::string fullPath = (isRelative ? ws2s(GetExePath()) + "\\" : "") + directory + "\\" + texPath;
-            return LoadTextureFromFile(s2ws(fullPath), sampler, preferSRGB);
+            auto texture = LoadTextureFromFile(s2ws(cacheProbeMeta.filePath), sampler, preferSRGB);
+            texture->Meta().preferSRGB = preferSRGB;
+            texture->SetProcessingSettings(processingSettings);
+            return texture;
         }
     }
 
     std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
         const aiScene* scene,
-        const std::string& directory // folder containing the model
+        const std::string& sourceFilePath
     )
     {
+        const std::filesystem::path sourcePath(sourceFilePath);
         std::vector<std::shared_ptr<TextureAsset>> textures;
         std::vector<std::shared_ptr<Material>> materials;
 
@@ -190,8 +281,16 @@ namespace AssimpLoader {
                     {
                         std::string texPath = aiTexPath.C_Str(); // e.g. "*0" or "texture.png"
                         // Check if we already loaded it:
-                        auto it = loadedTextures.find(texPath);
                         const bool preferSRGB = isSRGBTextureType(tType);
+                        const TextureSemantic semantic = aiTextureTypeToSemantic(tType);
+                        const NormalMapConvention normalConvention = semantic == TextureSemantic::Normal
+                            ? NormalMapConvention::DirectX
+                            : NormalMapConvention::DirectX;
+                        const std::string textureSourceIdentity = BuildAssimpTextureSourceIdentity(sourcePath, texPath);
+                        const std::string textureCacheKey = textureSourceIdentity + "|semantic:" + std::to_string(static_cast<uint32_t>(semantic)) +
+                            (preferSRGB ? "|srgb" : "|linear") +
+                            "|normalconv:" + std::to_string(static_cast<uint32_t>(normalConvention));
+                        auto it = loadedTextures.find(textureCacheKey);
 
                         if (it == loadedTextures.end())
                         {
@@ -215,15 +314,22 @@ namespace AssimpLoader {
 
                             // Not loaded yet, load now
                             try {
+                                const TextureProcessingSettings processingSettings = MakeMaterialTextureProcessingSettings(
+                                    semantic,
+                                    preferSRGB,
+                                    textureCacheKey,
+                                    false,
+                                    normalConvention);
                                 std::shared_ptr<TextureAsset> newTex = loadAiTexture(
                                     scene,
+                                    sourcePath,
                                     texPath,
-                                    directory,
+                                    processingSettings,
                                     sampler,
                                     preferSRGB
                                 );
                                 if (newTex) {
-                                    loadedTextures[texPath] = newTex;
+                                    loadedTextures[textureCacheKey] = newTex;
                                     materialTextures[tType] = newTex;
                                 }
                             }
@@ -294,7 +400,8 @@ namespace AssimpLoader {
             if (materialTextures.find(aiTextureType_NORMALS) != materialTextures.end()) {
                 normalTexture = materialTextures[aiTextureType_NORMALS];
                 materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
-                if (normalTexture->Meta().fileType == ImageFiletype::DDS) {
+                if (normalTexture->Meta().fileType == ImageFiletype::DDS ||
+                    (normalTexture->Meta().isProcessingCacheArtifact && normalTexture->Meta().processing.semantic == TextureSemantic::Normal)) {
                     negateNormals = true;
                 }
             }
@@ -704,9 +811,7 @@ namespace AssimpLoader {
         auto scene = std::make_shared<Scene>();
 
         // Directory of the model file, allowing both / and \\ as separators
-        std::string directory = GetDirectoryFromPath(filePath);
-
-        auto materials = LoadMaterialsFromAssimpScene(pScene, directory);
+        auto materials = LoadMaterialsFromAssimpScene(pScene, filePath);
         auto [meshes, meshSkinIndices] = parseAiMeshes(pScene, materials, filePath);
         std::vector<flecs::entity> nodes;
         std::unordered_map<std::string, flecs::entity> nodeMap;

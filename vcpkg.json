@@ -18,7 +18,10 @@
     "ms-gsl",
     "implot",
     "boost-container-hash",
-    "tracy",
+    {
+      "name": "tracy",
+      "features": [ "on-demand" ]
+    },
     "shader-slang",
     "tbb"
   ],

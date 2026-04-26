@@ -211,16 +211,16 @@ static void BuildFrameGraphSnapshotFromBatches(
             totalPassCount += b.Passes(static_cast<QueueKind>(queueIndex)).size();
         }
         row.passNames.reserve(totalPassCount);
-        for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
-            const auto queue = static_cast<QueueKind>(queueIndex);
-            for (const auto& queuedPass : b.Passes(queue)) {
-                std::visit(
-                    [&](const auto& pass) {
-                        row.passNames.push_back(pass.name);
-                    },
-                    queuedPass);
-            }
-        }
+        //for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
+        //    const auto queue = static_cast<QueueKind>(queueIndex);
+        //    for (const auto& queuedPass : b.Passes(queue)) {
+        //        std::visit(
+        //            [&](const auto* pass) {
+        //                row.passNames.push_back(pass->name);
+        //            },
+        //            queuedPass);
+        //    }
+        //}
 
         row.categories.reserve(catSum.size());
         for (auto& [label, bytes] : catSum) {

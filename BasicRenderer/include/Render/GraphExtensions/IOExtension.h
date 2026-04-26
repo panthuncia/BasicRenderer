@@ -52,6 +52,24 @@ public:
 					RenderGraph::ExternalPassDesc::Compute("Builtin::Mipmapping", mip)
 						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/1)));
 			}
+
+			if (auto bc7 = m_textureFactory->GetBC7CompressionPass()) {
+				outPasses.push_back(
+					RenderGraph::ExternalPassDesc::Compute("Builtin::BC7Compression", bc7)
+						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/2)));
+			}
+
+			if (auto bc7Copy = m_textureFactory->GetBC7CompressionCopyPass()) {
+				outPasses.push_back(
+					RenderGraph::ExternalPassDesc::Render("Builtin::BC7CompressionCopy", bc7Copy)
+						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/3)));
+			}
+
+			if (auto bc7Readback = m_textureFactory->GetBC7CompressionReadbackPass()) {
+				outPasses.push_back(
+					RenderGraph::ExternalPassDesc::Copy("Builtin::BC7CompressionReadback", bc7Readback)
+						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/4)));
+			}
 		}
 
 		// Readback pass: last

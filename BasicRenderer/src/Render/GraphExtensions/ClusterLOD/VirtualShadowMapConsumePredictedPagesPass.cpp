@@ -1,5 +1,6 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapConsumePredictedPagesPass.h"
 
+#include "BuiltinResources.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -44,6 +45,8 @@ VirtualShadowMapConsumePredictedPagesPass::VirtualShadowMapConsumePredictedPages
 void VirtualShadowMapConsumePredictedPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(
+            Builtin::CLod::StreamingNonResidentBits,
+            Builtin::CLod::StreamingRuntimeState,
             m_predictedPagesBuffer,
             m_predictedPageCountBuffer,
             m_clipmapInfoBuffer)

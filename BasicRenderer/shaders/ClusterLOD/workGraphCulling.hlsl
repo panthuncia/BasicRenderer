@@ -1081,12 +1081,16 @@ struct CLodVirtualShadowPredictiveInvalidationCandidate
 {
     float4 worldCenterAndRadius;
     uint shadowViewId;
+    uint sourceGroupGlobalIndex;
     uint pad0;
     uint pad1;
-    uint pad2;
 };
 
-void CLodAppendVirtualShadowPredictiveInvalidationCandidate(float3 worldCenter, float radiusWorld, uint shadowViewId)
+void CLodAppendVirtualShadowPredictiveInvalidationCandidate(
+    float3 worldCenter,
+    float radiusWorld,
+    uint shadowViewId,
+    uint sourceGroupGlobalIndex)
 {
     RWStructuredBuffer<CLodVirtualShadowPredictiveInvalidationCandidate> candidateBuffer =
         ResourceDescriptorHeap[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATES_DESCRIPTOR_INDEX];
@@ -1100,9 +1104,9 @@ void CLodAppendVirtualShadowPredictiveInvalidationCandidate(float3 worldCenter, 
         CLodVirtualShadowPredictiveInvalidationCandidate candidate;
         candidate.worldCenterAndRadius = float4(worldCenter, radiusWorld);
         candidate.shadowViewId = shadowViewId;
+        candidate.sourceGroupGlobalIndex = sourceGroupGlobalIndex;
         candidate.pad0 = 0u;
         candidate.pad1 = 0u;
-        candidate.pad2 = 0u;
         candidateBuffer[candidateIndex] = candidate;
     }
 }
@@ -2118,7 +2122,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                                         CLodAppendVirtualShadowPredictiveInvalidationCandidate(
                                             meshletCenterWorld,
                                             meshletRadiusWorld,
-                                            b.viewId);
+                                            b.viewId,
+                                            childGroupGlobalIndex);
 #endif
                                     }
                                 }

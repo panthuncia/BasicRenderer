@@ -308,6 +308,65 @@ struct MaterialInfo {
     uint3 perMaterialPad1;
 };
 
+struct MaterialEvalInfo {
+    uint materialFlags;
+    uint baseColorTextureIndex;
+    uint baseColorSamplerIndex;
+    uint normalTextureIndex;
+
+    uint normalSamplerIndex;
+    uint metallicTextureIndex;
+    uint metallicSamplerIndex;
+    uint roughnessTextureIndex;
+
+    uint roughnessSamplerIndex;
+    uint emissiveTextureIndex;
+    uint emissiveSamplerIndex;
+    uint aoMapIndex;
+
+    uint aoSamplerIndex;
+    uint heightMapIndex;
+    uint heightSamplerIndex;
+    uint opacityTextureIndex;
+
+    uint opacitySamplerIndex;
+    float metallicFactor;
+    float roughnessFactor;
+    float heightMapScale;
+
+    float alphaCutoff;
+    float geometricDisplacementMin;
+    float geometricDisplacementMax;
+    uint geometricDisplacementEnabled;
+
+    float4 baseColorFactor;
+    float4 emissiveFactor;
+    uint4 baseColorChannels;
+
+    uint aoChannel;
+    uint heightChannel;
+    uint metallicChannel;
+    uint roughnessChannel;
+
+    uint3 emissiveChannels;
+    uint openPBRMaterialDataIndex;
+
+    uint baseColorUvSetIndex;
+    uint normalUvSetIndex;
+    uint metallicUvSetIndex;
+    uint roughnessUvSetIndex;
+
+    uint emissiveUvSetIndex;
+    uint aoUvSetIndex;
+    uint heightUvSetIndex;
+    uint opacityUvSetIndex;
+
+    uint perMaterialEvalPad0;
+    uint perMaterialEvalPad1;
+    uint perMaterialEvalPad2;
+    uint perMaterialEvalPad3;
+};
+
 struct OpenPBRMaterialInfo {
     float baseWeight;
     float3 baseColor;
