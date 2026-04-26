@@ -6,6 +6,9 @@
 #include "include/occlusionCulling.hlsli"
 #include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
+#ifdef CLOD_COMPUTE_INCLUDE_ONLY
+#include "PerPassRootConstants/clodPureComputeCullingRootConstants.h"
+#endif
 #include "include/clodVirtualShadowClipmap.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
@@ -1235,7 +1238,32 @@ void WGTelemetryAddObjectCullPlaneReject(uint planeIndex)
     }
 }
 
+// Perspective views attenuate projected geometric error by distance.
+// Orthographic views keep a constant world-to-screen scale, so the projected
+// error reduces to the world-space error directly.
+float ProjectedGeometricError(
+    float3 worldCenter,
+    float worldRadius,
+    float errorMeshSpace,
+    float errorScale,
+    float3 cameraPos,
+    float zNear,
+    bool isOrtho)
+{
+    const float worldSpaceError = errorMeshSpace * errorScale;
+    if (isOrtho) {
+        return worldSpaceError;
+    }
+
+    // Conservative "distance to sphere surface"
+    float dist = length(worldCenter - cameraPos);
+    float denom = max(dist - worldRadius, zNear);
+
+    return worldSpaceError / denom;
+}
+
 // Node: ObjectCull (entry)
+#ifndef CLOD_COMPUTE_INCLUDE_ONLY
 [Shader("node")]
 [NodeID("ObjectCull")]
 [NodeLaunch("broadcasting")]
@@ -1337,30 +1365,6 @@ void WG_ObjectCull(
 
     // Must be uniform even when some threads requested 0 records.
     outRecs.OutputComplete();
-}
-
-// Perspective views attenuate projected geometric error by distance.
-// Orthographic views keep a constant world-to-screen scale, so the projected
-// error reduces to the world-space error directly.
-float ProjectedGeometricError(
-    float3 worldCenter,
-    float worldRadius,
-    float errorMeshSpace,
-    float errorScale,
-    float3 cameraPos,
-    float zNear,
-    bool isOrtho)
-{
-    const float worldSpaceError = errorMeshSpace * errorScale;
-    if (isOrtho) {
-        return worldSpaceError;
-    }
-
-    // Conservative "distance to sphere surface"
-    float dist = length(worldCenter - cameraPos);
-    float denom = max(dist - worldRadius, zNear);
-
-    return worldSpaceError / denom;
 }
 
 // Node: TraverseNodes (recursive, BVH-only)
@@ -1801,6 +1805,7 @@ void WG_TraverseNodes(
     out2.OutputComplete();
     out1.OutputComplete();
 }
+#endif
 #define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 32
 
 // SW raster batch accumulator (groupshared, per ClusterCull variant)
@@ -2814,6 +2819,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 // ClusterCull variant entry points - one per bucket size.
 // Each variant processes a fixed number of meshlets per lane, eliminating wave divergence.
 
+#ifndef CLOD_COMPUTE_INCLUDE_ONLY
 [Shader("node")]
 [NodeID("ClusterCull1")]
 [NodeLaunch("coalescing")]
@@ -2879,6 +2885,7 @@ void WG_ClusterCull4(
 }
 
 [Shader("node")]
+#endif
 [NodeID("ClusterCull8")]
 [NodeLaunch("coalescing")]
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]

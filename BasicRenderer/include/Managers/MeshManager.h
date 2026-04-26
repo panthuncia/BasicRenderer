@@ -152,6 +152,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceClodOffsets;
 	std::shared_ptr<DynamicBuffer> m_clodSharedGroupChunks;
 	std::shared_ptr<DynamicBuffer> m_clodMeshMetadata;
+	std::shared_ptr<DynamicBuffer> m_clodHierarchyLevelInfos;
 	std::shared_ptr<DynamicBuffer> m_clusterLODGroups;
 	std::shared_ptr<DynamicBuffer> m_clusterLODSegments;
 

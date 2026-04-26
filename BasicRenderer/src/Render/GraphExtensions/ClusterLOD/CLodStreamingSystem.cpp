@@ -411,7 +411,7 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                         slot.usedGroupsBufferStaging,
                         m_streamingReadbackFenceHandle,
                         fv))
-                    .At(RenderGraph::ExternalInsertPoint::After("CLodShadow::HierarchialCullingPass2"))
+                    .At(RenderGraph::ExternalInsertPoint::After("CLodShadow::HierarchicalCullingPass2"))
                     .PreferQueue(QueueKind::Copy));
 
             // Wake the background worker so it can HostWait for the new fence value.

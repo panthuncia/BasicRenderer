@@ -460,7 +460,18 @@ struct CLodMeshMetadata
     uint groupChunkTableBase;
     uint groupChunkTableCount;
     uint pageMapBase; // global offset into GroupPageMap buffer for this mesh
+    uint lodLevelInfoBase;
+    uint lodLevelCount;
+    uint maxDepth;
     uint pad0;
+};
+
+struct CLodHierarchyLevelInfo
+{
+    uint32_t rootNode = 0;
+    uint32_t nodeRangeOffset = 0;
+    uint32_t nodeRangeCount = 0;
+    uint32_t pad0 = 0;
 };
 
 // GPU-visible page table entry - maps a virtual page ID to a slab + byte offset.

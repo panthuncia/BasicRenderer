@@ -11,6 +11,7 @@
 #include "Resources/Buffers/PagePool.h"
 #include "Managers/ViewManager.h"
 #include "Import/CLodCache.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include <algorithm>
 #include <bit>
 #include <limits>
@@ -33,6 +34,7 @@ MeshManager::MeshManager() {
 	m_perMeshInstanceClodOffsets = DynamicBuffer::CreateShared(sizeof(MeshInstanceClodOffsets), 10000, "perMeshInstanceClodOffsets");
 	m_clodSharedGroupChunks = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupChunk), 10000, "clodSharedGroupChunks");
 	m_clodMeshMetadata = DynamicBuffer::CreateShared(sizeof(CLodMeshMetadata), 10000, "clodMeshMetadata");
+	m_clodHierarchyLevelInfos = DynamicBuffer::CreateShared(sizeof(CLodHierarchyLevelInfo), 10000, "clodHierarchyLevelInfos");
 	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 10000, "clusterLODGroups");
 	m_clusterLODSegments = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupSegment), 10000, "clusterLODSegments");
 	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
@@ -59,6 +61,7 @@ MeshManager::MeshManager() {
 	rg::memory::SetResourceUsageHint(*m_perMeshInstanceClodOffsets, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clodSharedGroupChunks, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clodMeshMetadata, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clodHierarchyLevelInfos, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODGroups, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODSegments, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODMeshletBounds, "Cluster LOD data");
@@ -77,6 +80,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::CLod::Offsets] = m_perMeshInstanceClodOffsets;
 	m_resources[Builtin::CLod::GroupChunks] = m_clodSharedGroupChunks;
 	m_resources[Builtin::CLod::MeshMetadata] = m_clodMeshMetadata;
+	m_resources[CLodLevelInfosBufferId] = m_clodHierarchyLevelInfos;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
 	m_resources[Builtin::CLod::Segments] = m_clusterLODSegments;
 	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
@@ -447,6 +451,29 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			totalPageMapEntries += grp.pageCount;
 		}
 
+		std::unique_ptr<BufferView> hierarchyLevelInfoView = nullptr;
+		uint32_t hierarchyLevelInfoBase = 0;
+		const auto& lodNodeRanges = mesh->GetCLodLodNodeRanges();
+		const auto& lodLevelRoots = mesh->GetCLodLodLevelRoots();
+		if (!lodLevelRoots.empty()) {
+			std::vector<CLodHierarchyLevelInfo> levelInfos(lodLevelRoots.size());
+			for (size_t levelIndex = 0; levelIndex < lodLevelRoots.size(); ++levelIndex) {
+				const ClusterLODNodeRangeAlloc range = levelIndex < lodNodeRanges.size()
+					? lodNodeRanges[levelIndex]
+					: ClusterLODNodeRangeAlloc{};
+				levelInfos[levelIndex].rootNode = lodLevelRoots[levelIndex];
+				levelInfos[levelIndex].nodeRangeOffset = range.offset;
+				levelInfos[levelIndex].nodeRangeCount = range.count;
+			}
+			hierarchyLevelInfoView = m_clodHierarchyLevelInfos->AddData(
+				levelInfos.data(),
+				levelInfos.size() * sizeof(CLodHierarchyLevelInfo),
+				sizeof(CLodHierarchyLevelInfo));
+			if (hierarchyLevelInfoView != nullptr) {
+				hierarchyLevelInfoBase = static_cast<uint32_t>(hierarchyLevelInfoView->GetOffset() / sizeof(CLodHierarchyLevelInfo));
+			}
+		}
+
 		// Allocate a contiguous range in the GroupPageMap buffer.
 		std::unique_ptr<BufferView> pageMapView = nullptr;
 		uint32_t pageMapGlobalBase = 0;
@@ -471,6 +498,9 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			: 0u;
 		clodMeshMetadata.groupChunkTableCount = static_cast<uint32_t>(materializedGroupChunks.size());
 		clodMeshMetadata.pageMapBase = pageMapGlobalBase;
+		clodMeshMetadata.lodLevelInfoBase = hierarchyLevelInfoBase;
+		clodMeshMetadata.lodLevelCount = static_cast<uint32_t>(lodLevelRoots.size());
+		clodMeshMetadata.maxDepth = mesh->GetCLodMaxDepth();
 		sharedState->ownedMeshMetadataView = m_clodMeshMetadata->AddData(&clodMeshMetadata, sizeof(CLodMeshMetadata), sizeof(CLodMeshMetadata));
 		if (sharedState->ownedMeshMetadataView != nullptr) {
 			sharedState->clodMeshMetadataIndex = static_cast<uint32_t>(sharedState->ownedMeshMetadataView->GetOffset() / sizeof(CLodMeshMetadata));

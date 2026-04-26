@@ -15,6 +15,17 @@ struct CLodMeshMetadata
     uint groupChunkTableBase;
     uint groupChunkTableCount;
     uint pageMapBase; // global offset into GroupPageMap buffer for this mesh
+    uint lodLevelInfoBase;
+    uint lodLevelCount;
+    uint maxDepth;
+    uint pad0;
+};
+
+struct CLodHierarchyLevelInfo
+{
+    uint rootNode;
+    uint nodeRangeOffset;
+    uint nodeRangeCount;
     uint pad0;
 };
 

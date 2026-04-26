@@ -517,6 +517,10 @@ private:
 	std::function<bool()> getMeshletCullingEnabled;
 	std::function<void(bool)> setMeshletCullingEnabled;
 
+    CLodCullingBackend m_clodCullingBackend = CLodCullingBackend::WorkGraph;
+    std::function<CLodCullingBackend()> getCLodCullingBackend;
+    std::function<void(CLodCullingBackend)> setCLodCullingBackend;
+
     CLodSoftwareRasterMode m_clodSoftwareRasterMode = CLodSoftwareRasterMode::Disabled;
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
@@ -829,6 +833,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	setMeshletCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletCulling");
 	meshletCulling = getMeshletCullingEnabled();
 	observerSetting(meshletCulling, "enableMeshletCulling");
+
+    getCLodCullingBackend = settingsManager.getSettingGetter<CLodCullingBackend>(CLodCullingBackendSettingName);
+    setCLodCullingBackend = settingsManager.getSettingSetter<CLodCullingBackend>(CLodCullingBackendSettingName);
+    m_clodCullingBackend = getCLodCullingBackend();
+    observerSetting(m_clodCullingBackend, CLodCullingBackendSettingName);
 
     getCLodSoftwareRasterMode = settingsManager.getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
@@ -1266,6 +1275,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
+        int clodCullingBackendIndex = static_cast<int>(m_clodCullingBackend);
+        if (ImGui::Combo("CLod Culling Backend", &clodCullingBackendIndex, CLodCullingBackendNames, CLodCullingBackendCount)) {
+            clodCullingBackendIndex = std::clamp(clodCullingBackendIndex, 0, CLodCullingBackendCount - 1);
+            m_clodCullingBackend = static_cast<CLodCullingBackend>(clodCullingBackendIndex);
+            setCLodCullingBackend(m_clodCullingBackend);
+        }
         int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
         if (ImGui::Combo("Visibility/Alpha SW Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
@@ -2411,7 +2426,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodOpaque::HierarchialCullingPass2",
+                "CLodOpaque::HierarchicalCullingPass2",
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2466,7 +2481,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLodOpaque::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchicalCullingPass2",
                     clodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -2486,7 +2501,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLodOpaque::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchicalCullingPass2",
                     clodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -2538,7 +2553,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodShadow::HierarchialCullingPass1",
+                "CLodShadow::HierarchicalCullingPass1",
                 shadowClodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2593,7 +2608,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLodShadow::HierarchialCullingPass1",
+                    "CLodShadow::HierarchicalCullingPass1",
                     shadowClodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -2613,7 +2628,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLodShadow::HierarchialCullingPass1",
+                    "CLodShadow::HierarchicalCullingPass1",
                     shadowClodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {

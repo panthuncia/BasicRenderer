@@ -36,7 +36,8 @@
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterPageJobRasterPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterizationPass.h"
 #include "Render/GraphExtensions/ClusterLOD/DeepVisibilityResolvePass.h"
-#include "Render/GraphExtensions/ClusterLOD/HierarchialCullingPass.h"
+#include "Render/GraphExtensions/ClusterLOD/HierarchicalDispatchCullingPass.h"
+#include "Render/GraphExtensions/ClusterLOD/HierarchicalCullingPass.h"
 #include "Render/GraphExtensions/ClusterLOD/PerViewLinearDepthCopyPass.h"
 #include "Render/GraphExtensions/ClusterLOD/RasterBucketBlockOffsetsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/RasterBucketBlockScanPass.h"
@@ -454,18 +455,41 @@ TextureDescription CreateVirtualShadowDirtyHierarchyDescription()
     return desc;
 }
 
-HierarchialCullingWorkGraphMode GetCullingWorkGraphMode(CLodSoftwareRasterMode softwareRasterMode)
+HierarchicalCullingWorkGraphMode GetCullingWorkGraphMode(CLodSoftwareRasterMode softwareRasterMode)
 {
     switch (softwareRasterMode) {
     case CLodSoftwareRasterMode::Disabled:
-        return HierarchialCullingWorkGraphMode::HardwareOnly;
+        return HierarchicalCullingWorkGraphMode::HardwareOnly;
     case CLodSoftwareRasterMode::Compute:
-        return HierarchialCullingWorkGraphMode::SoftwareRasterCompute;
+        return HierarchicalCullingWorkGraphMode::SoftwareRasterCompute;
     case CLodSoftwareRasterMode::WorkGraph:
-        return HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+        return HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph;
     }
 
-    return HierarchialCullingWorkGraphMode::HardwareOnly;
+    return HierarchicalCullingWorkGraphMode::HardwareOnly;
+}
+
+HierarchicalCullingBackend GetHierarchicalCullingBackend(CLodCullingBackend backend)
+{
+    switch (backend) {
+    case CLodCullingBackend::PureCompute:
+        return HierarchicalCullingBackend::PureCompute;
+    case CLodCullingBackend::WorkGraph:
+    default:
+        return HierarchicalCullingBackend::WorkGraph;
+    }
+}
+
+bool UseHierarchicalDispatchCullingPass(
+    HierarchicalCullingBackend backend,
+    bool isFirstPass,
+    HierarchicalCullingWorkGraphMode workGraphMode,
+    CLodRasterOutputKind rasterOutputKind)
+{
+    return backend == HierarchicalCullingBackend::PureCompute
+        && isFirstPass
+        && workGraphMode == HierarchicalCullingWorkGraphMode::HardwareOnly
+        && rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer;
 }
 
 std::shared_ptr<ResourceGroup> GetSlabResourceGroup()
@@ -2303,6 +2327,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     const auto softwareRasterMode =
         SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
+    const auto cullingBackendMode =
+        SettingsManager::GetInstance().getSettingGetter<CLodCullingBackend>(CLodCullingBackendSettingName)();
     const auto shadowVSMRasterMode =
         traits.type == CLodExtensionType::Shadow
             ? SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)()
@@ -2329,8 +2355,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     const uint32_t reyesDiceQueueCapacity = m_reyesDiceQueueCapacity;
     const uint32_t reyesRasterWorkCapacity = m_reyesRasterWorkCapacity;
     const auto workGraphMode = forceHardwareOnly
-        ? HierarchialCullingWorkGraphMode::HardwareOnly
+        ? HierarchicalCullingWorkGraphMode::HardwareOnly
         : GetCullingWorkGraphMode(softwareRasterMode);
+    const auto cullingBackend = forceHardwareOnly
+        ? HierarchicalCullingBackend::WorkGraph
+        : GetHierarchicalCullingBackend(cullingBackendMode);
     const auto renderPhase = RenderPhase(traits.renderPhaseName.data());
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer = useReyesForThisVariant ? m_reyesOwnershipBitsetBuffer : nullptr;
     const std::shared_ptr<Buffer> reyesOwnershipBitsetBufferPhase2 = useReyesForThisVariant ? m_reyesOwnershipBitsetBufferPhase2 : nullptr;
@@ -2593,7 +2622,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
 
-    HierarchialCullingPassInputs cullPassInputs;
+    HierarchicalCullingPassInputs cullPassInputs;
     cullPassInputs.isFirstPass = true;
     cullPassInputs.maxVisibleClusters = m_visibleClusterCapacity;
     cullPassInputs.workGraphMode = workGraphMode;
@@ -2601,33 +2630,66 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     cullPassInputs.clodOnlyWorkloads = true;
     cullPassInputs.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
     cullPassInputs.rasterOutputKind = traits.rasterOutputKind;
-    const std::string cullPassName = MakeVariantPassName(traits, "HierarchialCullingPass1");
+    const std::string cullPassName = MakeVariantPassName(traits, "HierarchicalCullingPass1");
+    const bool useDispatchCullingPass1 = UseHierarchicalDispatchCullingPass(
+        cullingBackend,
+        cullPassInputs.isFirstPass,
+        cullPassInputs.workGraphMode,
+        cullPassInputs.rasterOutputKind);
+    std::shared_ptr<ComputePass> cullPass1 = useDispatchCullingPass1
+        ? std::static_pointer_cast<ComputePass>(
+            std::make_shared<HierarchicalDispatchCullingPass>(
+                cullPassName,
+                cullPassInputs,
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBuffer,
+                m_swVisibleClustersCounterBuffer,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBuffer : nullptr,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBuffer : nullptr,
+                m_histogramIndirectCommand,
+                m_workGraphTelemetryBuffer,
+                m_occlusionReplayBuffer,
+                m_occlusionReplayStateBuffer,
+                m_occlusionNodeGpuInputsBuffer,
+                m_viewDepthSrvIndicesBuffer,
+                m_viewRasterInfoBuffer,
+                traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                slabGroup,
+                nullptr,
+                nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr))
+        : std::static_pointer_cast<ComputePass>(
+            std::make_shared<HierarchicalCullingPass>(
+                cullPassName,
+                cullPassInputs,
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBuffer,
+                m_swVisibleClustersCounterBuffer,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBuffer : nullptr,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBuffer : nullptr,
+                m_histogramIndirectCommand,
+                m_workGraphTelemetryBuffer,
+                m_occlusionReplayBuffer,
+                m_occlusionReplayStateBuffer,
+                m_occlusionNodeGpuInputsBuffer,
+                m_viewDepthSrvIndicesBuffer,
+                m_viewRasterInfoBuffer,
+                traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                slabGroup,
+                nullptr,
+                nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
     auto cullPassDesc = RenderGraph::ExternalPassDesc::Compute(
         cullPassName,
-        std::make_shared<HierarchialCullingPass>(
-            cullPassName,
-            cullPassInputs,
-            m_visibleClustersBuffer,
-            m_visibleClustersCounterBuffer,
-            m_swVisibleClustersCounterBuffer,
-            traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBuffer : nullptr,
-            traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBuffer : nullptr,
-            m_histogramIndirectCommand,
-            m_workGraphTelemetryBuffer,
-            m_occlusionReplayBuffer,
-            m_occlusionReplayStateBuffer,
-            m_occlusionNodeGpuInputsBuffer,
-            m_viewDepthSrvIndicesBuffer,
-            m_viewRasterInfoBuffer,
-            traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
-            slabGroup,
-            nullptr,
-            nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
-                traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
+        cullPass1);
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
         cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLodOpaque::LinearDepthDownsamplePass2"));
@@ -3765,7 +3827,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             std::make_shared<DownsamplePass>()));
 
     if (traits.usesPhase2OcclusionReplay) {
-        HierarchialCullingPassInputs cullPassInputs2;
+        HierarchicalCullingPassInputs cullPassInputs2;
         cullPassInputs2.isFirstPass = false;
         cullPassInputs2.maxVisibleClusters = m_visibleClusterCapacity;
         cullPassInputs2.workGraphMode = workGraphMode;
@@ -3773,33 +3835,66 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         cullPassInputs2.clodOnlyWorkloads = true;
         cullPassInputs2.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
         cullPassInputs2.rasterOutputKind = traits.rasterOutputKind;
-        const std::string cullPassName2 = MakeVariantPassName(traits, "HierarchialCullingPass2");
-        auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
-            cullPassName2,
-            std::make_shared<HierarchialCullingPass>(
-                cullPassName2,
-                cullPassInputs2,
-                m_visibleClustersBuffer,
-                m_visibleClustersCounterBufferPhase2,
-                m_swVisibleClustersCounterBufferPhase2,
-                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBufferPhase2 : nullptr,
-                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBufferPhase2 : nullptr,
-                m_histogramIndirectCommand,
-                m_workGraphTelemetryBuffer,
-                m_occlusionReplayBuffer,
-                m_occlusionReplayStateBuffer,
-                m_occlusionNodeGpuInputsBuffer,
-                m_viewDepthSrvIndicesBuffer,
-                m_viewRasterInfoBuffer,
-                traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
-                slabGroup,
-                m_visibleClustersCounterBuffer,
-                m_swVisibleClustersCounterBuffer,
+        const std::string cullPassName2 = MakeVariantPassName(traits, "HierarchicalCullingPass2");
+        const bool useDispatchCullingPass2 = UseHierarchicalDispatchCullingPass(
+            cullingBackend,
+            cullPassInputs2.isFirstPass,
+            cullPassInputs2.workGraphMode,
+            cullPassInputs2.rasterOutputKind);
+        std::shared_ptr<ComputePass> cullPass2 = useDispatchCullingPass2
+            ? std::static_pointer_cast<ComputePass>(
+                std::make_shared<HierarchicalDispatchCullingPass>(
+                    cullPassName2,
+                    cullPassInputs2,
+                    m_visibleClustersBuffer,
+                    m_visibleClustersCounterBufferPhase2,
+                    m_swVisibleClustersCounterBufferPhase2,
+                    traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBufferPhase2 : nullptr,
+                    traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBufferPhase2 : nullptr,
+                    m_histogramIndirectCommand,
+                    m_workGraphTelemetryBuffer,
+                    m_occlusionReplayBuffer,
+                    m_occlusionReplayStateBuffer,
+                    m_occlusionNodeGpuInputsBuffer,
+                    m_viewDepthSrvIndicesBuffer,
+                    m_viewRasterInfoBuffer,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                    slabGroup,
+                    m_visibleClustersCounterBuffer,
+                    m_swVisibleClustersCounterBuffer,
                     traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
                     traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
-                traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
-                traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
-                traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
+                    traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr))
+            : std::static_pointer_cast<ComputePass>(
+                std::make_shared<HierarchicalCullingPass>(
+                    cullPassName2,
+                    cullPassInputs2,
+                    m_visibleClustersBuffer,
+                    m_visibleClustersCounterBufferPhase2,
+                    m_swVisibleClustersCounterBufferPhase2,
+                    traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBufferPhase2 : nullptr,
+                    traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBufferPhase2 : nullptr,
+                    m_histogramIndirectCommand,
+                    m_workGraphTelemetryBuffer,
+                    m_occlusionReplayBuffer,
+                    m_occlusionReplayStateBuffer,
+                    m_occlusionNodeGpuInputsBuffer,
+                    m_viewDepthSrvIndicesBuffer,
+                    m_viewRasterInfoBuffer,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                    slabGroup,
+                    m_visibleClustersCounterBuffer,
+                    m_swVisibleClustersCounterBuffer,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
+        auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
+            cullPassName2,
+            cullPass2);
         cullPassDesc2.At(RenderGraph::ExternalInsertPoint::After(MakeVariantPassName(traits, "LinearDepthDownsamplePass1")));
         outPasses.push_back(std::move(cullPassDesc2));
 

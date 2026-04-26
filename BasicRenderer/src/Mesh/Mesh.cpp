@@ -389,19 +389,26 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodGroupDiskLocators = data.groupDiskLocators;
 	m_clodCacheSource = data.cacheSource;
 	m_clodNodes = data.nodes;
+	m_clodLodNodeRanges = data.lodNodeRanges;
+	m_clodLodLevelRoots = data.lodLevelRoots;
 	m_clodTopRootNode = 0;
 	m_perMeshBufferData.boundingSphere = data.objectBoundingSphere;
 	m_voxelGroupMapping = data.voxelGroupMapping;
 
-	m_clodMaxDepth = 0;
-	for (const auto& group : m_clodGroups) {
-		m_clodMaxDepth = std::max<uint32_t>(m_clodMaxDepth, static_cast<uint32_t>(std::max(group.depth, 0)));
+	m_clodMaxDepth = data.maxDepth;
+	if (m_clodLodLevelRoots.empty()) {
+		m_clodMaxDepth = 0;
+		for (const auto& group : m_clodGroups) {
+			m_clodMaxDepth = std::max<uint32_t>(m_clodMaxDepth, static_cast<uint32_t>(std::max(group.depth, 0)));
+		}
+		m_clodLodLevelRoots.resize(m_clodMaxDepth + 1);
+		for (uint32_t depth = 0; depth <= m_clodMaxDepth; ++depth) {
+			m_clodLodLevelRoots[depth] = 1u + depth;
+		}
 	}
-	m_clodLodLevelRoots.resize(m_clodMaxDepth + 1);
-	for (uint32_t depth = 0; depth <= m_clodMaxDepth; ++depth) {
-		m_clodLodLevelRoots[depth] = 1u + depth;
+	if (m_clodLodNodeRanges.empty()) {
+		m_clodLodNodeRanges.resize(m_clodLodLevelRoots.size());
 	}
-	m_clodLodNodeRanges.clear();
 
 	m_perMeshBufferData.numVertices = 0; // TODO: Remove, clod doesn't need it
 
@@ -443,6 +450,9 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.groupDiskLocators = m_clodGroupDiskLocators;
 	out.cacheSource = m_clodCacheSource;
 	out.nodes = m_clodNodes;
+	out.lodNodeRanges = m_clodLodNodeRanges;
+	out.lodLevelRoots = m_clodLodLevelRoots;
+	out.maxDepth = m_clodMaxDepth;
 	out.voxelGroupMapping = m_voxelGroupMapping;
 	return out;
 }

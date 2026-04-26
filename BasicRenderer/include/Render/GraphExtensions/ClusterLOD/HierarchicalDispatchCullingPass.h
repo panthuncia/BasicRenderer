@@ -1,0 +1,93 @@
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include <rhi.h>
+
+#include "Render/GraphExtensions/ClusterLOD/HierarchicalCullingPass.h"
+
+class HierarchicalDispatchCullingPass : public ComputePass {
+public:
+    HierarchicalDispatchCullingPass(
+        std::string stablePassIdentifier,
+        HierarchicalCullingPassInputs inputs,
+        std::shared_ptr<Buffer> visibleClustersBuffer,
+        std::shared_ptr<Buffer> visibleClustersCounterBuffer,
+        std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
+        std::shared_ptr<Buffer> pageJobVisibleClustersBuffer,
+        std::shared_ptr<Buffer> pageJobVisibleClustersCounterBuffer,
+        std::shared_ptr<Buffer> histogramIndirectCommand,
+        std::shared_ptr<Buffer> workGraphTelemetryBuffer,
+        std::shared_ptr<Buffer> occlusionReplayBuffer,
+        std::shared_ptr<Buffer> occlusionReplayStateBuffer,
+        std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
+        std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
+        std::shared_ptr<Buffer> viewRasterInfoBuffer,
+        std::shared_ptr<PixelBuffer> shadowDirtyHierarchyTexture = nullptr,
+        std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
+        std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer = nullptr,
+        std::shared_ptr<Buffer> swWriteBaseCounterBuffer = nullptr,
+        std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidatesBuffer = nullptr,
+        std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidateCountBuffer = nullptr,
+        std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer = nullptr,
+        std::shared_ptr<PixelBuffer> shadowPageTableTexture = nullptr,
+        std::shared_ptr<PixelBuffer> shadowPhysicalPagesTexture = nullptr);
+    ~HierarchicalDispatchCullingPass() override;
+
+    void DeclareResourceUsages(ComputePassBuilder* builder) override;
+    void Setup() override;
+    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Update(const UpdateExecutionContext& executionContext) override;
+    void Cleanup() override;
+
+private:
+    struct PureComputeDispatchCommand
+    {
+        uint32_t dispatchX;
+        uint32_t dispatchY;
+        uint32_t dispatchZ;
+    };
+
+    struct ObjectCullRecord
+    {
+        uint32_t viewDataIndex;
+        uint32_t activeDrawSetIndicesSRVIndex;
+        uint32_t activeDrawCount;
+        uint32_t dispatchGridX;
+        uint32_t dispatchGridY;
+        uint32_t dispatchGridZ;
+    };
+
+    bool SupportsPureComputeV1() const;
+
+    PipelineState m_clearPipelineState;
+    PipelineState m_pureComputeBuildDispatchArgsPipelineState;
+    PipelineState m_pureComputeObjectCullPipelineState;
+    PipelineState m_pureComputeTraversePipelineState;
+    PipelineState m_pureComputeClusterPipelineState;
+    rhi::CommandSignaturePtr m_pureComputeDispatchCommandSignature;
+    std::shared_ptr<Buffer> m_visibleClustersBuffer;
+    std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
+    std::shared_ptr<Buffer> m_occlusionReplayBuffer;
+    std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
+    std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
+    std::shared_ptr<Buffer> m_pureComputeCurrentNodeFrontierBuffer;
+    std::shared_ptr<Buffer> m_pureComputeNextNodeFrontierBuffer;
+    std::shared_ptr<Buffer> m_pureComputeClusterFrontierBuffer;
+    std::shared_ptr<Buffer> m_pureComputeCurrentNodeCounterBuffer;
+    std::shared_ptr<Buffer> m_pureComputeNextNodeCounterBuffer;
+    std::shared_ptr<Buffer> m_pureComputeClusterCounterBuffer;
+    std::shared_ptr<Buffer> m_pureComputeNodeDispatchArgsBuffer;
+    std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
+    bool m_isFirstPass = true;
+    unsigned int m_maxVisibleClusters = 0u;
+    HierarchicalCullingWorkGraphMode m_workGraphMode = HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph;
+    CLodRasterOutputKind m_rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
+    RenderPhase m_renderPhase;
+    bool m_clodOnlyWorkloads = false;
+    bool m_useShadowCascadeViews = false;
+    bool m_loggedUnsupportedConfiguration = false;
+};

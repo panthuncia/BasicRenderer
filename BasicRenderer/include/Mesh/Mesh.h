@@ -133,6 +133,18 @@ public:
 		return m_clodNodes;
 	}
 
+	const std::vector<ClusterLODNodeRangeAlloc>& GetCLodLodNodeRanges() const {
+		return m_clodLodNodeRanges;
+	}
+
+	const std::vector<uint32_t>& GetCLodLodLevelRoots() const {
+		return m_clodLodLevelRoots;
+	}
+
+	uint32_t GetCLodMaxDepth() const {
+		return m_clodMaxDepth;
+	}
+
 	const BufferView* GetCLodGroupsView() const {
 		return m_clusterLODGroupsView.get();
 	}

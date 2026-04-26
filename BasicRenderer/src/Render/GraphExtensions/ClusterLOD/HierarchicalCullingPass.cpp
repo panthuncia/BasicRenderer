@@ -1,4 +1,4 @@
-#include "Render/GraphExtensions/ClusterLOD/HierarchialCullingPass.h"
+#include "Render/GraphExtensions/ClusterLOD/HierarchicalCullingPass.h"
 
 #include <array>
 #include <cstring>
@@ -35,14 +35,14 @@ namespace {
 
 constexpr bool kDisableVirtualShadowDirtyPageCulling = false;
 
-bool UsesSWClassification(HierarchialCullingWorkGraphMode mode)
+bool UsesSWClassification(HierarchicalCullingWorkGraphMode mode)
 {
-    return mode != HierarchialCullingWorkGraphMode::HardwareOnly;
+    return mode != HierarchicalCullingWorkGraphMode::HardwareOnly;
 }
 
-bool UsesWorkGraphSWRaster(HierarchialCullingWorkGraphMode mode)
+bool UsesWorkGraphSWRaster(HierarchicalCullingWorkGraphMode mode)
 {
-    return mode == HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+    return mode == HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph;
 }
 
 bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
@@ -74,9 +74,9 @@ ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
 }
 }
 
-HierarchialCullingPass::HierarchialCullingPass(
+HierarchicalCullingPass::HierarchicalCullingPass(
     std::string stablePassIdentifier,
-    HierarchialCullingPassInputs inputs,
+    HierarchicalCullingPassInputs inputs,
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
     std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
@@ -111,7 +111,7 @@ HierarchialCullingPass::HierarchialCullingPass(
         m_clearPipelineState);
     if (!m_workGraph) {
         spdlog::error(
-            "HierarchialCullingPass::HierarchialCullingPass CreatePipelines returned null work graph this={} workGraphMode={} rasterOutputKind={}",
+            "HierarchicalCullingPass::HierarchicalCullingPass CreatePipelines returned null work graph this={} workGraphMode={} rasterOutputKind={}",
             static_cast<const void*>(this),
             static_cast<int>(m_workGraphMode),
             static_cast<int>(m_rasterOutputKind));
@@ -157,9 +157,9 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_useShadowCascadeViews = inputs.useShadowCascadeViews;
 }
 
-HierarchialCullingPass::~HierarchialCullingPass() = default;
+HierarchicalCullingPass::~HierarchicalCullingPass() = default;
 
-void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
+void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     auto queryBuilder = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
@@ -270,13 +270,13 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void HierarchialCullingPass::Setup() {
+void HierarchicalCullingPass::Setup() {
     if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
         RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
     }
 }
 
-PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContext) {
+PassReturn HierarchicalCullingPass::Execute(PassExecutionContext& executionContext) {
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
@@ -314,10 +314,6 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         commandList.Barriers(clearBarrierBatch);
     }
 
-    commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true);
-
-    BindResourceDescriptorIndices(commandList, m_pipelineResources);
-
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
     uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -339,7 +335,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     if (enableSoftwareRaster) {
         workGraphFlags |= CLOD_WG_FLAG_SW_RASTER_ENABLED;
     }
-    if (m_workGraphMode == HierarchialCullingWorkGraphMode::SoftwareRasterCompute) {
+    if (m_workGraphMode == HierarchicalCullingWorkGraphMode::SoftwareRasterCompute) {
         workGraphFlags |= CLOD_WG_FLAG_COMPUTE_SW_RASTER;
     }
     if (kDisableVirtualShadowDirtyPageCulling && UsesVirtualShadowOutput(m_rasterOutputKind)) {
@@ -419,6 +415,10 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         (m_swWriteBaseCounterBuffer ? m_swWriteBaseCounterBuffer : m_swVisibleClustersCounterBuffer)
             ->GetSRVInfo(0)
             .slot.index;
+
+    commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true);
+
+    BindResourceDescriptorIndices(commandList, m_pipelineResources);
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -555,7 +555,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     return {};
 }
 
-void HierarchialCullingPass::Update(const UpdateExecutionContext& executionContext) {
+void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
     if (!updateContext) {
         return;
@@ -757,11 +757,11 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
     }
 }
 
-bool HierarchialCullingPass::DeclaredResourcesChanged() const {
+bool HierarchicalCullingPass::DeclaredResourcesChanged() const {
     return m_declaredResourcesChanged;
 }
 
-std::shared_ptr<Resource> HierarchialCullingPass::ProvideResource(ResourceIdentifier const& key)
+std::shared_ptr<Resource> HierarchicalCullingPass::ProvideResource(ResourceIdentifier const& key)
 {
     if (key == m_workGraphComputePageJobDescriptorResourceId) {
         return m_workGraphComputePageJobDescriptorsBuffer;
@@ -770,15 +770,15 @@ std::shared_ptr<Resource> HierarchialCullingPass::ProvideResource(ResourceIdenti
     return nullptr;
 }
 
-std::vector<ResourceIdentifier> HierarchialCullingPass::GetSupportedKeys()
+std::vector<ResourceIdentifier> HierarchicalCullingPass::GetSupportedKeys()
 {
     return { ResourceIdentifier{ m_workGraphComputePageJobDescriptorResourceId } };
 }
 
-void HierarchialCullingPass::Cleanup() {
+void HierarchicalCullingPass::Cleanup() {
 }
 
-void HierarchialCullingPass::CreatePipelines(
+void HierarchicalCullingPass::CreatePipelines(
     rhi::Device device,
     rhi::PipelineLayoutHandle globalRootSignature,
     rhi::WorkGraphPtr& outGraph,
@@ -837,21 +837,21 @@ void HierarchialCullingPass::CreatePipelines(
     }};
 
     rhi::WorkGraphDesc wg{};
-    wg.programName = "HierarchialCulling";
+    wg.programName = "HierarchicalCulling";
     wg.flags = rhi::WorkGraphFlags::WorkGraphFlagsIncludeAllAvailableNodes;
     wg.globalRootSignature = globalRootSignature;
     wg.libraries = rhi::Span<rhi::ShaderLibraryDesc>(&library, 1);
     wg.entrypoints = rhi::Span<rhi::NodeIDDesc>(entrypoints.data(), static_cast<uint32_t>(entrypoints.size()));
     wg.allowStateObjectAdditions = false;
     switch (m_workGraphMode) {
-    case HierarchialCullingWorkGraphMode::HardwareOnly:
-        wg.debugName = "HierarchialCullingWG.HW";
+    case HierarchicalCullingWorkGraphMode::HardwareOnly:
+        wg.debugName = "HierarchicalCullingWG.HW";
         break;
-    case HierarchialCullingWorkGraphMode::SoftwareRasterCompute:
-        wg.debugName = "HierarchialCullingWG.ComputeSW";
+    case HierarchicalCullingWorkGraphMode::SoftwareRasterCompute:
+        wg.debugName = "HierarchicalCullingWG.ComputeSW";
         break;
-    case HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph:
-        wg.debugName = "HierarchialCullingWG.WorkGraphSW";
+    case HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph:
+        wg.debugName = "HierarchicalCullingWG.WorkGraphSW";
         break;
     }
 
@@ -862,11 +862,11 @@ void HierarchialCullingPass::CreatePipelines(
         L"shaders/ClusterLOD/clodUtil.hlsl",
         L"CreateRasterBucketsHistogramCommandCSMain",
         {},
-        "HierarchialLODCommandCreation");
+        "HierarchicalLODCommandCreation");
     outClearPipeline = PSOManager::GetInstance().MakeComputePipeline(
         globalRootSignature,
         L"shaders/ClusterLOD/clodUtil.hlsl",
         L"ClearUintStructuredBufferCSMain",
         {},
-        "HierarchialCullingClearUintPSO");
+        "HierarchicalCullingClearUintPSO");
 }

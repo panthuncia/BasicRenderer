@@ -2698,6 +2698,9 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	artifacts.prebuiltData.objectBoundingSphere = BuildObjectBoundingSphereFromRootNode(state.nodes, state.topRootNode);
 	artifacts.prebuiltData.groupChunks = std::move(state.groupChunks);
 	artifacts.prebuiltData.nodes = std::move(state.nodes);
+	artifacts.prebuiltData.lodNodeRanges = std::move(state.lodNodeRanges);
+	artifacts.prebuiltData.lodLevelRoots = std::move(state.lodLevelRoots);
+	artifacts.prebuiltData.maxDepth = state.maxDepth;
 	artifacts.prebuiltData.voxelGroupMapping = std::move(state.voxelGroupMapping);
 
 	artifacts.cacheBuildData.groupPageBlobs = std::move(state.groupPageBlobs);
