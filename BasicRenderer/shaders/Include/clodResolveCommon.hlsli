@@ -68,6 +68,33 @@ struct ClodGBufferDebugSample
     MaterialInputs materialInputs;
 };
 
+struct ClodResolvedGBufferSample
+{
+    uint meshletIndex;
+    float3 normalOS;
+    float2 motionVector;
+    MaterialInputs materialInputs;
+};
+
+struct ClodResolvedCommonSample
+{
+    float linearDepth;
+    uint clusterIndex;
+    uint meshletTriangleIndex;
+    uint meshletIndex;
+    float3 positionWS;
+    float3 positionVS;
+    float3 normalWSBase;
+    float3 normalOS;
+    float3 vertexColor;
+    float3 dpdxWS;
+    float3 dpdyWS;
+    float2 motionVector;
+    MaterialInfo materialInfo;
+    uint materialFlags;
+    MaterialInputs materialInputs;
+};
+
 BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
 {
     BarycentricDeriv ret = (BarycentricDeriv)0;
@@ -845,9 +872,9 @@ BarycentricDeriv ReyesComposeSourceBarycentrics(BarycentricDeriv patchBary, floa
     return sourceBary;
 }
 
-bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodResolvedSample sample)
+bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodResolvedCommonSample sample)
 {
-    sample = (ClodResolvedSample)0;
+    sample = (ClodResolvedCommonSample)0;
 
     if (vis == 0xFFFFFFFFFFFFFFFF)
     {
@@ -1100,7 +1127,6 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
 
     float3 positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
 
-    sample.pixelCoords = pixel;
     sample.linearDepth = depth;
     sample.clusterIndex = clusterIndex;
     sample.meshletTriangleIndex = meshletTriangleIndex;
@@ -1128,6 +1154,52 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     return true;
 }
 
+bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodResolvedSample sample)
+{
+    sample = (ClodResolvedSample)0;
+
+    ClodResolvedCommonSample resolvedSample;
+    if (!ResolveClodCommonSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
+    {
+        return false;
+    }
+
+    sample.pixelCoords = pixel;
+    sample.linearDepth = resolvedSample.linearDepth;
+    sample.clusterIndex = resolvedSample.clusterIndex;
+    sample.meshletTriangleIndex = resolvedSample.meshletTriangleIndex;
+    sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.positionWS = resolvedSample.positionWS;
+    sample.positionVS = resolvedSample.positionVS;
+    sample.normalWSBase = resolvedSample.normalWSBase;
+    sample.normalOS = resolvedSample.normalOS;
+    sample.vertexColor = resolvedSample.vertexColor;
+    sample.dpdxWS = resolvedSample.dpdxWS;
+    sample.dpdyWS = resolvedSample.dpdyWS;
+    sample.motionVector = resolvedSample.motionVector;
+    sample.materialInfo = resolvedSample.materialInfo;
+    sample.materialFlags = resolvedSample.materialFlags;
+    sample.materialInputs = resolvedSample.materialInputs;
+    return true;
+}
+
+bool ResolveClodGBufferSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodResolvedGBufferSample sample)
+{
+    sample = (ClodResolvedGBufferSample)0;
+
+    ClodResolvedCommonSample resolvedSample;
+    if (!ResolveClodCommonSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
+    {
+        return false;
+    }
+
+    sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.normalOS = resolvedSample.normalOS;
+    sample.motionVector = resolvedSample.motionVector;
+    sample.materialInputs = resolvedSample.materialInputs;
+    return true;
+}
+
 bool ResolveClodShadingSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodShadingSample sample)
 {
     ClodResolvedSample resolvedSample;
@@ -1152,8 +1224,8 @@ bool ResolveClodShadingSampleFromVisKey(uint64_t vis, uint2 pixel, out ClodShadi
 
 bool ResolveClodGBufferColorSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodGBufferColorSample sample)
 {
-    ClodResolvedSample resolvedSample;
-    if (!ResolveClodSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
+    ClodResolvedGBufferSample resolvedSample;
+    if (!ResolveClodGBufferSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
     {
         sample = (ClodGBufferColorSample)0;
         return false;
@@ -1171,8 +1243,8 @@ bool ResolveClodGBufferColorSampleFromVisKey(uint64_t vis, uint2 pixel, out Clod
 
 bool ResolveClodGBufferDebugSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodGBufferDebugSample sample)
 {
-    ClodResolvedSample resolvedSample;
-    if (!ResolveClodSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
+    ClodResolvedGBufferSample resolvedSample;
+    if (!ResolveClodGBufferSampleFromVisKeyWithFace(vis, pixel, isBackface, resolvedSample))
     {
         sample = (ClodGBufferDebugSample)0;
         return false;
