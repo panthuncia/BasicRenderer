@@ -6,8 +6,9 @@ void BuildPureComputeDispatchArgsCS()
 {
     StructuredBuffer<uint> counterBuffer = ResourceDescriptorHeap[CLOD_PC_DISPATCH_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint3> dispatchArgs = ResourceDescriptorHeap[CLOD_PC_DISPATCH_ARGS_DESCRIPTOR_INDEX];
-    const uint count = counterBuffer[0];
-    const uint groups = (count + max(1u, CLOD_PC_DISPATCH_THREADS_PER_GROUP) - 1u) / max(1u, CLOD_PC_DISPATCH_THREADS_PER_GROUP);
+    const uint count = min(counterBuffer[0], CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint threadsPerGroup = max(1u, CLOD_PC_DISPATCH_THREADS_PER_GROUP);
+    const uint groups = (count == 0u) ? 1u : ((count + threadsPerGroup - 1u) / threadsPerGroup);
     dispatchArgs[0] = uint3(groups, 1u, 1u);
 }
 
@@ -88,6 +89,10 @@ void PureComputeObjectCullCS(const uint3 vDispatchThreadID : SV_DispatchThreadID
 
     uint outputIndex = 0u;
     InterlockedAdd(outCounter[0], 1u, outputIndex);
+    if (outputIndex >= CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+        return;
+    }
+
     outFrontier[outputIndex].viewId = CLOD_PC_OBJECT_CULL_VIEW_DATA_INDEX;
     outFrontier[outputIndex].instanceIndex = perMeshInstanceBufferIndex;
     outFrontier[outputIndex].nodeIdPacked = PackTraverseNodeId(clodMeshMetadata.rootNode, CLOD_RECORD_SOURCE_PASS1, 1u);
@@ -237,6 +242,10 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         for (uint meshletOffset = 0u; meshletOffset < seg.meshletCount; ++meshletOffset) {
             uint outputIndex = 0u;
             InterlockedAdd(clusterCounter[0], 1u, outputIndex);
+            if (outputIndex >= CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                continue;
+            }
+
             MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
             outRecord.instanceIndex = rec.instanceIndex;
             outRecord.viewId = rec.viewId;
@@ -338,6 +347,10 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
 
         uint outputIndex = 0u;
         InterlockedAdd(nextCounter[0], 1u, outputIndex);
+        if (outputIndex >= CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+            continue;
+        }
+
         TraverseNodeRecord childRecord = (TraverseNodeRecord)0;
         childRecord.instanceIndex = rec.instanceIndex;
         childRecord.viewId = rec.viewId;

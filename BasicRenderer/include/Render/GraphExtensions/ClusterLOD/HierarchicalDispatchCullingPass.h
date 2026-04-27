@@ -63,6 +63,7 @@ private:
     bool SupportsPureComputeV1() const;
 
     PipelineState m_clearPipelineState;
+    PipelineState m_createCommandPipelineState;
     PipelineState m_pureComputeBuildDispatchArgsPipelineState;
     PipelineState m_pureComputeObjectCullPipelineState;
     PipelineState m_pureComputeTraversePipelineState;
@@ -70,10 +71,13 @@ private:
     rhi::CommandSignaturePtr m_pureComputeDispatchCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
     std::shared_ptr<Buffer> m_occlusionReplayBuffer;
     std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
+    std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
+    std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<Buffer> m_pureComputeCurrentNodeFrontierBuffer;
     std::shared_ptr<Buffer> m_pureComputeNextNodeFrontierBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterFrontierBuffer;
@@ -82,6 +86,7 @@ private:
     std::shared_ptr<Buffer> m_pureComputeClusterCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeNodeDispatchArgsBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
+    std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     bool m_isFirstPass = true;
     unsigned int m_maxVisibleClusters = 0u;
     HierarchicalCullingWorkGraphMode m_workGraphMode = HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph;
@@ -89,5 +94,6 @@ private:
     RenderPhase m_renderPhase;
     bool m_clodOnlyWorkloads = false;
     bool m_useShadowCascadeViews = false;
+    uint32_t m_activeTraversalDepth = 0u;
     bool m_loggedUnsupportedConfiguration = false;
 };

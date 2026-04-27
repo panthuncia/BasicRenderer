@@ -7,6 +7,8 @@
 #include <spdlog/spdlog.h>
 
 #include "BuiltinResources.h"
+#include "Managers/MaterialManager.h"
+#include "Managers/MeshManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -20,8 +22,11 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Resources/components.h"
 #include "Resources/Resolvers/ECSResourceResolver.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "ShaderBuffers.h"
+#include <rhi_dx12_casting.h>
 #include "../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodPureComputeCullingRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
 
@@ -87,20 +92,20 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
     std::shared_ptr<PixelBuffer> shadowPhysicalPagesTexture)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer))
+    , m_histogramIndirectCommand(std::move(histogramIndirectCommand))
     , m_workGraphTelemetryBuffer(std::move(workGraphTelemetryBuffer))
     , m_occlusionReplayBuffer(std::move(occlusionReplayBuffer))
     , m_occlusionReplayStateBuffer(std::move(occlusionReplayStateBuffer))
+    , m_occlusionNodeGpuInputsBuffer(std::move(occlusionNodeGpuInputsBuffer))
     , m_viewDepthSrvIndicesBuffer(std::move(viewDepthSrvIndicesBuffer))
+    , m_viewRasterInfoBuffer(std::move(viewRasterInfoBuffer))
+    , m_slabResourceGroup(std::move(slabResourceGroup))
 {
     (void)stablePassIdentifier;
     (void)swVisibleClustersCounterBuffer;
     (void)pageJobVisibleClustersBuffer;
     (void)pageJobVisibleClustersCounterBuffer;
-    (void)histogramIndirectCommand;
-    (void)occlusionNodeGpuInputsBuffer;
-    (void)viewRasterInfoBuffer;
     (void)shadowDirtyHierarchyTexture;
-    (void)slabResourceGroup;
     (void)phase1VisibleClustersCounterBuffer;
     (void)swWriteBaseCounterBuffer;
     (void)shadowPredictiveInvalidationCandidatesBuffer;
@@ -150,6 +155,12 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
         L"ClearUintStructuredBufferCSMain",
         {},
         "HierarchicalDispatchCulling.ClearUint");
+    m_createCommandPipelineState = psoManager.MakeComputePipeline(
+        computeLayout,
+        L"shaders/ClusterLOD/clodUtil.hlsl",
+        L"CreateRasterBucketsHistogramCommandCSMain",
+        {},
+        "HierarchicalDispatchCulling.CreateRasterBucketsHistogramCommand");
     m_pureComputeBuildDispatchArgsPipelineState = psoManager.MakeComputePipeline(
         computeLayout,
         L"shaders/ClusterLOD/computeCulling.hlsl",
@@ -203,9 +214,11 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
     builder->WithUnorderedAccess(
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
+            m_histogramIndirectCommand,
             m_workGraphTelemetryBuffer,
             m_occlusionReplayBuffer,
             m_occlusionReplayStateBuffer,
+            m_occlusionNodeGpuInputsBuffer,
             m_pureComputeCurrentNodeFrontierBuffer,
             m_pureComputeNextNodeFrontierBuffer,
             m_pureComputeClusterFrontierBuffer,
@@ -214,6 +227,8 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
             m_pureComputeClusterCounterBuffer,
             m_pureComputeNodeDispatchArgsBuffer,
             m_pureComputeClusterDispatchArgsBuffer,
+            Builtin::CLod::StreamingLoadRequests,
+            Builtin::CLod::StreamingLoadCounter,
             Builtin::CLod::StreamingTouchedGroupsCounter,
             Builtin::CLod::StreamingTouchedGroups)
         .WithShaderResource(
@@ -230,9 +245,19 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::CameraBuffer,
-            Builtin::PerMeshBuffer)
+            Builtin::PerMeshBuffer,
+            Builtin::PerMaterialDataBuffer,
+            Builtin::Material::TextureGroup,
+            Builtin::SkeletonResources::InverseBindMatrices,
+            Builtin::SkeletonResources::BoneTransforms,
+            Builtin::SkeletonResources::SkinningInstanceInfo,
+            m_viewRasterInfoBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery))
         .WithIndirectArguments(m_pureComputeNodeDispatchArgsBuffer, m_pureComputeClusterDispatchArgsBuffer);
+
+    if (m_slabResourceGroup) {
+        builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
+    }
 
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
         builder->WithUnorderedAccess(m_viewDepthSrvIndicesBuffer)
@@ -268,11 +293,11 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = 0u;
-    sharedRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = 0u;
     sharedRootConstants[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = 0u;
+    sharedRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] =
         UsesPerViewDepthMapOcclusion(m_rasterOutputKind)
             ? m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index
@@ -422,7 +447,8 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     auto nextNodeFrontier = m_pureComputeNextNodeFrontierBuffer;
     auto nextNodeCounter = m_pureComputeNextNodeCounterBuffer;
 
-    for (uint32_t level = 0; level < kPureComputeMaxTraversalLevels; ++level) {
+    const uint32_t traversalLevelCount = std::min(m_activeTraversalDepth, kPureComputeMaxTraversalLevels);
+    for (uint32_t level = 0; level < traversalLevelCount; ++level) {
         clearCounter(nextNodeCounter);
         clearCounter(m_pureComputeClusterCounterBuffer);
         uavBarrier({ nextNodeCounter, m_pureComputeClusterCounterBuffer });
@@ -467,11 +493,60 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
         buildDispatchArgs(m_pureComputeClusterCounterBuffer, m_pureComputeClusterDispatchArgsBuffer, kPureComputeClusterThreadsPerGroup);
         uavBarrier({ m_pureComputeClusterDispatchArgsBuffer });
 
+        BindResourceDescriptorIndices(commandList, m_pureComputeClusterPipelineState.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_pureComputeClusterPipelineState.GetAPIPipelineState().GetHandle());
+        uint32_t clusterRootConstants[NumMiscUintRootConstants] = {};
+        std::copy(std::begin(sharedRootConstants), std::end(sharedRootConstants), std::begin(clusterRootConstants));
+        clusterRootConstants[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX] = m_pureComputeClusterFrontierBuffer->GetSRVInfo(0).slot.index;
+        clusterRootConstants[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX] = m_pureComputeClusterCounterBuffer->GetSRVInfo(0).slot.index;
+        commandList.PushConstants(
+            rhi::ShaderStage::Compute,
+            0,
+            MiscUintRootSignatureIndex,
+            0,
+            NumMiscUintRootConstants,
+            clusterRootConstants);
+        commandList.ExecuteIndirect(
+            m_pureComputeDispatchCommandSignature->GetHandle(),
+            m_pureComputeClusterDispatchArgsBuffer->GetAPIResource().GetHandle(),
+            0,
+            {},
+            0,
+            1);
+
+        uavBarrier({
+            m_visibleClustersBuffer,
+            m_visibleClustersCounterBuffer,
+            m_pureComputeClusterFrontierBuffer,
+            m_occlusionReplayBuffer,
+            m_occlusionReplayStateBuffer,
+        });
+
         std::swap(currentNodeFrontier, nextNodeFrontier);
         std::swap(currentNodeCounter, nextNodeCounter);
     }
 
     uavBarrier({ m_visibleClustersCounterBuffer, m_occlusionReplayStateBuffer, m_occlusionReplayBuffer });
+
+    BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
+    commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
+
+    uint32_t createRootConstants[NumMiscUintRootConstants] = {};
+    std::copy(std::begin(sharedRootConstants), std::end(sharedRootConstants), std::begin(createRootConstants));
+    createRootConstants[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    createRootConstants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    createRootConstants[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index;
+    createRootConstants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    createRootConstants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        createRootConstants);
+    commandList.Dispatch(1u, 1u, 1u);
+
     return {};
 }
 
@@ -483,6 +558,9 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     }
 
     auto& context = *updateContext;
+    m_activeTraversalDepth = context.meshManager != nullptr
+        ? context.meshManager->GetCLodMaxTraversalDepth()
+        : 0u;
     uint32_t zero = 0u;
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
 
@@ -499,6 +577,41 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pureComputeNextNodeCounterBuffer), 0);
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pureComputeClusterCounterBuffer), 0);
 
+    auto numViews = context.viewManager->GetCameraBufferSize();
+    std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
+    context.viewManager->ForEachView([&](uint64_t viewID) {
+        auto* viewInfo = context.viewManager->Get(viewID);
+        if (!viewInfo) {
+            return;
+        }
+
+        const auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+        if (cameraIndex >= viewRasterInfo.size()) {
+            return;
+        }
+
+        CLodViewRasterInfo info{};
+        info.scissorMinX = 0;
+        info.scissorMinY = 0;
+
+        if (viewInfo->gpu.visibilityBuffer != nullptr) {
+            info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
+            info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
+            info.viewportScaleX = 1.0f;
+            info.viewportScaleY = 1.0f;
+        }
+
+        viewRasterInfo[cameraIndex] = info;
+    });
+
+    m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
+    BUFFER_UPLOAD(
+        viewRasterInfo.data(),
+        static_cast<uint32_t>(viewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
+        rg::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
+        0);
+
     if (!m_isFirstPass) {
         return;
     }
@@ -513,6 +626,47 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
         &replayState,
         sizeof(CLodReplayBufferState),
         rg::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
+        0);
+
+    CLodNodeGpuInput nodeGpuInputs[3] = {};
+    CLodMultiNodeGpuInput multiNodeGpuInput{};
+    multiNodeGpuInput.numNodeInputs = 2;
+    multiNodeGpuInput.pad0 = 0;
+    multiNodeGpuInput.nodeInputStride = sizeof(CLodNodeGpuInput);
+
+    if (!m_occlusionNodeGpuInputsBuffer->IsMaterialized()) {
+        m_occlusionNodeGpuInputsBuffer->Materialize();
+    }
+    if (!m_occlusionReplayBuffer->IsMaterialized()) {
+        m_occlusionReplayBuffer->Materialize();
+    }
+
+    if (ID3D12Resource* nodeInputResource = rhi::dx12::get_resource(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
+        const uint64_t nodeInputBufferAddress = nodeInputResource->GetGPUVirtualAddress();
+        multiNodeGpuInput.nodeInputsAddress = nodeInputBufferAddress + sizeof(CLodNodeGpuInput);
+    }
+
+    if (ID3D12Resource* replayResource = rhi::dx12::get_resource(m_occlusionReplayBuffer->GetAPIResource())) {
+        const uint64_t replayAddress = replayResource->GetGPUVirtualAddress();
+
+        nodeGpuInputs[1].entrypointIndex = 1;
+        nodeGpuInputs[1].numRecords = 0;
+        nodeGpuInputs[1].recordsAddress = replayAddress;
+        nodeGpuInputs[1].recordStride = CLodNodeReplayStrideBytes;
+
+        nodeGpuInputs[2].entrypointIndex = 2;
+        nodeGpuInputs[2].numRecords = 0;
+        nodeGpuInputs[2].recordsAddress = replayAddress + CLodReplayMeshletRegionOffset;
+        nodeGpuInputs[2].recordStride = CLodMeshletReplayStrideBytes;
+    }
+
+    static_assert(sizeof(CLodMultiNodeGpuInput) == sizeof(CLodNodeGpuInput));
+    std::memcpy(&nodeGpuInputs[0], &multiNodeGpuInput, sizeof(CLodMultiNodeGpuInput));
+
+    BUFFER_UPLOAD(
+        nodeGpuInputs,
+        sizeof(nodeGpuInputs),
+        rg::runtime::UploadTarget::FromShared(m_occlusionNodeGpuInputsBuffer),
         0);
 
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {

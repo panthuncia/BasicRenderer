@@ -2340,7 +2340,7 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
         // filenames/lines without relying solely on external PDB recovery.
         args.push_back(L"-Qembed_debug");
         args.push_back(L"-Qsource_in_debug_module");
-        //args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
+        args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
     }
 
     for (auto& def : opts.defines) { 

@@ -683,6 +683,27 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	}
 }
 
+uint32_t MeshManager::GetCLodMaxTraversalDepth() const
+{
+	uint32_t maxTraversalDepth = 0u;
+	std::unordered_set<const CLodSharedStreamingState*> visitedSharedStates;
+	visitedSharedStates.reserve(m_clodStreamingStateByInstanceIndex.size());
+
+	for (const auto& [_, state] : m_clodStreamingStateByInstanceIndex) {
+		const auto* sharedState = state.sharedMeshState.get();
+		if (sharedState == nullptr || sharedState->mesh == nullptr) {
+			continue;
+		}
+		if (!visitedSharedStates.insert(sharedState).second) {
+			continue;
+		}
+
+		maxTraversalDepth = std::max(maxTraversalDepth, sharedState->mesh->GetCLodMaxTraversalDepth());
+	}
+
+	return maxTraversalDepth;
+}
+
 void MeshManager::ProcessCLodDiskStreamingIO(
 	uint32_t maxCompletedRequests) {
 	// Dispatch pending IO requests across the task scheduler's IO workers.

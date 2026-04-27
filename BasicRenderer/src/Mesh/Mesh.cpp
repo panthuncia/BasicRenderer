@@ -10,6 +10,7 @@
 #include <bit>
 #include <cmath>
 #include <array>
+#include <functional>
 #include <cstring>
 #include <mutex>
 #include <cassert>
@@ -85,6 +86,34 @@ namespace
 		XMStoreFloat3(reinterpret_cast<DirectX::XMFLOAT3*>(&merged.sphere), mergedCenter);
 		merged.sphere.w = newRadius;
 		return merged;
+	}
+
+	uint32_t ComputeCLodTraversalDepth(const std::vector<ClusterLODNode>& nodes, uint32_t rootNodeIndex)
+	{
+		if (rootNodeIndex >= nodes.size()) {
+			return 0u;
+		}
+
+		std::function<uint32_t(uint32_t)> computeNodeDepth = [&](uint32_t nodeIndex) -> uint32_t {
+			if (nodeIndex >= nodes.size()) {
+				return 0u;
+			}
+
+			const ClusterLODNode& node = nodes[nodeIndex];
+			if (node.range.isGroup != 0u) {
+				return 1u;
+			}
+
+			const uint32_t childCount = node.range.countMinusOne + 1u;
+			uint32_t maxChildDepth = 0u;
+			for (uint32_t childIndex = 0; childIndex < childCount; ++childIndex) {
+				maxChildDepth = std::max(maxChildDepth, computeNodeDepth(node.range.indexOrOffset + childIndex));
+			}
+
+			return 1u + maxChildDepth;
+		};
+
+		return computeNodeDepth(rootNodeIndex);
 	}
 
 	void AppendClipKeyframeTimes(const std::shared_ptr<AnimationClip>& clip, std::vector<float>& sampleTimes)
@@ -396,6 +425,7 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_voxelGroupMapping = data.voxelGroupMapping;
 
 	m_clodMaxDepth = data.maxDepth;
+	m_clodMaxTraversalDepth = data.maxTraversalDepth;
 	if (m_clodLodLevelRoots.empty()) {
 		m_clodMaxDepth = 0;
 		for (const auto& group : m_clodGroups) {
@@ -408,6 +438,9 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	}
 	if (m_clodLodNodeRanges.empty()) {
 		m_clodLodNodeRanges.resize(m_clodLodLevelRoots.size());
+	}
+	if (m_clodMaxTraversalDepth == 0u && !m_clodNodes.empty()) {
+		m_clodMaxTraversalDepth = ComputeCLodTraversalDepth(m_clodNodes, m_clodTopRootNode);
 	}
 
 	m_perMeshBufferData.numVertices = 0; // TODO: Remove, clod doesn't need it
@@ -453,6 +486,7 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.lodNodeRanges = m_clodLodNodeRanges;
 	out.lodLevelRoots = m_clodLodLevelRoots;
 	out.maxDepth = m_clodMaxDepth;
+	out.maxTraversalDepth = m_clodMaxTraversalDepth;
 	out.voxelGroupMapping = m_voxelGroupMapping;
 	return out;
 }

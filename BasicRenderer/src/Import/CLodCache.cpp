@@ -194,6 +194,7 @@ namespace CLodCache {
 			WriteVectorPod(out, prebuiltData.lodNodeRanges);
 			WriteVectorPod(out, prebuiltData.lodLevelRoots);
 			WritePod(out, prebuiltData.maxDepth);
+			WritePod(out, prebuiltData.maxTraversalDepth);
 
 			// --- Voxel group mapping ---
 			const auto& vgm = prebuiltData.voxelGroupMapping;
@@ -243,6 +244,7 @@ namespace CLodCache {
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.lodNodeRanges)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.lodLevelRoots)) return false;
 			if (!ReadPod(blob, offset, out.prebuiltData.maxDepth)) return false;
+			if (!ReadPod(blob, offset, out.prebuiltData.maxTraversalDepth)) return false;
 
 			// --- Voxel group mapping ---
 			uint32_t payloadCount = 0;
