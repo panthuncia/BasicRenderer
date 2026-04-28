@@ -2315,7 +2315,7 @@ void Renderer::CreateRenderGraph() {
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        uint maxClusters = 1000000; // TODO: make this configurable based on scene content   
+        uint maxClusters = 1500000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
             std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");
