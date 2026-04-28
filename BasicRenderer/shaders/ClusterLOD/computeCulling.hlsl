@@ -248,6 +248,11 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
     const float nodeRadiusWorld = nodeCullRadiusObjectSpace * cullUniformScale;
     const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, cullCamera);
 
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    const bool objectInvalidatedThisFrame = CLodVirtualShadowInstanceInvalidatedThisFrame(rec.instanceIndex);
+    const bool dirtyPageCullingEnabled = CLodWorkGraphShadowDirtyPageCullingEnabled() && !objectInvalidatedThisFrame;
+#endif
+
     if (nodeCulled) {
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
         return;
@@ -270,6 +275,16 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
             return;
         }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (dirtyPageCullingEnabled) {
+            const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+            if (!CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId)) {
+                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+                return;
+            }
+        }
+#endif
 
         StructuredBuffer<ClusterLODGroupSegment> segments =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
@@ -477,6 +492,16 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         return;
     }
 
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    if (dirtyPageCullingEnabled) {
+        const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+        if (!CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId)) {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+            return;
+        }
+    }
+#endif
+
     bool occlusionCulled = false;
     if (CLodWorkGraphOcclusionEnabled() && (!cullCamera.isOrtho || CLOD_VSM_OCCLUSION_CULLING)) {
         StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
@@ -545,6 +570,16 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
                 continue;
             }
         }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (dirtyPageCullingEnabled) {
+            const float3 childCullCenterWorld = mul(float4(childCullCenterOS, 1.0f), objectModelMatrix).xyz;
+            if (!CLodVirtualShadowBoundsTouchDirtyPages(childCullCenterWorld, childRadiusWorld, rec.viewId)) {
+                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+                continue;
+            }
+        }
+#endif
 
         uint outputIndex = 0u;
         InterlockedAdd(nextCounter[0], 1u, outputIndex);
