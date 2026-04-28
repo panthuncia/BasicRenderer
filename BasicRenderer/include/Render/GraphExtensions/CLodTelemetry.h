@@ -51,8 +51,6 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     Phase2ReplayTraverseRecordsConsumed,
     Phase2ReplayClusterBucketRecordsConsumed,
 
-    TraverseNodesSegmentRecordsEmitted,
-
     SegmentEvaluateThreads,
     SegmentEvaluateSegmentRecords,
     SegmentEvaluateEmitBucketThreads,

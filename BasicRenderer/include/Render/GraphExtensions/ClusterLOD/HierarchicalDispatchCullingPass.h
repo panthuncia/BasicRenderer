@@ -6,9 +6,10 @@
 
 #include <rhi.h>
 
+#include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/HierarchicalCullingPass.h"
 
-class HierarchicalDispatchCullingPass : public ComputePass {
+class HierarchicalDispatchCullingPass : public ComputePass, public IDynamicDeclaredResources {
 public:
     HierarchicalDispatchCullingPass(
         std::string stablePassIdentifier,
@@ -40,7 +41,10 @@ public:
     void Setup() override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
     void Update(const UpdateExecutionContext& executionContext) override;
+    bool DeclaredResourcesChanged() const override;
     void Cleanup() override;
+    std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+    std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
     struct PureComputeDispatchCommand
@@ -65,12 +69,19 @@ private:
     PipelineState m_clearPipelineState;
     PipelineState m_createCommandPipelineState;
     PipelineState m_pureComputeBuildDispatchArgsPipelineState;
+    PipelineState m_pureComputeBuildReplayDispatchArgsPipelineState;
     PipelineState m_pureComputeObjectCullPipelineState;
+    PipelineState m_pureComputeReplayNodesPipelineState;
+    PipelineState m_pureComputeReplayClustersPipelineState;
     PipelineState m_pureComputeTraversePipelineState;
     PipelineState m_pureComputeClusterPipelineState;
     rhi::CommandSignaturePtr m_pureComputeDispatchCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_pageJobVisibleClustersBuffer;
+    std::shared_ptr<Buffer> m_pageJobVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_workGraphComputePageJobDescriptorsBuffer;
+    std::string m_workGraphComputePageJobDescriptorResourceId;
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
     std::shared_ptr<Buffer> m_occlusionReplayBuffer;
@@ -78,6 +89,13 @@ private:
     std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
+    std::shared_ptr<Buffer> m_phase1VisibleClustersCounterBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowDirtyHierarchyTexture;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidatesBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidateCountBuffer;
+    std::shared_ptr<Buffer> m_shadowInvalidatedInstancesBitsetBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowPageTableTexture;
+    std::shared_ptr<PixelBuffer> m_shadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_pureComputeCurrentNodeFrontierBuffer;
     std::shared_ptr<Buffer> m_pureComputeNextNodeFrontierBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterFrontierBuffer;
@@ -88,6 +106,7 @@ private:
     std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     bool m_isFirstPass = true;
+    bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;
     HierarchicalCullingWorkGraphMode m_workGraphMode = HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph;
     CLodRasterOutputKind m_rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;

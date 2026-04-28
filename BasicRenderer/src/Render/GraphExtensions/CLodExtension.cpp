@@ -486,10 +486,12 @@ bool UseHierarchicalDispatchCullingPass(
     HierarchicalCullingWorkGraphMode workGraphMode,
     CLodRasterOutputKind rasterOutputKind)
 {
+    (void)isFirstPass;
     return backend == HierarchicalCullingBackend::PureCompute
-        && isFirstPass
         && workGraphMode == HierarchicalCullingWorkGraphMode::HardwareOnly
-        && rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer;
+        && (rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer
+            || rasterOutputKind == CLodRasterOutputKind::DeepVisibility
+            || rasterOutputKind == CLodRasterOutputKind::VirtualShadow);
 }
 
 std::shared_ptr<ResourceGroup> GetSlabResourceGroup()

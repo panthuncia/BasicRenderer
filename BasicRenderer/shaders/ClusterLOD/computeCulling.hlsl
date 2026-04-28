@@ -12,6 +12,78 @@ void BuildPureComputeDispatchArgsCS()
     dispatchArgs[0] = uint3(groups, 1u, 1u);
 }
 
+[numthreads(1, 1, 1)]
+void BuildPureComputeReplayDispatchArgsCS()
+{
+    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint3> dispatchArgs = ResourceDescriptorHeap[CLOD_PC_DISPATCH_ARGS_DESCRIPTOR_INDEX];
+    const uint rawCount = (CLOD_PC_REPLAY_SOURCE_INDEX == 0u)
+        ? replayState[0].nodeWriteCount
+        : replayState[0].meshletWriteCount;
+    const uint count = min(rawCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint threadsPerGroup = max(1u, CLOD_PC_DISPATCH_THREADS_PER_GROUP);
+    const uint groups = (count == 0u) ? 1u : ((count + threadsPerGroup - 1u) / threadsPerGroup);
+    dispatchArgs[0] = uint3(groups, 1u, 1u);
+}
+
+[numthreads(64, 1, 1)]
+void SeedPureComputeReplayNodesCS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<TraverseNodeRecord> outFrontier = ResourceDescriptorHeap[CLOD_PC_FRONTIER_OUTPUT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> outCounter = ResourceDescriptorHeap[CLOD_PC_FRONTIER_OUTPUT_COUNT_DESCRIPTOR_INDEX];
+
+    const uint count = min(replayState[0].nodeWriteCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint index = dispatchThreadID.x;
+    if (index == 0u) {
+        outCounter[0] = count;
+    }
+    if (index >= count) {
+        return;
+    }
+
+    const uint byteOffset = index * CLOD_NODE_REPLAY_STRIDE_BYTES;
+    const uint2 header = replayBuffer.Load2(byteOffset);
+
+    TraverseNodeRecord record = (TraverseNodeRecord)0;
+    record.instanceIndex = header.x;
+    record.nodeIdPacked = header.y;
+    record.viewId = replayBuffer.Load(byteOffset + 8u);
+    outFrontier[index] = record;
+}
+
+[numthreads(32, 1, 1)]
+void SeedPureComputeReplayClustersCS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<MeshletBucketRecord> outFrontier = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> outCounter = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_COUNT_DESCRIPTOR_INDEX];
+
+    const uint count = min(replayState[0].meshletWriteCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint index = dispatchThreadID.x;
+    if (index == 0u) {
+        outCounter[0] = count;
+    }
+    if (index >= count) {
+        return;
+    }
+
+    const uint byteOffset = CLOD_REPLAY_MESHLET_REGION_OFFSET + index * CLOD_MESHLET_REPLAY_STRIDE_BYTES;
+    const uint4 head = replayBuffer.Load4(byteOffset);
+    const uint2 tail = replayBuffer.Load2(byteOffset + 16u);
+
+    MeshletBucketRecord record = (MeshletBucketRecord)0;
+    record.instanceIndex = head.x;
+    record.viewId = head.y;
+    record.groupIdPacked = head.z;
+    record.meshletIndexAndCount = head.w;
+    record.pageSlabDescriptorIndex = tail.x;
+    record.pageSlabByteOffset = tail.y;
+    outFrontier[index] = record;
+}
+
 [numthreads(64, 1, 1)]
 void PureComputeObjectCullCS(const uint3 vDispatchThreadID : SV_DispatchThreadID)
 {
@@ -238,24 +310,153 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + grp.pageMapBase, seg.pageIndex);
         const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
 
+        uint tail = seg.meshletCount;
+        uint budget = MAX_RECORDS_PER_SEGMENT;
+        uint n64 = min(tail / 64u, budget);
+        tail -= n64 * 64u;
+        budget -= n64;
+
+        uint n32 = 0u;
+        uint n16 = 0u;
+        uint n8 = 0u;
+        uint n4 = 0u;
+        uint n2 = 0u;
+        uint n1 = 0u;
+
+        if (tail >= 32u && budget >= 2u) { n32 = 1u; tail -= 32u; budget--; }
+        if (tail >= 16u && budget >= 2u) { n16 = 1u; tail -= 16u; budget--; }
+        if (tail >= 8u  && budget >= 2u) { n8  = 1u; tail -= 8u;  budget--; }
+        if (tail >= 4u  && budget >= 2u) { n4  = 1u; tail -= 4u;  budget--; }
+        if (tail >= 2u  && budget >= 2u) { n2  = 1u; tail -= 2u;  budget--; }
+
+        if      (tail > 32u) { n64++; }
+        else if (tail > 16u) { n32++; }
+        else if (tail > 8u)  { n16++; }
+        else if (tail > 4u)  { n8++;  }
+        else if (tail > 2u)  { n4++;  }
+        else if (tail > 1u)  { n2++;  }
+        else if (tail > 0u)  { n1 = 1u; }
+
+        uint meshletBase = seg.firstMeshletInPage;
+
         [loop]
-        for (uint meshletOffset = 0u; meshletOffset < seg.meshletCount; ++meshletOffset) {
+        for (uint bucketIndex64 = 0u; bucketIndex64 < n64; ++bucketIndex64) {
             uint outputIndex = 0u;
             InterlockedAdd(clusterCounter[0], 1u, outputIndex);
-            if (outputIndex >= CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
-                continue;
+            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
+                outRecord.instanceIndex = rec.instanceIndex;
+                outRecord.viewId = rec.viewId;
+                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 64u);
+                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                clusterFrontier[outputIndex] = outRecord;
             }
-
-            MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
-            outRecord.instanceIndex = rec.instanceIndex;
-            outRecord.viewId = rec.viewId;
-            outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-            outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(seg.firstMeshletInPage + meshletOffset, 1u);
-            outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-            outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
-            clusterFrontier[outputIndex] = outRecord;
+            meshletBase += 64u;
         }
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_SEGMENT_RECORDS, 1);
+
+        [loop]
+        for (uint bucketIndex32 = 0u; bucketIndex32 < n32; ++bucketIndex32) {
+            uint outputIndex = 0u;
+            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
+            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
+                outRecord.instanceIndex = rec.instanceIndex;
+                outRecord.viewId = rec.viewId;
+                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 32u);
+                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                clusterFrontier[outputIndex] = outRecord;
+            }
+            meshletBase += 32u;
+        }
+
+        [loop]
+        for (uint bucketIndex16 = 0u; bucketIndex16 < n16; ++bucketIndex16) {
+            uint outputIndex = 0u;
+            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
+            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
+                outRecord.instanceIndex = rec.instanceIndex;
+                outRecord.viewId = rec.viewId;
+                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 16u);
+                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                clusterFrontier[outputIndex] = outRecord;
+            }
+            meshletBase += 16u;
+        }
+
+        [loop]
+        for (uint bucketIndex8 = 0u; bucketIndex8 < n8; ++bucketIndex8) {
+            uint outputIndex = 0u;
+            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
+            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
+                outRecord.instanceIndex = rec.instanceIndex;
+                outRecord.viewId = rec.viewId;
+                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 8u);
+                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                clusterFrontier[outputIndex] = outRecord;
+            }
+            meshletBase += 8u;
+        }
+
+        [loop]
+        for (uint bucketIndex4 = 0u; bucketIndex4 < n4; ++bucketIndex4) {
+            uint outputIndex = 0u;
+            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
+            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
+                outRecord.instanceIndex = rec.instanceIndex;
+                outRecord.viewId = rec.viewId;
+                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 4u);
+                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                clusterFrontier[outputIndex] = outRecord;
+            }
+            meshletBase += 4u;
+        }
+
+        [loop]
+        for (uint bucketIndex2 = 0u; bucketIndex2 < n2; ++bucketIndex2) {
+            uint outputIndex = 0u;
+            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
+            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
+                outRecord.instanceIndex = rec.instanceIndex;
+                outRecord.viewId = rec.viewId;
+                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 2u);
+                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                clusterFrontier[outputIndex] = outRecord;
+            }
+            meshletBase += 2u;
+        }
+
+        [loop]
+        for (uint bucketIndex1 = 0u; bucketIndex1 < n1; ++bucketIndex1) {
+            uint outputIndex = 0u;
+            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
+            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
+                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
+                outRecord.instanceIndex = rec.instanceIndex;
+                outRecord.viewId = rec.viewId;
+                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 1u);
+                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                clusterFrontier[outputIndex] = outRecord;
+            }
+            meshletBase += 1u;
+        }
         return;
     }
 
@@ -378,5 +579,7 @@ void PureComputeClusterFrontierCS(const uint3 dispatchThreadID : SV_DispatchThre
 
     uint swPending = 0u;
     uint pageJobPending = 0u;
-    ClusterCullBody(bucket, hasBucket, GI, activeCount, 1u, swPending, pageJobPending);
+    // ClusterCullBody uses wave ops inside its meshlet loop, so all lanes in the wave
+    // must execute the same iteration count even when bucket sizes differ.
+    ClusterCullBody(bucket, hasBucket, GI, activeCount, 64u, swPending, pageJobPending);
 }
