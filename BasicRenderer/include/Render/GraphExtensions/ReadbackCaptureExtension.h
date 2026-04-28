@@ -70,6 +70,7 @@ public:
                         std::move(pass))
                         .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
                         .PreferQueue(QueueKind::Copy)
+                        .CollectStatistics(false)
                         .RegisterByName(false));
             }
             else {
@@ -83,6 +84,7 @@ public:
                         "ReadbackCapture::" + capture.passName + "::" + std::to_string(handle.GetGlobalResourceID()) + "::" + std::to_string(localIndex++),
                         std::move(pass))
                         .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
+                        .CollectStatistics(false)
                         .RegisterByName(false));
             }
         }

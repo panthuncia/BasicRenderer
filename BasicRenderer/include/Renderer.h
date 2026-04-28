@@ -177,7 +177,6 @@ private:
     void SignalFence(rhi::Queue commandQueue, uint8_t currentFrameIndex);
     void AdvanceFrameIndex();
     void CheckDebugMessages();
-    void FlushCommandQueue();
     void CreateRTVs();
     void RunGameUpdateStage(float elapsedSeconds);
     void RunAnimationUpdateStage(float elapsedSeconds);

@@ -1618,6 +1618,7 @@ void Renderer::Update(float elapsedSeconds) {
     runCapturedStage("WaitForFrame", [&]() {
         ZoneScopedN("Renderer::Update::WaitForFrame");
         WaitForFrame(m_frameIndex);
+        DeletionManager::GetInstance().ProcessDeletions();
         });
 
     auto& resourceManager = ResourceManager::GetInstance();
@@ -2002,11 +2003,6 @@ void Renderer::Render() {
             m_pReadbackManager->ProcessReadbackRequests(); // Save images to disk if requested
         }
     });
-
-    runCapturedStage("DeletionProcessing", [&]() {
-        DeletionManager::GetInstance().ProcessDeletions();
-    });
-
     PublishFrameTaskGraphCapture();
     FrameMark;
 }
@@ -2029,42 +2025,12 @@ void Renderer::AdvanceFrameIndex() {
     m_totalFramesRendered += 1;
 }
 
-void Renderer::FlushCommandQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-    auto flushQueue = [&](rhi::Queue queue, const char* debugName) {
-        rhi::TimelinePtr flushFence;
-        auto result = device.CreateTimeline(flushFence, 0, debugName);
-        if (result != rhi::Result::Ok || !flushFence) {
-            throw std::runtime_error("Failed to create queue flush timeline");
-        }
-
-        queue.Signal({ flushFence->GetHandle(), 1 });
-        flushFence->HostWait(1);
-    };
-
-    auto& deviceManager = DeviceManager::GetInstance();
-    flushQueue(deviceManager.GetGraphicsQueue(), "RendererFlushGraphics");
-    flushQueue(deviceManager.GetComputeQueue(), "RendererFlushCompute");
-    flushQueue(deviceManager.GetCopyQueue(), "RendererFlushCopy");
-
-    if (currentRenderGraph) {
-        auto& registry = currentRenderGraph->GetQueueRegistry();
-        for (size_t i = 0; i < registry.SlotCount(); ++i) {
-            auto slot = static_cast<QueueSlotIndex>(static_cast<uint8_t>(i));
-            auto queue = registry.GetQueue(slot);
-            auto& fence = registry.GetFence(slot);
-            const uint64_t fenceValue = registry.GetNextFenceValue(slot);
-            queue.Signal({ fence.GetHandle(), fenceValue });
-            fence.HostWait(fenceValue);
-        }
-    }
-}
-
 void Renderer::StallPipeline() {
     for (uint8_t i = 0; i < m_numFramesInFlight; ++i) {
         WaitForFrame(i);
     }
-    FlushCommandQueue();
+    auto device = DeviceManager::GetInstance().GetDevice();
+    device.WaitIdle();
 }
 
 void Renderer::Cleanup() {
