@@ -531,10 +531,6 @@ private:
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<void(uint8_t)> setNumDirectionalLightCascades;
 
-    float m_maxShadowDistance = 0.0f;
-    std::function<float()> getMaxShadowDistance;
-    std::function<void(float)> setMaxShadowDistance;
-
     float m_directionalShadowVerticalExtent = 0.0f;
     std::function<float()> getDirectionalShadowVerticalExtent;
     std::function<void(float)> setDirectionalShadowVerticalExtent;
@@ -872,11 +868,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setNumDirectionalLightCascades = settingsManager.getSettingSetter<uint8_t>("numDirectionalLightCascades");
     m_numDirectionalLightCascades = getNumDirectionalLightCascades();
     observerSetting(m_numDirectionalLightCascades, "numDirectionalLightCascades");
-
-    getMaxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance");
-    setMaxShadowDistance = settingsManager.getSettingSetter<float>("maxShadowDistance");
-    m_maxShadowDistance = getMaxShadowDistance();
-    observerSetting(m_maxShadowDistance, "maxShadowDistance");
 
     getDirectionalShadowVerticalExtent = settingsManager.getSettingGetter<float>("directionalShadowVerticalExtent");
     setDirectionalShadowVerticalExtent = settingsManager.getSettingSetter<float>("directionalShadowVerticalExtent");
@@ -1397,10 +1388,6 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional,
             m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees,
             m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional);
-        if (ImGui::SliderFloat("Directional Shadow Distance", &m_maxShadowDistance, 1.0f, 1000.0f, "%.1f")) {
-            m_maxShadowDistance = std::max(m_maxShadowDistance, 1.0f);
-            setMaxShadowDistance(m_maxShadowDistance);
-        }
         if (ImGui::SliderFloat("Directional Shadow Vertical Extent", &m_directionalShadowVerticalExtent, 1.0f, 1000.0f, "%.1f")) {
             m_directionalShadowVerticalExtent = std::max(m_directionalShadowVerticalExtent, 1.0f);
             setDirectionalShadowVerticalExtent(m_directionalShadowVerticalExtent);

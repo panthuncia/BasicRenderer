@@ -1200,14 +1200,9 @@ void Renderer::SetSettings() {
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<uint8_t>("numDirectionalLightCascades", [](const uint8_t& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
-		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
-        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(newValue, 0.1f, maxShadowDistance, maxShadowDistance));
-        }));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [](const float& newValue) {
-		auto& settingsManager = SettingsManager::GetInstance();
-		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
-		auto maxShadowDistance = std::max(newValue, 1.0f);
-        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1f, maxShadowDistance, maxShadowDistance));
+        const float zNear = 0.1f;
+        const float zFar = settingsManager.getSettingGetter<float>("maxShadowDistance")();
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(newValue, zNear, zFar, zFar));
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
         ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);

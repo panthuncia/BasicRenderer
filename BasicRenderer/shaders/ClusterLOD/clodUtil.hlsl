@@ -959,9 +959,9 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
             uint ignored = 0u;
             InterlockedAnd(dirtyFlags[dirtyWordIndex], ~dirtyBitMask, ignored);
 
-            // Set Dirty on the page table entry so the dirty hierarchy picks it up.
-            // This mirrors Timberdoodle's clear_pages.hlsl where Dirty is set only
-            // after physical memory has been zeroed.
+            // Clearing the physical page invalidates the cached depth contents.
+            // Keep Dirty so the page can be rerendered, but drop ContentValid so
+            // lookups never sample a cleared atlas page as if it were still valid.
             const uint4 meta = pageMetadata[physicalPageIndex];
             if ((meta.z & kCLodVirtualShadowPhysicalPageResidentFlag) != 0u)
             {
@@ -969,6 +969,12 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
                 const uint clipmapIndex = meta.w;
                 const uint pageX = virtualAddress % CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_RESOLUTION;
                 const uint pageY = virtualAddress / CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_RESOLUTION;
+                uint ignoredAnd = 0u;
+                InterlockedAnd(
+                    pageTable[uint3(pageX, pageY, clipmapIndex)],
+                    ~(kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask),
+                    ignoredAnd);
+
                 uint ignoredOr = 0u;
                 InterlockedOr(pageTable[uint3(pageX, pageY, clipmapIndex)], kCLodVirtualShadowDirtyMask, ignoredOr);
             }
@@ -1085,13 +1091,26 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             (existingPageEntry & kCLodVirtualShadowRerenderedThisFrameMask) == 0u;
         if (staleDirtyPage)
         {
-            // Dirty pages should either be rerendered in the same frame or be
-            // retired before the next one. If they survive into setup without
-            // RerenderedThisFrame, they were requested but never written.
-            pageTable[dispatchThreadId] = existingPageEntry & ~(
-                kCLodVirtualShadowDirtyMask |
+            uint updatedPageEntry = existingPageEntry & ~(
                 kCLodVirtualShadowVisitedMask |
                 kCLodVirtualShadowRerenderedThisFrameMask);
+
+            if ((existingPageEntry & kCLodVirtualShadowAllocatedMask) != 0u)
+            {
+                // The physical page was cleared but never rewritten. Keep the page
+                // dirty so a later mark can rerender it, and drop ContentValid so
+                // shadow lookups cannot treat cleared depth as usable data.
+                updatedPageEntry &= ~kCLodVirtualShadowContentValidMask;
+            }
+            else
+            {
+                // Unallocated dirty pages were requested but never assigned a
+                // physical page. Clear Dirty so a future mark pass can enqueue a
+                // fresh allocation request once depth becomes valid again.
+                updatedPageEntry &= ~kCLodVirtualShadowDirtyMask;
+            }
+
+            pageTable[dispatchThreadId] = updatedPageEntry;
             CLodVirtualShadowStatsIncrementSetupStaleDirtyClear(statsBuffer, dispatchThreadId.z);
             if ((existingPageEntry & kCLodVirtualShadowContentValidMask) == 0u)
             {

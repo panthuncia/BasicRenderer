@@ -150,7 +150,6 @@ Scene::Scene(){
 	m_sceneID = globalSceneCount.fetch_add(1, std::memory_order_relaxed);
 
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-    getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
 	getMeshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader");
 
@@ -520,10 +519,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		entity.add<Components::Active>();
 	}
 
-    // Keep shadow distance independent from the camera far plane so large
-    // scene view ranges do not silently inflate every directional clipmap.
-    const float shadowDistance = std::max(getMaxShadowDistance(), zNear);
-    setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, shadowDistance, shadowDistance));
+	setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, zFar, zFar));
 
 	m_primaryCamera = entity;
 }
