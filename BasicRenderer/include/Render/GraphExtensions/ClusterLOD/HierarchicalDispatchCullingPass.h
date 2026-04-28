@@ -64,8 +64,6 @@ private:
         uint32_t dispatchGridZ;
     };
 
-    bool SupportsPureComputeV1() const;
-
     PipelineState m_clearPipelineState;
     PipelineState m_createCommandPipelineState;
     PipelineState m_pureComputeBuildDispatchArgsPipelineState;
@@ -74,10 +72,13 @@ private:
     PipelineState m_pureComputeReplayNodesPipelineState;
     PipelineState m_pureComputeReplayClustersPipelineState;
     PipelineState m_pureComputeTraversePipelineState;
+    PipelineState m_pureComputeExpandClustersPipelineState;
     PipelineState m_pureComputeClusterPipelineState;
+    PipelineState m_pureComputeDenseClusterPipelineState;
     rhi::CommandSignaturePtr m_pureComputeDispatchCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_pageJobVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_pageJobVisibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_workGraphComputePageJobDescriptorsBuffer;
@@ -90,6 +91,7 @@ private:
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<Buffer> m_phase1VisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_swWriteBaseCounterBuffer;
     std::shared_ptr<PixelBuffer> m_shadowDirtyHierarchyTexture;
     std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidatesBuffer;
     std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidateCountBuffer;
@@ -102,6 +104,8 @@ private:
     std::shared_ptr<Buffer> m_pureComputeCurrentNodeCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeNextNodeCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterCounterBuffer;
+    std::shared_ptr<Buffer> m_pureComputeDenseClusterWorkBuffer;
+    std::shared_ptr<Buffer> m_pureComputeDenseClusterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeNodeDispatchArgsBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;

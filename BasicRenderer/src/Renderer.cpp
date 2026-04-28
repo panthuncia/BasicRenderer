@@ -988,7 +988,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<CLodCullingBackend>(CLodCullingBackendSettingName, CLodCullingBackend::PureCompute);
-    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Disabled);
+    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
     settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::PageJob);
     settingsManager.registerSetting<CLodTransparencyMode>(CLodTransparencyModeSettingName, CLodTransparencyMode::AVBOIT);
     settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);

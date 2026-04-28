@@ -1096,6 +1096,7 @@ inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;  
 inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSizeBytes;
 inline constexpr uint32_t CLodNodeReplayStrideBytes = 12u;   // sizeof(TraverseNodeRecord): 3 uints
 inline constexpr uint32_t CLodMeshletReplayStrideBytes = 24u; // sizeof(MeshletBucketRecord): 6 uints
+inline constexpr uint32_t CLodDenseClusterWorkStrideBytes = 24u; // sizeof(CLodDenseClusterWorkRecord): 6 uints
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;

@@ -123,6 +123,11 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     PageJobDbgAtlasHeight,
     PageJobDbgOobPixels,
 
+    // Keep these appended at the end to match workGraphCulling.hlsl.
+    ClusterCullBucketRecordsDispatched,
+    ClusterCullDenseExpansionBuckets,
+    ClusterCullDenseClustersDispatched,
+
     Count
 };
 

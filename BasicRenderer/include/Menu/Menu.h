@@ -148,92 +148,6 @@ static void BuildIdToMemInfoIndex(
     }
 }
 
-static void BuildFrameGraphSnapshotFromBatches(
-    ui::FrameGraphSnapshot& out,
-    const std::vector<RenderGraph::PassBatch>& batches,
-    const PerResourceMemIndex& memIndex)
-{
-    out.batches.clear();
-    out.batches.reserve(batches.size());
-
-    std::unordered_set<uint64_t> uniqueIds;
-    uniqueIds.reserve(2048);
-
-    std::unordered_map<std::string, uint64_t> catSum;
-    catSum.reserve(64);
-
-    for (int bi = 0; bi < (int)batches.size(); ++bi) {
-        const auto& b = batches[bi];
-
-        uniqueIds.clear();
-
-        auto scanTransitions = [&](const std::vector<ResourceTransition>& v) {
-            for (auto& t : v) {
-                if (!t.pResource) continue;
-                uniqueIds.insert(t.pResource->GetGlobalResourceID());
-            }
-            };
-
-        for (size_t phaseIndex = 0; phaseIndex < static_cast<size_t>(RenderGraph::BatchTransitionPhase::Count); ++phaseIndex) {
-            const auto phase = static_cast<RenderGraph::BatchTransitionPhase>(phaseIndex);
-            for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
-                const auto queue = static_cast<QueueKind>(queueIndex);
-                scanTransitions(b.Transitions(queue, phase));
-            }
-        }
-
-        for (auto id : b.allResources) uniqueIds.insert(id);
-        for (auto id : b.internallyTransitionedResources) uniqueIds.insert(id);
-
-        uint64_t footprint = 0;
-        catSum.clear();
-
-        uint64_t missingBytes = 0;
-
-        for (uint64_t id : uniqueIds) {
-            auto it = memIndex.find(id);
-            if (it == memIndex.end()) {
-                // ?
-                continue;
-            }
-
-            footprint += it->second.bytes;
-            catSum[it->second.category] += it->second.bytes;
-        }
-
-        ui::FrameGraphBatchRow row{};
-        row.label = "Batch " + std::to_string(bi);
-        row.footprintBytes = footprint;
-        row.hasEndTransitions = b.HasTransitions(QueueKind::Graphics, RenderGraph::BatchTransitionPhase::AfterPasses);
-
-        size_t totalPassCount = 0;
-        for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
-            totalPassCount += b.Passes(static_cast<QueueKind>(queueIndex)).size();
-        }
-        row.passNames.reserve(totalPassCount);
-        //for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
-        //    const auto queue = static_cast<QueueKind>(queueIndex);
-        //    for (const auto& queuedPass : b.Passes(queue)) {
-        //        std::visit(
-        //            [&](const auto* pass) {
-        //                row.passNames.push_back(pass->name);
-        //            },
-        //            queuedPass);
-        //    }
-        //}
-
-        row.categories.reserve(catSum.size());
-        for (auto& [label, bytes] : catSum) {
-            row.categories.push_back({ label, bytes });
-        }
-        std::sort(row.categories.begin(), row.categories.end(),
-            [](auto const& a, auto const& b) { return a.bytes > b.bytes; });
-
-        out.batches.push_back(std::move(row));
-    }
-}
-
-
 class Menu {
 public:
     static Menu& GetInstance();
@@ -1596,12 +1510,10 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         PerResourceMemIndex memIndex;
         BuildMemorySnapshotFromRecords(snap, memoryRecords, &memIndex);
 
-        static std::unordered_map<uint64_t, MemInfo> s_idToMem;
-		BuildIdToMemInfoIndex(s_idToMem, memoryRecords);
 		ui::FrameGraphSnapshot fgSnap;
-
-        const auto& batches = m_renderGraph->GetBatches();
-        BuildFrameGraphSnapshotFromBatches(fgSnap, batches, memIndex);
+        if (m_renderGraph) {
+            m_renderGraph->BuildMemoryIntrospectionFrameGraphSnapshot(fgSnap, memoryRecords);
+        }
 
 
         ImGui::Begin("Memory Introspection", nullptr);
@@ -2458,18 +2370,28 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
                 const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
                 const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+                const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
+                const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+                const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
+                    ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
+                    : "bucketed";
 
                 spdlog::info(
-                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node={}, meshlet={})",
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
                     visibleWrites,
+                    bucketDispatchRecords,
+                    denseExpansionBuckets,
+                    denseClustersDispatched,
                     replayNodeInput,
                     replayMeshletInput);
                 });
@@ -2585,18 +2507,28 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
                 const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
                 const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+                const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
+                const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+                const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
+                    ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
+                    : "bucketed";
 
                 spdlog::info(
-                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node={}, meshlet={})",
+                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
                     visibleWrites,
+                    bucketDispatchRecords,
+                    denseExpansionBuckets,
+                    denseClustersDispatched,
                     replayNodeInput,
                     replayMeshletInput);
                 });
@@ -3108,6 +3040,20 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
                 counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
 
+            const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
+            const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+            const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
+            const bool denseDispatchActive = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u);
+            const char* clusterDispatchMode = denseDispatchActive
+                ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense per-cluster")
+                : "bucketed";
+            ImGui::Text(
+                "ClusterCull dispatch mode: %s | bucket records=%u | dense expansion buckets=%u | dense clusters=%u",
+                clusterDispatchMode,
+                bucketDispatchRecords,
+                denseExpansionBuckets,
+                denseClustersDispatched);
+
             const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
             const uint32_t clusterSurvivingLanes = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
             drawUtilizationRow("ClusterCull surviving lanes", clusterSurvivingLanes, clusterActiveLanes);
@@ -3197,7 +3143,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 rejectionRow("Frustum cull", rejFrustum, totalRejected);
                 rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
                 rejectionRow("Occlusion cull", rejOccl, totalRejected);
-                rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
+                rejectionRow(
+                    denseDispatchActive ? "Inactive iterations / tail lanes" : "WaveActiveMax padding (inactive iterations)",
+                    rejOOR,
+                    totalRejected);
                 rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
                 rejectionRow("Clean shadow pages", rejCleanPages, totalRejected);
                 ImGui::Text("  Shadow clipmap misses: %u", shadowClipmapMisses);

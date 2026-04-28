@@ -28,6 +28,10 @@
 #define CLOD_WG_ENABLE_SW_NODE_OUTPUT CLOD_WG_ENABLE_SW_CLASSIFICATION
 #endif
 
+#ifndef CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
+#define CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER 0
+#endif
+
 // Set to 1 to enable occlusion culling for VSM / shadow cameras (ortho).
 // Defaults to 0 (off): ortho cameras skip occlusion culling entirely.
 #ifndef CLOD_VSM_OCCLUSION_CULLING
@@ -92,6 +96,9 @@ static const uint WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES = 14;
 static const uint WG_COUNTER_CLUSTER_CULL_SURVIVING_LANES = 15;
 static const uint WG_COUNTER_CLUSTER_CULL_ZERO_SURVIVOR_WAVES = 16;
 static const uint WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES = 17;
+static const uint WG_COUNTER_CLUSTER_CULL_BUCKET_RECORDS_DISPATCHED = 100;
+static const uint WG_COUNTER_CLUSTER_CULL_DENSE_EXPANSION_BUCKETS = 101;
+static const uint WG_COUNTER_CLUSTER_CULL_DENSE_CLUSTERS_DISPATCHED = 102;
 
 static const uint WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES = 18;
 static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS = 19;
@@ -233,7 +240,7 @@ bool CLodWorkGraphUseComputeSWRaster()
 
 bool CLodWorkGraphUseDedicatedComputePageJobBuffer()
 {
-#if CLOD_WG_ENABLE_SW_CLASSIFICATION
+#if CLOD_WG_ENABLE_SW_CLASSIFICATION && CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
     StructuredBuffer<uint4> pageJobDescriptorBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
     const uint2 descriptorPair = pageJobDescriptorBuffer[0].xy;
@@ -1829,14 +1836,25 @@ groupshared uint gs_pageJobBatchIndices[PAGEJOB_BATCH_ACCUM_CAPACITY];
 // Shared cluster-cull implementation called by each bucket-size variant.
 // FIXED_LOOP_COUNT is the bucket size (1, 2, 4, 8, 16, 32, or 64) - all active lanes
 // in a variant wave process the same number of iterations, minimizing WaveActiveMax divergence.
-void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputCount, uint FIXED_LOOP_COUNT, out uint swPendingOut, out uint pageJobPendingOut)
+void ClusterCullBody(
+    MeshletBucketRecord b,
+    bool hasBucket,
+    bool countReplayBucketRecord,
+    uint GI,
+    uint inputCount,
+    uint FIXED_LOOP_COUNT,
+    out uint swPendingOut,
+    out uint pageJobPendingOut)
 {
     // Telemetry (coalesced launch level)
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
     if (hasBucket) {
         const uint bucketMeshletCount = UnpackMeshletCount(b.meshletIndexAndCount);
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS, bucketMeshletCount);
-        if (UnpackGroupSourceTag(b.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
+        if (countReplayBucketRecord) {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_BUCKET_RECORDS_DISPATCHED, 1);
+        }
+        if (countReplayBucketRecord && UnpackGroupSourceTag(b.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
             WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED, 1);
         }
     }
@@ -2837,7 +2855,7 @@ void WG_ClusterCull1(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 1, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 1, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2858,7 +2876,7 @@ void WG_ClusterCull2(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 2, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 2, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2879,7 +2897,7 @@ void WG_ClusterCull4(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 4, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 4, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2901,7 +2919,7 @@ void WG_ClusterCull8(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 8, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 8, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2922,7 +2940,7 @@ void WG_ClusterCull16(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 16, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 16, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2943,7 +2961,7 @@ void WG_ClusterCull32(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 32, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 32, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2964,7 +2982,7 @@ void WG_ClusterCull64(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 64, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 64, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }

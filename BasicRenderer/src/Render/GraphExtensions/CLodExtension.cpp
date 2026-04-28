@@ -482,16 +482,12 @@ HierarchicalCullingBackend GetHierarchicalCullingBackend(CLodCullingBackend back
 
 bool UseHierarchicalDispatchCullingPass(
     HierarchicalCullingBackend backend,
-    bool isFirstPass,
     HierarchicalCullingWorkGraphMode workGraphMode,
     CLodRasterOutputKind rasterOutputKind)
 {
-    (void)isFirstPass;
-    return backend == HierarchicalCullingBackend::PureCompute
-        && workGraphMode == HierarchicalCullingWorkGraphMode::HardwareOnly
-        && (rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer
-            || rasterOutputKind == CLodRasterOutputKind::DeepVisibility
-            || rasterOutputKind == CLodRasterOutputKind::VirtualShadow);
+    (void)workGraphMode;
+    (void)rasterOutputKind;
+    return backend == HierarchicalCullingBackend::PureCompute;
 }
 
 std::shared_ptr<ResourceGroup> GetSlabResourceGroup()
@@ -2635,7 +2631,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     const std::string cullPassName = MakeVariantPassName(traits, "HierarchicalCullingPass1");
     const bool useDispatchCullingPass1 = UseHierarchicalDispatchCullingPass(
         cullingBackend,
-        cullPassInputs.isFirstPass,
         cullPassInputs.workGraphMode,
         cullPassInputs.rasterOutputKind);
     std::shared_ptr<ComputePass> cullPass1 = useDispatchCullingPass1
@@ -3840,7 +3835,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         const std::string cullPassName2 = MakeVariantPassName(traits, "HierarchicalCullingPass2");
         const bool useDispatchCullingPass2 = UseHierarchicalDispatchCullingPass(
             cullingBackend,
-            cullPassInputs2.isFirstPass,
             cullPassInputs2.workGraphMode,
             cullPassInputs2.rasterOutputKind);
         std::shared_ptr<ComputePass> cullPass2 = useDispatchCullingPass2

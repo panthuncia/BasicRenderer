@@ -792,10 +792,12 @@ void HierarchicalCullingPass::CreatePipelines(
         m_workGraphComputePageJobDescriptorResourceId.begin(),
         m_workGraphComputePageJobDescriptorResourceId.end());
     std::wstring pageJobDescriptorResourceIdDefine = L"\"" + pageJobDescriptorResourceIdWide + L"\"";
+    constexpr bool enableComputePageJobDescriptorBuffer = true;
     std::vector<DxcDefine> defines = {
         { L"CLOD_WG_ENABLE_SW_CLASSIFICATION", UsesSWClassification(m_workGraphMode) ? L"1" : L"0" },
         { L"CLOD_WG_ENABLE_SW_NODE_OUTPUT", UsesWorkGraphSWRaster(m_workGraphMode) ? L"1" : L"0" },
         { L"CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW", UsesVirtualShadowOutput(m_rasterOutputKind) ? L"1" : L"0" },
+        { L"CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER", enableComputePageJobDescriptorBuffer ? L"1" : L"0" },
         { L"CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID", pageJobDescriptorResourceIdDefine.c_str() },
     };
     auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo, defines);

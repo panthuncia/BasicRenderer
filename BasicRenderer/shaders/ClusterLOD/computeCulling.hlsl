@@ -6,7 +6,7 @@ void BuildPureComputeDispatchArgsCS()
 {
     StructuredBuffer<uint> counterBuffer = ResourceDescriptorHeap[CLOD_PC_DISPATCH_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint3> dispatchArgs = ResourceDescriptorHeap[CLOD_PC_DISPATCH_ARGS_DESCRIPTOR_INDEX];
-    const uint count = min(counterBuffer[0], CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint count = min(counterBuffer[0], max(1u, CLOD_PC_DISPATCH_COUNT_LIMIT));
     const uint threadsPerGroup = max(1u, CLOD_PC_DISPATCH_THREADS_PER_GROUP);
     const uint groups = (count == 0u) ? 1u : ((count + threadsPerGroup - 1u) / threadsPerGroup);
     dispatchArgs[0] = uint3(groups, 1u, 1u);
@@ -616,5 +616,84 @@ void PureComputeClusterFrontierCS(const uint3 dispatchThreadID : SV_DispatchThre
     uint pageJobPending = 0u;
     // ClusterCullBody uses wave ops inside its meshlet loop, so all lanes in the wave
     // must execute the same iteration count even when bucket sizes differ.
-    ClusterCullBody(bucket, hasBucket, GI, activeCount, 64u, swPending, pageJobPending);
+    ClusterCullBody(bucket, hasBucket, true, GI, activeCount, 64u, swPending, pageJobPending);
+}
+
+groupshared uint gs_denseBaseIndex;
+
+[numthreads(64, 1, 1)]
+void PureComputeExpandClusterFrontierCS(
+    const uint3 dispatchThreadID : SV_DispatchThreadID,
+    const uint3 groupID : SV_GroupID,
+    const uint GI : SV_GroupIndex)
+{
+    StructuredBuffer<MeshletBucketRecord> inputFrontier = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> inputCountBuffer = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodDenseClusterWorkRecord> denseClusterWork = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> denseClusterWorkCount = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_COUNT_DESCRIPTOR_INDEX];
+
+    const uint bucketIndex = groupID.x;
+    const uint inputCount = inputCountBuffer[0];
+    const bool hasBucket = bucketIndex < inputCount;
+    MeshletBucketRecord bucket = (MeshletBucketRecord)0;
+    uint firstLocalMeshletIndex = 0u;
+    uint meshletCount = 0u;
+    if (hasBucket) {
+        bucket = inputFrontier[bucketIndex];
+        firstLocalMeshletIndex = UnpackMeshletFirstIndex(bucket.meshletIndexAndCount);
+        meshletCount = UnpackMeshletCount(bucket.meshletIndexAndCount);
+    }
+
+    if (GI == 0u) {
+        gs_denseBaseIndex = 0u;
+        if (hasBucket && meshletCount > 0u) {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_DENSE_EXPANSION_BUCKETS, 1u);
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_DENSE_CLUSTERS_DISPATCHED, meshletCount);
+            if (UnpackGroupSourceTag(bucket.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
+                WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED, 1u);
+            }
+            InterlockedAdd(denseClusterWorkCount[0], meshletCount, gs_denseBaseIndex);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (hasBucket && GI < meshletCount) {
+        const uint denseIndex = gs_denseBaseIndex + GI;
+        CLodDenseClusterWorkRecord work = (CLodDenseClusterWorkRecord)0;
+        work.instanceIndex = bucket.instanceIndex;
+        work.viewId = bucket.viewId;
+        work.groupIdPacked = bucket.groupIdPacked;
+        work.localMeshletIndex = firstLocalMeshletIndex + GI;
+        work.pageSlabDescriptorIndex = bucket.pageSlabDescriptorIndex;
+        work.pageSlabByteOffset = bucket.pageSlabByteOffset;
+        denseClusterWork[denseIndex] = work;
+    }
+}
+
+[numthreads(64, 1, 1)]
+void PureComputeDenseClusterWorkCS(const uint3 dispatchThreadID : SV_DispatchThreadID, const uint GI : SV_GroupIndex)
+{
+    StructuredBuffer<CLodDenseClusterWorkRecord> inputWork = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> inputCountBuffer = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX];
+
+    const uint inputCount = inputCountBuffer[0];
+    const uint index = dispatchThreadID.x;
+    const uint groupBase = dispatchThreadID.x - GI;
+    const uint activeCount = (groupBase < inputCount) ? min(64u, inputCount - groupBase) : 0u;
+    if (index >= inputCount) {
+        return;
+    }
+
+    const CLodDenseClusterWorkRecord work = inputWork[index];
+    MeshletBucketRecord bucket = (MeshletBucketRecord)0;
+    bucket.instanceIndex = work.instanceIndex;
+    bucket.viewId = work.viewId;
+    bucket.groupIdPacked = work.groupIdPacked;
+    bucket.meshletIndexAndCount = (1u << 16u) | (work.localMeshletIndex & 0xFFFFu);
+    bucket.pageSlabDescriptorIndex = work.pageSlabDescriptorIndex;
+    bucket.pageSlabByteOffset = work.pageSlabByteOffset;
+
+    uint swPending = 0u;
+    uint pageJobPending = 0u;
+    ClusterCullBody(bucket, true, false, GI, activeCount, 1u, swPending, pageJobPending);
 }
