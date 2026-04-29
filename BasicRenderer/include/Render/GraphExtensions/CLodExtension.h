@@ -9,6 +9,8 @@
 
 class Buffer;
 class CLodStreamingSystem;
+class CLodAlphaVariant;
+class CLodShadowVariant;
 class PixelBuffer;
 
 class CLodExtension final : public RenderGraph::IRenderGraphExtension, public IResourceProvider {
@@ -25,6 +27,9 @@ public:
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
+    friend class CLodAlphaVariant;
+    friend class CLodShadowVariant;
+
     bool IsReyesTessellationDisabled() const;
     void RefreshShadowConfiguredSettings();
     uint32_t GetVisibleClusterCapacity() const;

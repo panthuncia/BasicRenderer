@@ -19,6 +19,4 @@ textures/
 /ThirdParty/
 cmake-build-*
 openpbr-bsdf
-betsy/
-compressonator/
-DirectStorage/
+docs/
