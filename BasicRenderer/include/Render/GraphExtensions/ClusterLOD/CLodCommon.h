@@ -568,8 +568,14 @@ inline uint32_t CLodVirtualShadowGetConfiguredMaxBackingResolution()
 
 inline uint32_t CLodVirtualShadowGetConfiguredMaxPhysicalPageCapacity()
 {
-    return CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(
-        CLodVirtualShadowGetConfiguredMaxBackingResolution());
+    auto& settingsManager = SettingsManager::GetInstance();
+    const uint32_t configuredBackingResolution = CLodVirtualShadowSanitizeBackingResolution(
+        settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName)());
+    const uint32_t configuredMaxPhysicalPages =
+        settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName)();
+    return CLodVirtualShadowSanitizePhysicalPageCount(
+        configuredMaxPhysicalPages,
+        CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(configuredBackingResolution));
 }
 
 inline uint32_t CLodVirtualShadowGetConfiguredComputeClusterCapacity(uint32_t maxVisibleClusters)

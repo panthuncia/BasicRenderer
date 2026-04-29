@@ -37,8 +37,15 @@ constexpr uint32_t kPureComputeObjectCullThreadsPerGroup = 64u;
 constexpr uint32_t kPureComputeTraverseThreadsPerGroup = 64u;
 constexpr uint32_t kPureComputeClusterThreadsPerGroup = 32u;
 constexpr uint32_t kPureComputeDenseClusterThreadsPerGroup = 64u;
+constexpr uint32_t kPureComputeDenseClusterExpansionFactor = 64u;
 constexpr uint32_t kPureComputeMaxTraversalLevels = 64u;
-constexpr bool kDisableVirtualShadowDirtyPageCulling = false;
+constexpr float kPureComputeFrontierCapacityMultiplier = 0.5f;
+constexpr bool kDisableVirtualShadowDirtyPageCulling = false; 
+
+uint32_t GetPureComputeDenseClusterWorkCapacity(uint32_t maxVisibleClusters)
+{
+	return static_cast<uint32_t>(maxVisibleClusters * kPureComputeFrontierCapacityMultiplier);
+}
 
 bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
 {
@@ -139,11 +146,7 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
     m_clodOnlyWorkloads = inputs.clodOnlyWorkloads;
     m_useShadowCascadeViews = inputs.useShadowCascadeViews;
 
-    const bool enableSharedSWClassificationPath =
-        UsesSWClassification(m_workGraphMode) ||
-        (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer);
-
-    if (enableSharedSWClassificationPath) {
+    if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
         m_workGraphComputePageJobDescriptorsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
             1u,
             sizeof(CLodWorkGraphComputePageJobDescriptors),
@@ -168,7 +171,7 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
     m_pureComputeClusterCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1u, sizeof(uint32_t), true, false, false, false);
     m_pureComputeClusterCounterBuffer->SetName("CLod Pure Compute Cluster Counter");
     m_pureComputeDenseClusterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        frontierCapacity,
+        GetPureComputeDenseClusterWorkCapacity(frontierCapacity),
         CLodDenseClusterWorkStrideBytes,
         true,
         false,
@@ -182,7 +185,10 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
     m_pureComputeClusterDispatchArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1u, sizeof(PureComputeDispatchCommand), true, false, false, false);
     m_pureComputeClusterDispatchArgsBuffer->SetName("CLod Pure Compute Cluster Dispatch Args");
 
-    const bool enableComputePageJobDescriptorBuffer = enableSharedSWClassificationPath;
+    const bool enableSharedSWClassificationPath =
+        UsesSWClassification(m_workGraphMode) || m_workGraphComputePageJobDescriptorsBuffer != nullptr;
+    const bool enableComputePageJobDescriptorBuffer =
+        m_workGraphComputePageJobDescriptorsBuffer != nullptr;
     std::wstring pageJobDescriptorResourceIdWide(
         m_workGraphComputePageJobDescriptorResourceId.begin(),
         m_workGraphComputePageJobDescriptorResourceId.end());
@@ -193,8 +199,10 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
         { L"CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW", UsesVirtualShadowOutput(m_rasterOutputKind) ? L"1" : L"0" },
         { L"CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER", enableComputePageJobDescriptorBuffer ? L"1" : L"0" },
         { L"CLOD_COMPUTE_INCLUDE_ONLY", L"1" },
-        { L"CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID", pageJobDescriptorResourceIdDefine.c_str() },
     };
+    if (enableComputePageJobDescriptorBuffer) {
+        pureComputeDefines.push_back({ L"CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID", pageJobDescriptorResourceIdDefine.c_str() });
+    }
 
     auto& psoManager = PSOManager::GetInstance();
     const auto computeLayout = psoManager.GetComputeRootSignature().GetHandle();
@@ -684,7 +692,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     };
 
     const bool useDenseClusterPath = true;
-    const uint32_t denseClusterWorkCapacity = m_maxVisibleClusters;
+    const uint32_t denseClusterWorkCapacity = GetPureComputeDenseClusterWorkCapacity(m_maxVisibleClusters);
 
     auto dispatchClusterCull = [&](const std::shared_ptr<Buffer>& frontierBuffer, const std::shared_ptr<Buffer>& frontierCounterBuffer) {
         if (!useDenseClusterPath) {
@@ -1042,7 +1050,7 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     m_pureComputeCurrentNodeCounterBuffer->ResizeStructured(1u);
     m_pureComputeNextNodeCounterBuffer->ResizeStructured(1u);
     m_pureComputeClusterCounterBuffer->ResizeStructured(1u);
-    m_pureComputeDenseClusterWorkBuffer->ResizeStructured(m_maxVisibleClusters);
+    m_pureComputeDenseClusterWorkBuffer->ResizeStructured(GetPureComputeDenseClusterWorkCapacity(m_maxVisibleClusters));
     m_pureComputeDenseClusterWorkCounterBuffer->ResizeStructured(1u);
     m_pureComputeNodeDispatchArgsBuffer->ResizeStructured(1u);
     m_pureComputeClusterDispatchArgsBuffer->ResizeStructured(1u);
@@ -1101,13 +1109,9 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
 
     if (m_workGraphComputePageJobDescriptorsBuffer) {
         CLodWorkGraphComputePageJobDescriptors pageJobDescriptors{};
-        pageJobDescriptors.visibleClustersUAVDescriptorIndex = 0xFFFFFFFFu;
-        pageJobDescriptors.visibleClustersCounterUAVDescriptorIndex = 0xFFFFFFFFu;
-        if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
-            pageJobDescriptors.visibleClustersUAVDescriptorIndex = m_pageJobVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            pageJobDescriptors.visibleClustersCounterUAVDescriptorIndex =
-                m_pageJobVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        }
+        pageJobDescriptors.visibleClustersUAVDescriptorIndex = m_pageJobVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        pageJobDescriptors.visibleClustersCounterUAVDescriptorIndex =
+            m_pageJobVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         BUFFER_UPLOAD(
             &pageJobDescriptors,
             sizeof(CLodWorkGraphComputePageJobDescriptors),

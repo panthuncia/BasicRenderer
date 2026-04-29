@@ -415,13 +415,19 @@ TextureDescription CreateVirtualShadowPageTableDescription()
     return desc;
 }
 
-TextureDescription CreateVirtualShadowPhysicalPagesDescription(uint32_t backingResolution)
+TextureDescription CreateVirtualShadowPhysicalPagesDescription(uint32_t backingResolution, uint32_t maxPhysicalPages)
 {
     TextureDescription desc;
     ImageDimensions dims;
     const uint32_t sanitizedBackingResolution = CLodVirtualShadowSanitizeBackingResolution(backingResolution);
-    dims.width = sanitizedBackingResolution;
-    dims.height = sanitizedBackingResolution;
+    const uint32_t atlasPagesWide = (std::max)(
+        1u,
+        CLodVirtualShadowPhysicalAtlasPagesWideFromPhysicalPageCount(maxPhysicalPages, sanitizedBackingResolution));
+    const uint32_t atlasPagesHigh = (std::max)(
+        1u,
+        CLodVirtualShadowPhysicalAtlasPagesHighFromPhysicalPageCount(maxPhysicalPages, sanitizedBackingResolution));
+    dims.width = atlasPagesWide * CLodVirtualShadowPhysicalPageSize;
+    dims.height = atlasPagesHigh * CLodVirtualShadowPhysicalPageSize;
     dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
     dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
     desc.imageDimensions.push_back(dims);
@@ -1084,6 +1090,26 @@ void CLodExtension::InitializeShadowResources()
     const uint32_t maxShadowPhysicalPageCount = m_shadowConfiguredMaxPhysicalPageCount;
     const uint32_t pageJobRecordCapacity = m_shadowConfiguredPageJobRecordCapacity;
     const uint32_t vsmExpandedRecordCapacity = m_shadowConfiguredExpandedRecordCapacity;
+    const uint32_t shadowAtlasPagesWide = CLodVirtualShadowPhysicalAtlasPagesWideFromPhysicalPageCount(
+        maxShadowPhysicalPageCount,
+        m_shadowConfiguredBackingResolution);
+    const uint32_t shadowAtlasPagesHigh = CLodVirtualShadowPhysicalAtlasPagesHighFromPhysicalPageCount(
+        maxShadowPhysicalPageCount,
+        m_shadowConfiguredBackingResolution);
+
+    spdlog::info(
+        "{}Shadow sizing: backingResolution={} physicalAtlas={}x{} pages={} texture={}x{} computeClusters={} expandedRecords={} pageJobRecords={} pageJobMaxPages={}",
+        traits.resourcePrefix,
+        m_shadowConfiguredBackingResolution,
+        shadowAtlasPagesWide,
+        shadowAtlasPagesHigh,
+        maxShadowPhysicalPageCount,
+        shadowAtlasPagesWide * CLodVirtualShadowPhysicalPageSize,
+        shadowAtlasPagesHigh * CLodVirtualShadowPhysicalPageSize,
+        m_shadowConfiguredComputeClusterCapacity,
+        vsmExpandedRecordCapacity,
+        pageJobRecordCapacity,
+        m_shadowConfiguredPageJobMaxPages);
 
     m_shadowPageTableTexture = PixelBuffer::CreateSharedUnmaterialized(CreateVirtualShadowPageTableDescription());
     m_shadowPageTableTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page Table"));
@@ -1093,7 +1119,9 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowPhysicalPagesTexture = PixelBuffer::CreateSharedUnmaterialized(
-        CreateVirtualShadowPhysicalPagesDescription(m_shadowConfiguredBackingResolution));
+        CreateVirtualShadowPhysicalPagesDescription(
+            m_shadowConfiguredBackingResolution,
+            maxShadowPhysicalPageCount));
     m_shadowPhysicalPagesTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Physical Pages"));
     m_shadowPhysicalPagesTexture->GetECSEntity()
         .set<Components::Resource>({ m_shadowPhysicalPagesTexture })

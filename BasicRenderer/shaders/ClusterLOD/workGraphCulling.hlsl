@@ -2683,6 +2683,7 @@ void ClusterCullBody(
                 const uint pjRank = GetLaneRankInGroup(pjMask, WaveGetLaneIndex());
 
                 uint pjBase = 0;
+#if CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
                 if (useDedicatedComputePageJobBuffer) {
                     StructuredBuffer<uint4> pageJobDescriptorBuffer =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
@@ -2718,7 +2719,9 @@ void ClusterCullBody(
                             b.pageSlabByteOffset,
                             shadowClipmapIndex);
                     }
-                } else {
+                } else
+#endif
+                {
                     uint pjCombinedBase = 0;
                     if (WaveGetLaneIndex() == pjLeader) {
                         InterlockedAdd(replayState[0].visibleClusterCombinedCount, pjIterCount, pjCombinedBase);
@@ -2759,7 +2762,11 @@ void ClusterCullBody(
                 }
             }
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
+#if CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
             pageJobPending += useDedicatedComputePageJobBuffer ? 0u : pjAvail;
+#else
+            pageJobPending += pjAvail;
+#endif
 #endif
         }
 #endif
