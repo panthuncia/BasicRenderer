@@ -130,6 +130,62 @@ bool UseHierarchicalDispatchCullingPass(
     return backend == HierarchicalCullingBackend::PureCompute;
 }
 
+struct StructuralSchedulingPolicy {
+    CLodTransparencyMode transparencyMode;
+    bool disableReyesTessellation;
+    bool useComputeSWRaster;
+    bool useShadowPageJob;
+    bool useShadowReyesRouting;
+    bool useReyesForThisVariant;
+    HierarchicalCullingWorkGraphMode workGraphMode;
+    HierarchicalCullingBackend cullingBackend;
+    RenderPhase renderPhase;
+};
+
+StructuralSchedulingPolicy BuildStructuralSchedulingPolicy(const CLodVariantTraits& traits, CLodExtensionType type)
+{
+    const auto softwareRasterMode =
+        SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
+    const auto cullingBackendMode =
+        SettingsManager::GetInstance().getSettingGetter<CLodCullingBackend>(CLodCullingBackendSettingName)();
+    const auto shadowVSMRasterMode =
+        traits.type == CLodExtensionType::Shadow
+            ? SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)()
+            : CLodVSMRasterMode::Standard;
+    const CLodTransparencyMode transparencyMode = GetTransparencyMode(type);
+    const bool disableReyesTessellation =
+        SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
+    const bool forceHardwareOnly =
+        traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
+        traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility ||
+        (traits.type == CLodExtensionType::Shadow && CLodVSMRasterModeUsesLegacyRasterOnly(shadowVSMRasterMode));
+    const bool useComputeSWRaster = !forceHardwareOnly && CLodSoftwareRasterUsesCompute(softwareRasterMode);
+    const bool useShadowPageJob =
+        traits.type == CLodExtensionType::Shadow && CLodVSMRasterModeUsesLargeClusterPageJob(shadowVSMRasterMode);
+    const bool useShadowReyesRouting =
+        traits.type == CLodExtensionType::Shadow && CLodVSMRasterModeUsesReyes(shadowVSMRasterMode);
+    const bool useReyesForThisVariant =
+        !disableReyesTessellation && (traits.type != CLodExtensionType::Shadow || useShadowReyesRouting);
+    const HierarchicalCullingWorkGraphMode workGraphMode = forceHardwareOnly
+        ? HierarchicalCullingWorkGraphMode::HardwareOnly
+        : GetCullingWorkGraphMode(softwareRasterMode);
+    const HierarchicalCullingBackend cullingBackend = forceHardwareOnly
+        ? HierarchicalCullingBackend::WorkGraph
+        : GetHierarchicalCullingBackend(cullingBackendMode);
+
+    return StructuralSchedulingPolicy{
+        .transparencyMode = transparencyMode,
+        .disableReyesTessellation = disableReyesTessellation,
+        .useComputeSWRaster = useComputeSWRaster,
+        .useShadowPageJob = useShadowPageJob,
+        .useShadowReyesRouting = useShadowReyesRouting,
+        .useReyesForThisVariant = useReyesForThisVariant,
+        .workGraphMode = workGraphMode,
+        .cullingBackend = cullingBackend,
+        .renderPhase = RenderPhase(traits.renderPhaseName.data()),
+    };
+}
+
 std::shared_ptr<ResourceGroup> GetSlabResourceGroup()
 {
     try {
@@ -1317,45 +1373,29 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         }
     };
 
-    // Derive the scheduling policy up front
-    const auto softwareRasterMode =
-        SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
-    const auto cullingBackendMode =
-        SettingsManager::GetInstance().getSettingGetter<CLodCullingBackend>(CLodCullingBackendSettingName)();
-    const auto shadowVSMRasterMode =
-        traits.type == CLodExtensionType::Shadow
-            ? SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)()
-            : CLodVSMRasterMode::Standard;
-    const auto transparencyMode = GetTransparencyMode(m_type);
-    const bool disableReyesTessellation =
-        SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
-    if (!disableReyesTessellation) {
+    // Snapshot the setting-driven scheduling policy up front so the rest of the
+    // function can read as orchestration rather than a sequence of settings lookups.
+    const StructuralSchedulingPolicy schedulingPolicy = BuildStructuralSchedulingPolicy(traits, m_type);
+    if (!schedulingPolicy.disableReyesTessellation) {
         EnsureReyesResourcesInitialized();
     }
-    const bool forceHardwareOnly =
-        traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
-        traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility ||
-        (traits.type == CLodExtensionType::Shadow && CLodVSMRasterModeUsesLegacyRasterOnly(shadowVSMRasterMode));
-    const bool useComputeSWRaster = !forceHardwareOnly && CLodSoftwareRasterUsesCompute(softwareRasterMode);
-    const bool useShadowPageJob =
-        traits.type == CLodExtensionType::Shadow && CLodVSMRasterModeUsesLargeClusterPageJob(shadowVSMRasterMode);
-    const bool useShadowReyesRouting =
-        traits.type == CLodExtensionType::Shadow && CLodVSMRasterModeUsesReyes(shadowVSMRasterMode);
-    const bool useReyesForThisVariant =
-        !disableReyesTessellation && (traits.type != CLodExtensionType::Shadow || useShadowReyesRouting);
-    SyncReyesResourceEntities(useReyesForThisVariant);
+    SyncReyesResourceEntities(schedulingPolicy.useReyesForThisVariant);
     const uint32_t reyesSplitQueueCapacity = m_reyesSplitQueueCapacity;
     const uint32_t reyesDiceQueueCapacity = m_reyesDiceQueueCapacity;
     const uint32_t reyesRasterWorkCapacity = m_reyesRasterWorkCapacity;
-    const auto workGraphMode = forceHardwareOnly
-        ? HierarchicalCullingWorkGraphMode::HardwareOnly
-        : GetCullingWorkGraphMode(softwareRasterMode);
-    const auto cullingBackend = forceHardwareOnly
-        ? HierarchicalCullingBackend::WorkGraph
-        : GetHierarchicalCullingBackend(cullingBackendMode);
-    const auto renderPhase = RenderPhase(traits.renderPhaseName.data());
-    const std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer = useReyesForThisVariant ? m_reyesOwnershipBitsetBuffer : nullptr;
-    const std::shared_ptr<Buffer> reyesOwnershipBitsetBufferPhase2 = useReyesForThisVariant ? m_reyesOwnershipBitsetBufferPhase2 : nullptr;
+    const auto transparencyMode = schedulingPolicy.transparencyMode;
+    const bool disableReyesTessellation = schedulingPolicy.disableReyesTessellation;
+    const bool useComputeSWRaster = schedulingPolicy.useComputeSWRaster;
+    const bool useShadowPageJob = schedulingPolicy.useShadowPageJob;
+    const bool useShadowReyesRouting = schedulingPolicy.useShadowReyesRouting;
+    const bool useReyesForThisVariant = schedulingPolicy.useReyesForThisVariant;
+    const auto workGraphMode = schedulingPolicy.workGraphMode;
+    const auto cullingBackend = schedulingPolicy.cullingBackend;
+    const auto renderPhase = schedulingPolicy.renderPhase;
+    const std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer =
+        useReyesForThisVariant ? m_reyesOwnershipBitsetBuffer : nullptr;
+    const std::shared_ptr<Buffer> reyesOwnershipBitsetBufferPhase2 =
+        useReyesForThisVariant ? m_reyesOwnershipBitsetBufferPhase2 : nullptr;
 
     std::string shadowNonRasterableHierarchyPassName;
     std::string shadowClearDirtyBitsAfterPassName;
@@ -1509,6 +1549,313 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClusterCapacity,
                     !isPhase1)));
     };
+    const auto appendFixedRasterPass = [&](uint32_t phaseIndex, bool updateShadowClearDirtyBitsAfter) {
+        const bool isPhase1 = phaseIndex == 1u;
+        const std::string phaseSuffix = std::to_string(phaseIndex);
+        ClusterRasterizationPassInputs rasterizePassInputs;
+        rasterizePassInputs.clearGbuffer = isPhase1;
+        rasterizePassInputs.wireframe = false;
+        rasterizePassInputs.renderPhase = renderPhase;
+        rasterizePassInputs.outputKind = traits.rasterOutputKind;
+
+        const auto shadowPageTable = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPageTableTexture : nullptr;
+        const auto shadowPhysicalPages = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPhysicalPagesTexture : nullptr;
+        const auto shadowClipmapInfo = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowClipmapInfoBuffer : nullptr;
+        const std::shared_ptr<Buffer> rasterHistogramBuffer =
+            isPhase1 ? m_rasterBucketsHistogramBuffer : m_rasterBucketsHistogramBufferPhase2;
+        const std::shared_ptr<Buffer> rasterIndirectArgsBuffer =
+            isPhase1 ? m_rasterBucketsIndirectArgsBuffer : m_rasterBucketsIndirectArgsBufferPhase2;
+        const std::string passName = MakeVariantPassName(traits, "RasterizeClustersPass" + phaseSuffix);
+
+        auto rasterizePassDesc = RenderGraph::ExternalPassDesc::Render(
+            passName,
+            std::make_shared<ClusterRasterizationPass>(
+                rasterizePassInputs,
+                m_compactedVisibleClustersBuffer,
+                rasterHistogramBuffer,
+                rasterIndirectArgsBuffer,
+                m_sortedToUnsortedMappingBuffer,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                slabGroup,
+                shadowPageTable,
+                shadowPhysicalPages,
+                shadowClipmapInfo));
+        if (!isPhase1) {
+            rasterizePassDesc.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
+        }
+        rasterizePassDesc.GeometryPass();
+        outPasses.push_back(std::move(rasterizePassDesc));
+
+        if (updateShadowClearDirtyBitsAfter) {
+            shadowClearDirtyBitsAfterPassName = passName;
+        }
+    };
+    const auto appendComputeSoftwareRasterPasses = [&](uint32_t phaseIndex, const std::shared_ptr<Buffer>& reyesOwnershipBitsetBuffer) {
+        const bool isPhase1 = phaseIndex == 1u;
+        const std::string phaseSuffix = std::to_string(phaseIndex);
+        const std::shared_ptr<Buffer> swVisibleClustersCounterBuffer =
+            isPhase1 ? m_swVisibleClustersCounterBuffer : m_swVisibleClustersCounterBufferPhase2;
+        const std::shared_ptr<Buffer> swHistogramBuffer =
+            isPhase1 ? m_rasterBucketsHistogramBufferSw : m_rasterBucketsHistogramBufferPhase2Sw;
+        const std::shared_ptr<Buffer> swTotalCountBuffer =
+            isPhase1 ? m_rasterBucketsTotalCountBufferPhase1Sw : m_rasterBucketsTotalCountBuffer;
+        const std::shared_ptr<Buffer> swWriteCursorBuffer =
+            isPhase1 ? m_rasterBucketsWriteCursorBufferSw : m_rasterBucketsWriteCursorBufferPhase2Sw;
+        const std::shared_ptr<Buffer> swIndirectArgsBuffer =
+            isPhase1 ? m_rasterBucketsIndirectArgsBufferSw : m_rasterBucketsIndirectArgsBufferPhase2Sw;
+        const std::shared_ptr<Buffer> previousSwVisibleClustersCounterBuffer =
+            isPhase1 ? std::shared_ptr<Buffer>{} : m_swVisibleClustersCounterBuffer;
+        const std::shared_ptr<Buffer> previousSwTotalCountBuffer =
+            isPhase1 ? m_swVisibleClustersCounterBuffer : m_rasterBucketsTotalCountBufferPhase1Sw;
+
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW" + phaseSuffix),
+                std::make_shared<RasterBucketCreateCommandPass>(
+                    swVisibleClustersCounterBuffer,
+                    m_histogramIndirectCommand,
+                    m_occlusionReplayStateBuffer,
+                    m_occlusionNodeGpuInputsBuffer,
+                    true)));
+
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsHistogramPassSW" + phaseSuffix),
+                std::make_shared<RasterBucketHistogramPass>(
+                    m_visibleClustersBuffer,
+                    swVisibleClustersCounterBuffer,
+                    m_histogramIndirectCommand,
+                    swHistogramBuffer,
+                    reyesOwnershipBitsetBuffer,
+                    previousSwVisibleClustersCounterBuffer,
+                    true,
+                    m_visibleClusterCapacity,
+                    true)));
+
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsPrefixScanPassSW" + phaseSuffix),
+                std::make_shared<RasterBucketBlockScanPass>(
+                    swHistogramBuffer,
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsBlockSumsBuffer,
+                    true)));
+
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassSW" + phaseSuffix),
+                std::make_shared<RasterBucketBlockOffsetsPass>(
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsBlockSumsBuffer,
+                    m_rasterBucketsScannedBlockSumsBuffer,
+                    swTotalCountBuffer,
+                    true)));
+
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassSW" + phaseSuffix),
+                std::make_shared<RasterBucketCompactAndArgsPass>(
+                    m_visibleClustersBuffer,
+                    swVisibleClustersCounterBuffer,
+                    previousSwTotalCountBuffer,
+                    m_histogramIndirectCommand,
+                    swHistogramBuffer,
+                    m_rasterBucketsOffsetsBuffer,
+                    swWriteCursorBuffer,
+                    m_compactedVisibleClustersBuffer,
+                    swIndirectArgsBuffer,
+                    m_sortedToUnsortedMappingBuffer,
+                    reyesOwnershipBitsetBuffer,
+                    m_visibleClusterCapacity,
+                    !isPhase1,
+                    true,
+                    true,
+                    true)));
+
+        std::shared_ptr<Buffer> swRasterClustersBuffer = m_compactedVisibleClustersBuffer;
+        std::shared_ptr<Buffer> swRasterHistogramBuffer = swHistogramBuffer;
+        std::shared_ptr<Buffer> swRasterIndirectArgsBuffer = swIndirectArgsBuffer;
+
+        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
+            const uint32_t vsmBlockSoftCap = std::max(1u, std::min(m_shadowConfiguredPageJobMaxPages, CLodVirtualShadowBlockMaxTrackedPerCluster));
+            const std::shared_ptr<Buffer> blockHistogramBuffer =
+                isPhase1 ? m_rasterBucketsHistogramBufferPhase2Sw : m_rasterBucketsHistogramBufferSw;
+            const std::shared_ptr<Buffer> blockWriteCursorBuffer =
+                isPhase1 ? m_rasterBucketsWriteCursorBufferPhase2Sw : m_rasterBucketsWriteCursorBufferSw;
+            const std::shared_ptr<Buffer> blockIndirectArgsBuffer =
+                isPhase1 ? m_rasterBucketsIndirectArgsBufferPhase2Sw : m_rasterBucketsIndirectArgsBufferSw;
+            const std::shared_ptr<Buffer> blockTotalCountBuffer =
+                isPhase1 ? m_rasterBucketsTotalCountBuffer : m_rasterBucketsTotalCountBufferPhase1Sw;
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockHistogramPassSW" + phaseSuffix),
+                    std::make_shared<VirtualShadowBlockExpandPass>(
+                        VirtualShadowBlockExpandMode::Histogram,
+                        m_compactedVisibleClustersBuffer,
+                        swHistogramBuffer,
+                        swIndirectArgsBuffer,
+                        blockHistogramBuffer,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_shadowConfiguredExpandedRecordCapacity,
+                        vsmBlockSoftCap,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixScanPassSW" + phaseSuffix),
+                    std::make_shared<RasterBucketBlockScanPass>(
+                        blockHistogramBuffer,
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixOffsetsPassSW" + phaseSuffix),
+                    std::make_shared<RasterBucketBlockOffsetsPass>(
+                        m_rasterBucketsOffsetsBuffer,
+                        m_rasterBucketsBlockSumsBuffer,
+                        m_rasterBucketsScannedBlockSumsBuffer,
+                        blockTotalCountBuffer,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBlockEmitPassSW" + phaseSuffix),
+                    std::make_shared<VirtualShadowBlockExpandPass>(
+                        VirtualShadowBlockExpandMode::Emit,
+                        m_compactedVisibleClustersBuffer,
+                        swHistogramBuffer,
+                        swIndirectArgsBuffer,
+                        blockHistogramBuffer,
+                        m_rasterBucketsOffsetsBuffer,
+                        blockWriteCursorBuffer,
+                        m_vsmExpandedVisibleClustersBufferSw,
+                        m_vsmExpandedBlockMetaBufferSw,
+                        m_shadowPageTableTexture,
+                        m_shadowClipmapInfoBuffer,
+                        m_shadowConfiguredExpandedRecordCapacity,
+                        vsmBlockSoftCap,
+                        slabGroup,
+                        true)));
+
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "VirtualShadowBuildArgsPassSW" + phaseSuffix),
+                    std::make_shared<VirtualShadowBuildRasterArgsPass>(
+                        blockHistogramBuffer,
+                        m_rasterBucketsOffsetsBuffer,
+                        blockIndirectArgsBuffer,
+                        true)));
+
+            swRasterClustersBuffer = m_vsmExpandedVisibleClustersBufferSw;
+            swRasterHistogramBuffer = blockHistogramBuffer;
+            swRasterIndirectArgsBuffer = blockIndirectArgsBuffer;
+        }
+
+        const std::string passName = MakeVariantPassName(traits, "SoftwareRasterizeClustersPass" + phaseSuffix);
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                passName,
+                std::make_shared<ClusterSoftwareRasterizationPass>(
+                    swRasterClustersBuffer,
+                    swRasterHistogramBuffer,
+                    swRasterIndirectArgsBuffer,
+                    m_sortedToUnsortedMappingBuffer,
+                    m_viewRasterInfoBuffer,
+                    traits.rasterOutputKind,
+                    m_shadowPageTableTexture,
+                    m_shadowPhysicalPagesTexture,
+                    m_shadowClipmapInfoBuffer,
+                    slabGroup,
+                    true)));
+
+        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
+            shadowClearDirtyBitsAfterPassName = passName;
+        }
+    };
+    const auto appendPerViewDepthCopyPass = [&](uint32_t phaseIndex) {
+        if (!traits.schedulesPerViewDepthCopy) {
+            return;
+        }
+
+        const std::string passName = MakeVariantPassName(traits, "LinearDepthCopyPass" + std::to_string(phaseIndex));
+        auto depthCopyPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            passName,
+            std::make_shared<PerViewLinearDepthCopyPass>());
+        if (phaseIndex == 2u) {
+            depthCopyPassDesc.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
+        }
+        outPasses.push_back(std::move(depthCopyPassDesc));
+    };
+    const auto appendLinearDepthDownsamplePass = [&](uint32_t phaseIndex) {
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "LinearDepthDownsamplePass" + std::to_string(phaseIndex)),
+                std::make_shared<DownsamplePass>()));
+    };
+    const auto appendPhaseRasterRouting = [&](uint32_t phaseIndex, const std::shared_ptr<Buffer>& reyesOwnershipBitsetBuffer) {
+        appendFixedRasterPass(
+            phaseIndex,
+            phaseIndex == 2u || traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow);
+
+        if (useComputeSWRaster) {
+            appendComputeSoftwareRasterPasses(phaseIndex, reyesOwnershipBitsetBuffer);
+        }
+
+        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowPageJob) {
+            shadowClearDirtyBitsAfterPassName = phaseIndex == 1u
+                ? CLodShadowVariant::AppendPhase1PageJobRasterPasses(*this, traits, slabGroup, outPasses)
+                : CLodShadowVariant::AppendPhase2PageJobRasterPasses(*this, traits, slabGroup, outPasses);
+        }
+        else if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowReyesRouting) {
+            shadowClearDirtyBitsAfterPassName = phaseIndex == 1u
+                ? CLodShadowVariant::AppendPhase1ReyesLargeRasterPasses(*this, traits, slabGroup, outPasses)
+                : CLodShadowVariant::AppendPhase2ReyesLargeRasterPasses(*this, traits, slabGroup, outPasses);
+        }
+
+        appendPerViewDepthCopyPass(phaseIndex);
+    };
+    const auto appendReplayPhase = [&]() {
+        appendHierarchicalCullingPass(2u, MakeVariantPassName(traits, "LinearDepthDownsamplePass1"));
+
+        if (useReyesForThisVariant) {
+            AppendPhaseReyesStructuralPasses(
+                traits,
+                slabGroup,
+                reyesOwnershipBitsetBufferPhase2,
+                reyesSplitQueueCapacity,
+                reyesDiceQueueCapacity,
+                reyesRasterWorkCapacity,
+                2u,
+                false,
+                false,
+                outPasses,
+                shadowClearDirtyBitsAfterPassName);
+        }
+
+        appendRasterBucketCompactionPasses(2u, reyesOwnershipBitsetBufferPhase2);
+        appendPhaseRasterRouting(2u, reyesOwnershipBitsetBufferPhase2);
+    };
 
     // Phase 1 starts with primary culling, then optionally prepares Reyes work before
     // any variant-specific raster routing takes over.
@@ -1564,484 +1911,16 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         return;
     }
 
-    ClusterRasterizationPassInputs rasterizePassInputs;
-    rasterizePassInputs.clearGbuffer = true;
-    rasterizePassInputs.wireframe = false;
-    rasterizePassInputs.renderPhase = renderPhase;
-    rasterizePassInputs.outputKind = traits.rasterOutputKind;
-    auto shadowPageTable = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPageTableTexture : nullptr;
-    auto shadowPhysicalPages = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPhysicalPagesTexture : nullptr;
-    auto shadowClipmapInfo = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowClipmapInfoBuffer : nullptr;
-    std::shared_ptr<Buffer> rasterClustersBufferPhase1 = m_compactedVisibleClustersBuffer;
-    std::shared_ptr<Buffer> rasterHistogramBufferPhase1 = m_rasterBucketsHistogramBuffer;
-    std::shared_ptr<Buffer> rasterIndirectArgsBufferPhase1 = m_rasterBucketsIndirectArgsBuffer;
-
-    auto rasterizePassDesc = RenderGraph::ExternalPassDesc::Render(
-        MakeVariantPassName(traits, "RasterizeClustersPass1"),
-        std::make_shared<ClusterRasterizationPass>(
-            rasterizePassInputs,
-            rasterClustersBufferPhase1,
-            rasterHistogramBufferPhase1,
-            rasterIndirectArgsBufferPhase1,
-            m_sortedToUnsortedMappingBuffer,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            slabGroup,
-            shadowPageTable,
-            shadowPhysicalPages,
-            shadowClipmapInfo));
-    rasterizePassDesc.GeometryPass();
-            if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
-            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "RasterizeClustersPass1");
-            }
-    outPasses.push_back(std::move(rasterizePassDesc));
-
-    if (useComputeSWRaster) {
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW1"),
-                std::make_shared<RasterBucketCreateCommandPass>(
-                    m_swVisibleClustersCounterBuffer,
-                    m_histogramIndirectCommand,
-                    m_occlusionReplayStateBuffer,
-                    m_occlusionNodeGpuInputsBuffer,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsHistogramPassSW1"),
-                std::make_shared<RasterBucketHistogramPass>(
-                    m_visibleClustersBuffer,
-                    m_swVisibleClustersCounterBuffer,
-                    m_histogramIndirectCommand,
-                    m_rasterBucketsHistogramBufferSw,
-                    reyesOwnershipBitsetBuffer,
-                    nullptr,
-                    true,
-                    m_visibleClusterCapacity,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsPrefixScanPassSW1"),
-                std::make_shared<RasterBucketBlockScanPass>(
-                    m_rasterBucketsHistogramBufferSw,
-                    m_rasterBucketsOffsetsBuffer,
-                    m_rasterBucketsBlockSumsBuffer,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassSW1"),
-                std::make_shared<RasterBucketBlockOffsetsPass>(
-                    m_rasterBucketsOffsetsBuffer,
-                    m_rasterBucketsBlockSumsBuffer,
-                    m_rasterBucketsScannedBlockSumsBuffer,
-                    m_rasterBucketsTotalCountBufferPhase1Sw,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassSW1"),
-                std::make_shared<RasterBucketCompactAndArgsPass>(
-                    m_visibleClustersBuffer,
-                    m_swVisibleClustersCounterBuffer,
-                    m_swVisibleClustersCounterBuffer,
-                    m_histogramIndirectCommand,
-                    m_rasterBucketsHistogramBufferSw,
-                    m_rasterBucketsOffsetsBuffer,
-                    m_rasterBucketsWriteCursorBufferSw,
-                    m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsIndirectArgsBufferSw,
-                    m_sortedToUnsortedMappingBuffer,
-                    reyesOwnershipBitsetBuffer,
-                    m_visibleClusterCapacity,
-                    false,
-                    true,
-                    true,
-                    true)));
-        std::shared_ptr<Buffer> swRasterClustersBufferPhase1 = m_compactedVisibleClustersBuffer;
-        std::shared_ptr<Buffer> swRasterHistogramBufferPhase1 = m_rasterBucketsHistogramBufferSw;
-        std::shared_ptr<Buffer> swRasterIndirectArgsBufferPhase1 = m_rasterBucketsIndirectArgsBufferSw;
-
-        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
-            const uint32_t vsmBlockSoftCap = std::max(1u, std::min(m_shadowConfiguredPageJobMaxPages, CLodVirtualShadowBlockMaxTrackedPerCluster));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockHistogramPassSW1"),
-                    std::make_shared<VirtualShadowBlockExpandPass>(
-                        VirtualShadowBlockExpandMode::Histogram,
-                        m_compactedVisibleClustersBuffer,
-                        m_rasterBucketsHistogramBufferSw,
-                        m_rasterBucketsIndirectArgsBufferSw,
-                        m_rasterBucketsHistogramBufferPhase2Sw,
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        m_shadowPageTableTexture,
-                        m_shadowClipmapInfoBuffer,
-                        m_shadowConfiguredExpandedRecordCapacity,
-                        vsmBlockSoftCap,
-                        slabGroup,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixScanPassSW1"),
-                    std::make_shared<RasterBucketBlockScanPass>(
-                        m_rasterBucketsHistogramBufferPhase2Sw,
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsBlockSumsBuffer,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixOffsetsPassSW1"),
-                    std::make_shared<RasterBucketBlockOffsetsPass>(
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsBlockSumsBuffer,
-                        m_rasterBucketsScannedBlockSumsBuffer,
-                        m_rasterBucketsTotalCountBuffer,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockEmitPassSW1"),
-                    std::make_shared<VirtualShadowBlockExpandPass>(
-                        VirtualShadowBlockExpandMode::Emit,
-                        m_compactedVisibleClustersBuffer,
-                        m_rasterBucketsHistogramBufferSw,
-                        m_rasterBucketsIndirectArgsBufferSw,
-                        m_rasterBucketsHistogramBufferPhase2Sw,
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsWriteCursorBufferPhase2Sw,
-                        m_vsmExpandedVisibleClustersBufferSw,
-                        m_vsmExpandedBlockMetaBufferSw,
-                        m_shadowPageTableTexture,
-                        m_shadowClipmapInfoBuffer,
-                        m_shadowConfiguredExpandedRecordCapacity,
-                        vsmBlockSoftCap,
-                        slabGroup,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBuildArgsPassSW1"),
-                    std::make_shared<VirtualShadowBuildRasterArgsPass>(
-                        m_rasterBucketsHistogramBufferPhase2Sw,
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsIndirectArgsBufferPhase2Sw,
-                        true)));
-
-            swRasterClustersBufferPhase1 = m_vsmExpandedVisibleClustersBufferSw;
-            swRasterHistogramBufferPhase1 = m_rasterBucketsHistogramBufferPhase2Sw;
-            swRasterIndirectArgsBufferPhase1 = m_rasterBucketsIndirectArgsBufferPhase2Sw;
-        }
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "SoftwareRasterizeClustersPass1"),
-                std::make_shared<ClusterSoftwareRasterizationPass>(
-                    swRasterClustersBufferPhase1,
-                    swRasterHistogramBufferPhase1,
-                    swRasterIndirectArgsBufferPhase1,
-                    m_sortedToUnsortedMappingBuffer,
-                    m_viewRasterInfoBuffer,
-                    traits.rasterOutputKind,
-                    m_shadowPageTableTexture,
-                    m_shadowPhysicalPagesTexture,
-                    m_shadowClipmapInfoBuffer,
-                    slabGroup,
-                    true)));
-
-        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
-            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterizeClustersPass1");
-        }
-    }
-
-    if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowPageJob) {
-        shadowClearDirtyBitsAfterPassName =
-            CLodShadowVariant::AppendPhase1PageJobRasterPasses(*this, traits, slabGroup, outPasses);
-    }
-    else if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowReyesRouting) {
-        shadowClearDirtyBitsAfterPassName =
-            CLodShadowVariant::AppendPhase1ReyesLargeRasterPasses(*this, traits, slabGroup, outPasses);
-    }
-
-    if (traits.schedulesPerViewDepthCopy) {
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "LinearDepthCopyPass1"),
-                std::make_shared<PerViewLinearDepthCopyPass>()));
-    }
-
-    outPasses.push_back(
-        RenderGraph::ExternalPassDesc::Compute(
-            MakeVariantPassName(traits, "LinearDepthDownsamplePass1"),
-            std::make_shared<DownsamplePass>()));
+    appendPhaseRasterRouting(1u, reyesOwnershipBitsetBuffer);
+    appendLinearDepthDownsamplePass(1u);
 
     // Only visibility scheduling currently uses phase 2 replay
     if (traits.usesPhase2OcclusionReplay) {
-        appendHierarchicalCullingPass(2u, MakeVariantPassName(traits, "LinearDepthDownsamplePass1"));
-
-        if (useReyesForThisVariant) {
-            AppendPhaseReyesStructuralPasses(
-                traits,
-                slabGroup,
-                reyesOwnershipBitsetBufferPhase2,
-                reyesSplitQueueCapacity,
-                reyesDiceQueueCapacity,
-                reyesRasterWorkCapacity,
-                2u,
-                false,
-                false,
-                outPasses,
-                shadowClearDirtyBitsAfterPassName);
-        }
-
-        appendRasterBucketCompactionPasses(2u, reyesOwnershipBitsetBufferPhase2);
-
-        ClusterRasterizationPassInputs rasterizePassInputs2;
-        rasterizePassInputs2.clearGbuffer = false;
-        rasterizePassInputs2.wireframe = false;
-        rasterizePassInputs2.renderPhase = renderPhase;
-        rasterizePassInputs2.outputKind = traits.rasterOutputKind;
-        std::shared_ptr<Buffer> rasterClustersBufferPhase2 = m_compactedVisibleClustersBuffer;
-        std::shared_ptr<Buffer> rasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferPhase2;
-        std::shared_ptr<Buffer> rasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferPhase2;
-
-        auto rasterizePassDesc2 = RenderGraph::ExternalPassDesc::Render(
-            MakeVariantPassName(traits, "RasterizeClustersPass2"),
-            std::make_shared<ClusterRasterizationPass>(
-            rasterizePassInputs2,
-            rasterClustersBufferPhase2,
-            rasterHistogramBufferPhase2,
-            rasterIndirectArgsBufferPhase2,
-            m_sortedToUnsortedMappingBuffer,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            slabGroup,
-            shadowPageTable,
-            shadowPhysicalPages,
-            shadowClipmapInfo));
-        rasterizePassDesc2.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
-        rasterizePassDesc2.GeometryPass();
-            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "RasterizeClustersPass2");
-        outPasses.push_back(std::move(rasterizePassDesc2));
-
-        if (useComputeSWRaster) {
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW2"),
-                std::make_shared<RasterBucketCreateCommandPass>(
-                    m_swVisibleClustersCounterBufferPhase2,
-                    m_histogramIndirectCommand,
-                    m_occlusionReplayStateBuffer,
-                    m_occlusionNodeGpuInputsBuffer,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsHistogramPassSW2"),
-                std::make_shared<RasterBucketHistogramPass>(
-                    m_visibleClustersBuffer,
-                    m_swVisibleClustersCounterBufferPhase2,
-                    m_histogramIndirectCommand,
-                    m_rasterBucketsHistogramBufferPhase2Sw,
-                    reyesOwnershipBitsetBufferPhase2,
-                    m_swVisibleClustersCounterBuffer,
-                    true,
-                    m_visibleClusterCapacity,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsPrefixScanPassSW2"),
-                std::make_shared<RasterBucketBlockScanPass>(
-                    m_rasterBucketsHistogramBufferPhase2Sw,
-                    m_rasterBucketsOffsetsBuffer,
-                    m_rasterBucketsBlockSumsBuffer,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassSW2"),
-                std::make_shared<RasterBucketBlockOffsetsPass>(
-                    m_rasterBucketsOffsetsBuffer,
-                    m_rasterBucketsBlockSumsBuffer,
-                    m_rasterBucketsScannedBlockSumsBuffer,
-                    m_rasterBucketsTotalCountBuffer,
-                    true)));
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassSW2"),
-                std::make_shared<RasterBucketCompactAndArgsPass>(
-                    m_visibleClustersBuffer,
-                    m_swVisibleClustersCounterBufferPhase2,
-                    m_rasterBucketsTotalCountBufferPhase1Sw,
-                    m_histogramIndirectCommand,
-                    m_rasterBucketsHistogramBufferPhase2Sw,
-                    m_rasterBucketsOffsetsBuffer,
-                    m_rasterBucketsWriteCursorBufferPhase2Sw,
-                    m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsIndirectArgsBufferPhase2Sw,
-                    m_sortedToUnsortedMappingBuffer,
-                    reyesOwnershipBitsetBufferPhase2,
-                    m_visibleClusterCapacity,
-                    true,
-                    true,
-                    true,
-                    true)));
-
-        std::shared_ptr<Buffer> swRasterClustersBufferPhase2 = m_compactedVisibleClustersBuffer;
-        std::shared_ptr<Buffer> swRasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferPhase2Sw;
-        std::shared_ptr<Buffer> swRasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferPhase2Sw;
-        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
-            const uint32_t vsmBlockSoftCap = std::max(1u, std::min(m_shadowConfiguredPageJobMaxPages, CLodVirtualShadowBlockMaxTrackedPerCluster));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockHistogramPassSW2"),
-                    std::make_shared<VirtualShadowBlockExpandPass>(
-                        VirtualShadowBlockExpandMode::Histogram,
-                        m_compactedVisibleClustersBuffer,
-                        m_rasterBucketsHistogramBufferPhase2Sw,
-                        m_rasterBucketsIndirectArgsBufferPhase2Sw,
-                        m_rasterBucketsHistogramBufferSw,
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        m_shadowPageTableTexture,
-                        m_shadowClipmapInfoBuffer,
-                        m_shadowConfiguredExpandedRecordCapacity,
-                        vsmBlockSoftCap,
-                        slabGroup,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixScanPassSW2"),
-                    std::make_shared<RasterBucketBlockScanPass>(
-                        m_rasterBucketsHistogramBufferSw,
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsBlockSumsBuffer,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockPrefixOffsetsPassSW2"),
-                    std::make_shared<RasterBucketBlockOffsetsPass>(
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsBlockSumsBuffer,
-                        m_rasterBucketsScannedBlockSumsBuffer,
-                        m_rasterBucketsTotalCountBufferPhase1Sw,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBlockEmitPassSW2"),
-                    std::make_shared<VirtualShadowBlockExpandPass>(
-                        VirtualShadowBlockExpandMode::Emit,
-                        m_compactedVisibleClustersBuffer,
-                        m_rasterBucketsHistogramBufferPhase2Sw,
-                        m_rasterBucketsIndirectArgsBufferPhase2Sw,
-                        m_rasterBucketsHistogramBufferSw,
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsWriteCursorBufferSw,
-                        m_vsmExpandedVisibleClustersBufferSw,
-                        m_vsmExpandedBlockMetaBufferSw,
-                        m_shadowPageTableTexture,
-                        m_shadowClipmapInfoBuffer,
-                        m_shadowConfiguredExpandedRecordCapacity,
-                        vsmBlockSoftCap,
-                        slabGroup,
-                        true)));
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Compute(
-                    MakeVariantPassName(traits, "VirtualShadowBuildArgsPassSW2"),
-                    std::make_shared<VirtualShadowBuildRasterArgsPass>(
-                        m_rasterBucketsHistogramBufferSw,
-                        m_rasterBucketsOffsetsBuffer,
-                        m_rasterBucketsIndirectArgsBufferSw,
-                        true)));
-
-            swRasterClustersBufferPhase2 = m_vsmExpandedVisibleClustersBufferSw;
-            swRasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferSw;
-            swRasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferSw;
-        }
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "SoftwareRasterizeClustersPass2"),
-                std::make_shared<ClusterSoftwareRasterizationPass>(
-                    swRasterClustersBufferPhase2,
-                    swRasterHistogramBufferPhase2,
-                    swRasterIndirectArgsBufferPhase2,
-                    m_sortedToUnsortedMappingBuffer,
-                    m_viewRasterInfoBuffer,
-                    traits.rasterOutputKind,
-                    m_shadowPageTableTexture,
-                    m_shadowPhysicalPagesTexture,
-                    m_shadowClipmapInfoBuffer,
-                    slabGroup,
-                    true)));
-
-        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
-            shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterizeClustersPass2");
-        }
-    }
-
-        if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowPageJob) {
-            shadowClearDirtyBitsAfterPassName =
-                CLodShadowVariant::AppendPhase2PageJobRasterPasses(*this, traits, slabGroup, outPasses);
-        }
-        else if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowReyesRouting) {
-            shadowClearDirtyBitsAfterPassName =
-                CLodShadowVariant::AppendPhase2ReyesLargeRasterPasses(*this, traits, slabGroup, outPasses);
-        }
-
-        if (traits.schedulesPerViewDepthCopy) {
-            auto depthCopyPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
-                MakeVariantPassName(traits, "LinearDepthCopyPass2"),
-                std::make_shared<PerViewLinearDepthCopyPass>());
-            depthCopyPassDesc2.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
-            outPasses.push_back(std::move(depthCopyPassDesc2));
-        }
+        appendReplayPhase();
     }
 
     CLodShadowVariant::AppendStructuralTail(*this, traits, outPasses, shadowClearDirtyBitsAfterPassName);
-
-    outPasses.push_back(
-        RenderGraph::ExternalPassDesc::Compute(
-            MakeVariantPassName(traits, "LinearDepthDownsamplePass2"),
-            std::make_shared<DownsamplePass>()));
+    appendLinearDepthDownsamplePass(2u);
 
     applyTechniqueTags();
 }
