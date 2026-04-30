@@ -9,6 +9,13 @@
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
+#if __has_include(<imgui_impl_vulkan.h>) && __has_include(<vulkan/vulkan.h>)
+#define BASICRENDERER_HAS_IMGUI_VULKAN 1
+#include <imgui_impl_vulkan.h>
+#include <rhi_interop_vulkan.h>
+#else
+#define BASICRENDERER_HAS_IMGUI_VULKAN 0
+#endif
 #include <implot.h>
 #include <functional>
 #include <spdlog/spdlog.h>
@@ -160,6 +167,11 @@ public:
         if (m_imguiBackend == rhi::Backend::D3D12) {
             ImGui_ImplDX12_Shutdown();
         }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        if (m_imguiBackend == rhi::Backend::Vulkan) {
+            ImGui_ImplVulkan_Shutdown();
+        }
+#endif
         if (m_imguiWin32Initialized) {
             ImGui_ImplWin32_Shutdown();
         }
@@ -228,6 +240,10 @@ private:
     std::mutex imguiHeapMutex_;
     rhi::Backend m_imguiBackend = rhi::Backend::Null;
     bool m_imguiWin32Initialized = false;
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    VkFormat m_imguiVkColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkPipelineRenderingCreateInfoKHR m_imguiVkRenderingInfo{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+#endif
 
     Menu() { 
         ImGui::CreateContext();
@@ -664,7 +680,6 @@ inline bool Menu::HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 
 inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
-	(void)swapChain;
 	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
 
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
@@ -692,7 +707,49 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
         imguiHeapGpuStart_ = rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart().ptr;
         imguiHeapIncrementSize_ = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::CbvSrvUav);
         m_imguiBackend = rhi::Backend::D3D12;
+    } else if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        ImGui_ImplVulkan_InitInfo initInfo{};
+        initInfo.ApiVersion = VK_API_VERSION_1_3;
+        initInfo.Instance = rhi::vulkan::get_instance(device);
+        initInfo.PhysicalDevice = rhi::vulkan::get_physical_device(device);
+        initInfo.Device = rhi::vulkan::get_device(device);
+        initInfo.QueueFamily = rhi::vulkan::get_queue_family_index(DeviceManager::GetInstance().GetGraphicsQueue());
+        initInfo.Queue = rhi::vulkan::get_queue(DeviceManager::GetInstance().GetGraphicsQueue());
+        initInfo.MinImageCount = numFramesInFlight;
+        initInfo.ImageCount = numFramesInFlight;
+        initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        initInfo.DescriptorPoolSize = kImGuiHeapCapacity;
+        initInfo.UseDynamicRendering = true;
+        m_imguiVkColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+        m_imguiVkRenderingInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+        m_imguiVkRenderingInfo.colorAttachmentCount = 1;
+        m_imguiVkRenderingInfo.pColorAttachmentFormats = &m_imguiVkColorFormat;
+        initInfo.PipelineRenderingCreateInfo = m_imguiVkRenderingInfo;
+        initInfo.CheckVkResultFn = [](VkResult result) {
+            if (result != VK_SUCCESS) {
+                spdlog::error("ImGui Vulkan backend returned VkResult {}", static_cast<int>(result));
+            }
+        };
+
+        if (!initInfo.Instance || !initInfo.PhysicalDevice || !initInfo.Device || !initInfo.Queue) {
+            throw std::runtime_error("Menu::Initialize failed to query Vulkan native handles for ImGui");
+        }
+
+        if (!ImGui_ImplVulkan_Init(&initInfo)) {
+            throw std::runtime_error("Menu::Initialize failed to initialize ImGui Vulkan backend");
+        }
+        if (!ImGui_ImplVulkan_CreateFontsTexture()) {
+            throw std::runtime_error("Menu::Initialize failed to create ImGui Vulkan font texture");
+        }
+
+        m_imguiBackend = rhi::Backend::Vulkan;
+#else
+        (void)swapChain;
+        spdlog::warn("Menu::Initialize: Vulkan renderer backend was selected, but imgui_impl_vulkan.h is not available in this build environment.");
+#endif
     } else {
+        (void)swapChain;
         spdlog::warn("Menu::Initialize: Vulkan renderer backend is not available in this workspace's ImGui integration. UI rendering will stay disabled until a Vulkan ImGui backend is added.");
     }
 
@@ -1131,6 +1188,11 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     if (m_imguiBackend == rhi::Backend::D3D12) {
         ImGui_ImplDX12_NewFrame();
     }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    else if (m_imguiBackend == rhi::Backend::Vulkan) {
+        ImGui_ImplVulkan_NewFrame();
+    }
+#endif
 	ImGui_ImplWin32_NewFrame();
 
 	ImGui::NewFrame();
@@ -1181,11 +1243,16 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 		ImGui::Render();
 
-        if (m_imguiBackend != rhi::Backend::D3D12 || !g_pd3dSrvDescHeap) {
+        if (m_imguiBackend == rhi::Backend::Null) {
             return;
         }
 
-        commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+        if (m_imguiBackend == rhi::Backend::D3D12) {
+            if (!g_pd3dSrvDescHeap) {
+                return;
+            }
+            commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+        }
 
 		rhi::PassBeginInfo beginInfo{};
 		rhi::ColorAttachment attchment{};
@@ -1197,7 +1264,14 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 		commandList.BeginPass(beginInfo);
 
-		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+        if (m_imguiBackend == rhi::Backend::D3D12) {
+            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+        }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        else if (m_imguiBackend == rhi::Backend::Vulkan) {
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), rhi::vulkan::get_cmd_list(commandList));
+        }
+#endif
         return;
     }
 
@@ -1686,11 +1760,16 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 	// Rendering
 	ImGui::Render();
 
-    if (m_imguiBackend != rhi::Backend::D3D12 || !g_pd3dSrvDescHeap) {
+    if (m_imguiBackend == rhi::Backend::Null) {
         return;
     }
 
-    commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+    if (m_imguiBackend == rhi::Backend::D3D12) {
+        if (!g_pd3dSrvDescHeap) {
+            return;
+        }
+        commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+    }
 
 	rhi::PassBeginInfo beginInfo{};
 	rhi::ColorAttachment attchment{};
@@ -1702,7 +1781,14 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 	commandList.BeginPass(beginInfo);
 
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+    if (m_imguiBackend == rhi::Backend::D3D12) {
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+    }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    else if (m_imguiBackend == rhi::Backend::Vulkan) {
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), rhi::vulkan::get_cmd_list(commandList));
+    }
+#endif
 
 }
 

@@ -610,6 +610,8 @@ struct FragmentInfo {
     uint heightMapIndex;
     uint heightMapSamplerIndex;
     uint materialFlags;
+    uint selectedMaterialMipLevel;
+    uint selectedMaterialMipMaxLevel;
 };
 
 struct EnvironmentInfo {
@@ -634,6 +636,8 @@ struct LPMConstants
     float4x4 inputToOutputMatrix;
 };
 
+static const uint MATERIAL_DEBUG_INVALID_MIP_LEVEL = 0xffffffffu;
+
 struct MaterialInputs
 {
     float3 albedo;
@@ -650,6 +654,8 @@ struct MaterialInputs
     float opacity;
     float ambientOcclusion;
     uint openPBRMaterialDataIndex;
+    uint selectedMaterialMipLevel;
+    uint selectedMaterialMipMaxLevel;
 };
 
 struct SkinningInstanceGPUInfo

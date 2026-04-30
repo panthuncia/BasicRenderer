@@ -8,6 +8,7 @@
 #include "include/gammaCorrection.hlsli"
 #include "include/constants.hlsli"
 #include "include/dynamicSwizzle.hlsli"
+#include "include/outputTypes.hlsli"
 
 struct OpenPBRSurfaceSample
 {
@@ -345,15 +346,126 @@ float Sample2DGrad(Texture2D<float> tex, SamplerState samp, float2 uv, float2 dU
     return tex.SampleGrad(samp, uv, dUVdx, dUVdy);
 }
 
-float4 SampleMaterialTexture2DGrad(Texture2D<float4> tex, SamplerState samp, uint streamingTextureID, float2 uv, float2 dUVdx, float2 dUVdy)
+uint ComputeTextureMipCountFromDimensions(uint width, uint height)
 {
+    const uint maxDimension = max(width, height);
+    return maxDimension > 0u ? (1u + firstbithigh(maxDimension)) : 1u;
+}
+
+float ComputeMaterialSelectedMipLod(float2 texelDdx, float2 texelDdy)
+{
+    const float maxFootprintSq = max(dot(texelDdx, texelDdx), dot(texelDdy, texelDdy));
+    return max(0.0f, 0.5f * log2(max(maxFootprintSq, 1.0e-8f)));
+}
+
+bool ShouldTrackMaterialSelectedMipDebug()
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
+    return perFrameBuffer.outputType == OUTPUT_MATERIAL_SELECTED_MIP;
+}
+
+void InitializeMaterialSelectedMipDebug(inout MaterialInputs materialInputs)
+{
+    materialInputs.selectedMaterialMipLevel = MATERIAL_DEBUG_INVALID_MIP_LEVEL;
+    materialInputs.selectedMaterialMipMaxLevel = 0u;
+}
+
+void AccumulateMaterialSelectedMipDebug(inout MaterialInputs materialInputs, uint selectedMipLevel, uint selectedMipMaxLevel)
+{
+    if (materialInputs.selectedMaterialMipLevel == MATERIAL_DEBUG_INVALID_MIP_LEVEL ||
+        selectedMipLevel < materialInputs.selectedMaterialMipLevel)
+    {
+        materialInputs.selectedMaterialMipLevel = selectedMipLevel;
+        materialInputs.selectedMaterialMipMaxLevel = selectedMipMaxLevel;
+        return;
+    }
+
+    if (selectedMipLevel == materialInputs.selectedMaterialMipLevel)
+    {
+        materialInputs.selectedMaterialMipMaxLevel = max(materialInputs.selectedMaterialMipMaxLevel, selectedMipMaxLevel);
+    }
+}
+
+void RecordMaterialSelectedMipDebug(
+    inout MaterialInputs materialInputs,
+    uint streamingTextureID,
+    uint width,
+    uint height,
+    float2 dUVdx,
+    float2 dUVdy)
+{
+    uint residentTopMip = 0u;
+    uint totalMipCount = ComputeTextureMipCountFromDimensions(width, height);
+    if (streamingTextureID != 0u)
+    {
+        TextureStreamingGPUInfo streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
+        residentTopMip = streamingInfo.residentTopMip;
+        totalMipCount = max(streamingInfo.totalMipCount, 1u);
+    }
+
+    const float2 texelScale = float2((float)width, (float)height);
+    const uint selectedMipLevel = min(
+        totalMipCount - 1u,
+        residentTopMip + (uint)ComputeMaterialSelectedMipLod(dUVdx * texelScale, dUVdy * texelScale));
+    AccumulateMaterialSelectedMipDebug(materialInputs, selectedMipLevel, totalMipCount - 1u);
+}
+
+float4 SampleMaterialTexture2DGrad(
+    Texture2D<float4> tex,
+    SamplerState samp,
+    uint streamingTextureID,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    inout MaterialInputs materialInputs)
+{
+    uint width;
+    uint height;
+    tex.GetDimensions(width, height);
+
     if (streamingTextureID != 0u) {
         TextureStreamingGPUInfo streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
-        uint width;
-        uint height;
-        tex.GetDimensions(width, height);
         const float2 texelScale = float2((float)width, (float)height);
         RecordTextureStreamingFeedback(streamingInfo, streamingTextureID, dUVdx * texelScale, dUVdy * texelScale);
+    }
+
+    if (ShouldTrackMaterialSelectedMipDebug())
+    {
+        RecordMaterialSelectedMipDebug(materialInputs, streamingTextureID, width, height, dUVdx, dUVdy);
+    }
+
+    return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
+}
+
+float4 SampleMaterialTexture2DGrad(Texture2D<float4> tex, SamplerState samp, uint streamingTextureID, float2 uv, float2 dUVdx, float2 dUVdy)
+{
+    MaterialInputs unusedMaterialInputs = (MaterialInputs)0;
+    InitializeMaterialSelectedMipDebug(unusedMaterialInputs);
+    return SampleMaterialTexture2DGrad(tex, samp, streamingTextureID, uv, dUVdx, dUVdy, unusedMaterialInputs);
+}
+
+float SampleMaterialTexture2DGrad(
+    Texture2D<float> tex,
+    SamplerState samp,
+    uint streamingTextureID,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    inout MaterialInputs materialInputs)
+{
+    uint width;
+    uint height;
+    tex.GetDimensions(width, height);
+
+    if (streamingTextureID != 0u) {
+        TextureStreamingGPUInfo streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
+        const float2 texelScale = float2((float)width, (float)height);
+        RecordTextureStreamingFeedback(streamingInfo, streamingTextureID, dUVdx * texelScale, dUVdy * texelScale);
+    }
+
+    if (ShouldTrackMaterialSelectedMipDebug())
+    {
+        RecordMaterialSelectedMipDebug(materialInputs, streamingTextureID, width, height, dUVdx, dUVdy);
     }
 
     return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
@@ -361,16 +473,9 @@ float4 SampleMaterialTexture2DGrad(Texture2D<float4> tex, SamplerState samp, uin
 
 float SampleMaterialTexture2DGrad(Texture2D<float> tex, SamplerState samp, uint streamingTextureID, float2 uv, float2 dUVdx, float2 dUVdy)
 {
-    if (streamingTextureID != 0u) {
-        TextureStreamingGPUInfo streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
-        uint width;
-        uint height;
-        tex.GetDimensions(width, height);
-        const float2 texelScale = float2((float)width, (float)height);
-        RecordTextureStreamingFeedback(streamingInfo, streamingTextureID, dUVdx * texelScale, dUVdy * texelScale);
-    }
-
-    return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
+    MaterialInputs unusedMaterialInputs = (MaterialInputs)0;
+    InitializeMaterialSelectedMipDebug(unusedMaterialInputs);
+    return SampleMaterialTexture2DGrad(tex, samp, streamingTextureID, uv, dUVdx, dUVdy, unusedMaterialInputs);
 }
 
 #define MATERIAL_MAX_UNIQUE_UV_SETS 8u
@@ -499,11 +604,11 @@ MaterialUvSample ResolveOpenPBRTextureUv(
     return uvCache.samples[cacheIndex];
 }
 
-float4 SampleOpenPBRTexture(uint textureIndex, uint samplerIndex, uint streamingTextureID, MaterialUvSample uvSample)
+float4 SampleOpenPBRTexture(uint textureIndex, uint samplerIndex, uint streamingTextureID, MaterialUvSample uvSample, inout MaterialInputs materialInputs)
 {
     Texture2D<float4> textureHandle = ResourceDescriptorHeap[NonUniformResourceIndex(textureIndex)];
     SamplerState samplerHandle = SamplerDescriptorHeap[NonUniformResourceIndex(samplerIndex)];
-    return SampleMaterialTexture2DGrad(textureHandle, samplerHandle, streamingTextureID, uvSample.uv, uvSample.dUVdx, uvSample.dUVdy);
+    return SampleMaterialTexture2DGrad(textureHandle, samplerHandle, streamingTextureID, uvSample.uv, uvSample.dUVdx, uvSample.dUVdy, materialInputs);
 }
 
 float3 SampleOpenPBRColorTexture(
@@ -511,14 +616,15 @@ float3 SampleOpenPBRColorTexture(
     uint samplerIndex,
     uint streamingTextureID,
     uint4 channels,
-    MaterialUvSample uvSample)
+    MaterialUvSample uvSample,
+    inout MaterialInputs materialInputs)
 {
     if (!HasOpenPBRTexture(textureIndex, samplerIndex))
     {
         return float3(1.0f, 1.0f, 1.0f);
     }
 
-    const float4 sampleValue = SampleOpenPBRTexture(textureIndex, samplerIndex, streamingTextureID, uvSample);
+    const float4 sampleValue = SampleOpenPBRTexture(textureIndex, samplerIndex, streamingTextureID, uvSample, materialInputs);
     return float3(
         DynamicSwizzle(sampleValue, channels.x),
         DynamicSwizzle(sampleValue, channels.y),
@@ -530,14 +636,15 @@ float SampleOpenPBRScalarTexture(
     uint samplerIndex,
     uint streamingTextureID,
     uint channel,
-    MaterialUvSample uvSample)
+    MaterialUvSample uvSample,
+    inout MaterialInputs materialInputs)
 {
     if (!HasOpenPBRTexture(textureIndex, samplerIndex))
     {
         return 1.0f;
     }
 
-    const float4 sampleValue = SampleOpenPBRTexture(textureIndex, samplerIndex, streamingTextureID, uvSample);
+    const float4 sampleValue = SampleOpenPBRTexture(textureIndex, samplerIndex, streamingTextureID, uvSample, materialInputs);
     return DynamicSwizzle(sampleValue, channel);
 }
 
@@ -550,7 +657,8 @@ void ApplyOpenPBRTextureSampling(
     float2 parallaxDUdx,
     float2 parallaxDUdy,
     in OpenPBRMaterialInfo openPBRMaterialInfo,
-    inout OpenPBRSurfaceSample surface)
+    inout OpenPBRSurfaceSample surface,
+    inout MaterialInputs materialInputs)
 {
     const uint cacheIndices[OPENPBR_TEXTURE_SLOT_COUNT] = {
         uvBindings.openPBRCacheIndexBySlot[0],
@@ -621,38 +729,44 @@ void ApplyOpenPBRTextureSampling(
         openPBRMaterialInfo.coatColorSamplerIndex,
         openPBRMaterialInfo.coatColorStreamingTextureID,
         openPBRMaterialInfo.coatColorChannels,
-        coatColorUv);
+        coatColorUv,
+        materialInputs);
     surface.coatWeight *= SampleOpenPBRScalarTexture(
         openPBRMaterialInfo.coatWeightTextureIndex,
         openPBRMaterialInfo.coatWeightSamplerIndex,
         openPBRMaterialInfo.coatWeightStreamingTextureID,
         openPBRMaterialInfo.coatWeightChannel,
-        coatWeightUv);
+        coatWeightUv,
+        materialInputs);
     surface.coatRoughness *= SampleOpenPBRScalarTexture(
         openPBRMaterialInfo.coatRoughnessTextureIndex,
         openPBRMaterialInfo.coatRoughnessSamplerIndex,
         openPBRMaterialInfo.coatRoughnessStreamingTextureID,
         openPBRMaterialInfo.coatRoughnessChannel,
-        coatRoughnessUv);
+        coatRoughnessUv,
+        materialInputs);
 
     surface.fuzzColor *= SampleOpenPBRColorTexture(
         openPBRMaterialInfo.fuzzColorTextureIndex,
         openPBRMaterialInfo.fuzzColorSamplerIndex,
         openPBRMaterialInfo.fuzzColorStreamingTextureID,
         openPBRMaterialInfo.fuzzColorChannels,
-        fuzzColorUv);
+        fuzzColorUv,
+        materialInputs);
     surface.fuzzWeight *= SampleOpenPBRScalarTexture(
         openPBRMaterialInfo.fuzzWeightTextureIndex,
         openPBRMaterialInfo.fuzzWeightSamplerIndex,
         openPBRMaterialInfo.fuzzWeightStreamingTextureID,
         openPBRMaterialInfo.fuzzWeightChannel,
-        fuzzWeightUv);
+        fuzzWeightUv,
+        materialInputs);
     surface.fuzzRoughness *= SampleOpenPBRScalarTexture(
         openPBRMaterialInfo.fuzzRoughnessTextureIndex,
         openPBRMaterialInfo.fuzzRoughnessSamplerIndex,
         openPBRMaterialInfo.fuzzRoughnessStreamingTextureID,
         openPBRMaterialInfo.fuzzRoughnessChannel,
-        fuzzRoughnessUv);
+        fuzzRoughnessUv,
+        materialInputs);
 
     surface.coatColor = saturate(surface.coatColor);
     surface.coatWeight = saturate(surface.coatWeight);
@@ -671,7 +785,8 @@ void ApplyOpenPBRTextureSamplingSpecialized(
     float2 parallaxDUdx,
     float2 parallaxDUdy,
     in OpenPBRMaterialInfo openPBRMaterialInfo,
-    inout OpenPBRSurfaceSample surface)
+    inout OpenPBRSurfaceSample surface,
+    inout MaterialInputs materialInputs)
 {
 #if defined(PSO_OPENPBR_COAT_COLOR_TEXTURE)
     const MaterialUvSample coatColorUv = ResolveOpenPBRTextureUv(
@@ -688,7 +803,8 @@ void ApplyOpenPBRTextureSamplingSpecialized(
         openPBRMaterialInfo.coatColorSamplerIndex,
         openPBRMaterialInfo.coatColorStreamingTextureID,
         openPBRMaterialInfo.coatColorChannels,
-        coatColorUv);
+        coatColorUv,
+        materialInputs);
 #endif
 
 #if defined(PSO_OPENPBR_COAT_WEIGHT_TEXTURE)
@@ -706,7 +822,8 @@ void ApplyOpenPBRTextureSamplingSpecialized(
         openPBRMaterialInfo.coatWeightSamplerIndex,
         openPBRMaterialInfo.coatWeightStreamingTextureID,
         openPBRMaterialInfo.coatWeightChannel,
-        coatWeightUv);
+        coatWeightUv,
+        materialInputs);
 #endif
 
 #if defined(PSO_OPENPBR_COAT_ROUGHNESS_TEXTURE)
@@ -724,7 +841,8 @@ void ApplyOpenPBRTextureSamplingSpecialized(
         openPBRMaterialInfo.coatRoughnessSamplerIndex,
         openPBRMaterialInfo.coatRoughnessStreamingTextureID,
         openPBRMaterialInfo.coatRoughnessChannel,
-        coatRoughnessUv);
+        coatRoughnessUv,
+        materialInputs);
 #endif
 
 #if defined(PSO_OPENPBR_FUZZ_COLOR_TEXTURE)
@@ -742,7 +860,8 @@ void ApplyOpenPBRTextureSamplingSpecialized(
         openPBRMaterialInfo.fuzzColorSamplerIndex,
         openPBRMaterialInfo.fuzzColorStreamingTextureID,
         openPBRMaterialInfo.fuzzColorChannels,
-        fuzzColorUv);
+        fuzzColorUv,
+        materialInputs);
 #endif
 
 #if defined(PSO_OPENPBR_FUZZ_WEIGHT_TEXTURE)
@@ -760,7 +879,8 @@ void ApplyOpenPBRTextureSamplingSpecialized(
         openPBRMaterialInfo.fuzzWeightSamplerIndex,
         openPBRMaterialInfo.fuzzWeightStreamingTextureID,
         openPBRMaterialInfo.fuzzWeightChannel,
-        fuzzWeightUv);
+        fuzzWeightUv,
+        materialInputs);
 #endif
 
 #if defined(PSO_OPENPBR_FUZZ_ROUGHNESS_TEXTURE)
@@ -778,7 +898,8 @@ void ApplyOpenPBRTextureSamplingSpecialized(
         openPBRMaterialInfo.fuzzRoughnessSamplerIndex,
         openPBRMaterialInfo.fuzzRoughnessStreamingTextureID,
         openPBRMaterialInfo.fuzzRoughnessChannel,
-        fuzzRoughnessUv);
+        fuzzRoughnessUv,
+        materialInputs);
 #endif
 
     surface.coatColor = saturate(surface.coatColor);
@@ -1445,6 +1566,8 @@ void SampleMaterialFromUvCache(
     in float3 dpdy,
     out MaterialInputs ret)
 {
+    InitializeMaterialSelectedMipDebug(ret);
+
     MaterialUvSample baseColorUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_BASE_COLOR);
     MaterialUvSample opacityUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_OPACITY);
     MaterialUvSample metallicUv = GetBoundUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_METALLIC);
@@ -1509,7 +1632,7 @@ void SampleMaterialFromUvCache(
         baseColorDUdx = parallaxDUdx;
         baseColorDUdy = parallaxDUdy;
     }
-    float4 sampledColor = SampleMaterialTexture2DGrad(baseColorTexture, baseColorSamplerState, materialInfo.baseColorStreamingTextureID, baseColorSampleUv, baseColorDUdx, baseColorDUdy);
+    float4 sampledColor = SampleMaterialTexture2DGrad(baseColorTexture, baseColorSamplerState, materialInfo.baseColorStreamingTextureID, baseColorSampleUv, baseColorDUdx, baseColorDUdy, ret);
     baseColor *= sampledColor;
 #endif
 
@@ -1525,7 +1648,7 @@ void SampleMaterialFromUvCache(
         opacityDUdx = parallaxDUdx;
         opacityDUdy = parallaxDUdy;
     }
-    float4 opacitySample = SampleMaterialTexture2DGrad(opacityTexture, opacitySamplerState, materialInfo.opacityStreamingTextureID, opacitySampleUv, opacityDUdx, opacityDUdy);
+    float4 opacitySample = SampleMaterialTexture2DGrad(opacityTexture, opacitySamplerState, materialInfo.opacityStreamingTextureID, opacitySampleUv, opacityDUdx, opacityDUdy, ret);
     baseColor.a *= opacitySample.a;
 #endif
 
@@ -1546,7 +1669,7 @@ void SampleMaterialFromUvCache(
         metallicDUdy = parallaxDUdy;
     }
 
-    float4 metallicSample = SampleMaterialTexture2DGrad(metallicTexture, metallicSamplerState, materialInfo.metallicStreamingTextureID, metallicSampleUv, metallicDUdx, metallicDUdy);
+    float4 metallicSample = SampleMaterialTexture2DGrad(metallicTexture, metallicSamplerState, materialInfo.metallicStreamingTextureID, metallicSampleUv, metallicDUdx, metallicDUdy, ret);
     metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
 #endif
 
@@ -1564,7 +1687,7 @@ void SampleMaterialFromUvCache(
         roughnessDUdy = parallaxDUdy;
     }
 
-    float4 roughnessSample = SampleMaterialTexture2DGrad(roughnessTexture, roughnessSamplerState, materialInfo.roughnessStreamingTextureID, roughnessSampleUv, roughnessDUdx, roughnessDUdy);
+    float4 roughnessSample = SampleMaterialTexture2DGrad(roughnessTexture, roughnessSamplerState, materialInfo.roughnessStreamingTextureID, roughnessSampleUv, roughnessDUdx, roughnessDUdy, ret);
     roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
 #endif
 
@@ -1585,7 +1708,7 @@ void SampleMaterialFromUvCache(
             normalDUdy = parallaxDUdy;
         }
 
-        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy).rgb;
+        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy, ret).rgb;
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
 
         if (materialFlags & MATERIAL_NEGATE_NORMALS) tangentSpaceNormal = -tangentSpaceNormal;
@@ -1608,7 +1731,7 @@ void SampleMaterialFromUvCache(
         aoDUdx = parallaxDUdx;
         aoDUdy = parallaxDUdy;
     }
-    float4 aoSample = SampleMaterialTexture2DGrad(aoTexture, aoSamplerState, materialInfo.aoStreamingTextureID, aoSampleUv, aoDUdx, aoDUdy);
+    float4 aoSample = SampleMaterialTexture2DGrad(aoTexture, aoSamplerState, materialInfo.aoStreamingTextureID, aoSampleUv, aoDUdx, aoDUdy, ret);
     ao = DynamicSwizzle(aoSample, materialInfo.aoChannel);
 #endif
 
@@ -1625,7 +1748,7 @@ void SampleMaterialFromUvCache(
         emissiveDUdx = parallaxDUdx;
         emissiveDUdy = parallaxDUdy;
     }
-    float4 emissiveSample = SampleMaterialTexture2DGrad(emissiveTexture, emissiveSamplerState, materialInfo.emissiveStreamingTextureID, emissiveSampleUv, emissiveDUdx, emissiveDUdy);
+    float4 emissiveSample = SampleMaterialTexture2DGrad(emissiveTexture, emissiveSamplerState, materialInfo.emissiveStreamingTextureID, emissiveSampleUv, emissiveDUdx, emissiveDUdy, ret);
     emissive = float3(
         DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.x),
         DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.y),
@@ -1650,7 +1773,8 @@ void SampleMaterialFromUvCache(
         parallaxDUdx,
         parallaxDUdy,
         openPBRMaterialInfo,
-        openPBRSurface);
+        openPBRSurface,
+        ret);
     PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 }
 
@@ -1666,6 +1790,8 @@ void SampleMaterialEvalFromUvCache(
     in float3 dpdy,
     out MaterialInputs ret)
 {
+    InitializeMaterialSelectedMipDebug(ret);
+
     float2 parallaxUv = float2(0.0f, 0.0f);
     float2 parallaxDUdx = float2(0.0f, 0.0f);
     float2 parallaxDUdy = float2(0.0f, 0.0f);
@@ -1719,7 +1845,7 @@ void SampleMaterialEvalFromUvCache(
 #else
     const MaterialUvSample baseColorUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_BASE_COLOR);
 #endif
-    float4 sampledColor = SampleMaterialTexture2DGrad(baseColorTexture, baseColorSamplerState, materialInfo.baseColorStreamingTextureID, baseColorUv.uv, baseColorUv.dUVdx, baseColorUv.dUVdy);
+    float4 sampledColor = SampleMaterialTexture2DGrad(baseColorTexture, baseColorSamplerState, materialInfo.baseColorStreamingTextureID, baseColorUv.uv, baseColorUv.dUVdx, baseColorUv.dUVdy, ret);
     baseColor *= sampledColor;
 #endif
 
@@ -1738,7 +1864,7 @@ void SampleMaterialEvalFromUvCache(
 #else
     const MaterialUvSample opacityUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_OPACITY);
 #endif
-    float4 opacitySample = SampleMaterialTexture2DGrad(opacityTexture, opacitySamplerState, materialInfo.opacityStreamingTextureID, opacityUv.uv, opacityUv.dUVdx, opacityUv.dUVdy);
+    float4 opacitySample = SampleMaterialTexture2DGrad(opacityTexture, opacitySamplerState, materialInfo.opacityStreamingTextureID, opacityUv.uv, opacityUv.dUVdx, opacityUv.dUVdy, ret);
     baseColor.a *= opacitySample.a;
 #endif
 
@@ -1760,7 +1886,7 @@ void SampleMaterialEvalFromUvCache(
 #else
     const MaterialUvSample metallicUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_METALLIC);
 #endif
-    float4 metallicSample = SampleMaterialTexture2DGrad(metallicTexture, metallicSamplerState, materialInfo.metallicStreamingTextureID, metallicUv.uv, metallicUv.dUVdx, metallicUv.dUVdy);
+    float4 metallicSample = SampleMaterialTexture2DGrad(metallicTexture, metallicSamplerState, materialInfo.metallicStreamingTextureID, metallicUv.uv, metallicUv.dUVdx, metallicUv.dUVdy, ret);
     metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
 #endif
 
@@ -1779,7 +1905,7 @@ void SampleMaterialEvalFromUvCache(
 #else
     const MaterialUvSample roughnessUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_ROUGHNESS);
 #endif
-    float4 roughnessSample = SampleMaterialTexture2DGrad(roughnessTexture, roughnessSamplerState, materialInfo.roughnessStreamingTextureID, roughnessUv.uv, roughnessUv.dUVdx, roughnessUv.dUVdy);
+    float4 roughnessSample = SampleMaterialTexture2DGrad(roughnessTexture, roughnessSamplerState, materialInfo.roughnessStreamingTextureID, roughnessUv.uv, roughnessUv.dUVdx, roughnessUv.dUVdy, ret);
     roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
 #endif
 
@@ -1803,7 +1929,7 @@ void SampleMaterialEvalFromUvCache(
 #else
         const MaterialUvSample normalUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_NORMAL);
 #endif
-        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalUv.uv, normalUv.dUVdx, normalUv.dUVdy).rgb;
+        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalUv.uv, normalUv.dUVdx, normalUv.dUVdy, ret).rgb;
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
 
         if (materialFlags & MATERIAL_NEGATE_NORMALS) tangentSpaceNormal = -tangentSpaceNormal;
@@ -1829,7 +1955,7 @@ void SampleMaterialEvalFromUvCache(
 #else
     const MaterialUvSample aoUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_AO);
 #endif
-    float4 aoSample = SampleMaterialTexture2DGrad(aoTexture, aoSamplerState, materialInfo.aoStreamingTextureID, aoUv.uv, aoUv.dUVdx, aoUv.dUVdy);
+    float4 aoSample = SampleMaterialTexture2DGrad(aoTexture, aoSamplerState, materialInfo.aoStreamingTextureID, aoUv.uv, aoUv.dUVdx, aoUv.dUVdy, ret);
     ao = DynamicSwizzle(aoSample, materialInfo.aoChannel);
 #endif
 
@@ -1849,7 +1975,7 @@ void SampleMaterialEvalFromUvCache(
 #else
     const MaterialUvSample emissiveUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_EMISSIVE);
 #endif
-    float4 emissiveSample = SampleMaterialTexture2DGrad(emissiveTexture, emissiveSamplerState, materialInfo.emissiveStreamingTextureID, emissiveUv.uv, emissiveUv.dUVdx, emissiveUv.dUVdy);
+    float4 emissiveSample = SampleMaterialTexture2DGrad(emissiveTexture, emissiveSamplerState, materialInfo.emissiveStreamingTextureID, emissiveUv.uv, emissiveUv.dUVdx, emissiveUv.dUVdy, ret);
     emissive = float3(
         DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.x),
         DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.y),
@@ -1874,7 +2000,8 @@ void SampleMaterialEvalFromUvCache(
         parallaxDUdx,
         parallaxDUdy,
         openPBRMaterialInfo,
-        openPBRSurface);
+        openPBRSurface,
+        ret);
     PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 }
 
@@ -1890,6 +2017,8 @@ void SampleMaterialFromUvCacheRuntime(
     in float3 dpdy,
     out MaterialInputs ret)
 {
+    InitializeMaterialSelectedMipDebug(ret);
+
     float3x3 TBN = (float3x3)0.0f;
     if (uvBindings.hasTbnSource)
     {
@@ -1946,7 +2075,7 @@ void SampleMaterialFromUvCacheRuntime(
             baseColorDUdx = parallaxDUdx;
             baseColorDUdy = parallaxDUdy;
         }
-        float4 sampledColor = SampleMaterialTexture2DGrad(baseColorTexture, baseColorSamplerState, materialInfo.baseColorStreamingTextureID, baseColorSampleUv, baseColorDUdx, baseColorDUdy);
+        float4 sampledColor = SampleMaterialTexture2DGrad(baseColorTexture, baseColorSamplerState, materialInfo.baseColorStreamingTextureID, baseColorSampleUv, baseColorDUdx, baseColorDUdy, ret);
         baseColor *= sampledColor;
     }
 
@@ -1964,7 +2093,7 @@ void SampleMaterialFromUvCacheRuntime(
             opacityDUdx = parallaxDUdx;
             opacityDUdy = parallaxDUdy;
         }
-        float4 opacitySample = SampleMaterialTexture2DGrad(opacityTexture, opacitySamplerState, materialInfo.opacityStreamingTextureID, opacitySampleUv, opacityDUdx, opacityDUdy);
+        float4 opacitySample = SampleMaterialTexture2DGrad(opacityTexture, opacitySamplerState, materialInfo.opacityStreamingTextureID, opacitySampleUv, opacityDUdx, opacityDUdy, ret);
         baseColor.a *= opacitySample.a;
     }
 
@@ -1986,7 +2115,7 @@ void SampleMaterialFromUvCacheRuntime(
             metallicDUdy = parallaxDUdy;
         }
 
-        float4 metallicSample = SampleMaterialTexture2DGrad(metallicTexture, metallicSamplerState, materialInfo.metallicStreamingTextureID, metallicSampleUv, metallicDUdx, metallicDUdy);
+        float4 metallicSample = SampleMaterialTexture2DGrad(metallicTexture, metallicSamplerState, materialInfo.metallicStreamingTextureID, metallicSampleUv, metallicDUdx, metallicDUdy, ret);
         metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
     }
 
@@ -2006,7 +2135,7 @@ void SampleMaterialFromUvCacheRuntime(
             roughnessDUdy = parallaxDUdy;
         }
 
-        float4 roughnessSample = SampleMaterialTexture2DGrad(roughnessTexture, roughnessSamplerState, materialInfo.roughnessStreamingTextureID, roughnessSampleUv, roughnessDUdx, roughnessDUdy);
+        float4 roughnessSample = SampleMaterialTexture2DGrad(roughnessTexture, roughnessSamplerState, materialInfo.roughnessStreamingTextureID, roughnessSampleUv, roughnessDUdx, roughnessDUdy, ret);
         roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
     }
 
@@ -2026,7 +2155,7 @@ void SampleMaterialFromUvCacheRuntime(
             normalDUdy = parallaxDUdy;
         }
 
-        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy).rgb;
+        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy, ret).rgb;
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
 
         if ((materialFlags & MATERIAL_NEGATE_NORMALS) != 0u) tangentSpaceNormal = -tangentSpaceNormal;
@@ -2050,7 +2179,7 @@ void SampleMaterialFromUvCacheRuntime(
             aoDUdx = parallaxDUdx;
             aoDUdy = parallaxDUdy;
         }
-        float4 aoSample = SampleMaterialTexture2DGrad(aoTexture, aoSamplerState, materialInfo.aoStreamingTextureID, aoSampleUv, aoDUdx, aoDUdy);
+        float4 aoSample = SampleMaterialTexture2DGrad(aoTexture, aoSamplerState, materialInfo.aoStreamingTextureID, aoSampleUv, aoDUdx, aoDUdy, ret);
         ao = DynamicSwizzle(aoSample, materialInfo.aoChannel);
     }
 
@@ -2069,7 +2198,7 @@ void SampleMaterialFromUvCacheRuntime(
             emissiveDUdx = parallaxDUdx;
             emissiveDUdy = parallaxDUdy;
         }
-        float4 emissiveSample = SampleMaterialTexture2DGrad(emissiveTexture, emissiveSamplerState, materialInfo.emissiveStreamingTextureID, emissiveSampleUv, emissiveDUdx, emissiveDUdy);
+        float4 emissiveSample = SampleMaterialTexture2DGrad(emissiveTexture, emissiveSamplerState, materialInfo.emissiveStreamingTextureID, emissiveSampleUv, emissiveDUdx, emissiveDUdy, ret);
         emissive = float3(
             DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.x),
             DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.y),
@@ -2094,7 +2223,8 @@ void SampleMaterialFromUvCacheRuntime(
         parallaxDUdx,
         parallaxDUdy,
         openPBRMaterialInfo,
-        openPBRSurface);
+        openPBRSurface,
+        ret);
     PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 }
 
@@ -2441,6 +2571,8 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.pixelCoords = pixelCoordinates;
     ret.fragPosViewSpace = fragPosViewSpace;
     ret.fragPosWorldSpace = fragPosWorldSpace;
+    ret.selectedMaterialMipLevel = MATERIAL_DEBUG_INVALID_MIP_LEVEL;
+    ret.selectedMaterialMipMaxLevel = 0u;
     
     // Gather textures
     Texture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
@@ -2510,6 +2642,8 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
 void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialInfo, in float3 viewWS, in float2 pixelCoords, in bool transparent, in bool isFrontFace, in uint materialFlags)
 {
     ret.materialFlags = materialFlags;
+    ret.selectedMaterialMipLevel = materialInfo.selectedMaterialMipLevel;
+    ret.selectedMaterialMipMaxLevel = materialInfo.selectedMaterialMipMaxLevel;
     float perceptualRoughness = materialInfo.roughness;
     ret.perceptualRoughnessUnclamped = perceptualRoughness;
     // Clamp the roughness to a minimum value to avoid divisions by 0 during lighting

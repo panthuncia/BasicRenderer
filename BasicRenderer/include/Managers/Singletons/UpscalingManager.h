@@ -15,7 +15,6 @@
 
 #include <rhi.h>
 
-#include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
 #include "ThirdParty/FFX/ffx_api_loader.h"
 #include "ThirdParty/FFX/ffx_api.hpp"
 #include "ThirdParty/FFX/ffx_upscale.hpp"
