@@ -246,7 +246,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after PSO and command signatures");
-    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
+    Menu::GetInstance().Initialize(hwnd, m_swapChain.Get());
     if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
         readbackService->Initialize(m_readbackFence.Get());
     }
@@ -646,6 +646,9 @@ void Renderer::RunRenderResourceSyncStage() {
 
     auto* textureFactory = m_managerInterface.GetTextureFactory();
     auto* materialManager = m_managerInterface.GetMaterialManager();
+        if (materialManager) {
+            materialManager->BeginTextureStreamingFeedbackFrame(m_totalFramesRendered + 1u);
+        }
     if (textureFactory && materialManager) {
         for (Material* material : activeMaterials) {
             if (!material) {
@@ -2314,7 +2317,8 @@ void Renderer::CreateRenderGraph() {
         currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(
             m_managerInterface.GetTextureFactory(),
             currentRenderGraph->GetUploadService(),
-            m_pReadbackManager.get()));
+                m_pReadbackManager.get(),
+                m_managerInterface.GetMaterialManager()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
         uint maxClusters = 1500000; // TODO: make this configurable based on scene content   

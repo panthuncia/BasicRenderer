@@ -152,11 +152,24 @@ class Menu {
 public:
     static Menu& GetInstance();
 
-    void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
+    void Initialize(HWND hwnd, rhi::Swapchain swapChain);
     void Render(const RenderContext& context, rhi::CommandList commandList);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
+        if (m_imguiBackend == rhi::Backend::D3D12) {
+            ImGui_ImplDX12_Shutdown();
+        }
+        if (m_imguiWin32Initialized) {
+            ImGui_ImplWin32_Shutdown();
+        }
+        m_imguiBackend = rhi::Backend::Null;
+        m_imguiWin32Initialized = false;
+        g_pd3dSrvDescHeap.Reset();
+        imguiHeapGpuStart_ = 0;
+        imguiHeapIncrementSize_ = 0;
+        imguiHeapNextSlot_ = 1;
+        imguiHeapFreeSlots_ = {};
 		m_settingSubscriptions.clear();
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
@@ -193,9 +206,15 @@ public:
         imguiHeapFreeSlots_.push(index);
     }
     ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) const {
+		if (m_imguiBackend != rhi::Backend::D3D12) {
+            return static_cast<ImTextureID>(0);
+		}
         return static_cast<ImTextureID>(imguiHeapGpuStart_ + static_cast<uint64_t>(index) * imguiHeapIncrementSize_);
     }
     rhi::DescriptorHeapHandle GetImGuiHeapHandle() const {
+		if (!g_pd3dSrvDescHeap) {
+			return {};
+		}
         return g_pd3dSrvDescHeap->GetHandle();
     }
 
@@ -207,12 +226,13 @@ private:
     uint32_t imguiHeapNextSlot_ = 1; // slot 0 = font atlas
     std::queue<uint32_t> imguiHeapFreeSlots_;
     std::mutex imguiHeapMutex_;
+    rhi::Backend m_imguiBackend = rhi::Backend::Null;
+    bool m_imguiWin32Initialized = false;
 
     Menu() { 
         ImGui::CreateContext();
 		ImPlot::CreateContext();
     };
-	IDXGISwapChain3* m_pSwapChain = nullptr;
 
     struct SceneExplorerPendingEdit {
         bool hasPosition = false;
@@ -643,27 +663,38 @@ inline bool Menu::HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return static_cast<bool>(ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam));
 }
 
-inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
-	m_pSwapChain = swapChain;
+inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
+	(void)swapChain;
 	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
 
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX12_Init(rhi::dx12::get_device(device), 
-        numFramesInFlight,
-        DXGI_FORMAT_R8G8B8A8_UNORM, 
-        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get()),
-        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetCPUDescriptorHandleForHeapStart(),
-        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart());
+    m_imguiWin32Initialized = true;
 
-    // Cache GPU start and increment size for user-texture descriptor allocation.
-    imguiHeapGpuStart_ = rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart().ptr;
-    imguiHeapIncrementSize_ = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::CbvSrvUav);
+    if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::D3D12) {
+		auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
+		if (!rhi::IsOk(result) || !g_pd3dSrvDescHeap) {
+			throw std::runtime_error("Menu::Initialize failed to create ImGui descriptor heap for DX12 backend");
+		}
+
+        ImGui_ImplDX12_Init(rhi::dx12::get_device(device), 
+            numFramesInFlight,
+            DXGI_FORMAT_R8G8B8A8_UNORM, 
+            rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get()),
+            rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetCPUDescriptorHandleForHeapStart(),
+            rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart());
+
+        // Cache GPU start and increment size for user-texture descriptor allocation.
+        imguiHeapGpuStart_ = rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart().ptr;
+        imguiHeapIncrementSize_ = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::CbvSrvUav);
+        m_imguiBackend = rhi::Backend::D3D12;
+    } else {
+        spdlog::warn("Menu::Initialize: Vulkan renderer backend is not available in this workspace's ImGui integration. UI rendering will stay disabled until a Vulkan ImGui backend is added.");
+    }
 
     ImGui_ImplWin32_EnableDpiAwareness();
 
@@ -1097,7 +1128,9 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
 inline void Menu::Render(const RenderContext& context, rhi::CommandList commandList) {
     m_sceneOverlapStatus = context.sceneOverlapStatus;
 
-	ImGui_ImplDX12_NewFrame();
+    if (m_imguiBackend == rhi::Backend::D3D12) {
+        ImGui_ImplDX12_NewFrame();
+    }
 	ImGui_ImplWin32_NewFrame();
 
 	ImGui::NewFrame();
@@ -1107,6 +1140,24 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     static bool showFrameTaskGraph = false;
     static bool showAutoAliasPlanner = false;
     static bool showGpuInstrumentation = false;
+    static bool showMaterialTextureStreaming = false;
+
+    const auto formatBytes = [](uint64_t bytes) {
+        const double value = static_cast<double>(bytes);
+        const double KiB = 1024.0;
+        const double MiB = KiB * 1024.0;
+        const double GiB = MiB * 1024.0;
+        const auto [divisor, suffix] =
+            (value >= GiB) ? std::pair{ GiB, "GB" } :
+            (value >= MiB) ? std::pair{ MiB, "MB" } :
+            (value >= KiB) ? std::pair{ KiB, "KB" } :
+            std::pair{ 1.0, "B" };
+        return std::format("{:.2f} {}", value / divisor, suffix);
+    };
+    const std::optional<MaterialTextureStreamingStats> materialTextureStreamingStats =
+        context.materialManager
+        ? std::optional<MaterialTextureStreamingStats>(context.materialManager->GetMaterialTextureStreamingStats())
+        : std::nullopt;
 
     const float fps = ImGui::GetIO().Framerate;
     const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
@@ -1129,6 +1180,10 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui::End();
 
 		ImGui::Render();
+
+        if (m_imguiBackend != rhi::Backend::D3D12 || !g_pd3dSrvDescHeap) {
+            return;
+        }
 
         commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
 
@@ -1456,6 +1511,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui::Checkbox("CPU frame task graph", &showFrameTaskGraph);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
         ImGui::Checkbox("GPU instrumentation", &showGpuInstrumentation);
+        ImGui::Checkbox("Material texture streaming", &showMaterialTextureStreaming);
         std::string memoryString = "Memory usage: unavailable";
         const double KiB = 1024.0;
         const double MiB = KiB * 1024.0;
@@ -1513,6 +1569,55 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		ImGui::End();
 	}
 
+    if (showMaterialTextureStreaming) {
+        ImGui::Begin("Material Texture Streaming", &showMaterialTextureStreaming);
+        if (materialTextureStreamingStats.has_value()) {
+            const auto& stats = *materialTextureStreamingStats;
+            ImGui::Text("Active material textures: %u", stats.uniqueMaterialTextureCount);
+            ImGui::Text(
+                "Streamable / enabled: %u / %u",
+                stats.uniqueStreamableTextureCount,
+                stats.uniqueStreamingEnabledTextureCount);
+            ImGui::Text(
+                "Full-res resident: %u total, %u streamable",
+                stats.fullResolutionResidentTextureCount,
+                stats.streamableFullResolutionResidentTextureCount);
+            ImGui::Text("Pending reloads: %u", stats.pendingReloadTextureCount);
+            ImGui::Text("Resident bytes: %s", formatBytes(stats.totalResidentBytes).c_str());
+            ImGui::Text("Streamable resident bytes: %s", formatBytes(stats.streamableResidentBytes).c_str());
+
+            if (!stats.residentTopMipHistogram.empty()) {
+                std::vector<float> histogramValues;
+                histogramValues.reserve(stats.residentTopMipHistogram.size());
+                for (uint32_t count : stats.residentTopMipHistogram) {
+                    histogramValues.push_back(static_cast<float>(count));
+                }
+
+                ImGui::SeparatorText("Resident top mip histogram");
+                ImGui::PlotHistogram(
+                    "##MaterialTextureResidentTopMipHistogram",
+                    histogramValues.data(),
+                    static_cast<int>(histogramValues.size()),
+                    0,
+                    nullptr,
+                    0.0f,
+                    *std::max_element(histogramValues.begin(), histogramValues.end()) + 1.0f,
+                    ImVec2(420.0f, 180.0f));
+
+                for (size_t mip = 0; mip < stats.residentTopMipHistogram.size(); ++mip) {
+                    ImGui::Text("Top mip %zu: %u", mip, stats.residentTopMipHistogram[mip]);
+                }
+            }
+            else {
+                ImGui::TextUnformatted("No active material textures tracked.");
+            }
+        }
+        else {
+            ImGui::TextUnformatted("MaterialManager unavailable.");
+        }
+        ImGui::End();
+    }
+
     {
 		ImGui::Begin("Scene Graph", nullptr);
 		DisplaySceneGraph();
@@ -1525,34 +1630,38 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
-        RGInspectorOptions opts;
-        opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
-        opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
-        opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
-        opts.imguiHeapHandle = GetImGuiHeapHandle();
-        RGInspector::Show(m_renderGraph->GetBatches(),
-            m_renderGraph->GetQueueRegistry(),
-            PassUsesResourceAdapter,
-            [this](uint64_t resourceId) -> std::string {
-                if (!m_renderGraph) return {};
-                auto resource = m_renderGraph->GetResourceByID(resourceId);
-                if (!resource) return {};
-                return resource->GetName();
-            },
-            [this](uint64_t resourceId) -> Resource* {
-                if (!m_renderGraph) return nullptr;
-                auto resource = m_renderGraph->GetResourceByID(resourceId);
-                return resource ? resource.get() : nullptr;
-            },
-            [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
-                if (!m_renderGraph) {
-                    return;
-                }
-                if (auto* readbackService = m_renderGraph->GetReadbackService()) {
-                    readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
-                }
-            },
-            opts);
+        if (m_imguiBackend == rhi::Backend::D3D12 && g_pd3dSrvDescHeap) {
+            RGInspectorOptions opts;
+            opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
+            opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
+            opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
+            opts.imguiHeapHandle = GetImGuiHeapHandle();
+            RGInspector::Show(m_renderGraph->GetBatches(),
+                m_renderGraph->GetQueueRegistry(),
+                PassUsesResourceAdapter,
+                [this](uint64_t resourceId) -> std::string {
+                    if (!m_renderGraph) return {};
+                    auto resource = m_renderGraph->GetResourceByID(resourceId);
+                    if (!resource) return {};
+                    return resource->GetName();
+                },
+                [this](uint64_t resourceId) -> Resource* {
+                    if (!m_renderGraph) return nullptr;
+                    auto resource = m_renderGraph->GetResourceByID(resourceId);
+                    return resource ? resource.get() : nullptr;
+                },
+                [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
+                    if (!m_renderGraph) {
+                        return;
+                    }
+                    if (auto* readbackService = m_renderGraph->GetReadbackService()) {
+                        readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
+                    }
+                },
+                opts);
+        } else {
+            ImGui::TextUnformatted("Texture preview integration currently requires the DX12 ImGui backend.");
+        }
         ImGui::End();
 
     }
@@ -1576,6 +1685,10 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 	// Rendering
 	ImGui::Render();
+
+    if (m_imguiBackend != rhi::Backend::D3D12 || !g_pd3dSrvDescHeap) {
+        return;
+    }
 
     commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
 

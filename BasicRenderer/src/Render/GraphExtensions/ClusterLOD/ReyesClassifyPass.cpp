@@ -64,10 +64,12 @@ void ReyesClassifyPass::DeclareResourceUsages(ComputePassBuilder* builder)
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer,
             Builtin::PerObjectBuffer,
             Builtin::CullingCameraBuffer)
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
+            Builtin::Material::TextureStreamingFeedbackBuffer,
             m_fullClusterOutputsBuffer,
             m_fullClusterCounterBuffer,
             m_ownedClustersBuffer,

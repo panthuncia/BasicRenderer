@@ -654,9 +654,10 @@ namespace USDLoader {
 					const std::wstring cachePath = TextureProcessingManager::GetInstance().GetExistingCachePathForFile(cacheProbeMeta);
 					if (!cachePath.empty()) {
 						auto tex = LoadTextureFromFile(cachePath, nullptr, preferSRGB);
+						tex->Meta().filePath = cacheProbeMeta.filePath;
 						tex->Meta().isProcessingCacheArtifact = true;
 						tex->Meta().preferSRGB = preferSRGB;
-						tex->Meta().processing = cacheProbeMeta.processing;
+						tex->SetProcessingSettings(cacheProbeMeta.processing);
 						loadingCache.textureCache[cacheKey] = tex;
 						spdlog::info("USDLoader: texture processing cache hit for '{}' -> '{}'", resolved.GetPathString(), ws2s(cachePath));
 					}

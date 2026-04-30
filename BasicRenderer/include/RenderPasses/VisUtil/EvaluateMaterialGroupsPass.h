@@ -92,6 +92,7 @@ public:
             Builtin::PerMaterialDataBuffer,
             "Builtin::PerMaterialEvalDataBuffer",
             Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer,
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,
@@ -104,7 +105,8 @@ public:
                 Builtin::GBuffer::Fuzz,
                 Builtin::GBuffer::MetallicRoughness,
                 Builtin::GBuffer::MotionVectors,
-                Builtin::DebugVisualization)
+				Builtin::DebugVisualization,
+				Builtin::Material::TextureStreamingFeedbackBuffer)
     	.WithConstantBuffer(Builtin::PerFrameBuffer);
         b->WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }

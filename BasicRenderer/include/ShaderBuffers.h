@@ -190,7 +190,14 @@ struct PerMaterialCB {
 	unsigned int opacityUvSetIndex;
 
 	unsigned int openPBRMaterialDataIndex;
-	unsigned int perMaterialPad1[3];
+    unsigned int baseColorStreamingTextureID;
+    unsigned int normalStreamingTextureID;
+    unsigned int metallicStreamingTextureID;
+    unsigned int roughnessStreamingTextureID;
+    unsigned int emissiveStreamingTextureID;
+    unsigned int aoStreamingTextureID;
+    unsigned int heightStreamingTextureID;
+    unsigned int opacityStreamingTextureID;
 };
 
 struct PerMaterialEvalCB {
@@ -245,10 +252,14 @@ struct PerMaterialEvalCB {
     unsigned int aoUvSetIndex;
     unsigned int heightUvSetIndex;
     unsigned int opacityUvSetIndex;
-    unsigned int perMaterialEvalPad0;
-    unsigned int perMaterialEvalPad1;
-    unsigned int perMaterialEvalPad2;
-    unsigned int perMaterialEvalPad3;
+    unsigned int baseColorStreamingTextureID;
+    unsigned int normalStreamingTextureID;
+    unsigned int metallicStreamingTextureID;
+    unsigned int roughnessStreamingTextureID;
+    unsigned int emissiveStreamingTextureID;
+    unsigned int aoStreamingTextureID;
+    unsigned int heightStreamingTextureID;
+    unsigned int opacityStreamingTextureID;
 };
 
 struct PerMaterialOpenPBRCB {
@@ -333,8 +344,24 @@ struct PerMaterialOpenPBRCB {
 
     unsigned int fuzzWeightUvSetIndex;
     unsigned int fuzzRoughnessUvSetIndex;
-    unsigned int openPBRTexturePad0;
-    unsigned int openPBRTexturePad1;
+    unsigned int coatColorStreamingTextureID;
+    unsigned int coatWeightStreamingTextureID;
+    unsigned int coatRoughnessStreamingTextureID;
+    unsigned int fuzzColorStreamingTextureID;
+    unsigned int fuzzWeightStreamingTextureID;
+    unsigned int fuzzRoughnessStreamingTextureID;
+};
+
+struct TextureStreamingGPUInfo {
+    unsigned int flags;
+    unsigned int totalMipCount;
+    unsigned int residentTopMip;
+    unsigned int residentMipCount;
+
+    unsigned int requestedTopMip;
+    unsigned int pendingTopMip;
+    unsigned int bindingRevisionLo;
+    unsigned int bindingRevisionHi;
 };
 
 struct LightInfo {

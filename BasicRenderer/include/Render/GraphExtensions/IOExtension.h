@@ -3,6 +3,7 @@
 #include "Render/RenderGraph/RenderGraph.h"
 
 #include "Factories/TextureFactory.h"
+#include "Managers/MaterialManager.h"
 #include "Managers/ReadbackManager.h"
 #include "Render/Runtime/IUploadService.h"
 
@@ -18,10 +19,12 @@ class RenderGraphIOExtension final : public RenderGraph::IRenderGraphExtension {
 public:
 	RenderGraphIOExtension(TextureFactory* textureFactory,
 		rg::runtime::IUploadService* uploadService,
-		br::ReadbackManager* readbackManager)
+		br::ReadbackManager* readbackManager,
+		MaterialManager* materialManager)
 		: m_textureFactory(textureFactory),
 		m_uploadService(uploadService),
-		m_readbackManager(readbackManager) {
+		m_readbackManager(readbackManager),
+		m_materialManager(materialManager) {
 	}
 
 	void OnRegistryReset(ResourceRegistry* reg) override {
@@ -96,10 +99,15 @@ public:
 						.At(RenderGraph::ExternalInsertPoint::After("Builtin::Uploads")));
 			}
 		}
+
+		if (m_materialManager) {
+			m_materialManager->RequestTextureStreamingFeedbackReadback(rg.GetReadbackService());
+		}
 	}
 
 private:
 	TextureFactory* m_textureFactory = nullptr; // non-owning
 	rg::runtime::IUploadService* m_uploadService = nullptr; // non-owning
 	br::ReadbackManager* m_readbackManager = nullptr; // non-owning
+	MaterialManager* m_materialManager = nullptr; // non-owning
 };

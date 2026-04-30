@@ -976,7 +976,7 @@ std::shared_ptr<TextureAsset> LoadTexture(
         cachedTexture->Meta().isProcessingCacheArtifact = true;
         cachedTexture->Meta().filePath = cacheProbeMeta.filePath;
         cachedTexture->Meta().preferSRGB = preferSRGB;
-        cachedTexture->Meta().processing = cacheProbeMeta.processing;
+        cachedTexture->SetProcessingSettings(cacheProbeMeta.processing);
         cache.textureCache[cacheKey] = cachedTexture;
 
         {

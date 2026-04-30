@@ -1,7 +1,5 @@
 #pragma once
 
-#include <directx/d3d12.h>
-
 #include <rhi.h>
 #include <rhi_allocator.h>
 
@@ -29,6 +27,10 @@ public:
         return m_copyQueue;
     }
 
+    rhi::Backend GetBackend() const {
+        return m_backend;
+    }
+
     bool GetMeshShadersSupported() const {
         return m_meshShadersSupported;
     }
@@ -42,6 +44,7 @@ private:
     rhi::Queue m_graphicsQueue;
     rhi::Queue m_computeQueue;
     rhi::Queue m_copyQueue;
+    rhi::Backend m_backend = rhi::Backend::Null;
     bool m_meshShadersSupported = false;
 };
 }

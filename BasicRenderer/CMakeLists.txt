@@ -466,6 +466,16 @@ add_symlink_or_copy_per_config(
     "FFX_dx12"
 )
 
+set(FFX_VK_BIN_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/amd_fidelityfx_vk.dll")
+set(FFX_VK_BIN_FILE "${BASICRENDERER_OUTPUT_ROOT}/amd_fidelityfx_vk.dll")
+
+add_symlink_or_copy_per_config(
+    "${FFX_VK_BIN_DIR}"
+    "${FFX_VK_BIN_FILE}"
+    FALSE  # IS_DIRECTORY
+    "FFX_vk"
+)
+
 set(FFX_BACKEND_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_backend_dx12_x64drel.dll")
 set(FFX_BACKEND_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_backend_dx12_x64drel.dll")
 
@@ -828,6 +838,7 @@ PRIVATE
     "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib" 
     "${BASICRENDERER_SOURCE_ROOT}/sl.interposer.lib" 
     "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_dx12.lib" 
+    "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_vk.lib"
     "${BASICRENDERER_SOURCE_ROOT}/ffx_backend_dx12_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/ffx_sssr_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"

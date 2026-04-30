@@ -1,4 +1,6 @@
 #pragma once
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 
@@ -115,6 +117,35 @@ struct TextureFileMeta {
     TextureProcessingSettings processing = {};
 };
 
+struct TextureMipResidencyWindow {
+    uint32_t totalMipCount = 1;
+    uint32_t residentTopMip = 0;
+    uint32_t residentMipCount = 1;
+
+    uint32_t ResidentLastMip() const {
+        if (residentMipCount == 0) {
+            return residentTopMip;
+        }
+        return residentTopMip + residentMipCount - 1u;
+    }
+
+    bool IsFullChainResident() const {
+        return residentTopMip == 0u && residentMipCount >= totalMipCount;
+    }
+};
+
+struct TextureStreamingState {
+    uint32_t streamingTextureID = 0;
+    bool eligible = false;
+    bool enabled = false;
+    TextureMipResidencyWindow residency = {};
+    uint32_t requestedTopMip = 0;
+    uint32_t pendingTopMip = 0;
+    uint64_t lastSeenFrame = 0;
+    uint64_t stateRevision = 0;
+    uint64_t bindingRevision = 0;
+};
+
 // Helper for std::visit with multiple lambdas
 template<class... Ts>
 struct Overloaded : Ts... { using Ts::operator()...; };
@@ -182,6 +213,18 @@ public:
     const TextureProcessingSettings& ProcessingSettings() const { return m_meta.processing; }
     void SetProcessingSettings(TextureProcessingSettings settings);
 
+    const TextureStreamingState& GetStreamingState() const { return m_streamingState; }
+    uint32_t GetStreamingTextureID() const { return m_streamingState.streamingTextureID; }
+    bool IsMipStreamingEligible() const { return m_streamingState.eligible; }
+    bool IsMipStreamingEnabled() const { return m_streamingState.enabled; }
+    uint64_t GetBindingRevision() const { return m_streamingState.bindingRevision; }
+    uint64_t GetStreamingStateRevision() const { return m_streamingState.stateRevision; }
+    void EnableMipStreaming(bool enabled);
+    void SetRequestedTopMip(uint32_t topMip, uint64_t frameIndex = 0);
+    void SetPendingTopMip(uint32_t topMip);
+    void SetResidentMipWindow(uint32_t residentTopMip, uint32_t residentMipCount);
+    void NoteTextureSeen(uint64_t frameIndex);
+
     void AdoptUploadedImage(std::shared_ptr<PixelBuffer> image);
     void RecordLoadPath(TextureLoadPathTelemetry path, std::string detail = {});
     void RecordUploadPath(TextureUploadPathTelemetry path, std::string detail = {});
@@ -209,6 +252,7 @@ public:
     }
 
 private:
+    static uint32_t NextStreamingTextureID();
     TextureAsset(TextureDescription desc,
         StorageVariant initialStorage,
         std::shared_ptr<Sampler> defaultSampler,
@@ -217,6 +261,7 @@ private:
         , m_initialStorage(std::move(initialStorage))
         , m_sampler(defaultSampler ? std::move(defaultSampler) : Sampler::GetDefaultSampler())
         , m_meta(std::move(meta)) {
+        m_streamingState.streamingTextureID = NextStreamingTextureID();
         if (std::holds_alternative<std::shared_ptr<PixelBuffer>>(m_initialStorage)) { // Already initialized
             m_image = std::get<std::shared_ptr<PixelBuffer>>(m_initialStorage);
 			m_hasUploadedFinalImage = true;
@@ -224,16 +269,28 @@ private:
 		if (std::holds_alternative<std::string>(m_initialStorage)) { // Store path for potential re-use
             m_initialDataString = std::get<std::string>(m_initialStorage);
 		}
+        RefreshStreamingStateFromDescription();
+        if (m_streamingState.eligible) {
+            m_streamingState.enabled = true;
+			ApplyStreamingBootstrapTopMip();
+        }
     }
 	TextureDescription m_desc;
     std::shared_ptr<PixelBuffer> m_image;
     std::shared_ptr<Sampler> m_sampler;
     TextureFileMeta m_meta;
 	std::shared_ptr<TextureProcessingJobHandle> m_processingHandle;
+    TextureStreamingState m_streamingState;
+	uint32_t m_sourceTotalMipCount = 0;
     std::string m_initialDataString;
     std::string m_name;
 	bool m_hasUploadedPlaceholder = false;
 	bool m_hasUploadedFinalImage = false;
     TextureLoadPathTelemetry m_lastReportedLoadPath = TextureLoadPathTelemetry::Unknown;
     TextureUploadPathTelemetry m_lastReportedUploadPath = TextureUploadPathTelemetry::Unknown;
+
+    void RefreshStreamingStateFromDescription();
+	void ApplyStreamingBootstrapTopMip();
+    void BumpStreamingStateRevision();
+    void BumpBindingRevision();
 };

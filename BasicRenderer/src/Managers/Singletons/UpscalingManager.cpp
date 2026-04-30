@@ -17,7 +17,13 @@
 #include <sl.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
+#include "rhi_interop.h"
 #include "rhi_interop_dx12.h"
+#include "rhi_interop_vulkan.h"
+
+#if BASICRHI_HAS_VULKAN_HEADERS
+#include "ThirdParty/FFX/vk/ffx_api_vk.hpp"
+#endif
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
 PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
@@ -62,22 +68,116 @@ namespace {
     }
 }
 
-static ID3D12Device* dx12_device() { return rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice()); }
-static IDXGIFactory7* dx12_factory() { return rhi::dx12::get_factory(DeviceManager::GetInstance().GetDevice()); }
-static IDXGIAdapter4* dx12_adapter() { return rhi::dx12::get_adapter(DeviceManager::GetInstance().GetDevice()); }
-
 ffxFunctions ffxModule;
 
-FfxApiResource getFFXResource(Resource* resource, const wchar_t* name, FfxApiResourceState state) {
-	//auto desc = ffx::ApiGetResourceDescriptionDX12(resource->GetAPIResource(), FFX_API_RESOURCE_USAGE_READ_ONLY);
-	auto ffxResource = ffxApiGetResourceDX12(rhi::dx12::get_resource(resource->GetAPIResource()), state);
-    if (ffxResource.resource == nullptr) {
-        spdlog::error("Failed to get FFX resource for resource");
-	}
-    return ffxResource;
+namespace {
+#if BASICRHI_HAS_VULKAN_HEADERS
+    VkFormat ToVkFormat(rhi::Format format) {
+        switch (format) {
+        case rhi::Format::R32G32B32A32_Float:
+            return VK_FORMAT_R32G32B32A32_SFLOAT;
+        case rhi::Format::R16G16B16A16_Float:
+            return VK_FORMAT_R16G16B16A16_SFLOAT;
+        case rhi::Format::R11G11B10_Float:
+            return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+        case rhi::Format::R16G16_Float:
+            return VK_FORMAT_R16G16_SFLOAT;
+        case rhi::Format::R8G8B8A8_UNorm:
+            return VK_FORMAT_R8G8B8A8_UNORM;
+        case rhi::Format::R8G8B8A8_UNorm_sRGB:
+            return VK_FORMAT_R8G8B8A8_SRGB;
+        case rhi::Format::B8G8R8A8_UNorm:
+            return VK_FORMAT_B8G8R8A8_UNORM;
+        case rhi::Format::B8G8R8A8_UNorm_sRGB:
+            return VK_FORMAT_B8G8R8A8_SRGB;
+        case rhi::Format::R32_Float:
+            return VK_FORMAT_R32_SFLOAT;
+        case rhi::Format::D32_Float:
+            return VK_FORMAT_D32_SFLOAT;
+        default:
+            return VK_FORMAT_UNDEFINED;
+        }
+    }
+
+    uint32_t ComputeMipCount(const TextureDescription& description) {
+        const uint32_t layers = (description.isCubemap ? 6u : 1u) * (std::max)(1u, description.arraySize);
+        if (layers == 0u || description.imageDimensions.empty()) {
+            return 1u;
+        }
+        const size_t mipCount = description.imageDimensions.size() / layers;
+        return static_cast<uint32_t>((std::max)(size_t(1), mipCount));
+    }
+
+    VkImageUsageFlags BuildVkImageUsage(const TextureDescription& description) {
+        VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (description.hasUAV || description.hasNonShaderVisibleUAV) {
+            usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        }
+        if (description.hasRTV) {
+            usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
+        if (description.hasDSV) {
+            usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        }
+        return usage;
+    }
+
+    VkImageCreateInfo BuildVkImageCreateInfo(const TextureDescription& description) {
+        VkImageCreateInfo createInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        createInfo.imageType = VK_IMAGE_TYPE_2D;
+        createInfo.format = ToVkFormat(description.format);
+        createInfo.extent.width = description.imageDimensions.empty() ? 1u : description.imageDimensions.front().width;
+        createInfo.extent.height = description.imageDimensions.empty() ? 1u : description.imageDimensions.front().height;
+        createInfo.extent.depth = 1u;
+        createInfo.mipLevels = ComputeMipCount(description);
+        createInfo.arrayLayers = (description.isCubemap ? 6u : 1u) * (std::max)(1u, description.arraySize);
+        createInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        createInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        createInfo.usage = BuildVkImageUsage(description);
+        createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        createInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (description.isCubemap) {
+            createInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        }
+        return createInfo;
+    }
+
+    FfxApiResource GetFFXResource(PixelBuffer* resource, const wchar_t* name, FfxApiResourceState state) {
+        const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+        if (backend == rhi::Backend::D3D12) {
+            auto* nativeResource = rhi::dx12::get_resource(resource->GetAPIResource());
+            return ffxApiGetResourceDX12(nativeResource, state);
+        }
+
+        if (backend == rhi::Backend::Vulkan) {
+            const VkImage nativeImage = rhi::vulkan::get_resource(resource->GetAPIResource());
+            const VkImageCreateInfo createInfo = BuildVkImageCreateInfo(resource->GetDescription());
+            const FfxApiResourceDescription desc = ffxApiGetImageResourceDescriptionVK(nativeImage, createInfo, 0u);
+            return ffxApiGetResourceVK(reinterpret_cast<void*>(nativeImage), desc, state);
+        }
+
+        spdlog::error("Failed to get FFX resource '{}' for unsupported backend {}", ws2s(name), static_cast<uint32_t>(backend));
+        return {};
+    }
+#else
+    FfxApiResource GetFFXResource(PixelBuffer* resource, const wchar_t* name, FfxApiResourceState state) {
+        const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+        if (backend == rhi::Backend::D3D12) {
+            auto* nativeResource = rhi::dx12::get_resource(resource->GetAPIResource());
+            return ffxApiGetResourceDX12(nativeResource, state);
+        }
+
+        spdlog::error("Failed to get FFX resource '{}' because Vulkan SDK headers are not available for this build.", ws2s(name));
+        return {};
+    }
+#endif
 }
 
-bool CheckDLSSSupport(rhi::Device dev) {
+bool CheckDLSSSupport(rhi::Device dev, rhi::Backend backend) {
+    if (backend != rhi::Backend::D3D12) {
+        return false;
+    }
+
     IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
     if (!ad) {
         return false;
@@ -121,6 +221,7 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
 
 void UpscalingManager::InitializeAdapter()
 {
+    const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
     if (!IsStreamlineEnabledSetting()) {
         m_dlssSupported = false;
         if (m_upscalingMode == UpscalingMode::DLSS) {
@@ -130,8 +231,17 @@ void UpscalingManager::InitializeAdapter()
         return;
     }
 
+    if (backend != rhi::Backend::D3D12) {
+        m_dlssSupported = false;
+        if (m_upscalingMode == UpscalingMode::DLSS) {
+            m_upscalingMode = UpscalingMode::None;
+        }
+        spdlog::warn("UpscalingManager::InitializeAdapter disabled DLSS because Streamline Vulkan integration is not available in this workspace.");
+        return;
+    }
+
     auto dev = DeviceManager::GetInstance().GetDevice();
-	m_dlssSupported = CheckDLSSSupport(dev); // TODO: Query from RHI
+	m_dlssSupported = CheckDLSSSupport(dev, backend); // TODO: Query from RHI
 }
 
 void UpscalingManager::ProxyDevice() { // TODO: RHI now handles this internally
@@ -151,25 +261,40 @@ void UpscalingManager::ProxyDevice() { // TODO: RHI now handles this internally
 bool UpscalingManager::InitFFX() {
     m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
     m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
+	const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
     auto outputRes = m_getOutputRes();
     auto renderRes = m_getRenderRes();
-	auto module = LoadLibrary(L"amd_fidelityfx_dx12.dll");
+	const wchar_t* moduleName = backend == rhi::Backend::Vulkan ? L"amd_fidelityfx_vk.dll" : L"amd_fidelityfx_dx12.dll";
+	auto module = LoadLibrary(moduleName);
     if (module) {
         ffxLoadFunctions(&ffxModule, module);
-
-        ffx::CreateBackendDX12Desc backendDesc{};
-        backendDesc.device = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
 
         ffx::CreateContextDescUpscale createUpscaling;
         createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
         createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
         createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
 
-        ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+        if (backend == rhi::Backend::Vulkan) {
+#if BASICRHI_HAS_VULKAN_HEADERS
+            ffx::CreateBackendVKDesc backendDesc{};
+            backendDesc.vkDevice = rhi::vulkan::get_device(DeviceManager::GetInstance().GetDevice());
+            backendDesc.vkPhysicalDevice = rhi::vulkan::get_physical_device(DeviceManager::GetInstance().GetDevice());
+            backendDesc.vkDeviceProcAddr = vkGetDeviceProcAddr;
+            ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+#else
+            spdlog::warn("UpscalingManager::InitFFX cannot enable Vulkan because Vulkan SDK headers are not available in this build environment.");
+            return false;
+#endif
+        } else {
+            ffx::CreateBackendDX12Desc backendDesc{};
+            backendDesc.device = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
+            ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+        }
 		m_fsrIntialized = true;
 
 		return true;
     }
+	spdlog::error("UpscalingManager::InitFFX failed to load {}", ws2s(moduleName));
 	return false;
 }
 
@@ -220,6 +345,15 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 }
 
 bool UpscalingManager::InitSL() {
+    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
+        m_dlssSupported = false;
+        if (m_upscalingMode == UpscalingMode::DLSS) {
+            m_upscalingMode = UpscalingMode::None;
+        }
+        spdlog::warn("UpscalingManager::InitSL skipped because Streamline Vulkan integration is not available in this workspace.");
+        return false;
+    }
+
     if (!IsStreamlineEnabledSetting()) {
         m_dlssSupported = false;
         if (m_upscalingMode == UpscalingMode::DLSS) {
@@ -302,6 +436,11 @@ void UpscalingManager::Setup() {
 }
 
 void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
+        spdlog::warn("UpscalingManager::EvaluateDLSS called on unsupported backend {}; skipping.", static_cast<uint32_t>(DeviceManager::GetInstance().GetBackend()));
+        return;
+    }
+
     sl::FrameToken* frameToken = nullptr;
     const uint32_t streamlineFrameIndex = static_cast<uint32_t>(frameNumber);
     if (SL_FAILED(result, slGetNewFrameToken(frameToken, &streamlineFrameIndex)) || frameToken == nullptr)
@@ -395,12 +534,21 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     ffx::DispatchDescUpscale dispatchUpscale{};
 
-    dispatchUpscale.commandList = rhi::dx12::get_cmd_list(commandList);
+    if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
+#if BASICRHI_HAS_VULKAN_HEADERS
+        dispatchUpscale.commandList = reinterpret_cast<void*>(rhi::vulkan::get_cmd_list(commandList));
+#else
+        spdlog::warn("UpscalingManager::EvaluateFSR3 skipped Vulkan dispatch because Vulkan SDK headers are not available in this build environment.");
+        return;
+#endif
+    } else {
+        dispatchUpscale.commandList = rhi::dx12::get_cmd_list(commandList);
+    }
 
-    dispatchUpscale.color = getFFXResource(pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
-	dispatchUpscale.depth = getFFXResource(pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
-	dispatchUpscale.motionVectors = getFFXResource(pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMMON);
-	dispatchUpscale.output = getFFXResource(pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_COMMON);
+        dispatchUpscale.color = GetFFXResource(pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.depth = GetFFXResource(pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.motionVectors = GetFFXResource(pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.output = GetFFXResource(pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_COMMON);
     //dispatchUpscale.reactive;
     //dispatchUpscale.transparencyAndComposition;
 

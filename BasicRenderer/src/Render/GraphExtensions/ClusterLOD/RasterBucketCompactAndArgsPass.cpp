@@ -83,8 +83,10 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMaterialDataBuffer,
-            Builtin::Material::TextureGroup)
+            Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer)
         .WithUnorderedAccess(
+            Builtin::Material::TextureStreamingFeedbackBuffer,
             m_writeCursorBuffer,
             m_compactedClustersBuffer,
             m_indirectArgsBuffer,

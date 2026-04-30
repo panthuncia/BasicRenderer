@@ -71,6 +71,7 @@ void ReyesVirtualShadowHardwareRasterPass::DeclareResourceUsages(RenderPassBuild
             Builtin::PerMaterialDataBuffer,
             Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer,
             Builtin::CameraBuffer,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
@@ -86,6 +87,7 @@ void ReyesVirtualShadowHardwareRasterPass::DeclareResourceUsages(RenderPassBuild
             m_tessTableTrianglesBuffer,
             m_viewRasterInfoBuffer,
             m_virtualShadowClipmapInfoBuffer)
+		.WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .WithUnorderedAccess(m_virtualShadowPageTableTexture, m_virtualShadowPhysicalPagesTexture, m_telemetryBuffer)
         .IsGeometryPass();

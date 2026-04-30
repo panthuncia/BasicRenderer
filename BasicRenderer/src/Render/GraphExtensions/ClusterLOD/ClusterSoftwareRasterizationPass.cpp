@@ -57,6 +57,7 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
             Builtin::PerMeshBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::CullingCameraBuffer,
@@ -67,6 +68,7 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
             m_rasterBucketsHistogramBuffer,
             m_sortedToUnsortedMappingBuffer,
             m_viewRasterInfoBuffer)
+        .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .WithUnorderedAccess(Builtin::DebugVisualization);
 

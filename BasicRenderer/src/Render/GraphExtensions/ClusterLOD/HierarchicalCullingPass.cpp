@@ -210,7 +210,9 @@ void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_occlusionReplayStateBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer,
             m_workGraphComputePageJobDescriptorResourceId.c_str())
+    		.WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {

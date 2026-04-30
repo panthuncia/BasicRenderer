@@ -191,6 +191,14 @@ std::shared_ptr<Material> Material::GetDefaultMaterial() {
 void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
 	const uint32_t negateNormalsFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_NEGATE_NORMALS);
 	const uint32_t invertNormalGreenFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN);
+    m_materialData.baseColorStreamingTextureID = 0u;
+    m_materialData.normalStreamingTextureID = 0u;
+    m_materialData.metallicStreamingTextureID = 0u;
+    m_materialData.roughnessStreamingTextureID = 0u;
+    m_materialData.emissiveStreamingTextureID = 0u;
+    m_materialData.aoStreamingTextureID = 0u;
+    m_materialData.heightStreamingTextureID = 0u;
+    m_materialData.opacityStreamingTextureID = 0u;
 
     if (m_baseColorTexture) {
         m_baseColorTexture->SetGenerateMipmaps(true);
@@ -256,6 +264,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_baseColorTexture != nullptr) {
         m_materialData.baseColorTextureIndex = m_baseColorTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.baseColorSamplerIndex = m_baseColorTexture->SamplerDescriptorIndex();
+        m_materialData.baseColorStreamingTextureID = m_baseColorTexture->GetStreamingTextureID();
         m_materialData.baseColorChannels = { m_baseColorChannels[0], m_baseColorChannels[1], m_baseColorChannels[2], m_baseColorChannels[3] };
         m_materialData.baseColorUvSetIndex = m_baseColorUvSetIndex;
         rg::memory::SetResourceUsageHint(m_baseColorTexture->Image(), "Material textures");
@@ -264,6 +273,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_normalTexture != nullptr) {
         m_materialData.normalTextureIndex = m_normalTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.normalSamplerIndex = m_normalTexture->SamplerDescriptorIndex();
+        m_materialData.normalStreamingTextureID = m_normalTexture->GetStreamingTextureID();
         m_materialData.normalChannels = { m_normalChannels[0], m_normalChannels[1], m_normalChannels[2] };
         m_materialData.normalUvSetIndex = m_normalUvSetIndex;
         rg::memory::SetResourceUsageHint(m_normalTexture->Image(), "Material textures");
@@ -272,6 +282,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_aoMap != nullptr) {
         m_materialData.aoMapIndex = m_aoMap->Image().GetSRVInfo(0).slot.index;
         m_materialData.aoSamplerIndex = m_aoMap->SamplerDescriptorIndex();
+        m_materialData.aoStreamingTextureID = m_aoMap->GetStreamingTextureID();
         m_materialData.aoChannel = m_aoChannel[0];
         m_materialData.aoUvSetIndex = m_aoUvSetIndex;
         rg::memory::SetResourceUsageHint(m_aoMap->Image(), "Material textures");
@@ -280,6 +291,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_heightMap != nullptr) {
         m_materialData.heightMapIndex = m_heightMap->Image().GetSRVInfo(0).slot.index;
         m_materialData.heightSamplerIndex = m_heightMap->SamplerDescriptorIndex();
+        m_materialData.heightStreamingTextureID = m_heightMap->GetStreamingTextureID();
         m_materialData.heightChannel = m_heightChannel[0];
         m_materialData.heightUvSetIndex = m_heightUvSetIndex;
         rg::memory::SetResourceUsageHint(m_heightMap->Image(), "Material textures");
@@ -288,6 +300,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_metallicTexture != nullptr) {
         m_materialData.metallicTextureIndex = m_metallicTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.metallicSamplerIndex = m_metallicTexture->SamplerDescriptorIndex();
+        m_materialData.metallicStreamingTextureID = m_metallicTexture->GetStreamingTextureID();
         m_materialData.metallicChannel = m_metallicChannel[0];
         m_materialData.metallicUvSetIndex = m_metallicUvSetIndex;
         rg::memory::SetResourceUsageHint(m_metallicTexture->Image(), "Material textures");
@@ -296,6 +309,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_roughnessTexture != nullptr) {
         m_materialData.roughnessTextureIndex = m_roughnessTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.roughnessSamplerIndex = m_roughnessTexture->SamplerDescriptorIndex();
+        m_materialData.roughnessStreamingTextureID = m_roughnessTexture->GetStreamingTextureID();
         m_materialData.roughnessChannel = m_roughnessChannel[0];
         m_materialData.roughnessUvSetIndex = m_roughnessUvSetIndex;
         rg::memory::SetResourceUsageHint(m_roughnessTexture->Image(), "Material textures");
@@ -308,6 +322,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_emissiveTexture != nullptr) {
         m_materialData.emissiveTextureIndex = m_emissiveTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.emissiveSamplerIndex = m_emissiveTexture->SamplerDescriptorIndex();
+        m_materialData.emissiveStreamingTextureID = m_emissiveTexture->GetStreamingTextureID();
         m_materialData.emissiveChannels = { m_emissiveChannels[0], m_emissiveChannels[1], m_emissiveChannels[2] };
         m_materialData.emissiveUvSetIndex = m_emissiveUvSetIndex;
         rg::memory::SetResourceUsageHint(m_emissiveTexture->Image(), "Material textures");
@@ -317,6 +332,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_opacityTexture != nullptr) {
         m_materialData.opacityTextureIndex = m_opacityTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.opacitySamplerIndex = m_opacityTexture->SamplerDescriptorIndex();
+        m_materialData.opacityStreamingTextureID = m_opacityTexture->GetStreamingTextureID();
         m_materialData.opacityUvSetIndex = m_opacityUvSetIndex;
         rg::memory::SetResourceUsageHint(m_opacityTexture->Image(), "Material textures");
         m_opacityTexture->Image().SetName("OpacityTexture");

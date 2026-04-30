@@ -2,7 +2,6 @@
 
 #include <spdlog/spdlog.h>
 #include <rhi_debug.h>
-#include <rhi_interop_dx12.h>
 
 #include "Managers/Singletons/SettingsManager.h"
 
@@ -39,7 +38,7 @@ bool IsStreamlineDisabledByEnvironment() {
 }
 
 bool IsDiagnosticsBuild() {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG //|| BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
     return true;
 #else
     return false;
@@ -101,9 +100,11 @@ void DeviceManager::Initialize() {
         enableTexelAddressing,
         numFramesInFlight);
 
+    const rhi::Backend backend = rhi::Backend::D3D12;
+
     rhi::CreateD3D12Device(
         rhi::DeviceCreateInfo{
-            .backend = rhi::Backend::D3D12,
+            .backend = backend,
             .framesInFlight = numFramesInFlight,
             .enableDebug = enableDebug,
             .instrumentation = {
@@ -114,6 +115,8 @@ void DeviceManager::Initialize() {
         },
         m_device,
         enableStreamline);
+
+    m_backend = backend;
 
     m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
     m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
@@ -164,6 +167,7 @@ void DeviceManager::Cleanup() {
     m_graphicsQueue.Reset();
     m_computeQueue.Reset();
     m_copyQueue.Reset();
+    m_backend = rhi::Backend::Null;
     m_meshShadersSupported = false;
 
     if (m_device) {
@@ -172,9 +176,15 @@ void DeviceManager::Cleanup() {
 }
 
 void DeviceManager::CheckGPUFeatures() {
-    D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {};
-    rhi::dx12::get_device(m_device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
-    m_meshShadersSupported = features.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
+    m_meshShadersSupported = false;
+    if (!m_device) {
+        return;
+    }
+
+    MeshShaderFeatureInfo meshShaderFeatures{};
+    if (rhi::IsOk(m_device->QueryFeatureInfo(&meshShaderFeatures.header))) {
+        m_meshShadersSupported = meshShaderFeatures.meshShader;
+    }
 }
 
 }
