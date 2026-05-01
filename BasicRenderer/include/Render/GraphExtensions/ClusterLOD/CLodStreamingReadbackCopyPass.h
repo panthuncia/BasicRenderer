@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <rhi.h>
 
@@ -27,14 +28,12 @@ public:
         std::shared_ptr<Buffer> requestsStaging,
         std::shared_ptr<Buffer> usedGroupsCounterStaging,
         std::shared_ptr<Buffer> usedGroupsBufferStaging,
-        rhi::Timeline fence,
-        uint64_t fenceValue)
+        std::function<PassReturn()> makePassReturn)
         : m_counterStaging(std::move(counterStaging))
         , m_requestsStaging(std::move(requestsStaging))
         , m_usedGroupsCounterStaging(std::move(usedGroupsCounterStaging))
         , m_usedGroupsBufferStaging(std::move(usedGroupsBufferStaging))
-        , m_fence(fence)
-        , m_fenceValue(fenceValue)
+        , m_makePassReturn(std::move(makePassReturn))
     {
         SetInputs(std::move(inputs));
     }
@@ -105,7 +104,12 @@ public:
     }
 
     PassReturn Execute(PassExecutionContext& context) override {
-        return { m_fence, m_fenceValue };
+        (void)context;
+        if (!m_makePassReturn) {
+            return {};
+        }
+
+        return m_makePassReturn();
     }
 
     void Cleanup() override {}
@@ -115,6 +119,5 @@ private:
     std::shared_ptr<Buffer> m_requestsStaging;
     std::shared_ptr<Buffer> m_usedGroupsCounterStaging;
     std::shared_ptr<Buffer> m_usedGroupsBufferStaging;
-    rhi::Timeline m_fence;
-    uint64_t m_fenceValue;
+    std::function<PassReturn()> m_makePassReturn;
 };

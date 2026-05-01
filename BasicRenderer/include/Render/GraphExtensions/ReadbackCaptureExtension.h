@@ -24,7 +24,7 @@ public:
 
         auto captures = m_readbackService->ConsumeCaptureRequests();
 
-        uint32_t localIndex = 0;
+        std::unordered_map<std::string, uint32_t> localIndexByAnchorPass;
 
         for (auto& capture : captures) {
             QueueKind preferredQueueKind = capture.preferredQueueKind;
@@ -58,6 +58,15 @@ public:
                 continue;
             }
 
+            auto& localIndex = localIndexByAnchorPass[capture.passName];
+            const std::string passInstanceName =
+                "ReadbackCapture::" +
+                capture.passName +
+                "::" +
+                (preferredQueueKind == QueueKind::Copy ? "Copy" : "Graphics") +
+                "::Slot" +
+                std::to_string(localIndex++);
+
             if (preferredQueueKind == QueueKind::Copy) {
                 // Route through copy-queue CopyPass for lower latency
                 ReadbackCopyCaptureInputs inputs{};
@@ -66,7 +75,7 @@ public:
                 auto pass = std::make_shared<ReadbackCopyCapturePass>(inputs, std::move(capture.callback), m_readbackService);
                 out.push_back(
                     RenderGraph::ExternalPassDesc::Copy(
-                        "ReadbackCapture::" + capture.passName + "::" + std::to_string(handle.GetGlobalResourceID()) + "::" + std::to_string(localIndex++),
+                        passInstanceName,
                         std::move(pass))
                         .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
                         .PreferQueue(QueueKind::Copy)
@@ -81,7 +90,7 @@ public:
                 auto pass = std::make_shared<ReadbackCapturePass>(inputs, std::move(capture.callback), m_readbackService);
                 out.push_back(
                     RenderGraph::ExternalPassDesc::Render(
-                        "ReadbackCapture::" + capture.passName + "::" + std::to_string(handle.GetGlobalResourceID()) + "::" + std::to_string(localIndex++),
+                        passInstanceName,
                         std::move(pass))
                         .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
                         .CollectStatistics(false)

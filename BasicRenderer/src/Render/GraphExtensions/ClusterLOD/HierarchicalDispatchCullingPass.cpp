@@ -73,6 +73,33 @@ bool UsesPerViewDepthMapOcclusion(CLodRasterOutputKind outputKind)
     return !UsesVirtualShadowOutput(outputKind);
 }
 
+std::vector<uint64_t> CollectDeclaredDrawSetResourceIds(RenderPhase renderPhase, bool clodOnlyWorkloads)
+{
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    auto queryBuilder = ecsWorld.query_builder<>()
+        .with<Components::IsActiveDrawSetIndices>()
+        .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(renderPhase));
+    if (clodOnlyWorkloads) {
+        queryBuilder.with<Components::CLodOnlyDrawWorkload>();
+    }
+    else {
+        queryBuilder.with<Components::GeneralDrawWorkload>();
+    }
+
+    std::vector<uint64_t> resourceIds;
+    queryBuilder.build().each([&](flecs::entity entity) {
+        if (const auto resource = entity.try_get<Components::Resource>(); resource) {
+            if (const auto shared = resource->resource.lock(); shared) {
+                resourceIds.push_back(shared->GetGlobalResourceID());
+            }
+        }
+    });
+
+    std::sort(resourceIds.begin(), resourceIds.end());
+    resourceIds.erase(std::unique(resourceIds.begin(), resourceIds.end()), resourceIds.end());
+    return resourceIds;
+}
+
 constexpr uint32_t kReplaySourceNodes = 0u;
 constexpr uint32_t kReplaySourceClusters = 1u;
 
@@ -1034,6 +1061,11 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
 
     auto& context = *updateContext;
     m_declaredResourcesChanged = false;
+    const std::vector<uint64_t> currentDrawSetResourceIds = CollectDeclaredDrawSetResourceIds(m_renderPhase, m_clodOnlyWorkloads);
+    if (currentDrawSetResourceIds != m_declaredDrawSetResourceIds) {
+        m_declaredDrawSetResourceIds = currentDrawSetResourceIds;
+        m_declaredResourcesChanged = true;
+    }
     m_activeTraversalDepth = context.meshManager != nullptr
         ? context.meshManager->GetCLodMaxTraversalDepth()
         : 0u;

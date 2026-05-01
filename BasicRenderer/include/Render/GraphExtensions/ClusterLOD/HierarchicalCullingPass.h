@@ -128,6 +128,8 @@ private:
     std::shared_ptr<Buffer> m_phase1VisibleClustersCounterBuffer; // Phase 2 only: Phase 1's HW counter for write offset
     std::shared_ptr<Buffer> m_swWriteBaseCounterBuffer; // Phase 2 only: Phase 1's SW counter for top-down write offset
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
+    std::vector<uint64_t> m_declaredDrawSetResourceIds;
+    std::vector<uint64_t> m_declaredVisibilityBufferIds;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;

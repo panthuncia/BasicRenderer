@@ -109,6 +109,7 @@ private:
     std::shared_ptr<Buffer> m_pureComputeNodeDispatchArgsBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
+    std::vector<uint64_t> m_declaredDrawSetResourceIds;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;

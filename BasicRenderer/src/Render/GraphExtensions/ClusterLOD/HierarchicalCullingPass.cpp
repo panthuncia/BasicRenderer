@@ -1,5 +1,6 @@
 #include "Render/GraphExtensions/ClusterLOD/HierarchicalCullingPass.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <string>
@@ -71,6 +72,33 @@ ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
     filter.requireLightType = true;
     filter.lightType = Components::LightType::Directional;
     return filter;
+}
+
+std::vector<uint64_t> CollectDeclaredDrawSetResourceIds(RenderPhase renderPhase, bool clodOnlyWorkloads)
+{
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    auto queryBuilder = ecsWorld.query_builder<>()
+        .with<Components::IsActiveDrawSetIndices>()
+        .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(renderPhase));
+    if (clodOnlyWorkloads) {
+        queryBuilder.with<Components::CLodOnlyDrawWorkload>();
+    }
+    else {
+        queryBuilder.with<Components::GeneralDrawWorkload>();
+    }
+
+    std::vector<uint64_t> resourceIds;
+    queryBuilder.build().each([&](flecs::entity entity) {
+        if (const auto resource = entity.try_get<Components::Resource>(); resource) {
+            if (const auto shared = resource->resource.lock(); shared) {
+                resourceIds.push_back(shared->GetGlobalResourceID());
+            }
+        }
+    });
+
+    std::sort(resourceIds.begin(), resourceIds.end());
+    resourceIds.erase(std::unique(resourceIds.begin(), resourceIds.end()), resourceIds.end());
+    return resourceIds;
 }
 }
 
@@ -564,6 +592,11 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
     }
     auto& context = *updateContext;
     m_declaredResourcesChanged = false;
+    const std::vector<uint64_t> currentDrawSetResourceIds = CollectDeclaredDrawSetResourceIds(m_renderPhase, m_clodOnlyWorkloads);
+    if (currentDrawSetResourceIds != m_declaredDrawSetResourceIds) {
+        m_declaredDrawSetResourceIds = currentDrawSetResourceIds;
+        m_declaredResourcesChanged = true;
+    }
 
     uint32_t zero = 0u;
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
@@ -588,6 +621,7 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
+        std::vector<std::pair<uint32_t, std::shared_ptr<PixelBuffer>>> visibilityBuffersByCameraIndex;
         const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
         context.viewManager->ForEachView([&](uint64_t v) {
             auto viewInfo = context.viewManager->Get(v);
@@ -619,10 +653,27 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
                 info.viewportScaleY = 1.0f;
                 viewRasterInfo[cameraIndex] = info;
                 if (UsesWorkGraphSWRaster(m_workGraphMode)) {
-                    m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+                    visibilityBuffersByCameraIndex.emplace_back(cameraIndex, viewInfo->gpu.visibilityBuffer);
                 }
             }
         });
+
+        std::sort(
+            visibilityBuffersByCameraIndex.begin(),
+            visibilityBuffersByCameraIndex.end(),
+            [](const auto& left, const auto& right) {
+                return left.first < right.first;
+            });
+
+        std::vector<uint64_t> currentVisibilityBufferIds;
+        currentVisibilityBufferIds.reserve(visibilityBuffersByCameraIndex.size());
+        m_visibilityBuffers.reserve(visibilityBuffersByCameraIndex.size());
+        for (auto& [cameraIndex, visibilityBuffer] : visibilityBuffersByCameraIndex) {
+            (void)cameraIndex;
+            m_visibilityBuffers.push_back(visibilityBuffer);
+            currentVisibilityBufferIds.push_back(visibilityBuffer->GetGlobalResourceID());
+        }
+
 
         m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
         BUFFER_UPLOAD(
@@ -630,13 +681,17 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
             static_cast<uint32_t>(viewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
             rg::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
             0);
-        if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+        if (currentVisibilityBufferIds != m_declaredVisibilityBufferIds) {
+            m_declaredVisibilityBufferIds = std::move(currentVisibilityBufferIds);
             m_declaredResourcesChanged = true;
         }
     }
     else {
         m_visibilityBuffers.clear();
-        m_declaredResourcesChanged = false;
+        if (!m_declaredVisibilityBufferIds.empty()) {
+            m_declaredVisibilityBufferIds.clear();
+            m_declaredResourcesChanged = true;
+        }
     }
 
     if (!m_isFirstPass) {
