@@ -1016,7 +1016,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
     settingsManager.registerSetting<bool>("renderGraphVramDumpEnabled", false);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);

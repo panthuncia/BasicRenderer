@@ -24,7 +24,7 @@ VirtualShadowMapBuildMarkTilesPass::VirtualShadowMapBuildMarkTilesPass(
 
 void VirtualShadowMapBuildMarkTilesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap)
+    builder->WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
         .WithUnorderedAccess(m_tileWorkBuffer, m_tileCountBuffer);
 }
 
