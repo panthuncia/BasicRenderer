@@ -20,7 +20,7 @@ struct CLodStreamingReadbackCopyInputs {
 // CopyPass that copies the GPU streaming load counter + load request buffer
 // to pre-allocated readback staging buffers, then returns a fence signal so
 // the CPU can HostWait for completion.
-class CLodStreamingReadbackCopyPass final : public CopyPass {
+class CLodStreamingReadbackCopyPass final : public CopyPass, public IHasImmediateModeCommands {
 public:
     CLodStreamingReadbackCopyPass(
         CLodStreamingReadbackCopyInputs inputs,

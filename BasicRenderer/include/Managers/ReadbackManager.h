@@ -43,7 +43,7 @@ private:
         uint64_t fenceValue = 0;
     };
 
-    class ReadbackPass : public RenderPass {
+    class ReadbackPass : public RenderPass, public IHasImmediateModeCommands {
     public:
         explicit ReadbackPass(ReadbackManager& owner)
             : m_owner(owner) {

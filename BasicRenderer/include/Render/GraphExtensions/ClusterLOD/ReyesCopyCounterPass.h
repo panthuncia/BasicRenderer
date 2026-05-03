@@ -6,7 +6,7 @@
 
 class Buffer;
 
-class ReyesCopyCounterPass final : public CopyPass {
+class ReyesCopyCounterPass final : public CopyPass, public IHasImmediateModeCommands {
 public:
     ReyesCopyCounterPass(std::shared_ptr<Buffer> sourceCounterBuffer, std::shared_ptr<Buffer> destCounterBuffer)
         : m_sourceCounterBuffer(std::move(sourceCounterBuffer))

@@ -653,6 +653,7 @@ private:
     bool m_autoAliasLogExclusionReasons = false;
     std::function<bool()> getAutoAliasLogExclusionReasons;
     std::function<void(bool)> setAutoAliasLogExclusionReasons;
+    std::function<void(bool)> setAutoAliasBuildDebugData;
 
     uint32_t m_autoAliasPoolRetireIdleFrames = 120;
     std::function<uint32_t()> getAutoAliasPoolRetireIdleFrames;
@@ -1061,6 +1062,8 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     m_autoAliasLogExclusionReasons = getAutoAliasLogExclusionReasons();
     observerSetting(m_autoAliasLogExclusionReasons, "autoAliasLogExclusionReasons");
 
+    setAutoAliasBuildDebugData = settingsManager.getSettingSetter<bool>("autoAliasBuildDebugData");
+
     getAutoAliasPoolRetireIdleFrames = settingsManager.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames");
     setAutoAliasPoolRetireIdleFrames = settingsManager.getSettingSetter<uint32_t>("autoAliasPoolRetireIdleFrames");
     m_autoAliasPoolRetireIdleFrames = getAutoAliasPoolRetireIdleFrames();
@@ -1158,26 +1161,27 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 }
 
 static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, int passKind) {
-    auto checkRequirements = [&](const auto& requirements) {
-        for (const auto& req : requirements) {
+    auto checkRequirements = [&](const auto& resources) {
+        bool found = false;
+        ForEachFrameRequirement(resources, [&](const auto& req) {
             if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
-                return true;
+                found = true;
             }
-        }
-        return false;
+        });
+        return found;
     };
     switch (passKind) {
     case 1: { // Compute
         auto& pr = *reinterpret_cast<const RenderGraph::ComputePassAndResources*>(passAndRes);
-        return checkRequirements(pr.resources.frameResourceRequirements);
+        return checkRequirements(pr.resources);
     }
     case 2: { // Copy
         auto& pr = *reinterpret_cast<const RenderGraph::CopyPassAndResources*>(passAndRes);
-        return checkRequirements(pr.resources.frameResourceRequirements);
+        return checkRequirements(pr.resources);
     }
     default: { // Render (0)
         auto& pr = *reinterpret_cast<const RenderGraph::RenderPassAndResources*>(passAndRes);
-        return checkRequirements(pr.resources.frameResourceRequirements);
+        return checkRequirements(pr.resources);
     }
     }
 }
@@ -1584,6 +1588,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
         ImGui::Checkbox("CPU frame task graph", &showFrameTaskGraph);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
+        if (setAutoAliasBuildDebugData) {
+            setAutoAliasBuildDebugData(showAutoAliasPlanner);
+        }
         ImGui::Checkbox("GPU instrumentation", &showGpuInstrumentation);
         ImGui::Checkbox("Material texture streaming", &showMaterialTextureStreaming);
         std::string memoryString = "Memory usage: unavailable";
@@ -4818,6 +4825,17 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
         ImGui::BulletText("Independent: %.2f MB", independentMB);
         ImGui::BulletText("Pooled: %.2f MB", pooledMB);
         ImGui::BulletText("Saved: %.2f MB (%.1f%%)", savedMB, savedPct);
+
+        if (snapshot.planCacheHits > 0 || snapshot.planCacheMisses > 0 || !snapshot.primaryPlanCacheMissReason.empty()) {
+            ImGui::Text("Planner cache");
+            ImGui::BulletText(
+                "Hits: %llu | Misses: %llu",
+                static_cast<unsigned long long>(snapshot.planCacheHits),
+                static_cast<unsigned long long>(snapshot.planCacheMisses));
+            if (!snapshot.primaryPlanCacheMissReason.empty()) {
+                ImGui::BulletText("Primary miss reason: %s", snapshot.primaryPlanCacheMissReason.c_str());
+            }
+        }
 
         if (!snapshot.poolDebug.empty()) {
             ImGui::Separator();
