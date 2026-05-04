@@ -429,8 +429,11 @@ void CLodShadowVariant::RefreshConfiguredSettings(CLodExtension& extension)
         SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodPageJobRecordCapacitySettingName)());
     extension.m_shadowConfiguredComputeClusterCapacity =
         CLodVirtualShadowGetConfiguredComputeClusterCapacity(extension.m_maxVisibleClusters);
+    const uint32_t vsmBlockSoftCap = std::max(
+        1u,
+        std::min(extension.m_shadowConfiguredPageJobMaxPages, CLodVirtualShadowBlockMaxTrackedPerCluster));
     extension.m_shadowConfiguredExpandedRecordCapacity =
-        std::max(1u, extension.m_shadowConfiguredComputeClusterCapacity * (extension.m_shadowConfiguredPageJobMaxPages + 1u));
+        std::max(1u, extension.m_shadowConfiguredComputeClusterCapacity * vsmBlockSoftCap);
 }
 
 uint32_t CLodShadowVariant::GetVisibleClusterCapacity(const CLodExtension& extension)
@@ -1656,17 +1659,7 @@ void CLodShadowVariant::InitializeResources(CLodExtension& extension)
         false);
     extension.m_vsmExpandedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Visible Clusters Buffer"));
 
-    extension.m_vsmExpandedBlockMetaBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        vsmExpandedRecordCapacity,
-        sizeof(CLodVirtualShadowBlockMeta),
-        true,
-        false,
-        false,
-        false);
-    extension.m_vsmExpandedBlockMetaBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Block Metadata Buffer"));
-
     extension.m_vsmExpandedVisibleClustersBufferSw = extension.m_vsmExpandedVisibleClustersBuffer;
-    extension.m_vsmExpandedBlockMetaBufferSw = extension.m_vsmExpandedBlockMetaBuffer;
 
     extension.m_shadowVirtualResourcesNeedReset = true;
 }
@@ -1738,9 +1731,7 @@ void CLodShadowVariant::TagResourceUsages(CLodExtension& extension)
     tagBufferUsage(extension.m_swPageJobClusterTagsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(extension.m_swPageJobClusterTagsBufferPhase2, "Cluster LOD virtual shadow maps");
     tagBufferUsage(extension.m_vsmExpandedVisibleClustersBuffer, "Cluster LOD virtual shadow maps");
-    tagBufferUsage(extension.m_vsmExpandedBlockMetaBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(extension.m_vsmExpandedVisibleClustersBufferSw, "Cluster LOD virtual shadow maps");
-    tagBufferUsage(extension.m_vsmExpandedBlockMetaBufferSw, "Cluster LOD virtual shadow maps");
 }
 
 void CLodShadowVariant::ReleaseResourceBackings(CLodExtension& extension)
@@ -1781,9 +1772,7 @@ void CLodShadowVariant::ReleaseResourceBackings(CLodExtension& extension)
     releaseBufferBacking(extension.m_swPageJobClusterTagsBuffer);
     releaseBufferBacking(extension.m_swPageJobClusterTagsBufferPhase2);
     releaseBufferBacking(extension.m_vsmExpandedVisibleClustersBuffer);
-    releaseBufferBacking(extension.m_vsmExpandedBlockMetaBuffer);
     releaseBufferBacking(extension.m_vsmExpandedVisibleClustersBufferSw);
-    releaseBufferBacking(extension.m_vsmExpandedBlockMetaBufferSw);
     extension.m_shadowVirtualResourcesNeedReset = true;
 }
 

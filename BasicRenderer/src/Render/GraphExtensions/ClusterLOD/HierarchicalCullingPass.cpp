@@ -149,6 +149,7 @@ HierarchicalCullingPass::HierarchicalCullingPass(
         rhi::HeapType::DeviceLocal,
         memSize,
         true);
+    m_scratchBuffer->SetName("CLod Work Graph Scratch Buffer");
     m_scratchBuffer->SetMemoryUsageHint("Work graph scratch buffer");
     m_visibleClustersBuffer = std::move(visibleClustersBuffer);
     m_visibleClustersCounterBuffer = std::move(visibleClustersCounterBuffer);

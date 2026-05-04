@@ -955,9 +955,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_swPageJobClusterTagsBuffer);
     releaseBufferBacking(m_swPageJobClusterTagsBufferPhase2);
     releaseBufferBacking(m_vsmExpandedVisibleClustersBuffer);
-    releaseBufferBacking(m_vsmExpandedBlockMetaBuffer);
     releaseBufferBacking(m_vsmExpandedVisibleClustersBufferSw);
-    releaseBufferBacking(m_vsmExpandedBlockMetaBufferSw);
 }
 
 void CLodExtension::ReleaseTransparencyResourceBackings()
@@ -1711,7 +1709,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         nullptr,
                         nullptr,
                         nullptr,
-                        nullptr,
                         m_shadowPageTableTexture,
                         m_shadowClipmapInfoBuffer,
                         m_shadowConfiguredExpandedRecordCapacity,
@@ -1750,7 +1747,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_rasterBucketsOffsetsBuffer,
                         blockWriteCursorBuffer,
                         m_vsmExpandedVisibleClustersBufferSw,
-                        m_vsmExpandedBlockMetaBufferSw,
                         m_shadowPageTableTexture,
                         m_shadowClipmapInfoBuffer,
                         m_shadowConfiguredExpandedRecordCapacity,

@@ -4981,6 +4981,49 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
                     static_cast<unsigned long long>(snapshot.exclusionReasons[i].count));
             }
         }
+
+        if (!snapshot.excludedResources.empty()) {
+            ImGui::Separator();
+            uint64_t excludedBytes = 0;
+            for (const auto& excludedResource : snapshot.excludedResources) {
+                excludedBytes += excludedResource.sizeBytes;
+            }
+
+            ImGui::Text(
+                "Non-aliasable resources: %llu | Total bytes: %s",
+                static_cast<unsigned long long>(snapshot.excludedResources.size()),
+                formatBytes(excludedBytes).c_str());
+            ImGui::TextDisabled("Sorted by memory size (largest first)");
+
+            constexpr ImGuiTableFlags excludedTableFlags =
+                ImGuiTableFlags_Borders |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingStretchProp |
+                ImGuiTableFlags_ScrollY;
+            const float listHeight = std::min(320.0f, 22.0f * static_cast<float>(snapshot.excludedResources.size()) + 28.0f);
+            if (ImGui::BeginTable("##AutoAliasExcludedResources", 3, excludedTableFlags, ImVec2(0.0f, std::max(140.0f, listHeight)))) {
+                ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+                ImGui::TableSetupColumn("Reason", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+                ImGui::TableHeadersRow();
+                ImGui::TableSetupScrollFreeze(0, 1);
+
+                for (const auto& excludedResource : snapshot.excludedResources) {
+                    ImGui::TableNextRow();
+
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(excludedResource.resourceName.c_str());
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextUnformatted(formatBytes(excludedResource.sizeBytes).c_str());
+
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::TextWrapped("%s", excludedResource.reason.c_str());
+                }
+
+                ImGui::EndTable();
+            }
+        }
     }
     else {
         ImGui::Separator();

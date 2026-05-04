@@ -235,9 +235,7 @@ private:
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBufferPhase2;
     std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBuffer;
-    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBuffer;
     std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBufferSw;
-    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBufferSw;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;
