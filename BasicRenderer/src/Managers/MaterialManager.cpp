@@ -1,5 +1,6 @@
 #include "Managers/MaterialManager.h"
 #include "../generated/BuiltinResources.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RasterBucketFlags.h"
@@ -367,7 +368,6 @@ void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
 	m_activeTextureStreamingFeedbackIDs.clear();
 	m_activeTextureStreamingFeedbackIDSet.clear();
 }
-
 void MaterialManager::RequestTextureStreamingFeedbackReadback(rg::runtime::IReadbackService* readbackService) {
 	if (!readbackService || !m_textureStreamingFeedbackBuffer || m_activeTextureStreamingFeedbackIDs.empty()) {
 		return;
@@ -383,35 +383,41 @@ void MaterialManager::RequestTextureStreamingFeedbackReadback(rg::runtime::IRead
 				return;
 			}
 
-			std::vector<std::pair<uint32_t, uint32_t>> decodedFeedback;
-			decodedFeedback.reserve(activeStreamingTextureIDs.size());
-			const size_t wordCount = result.data.size() / sizeof(uint32_t);
-			for (uint32_t streamingTextureID : activeStreamingTextureIDs) {
-				if (streamingTextureID >= wordCount) {
-					continue;
-				}
+			TaskSchedulerManager::GetInstance().RunBackgroundTask(
+				"MaterialManager::DecodeTextureStreamingFeedback",
+				[this,
+				 activeStreamingTextureIDs = std::move(activeStreamingTextureIDs),
+				 resultData = std::move(result.data)]() mutable {
+					std::vector<std::pair<uint32_t, uint32_t>> decodedFeedback;
+					decodedFeedback.reserve(activeStreamingTextureIDs.size());
+					const size_t wordCount = resultData.size() / sizeof(uint32_t);
+					for (uint32_t streamingTextureID : activeStreamingTextureIDs) {
+						if (streamingTextureID >= wordCount) {
+							continue;
+						}
 
-				uint32_t requestedTopMip = kTextureStreamingFeedbackUnused;
-				std::memcpy(
-					&requestedTopMip,
-					result.data.data() + static_cast<size_t>(streamingTextureID) * sizeof(uint32_t),
-					sizeof(uint32_t));
-				if (requestedTopMip == kTextureStreamingFeedbackUnused) {
-					continue;
-				}
+						uint32_t requestedTopMip = kTextureStreamingFeedbackUnused;
+						std::memcpy(
+							&requestedTopMip,
+							resultData.data() + static_cast<size_t>(streamingTextureID) * sizeof(uint32_t),
+							sizeof(uint32_t));
+						if (requestedTopMip == kTextureStreamingFeedbackUnused) {
+							continue;
+						}
 
-				decodedFeedback.emplace_back(streamingTextureID, requestedTopMip);
-			}
+						decodedFeedback.emplace_back(streamingTextureID, requestedTopMip);
+					}
 
-			if (decodedFeedback.empty()) {
-				return;
-			}
+					if (decodedFeedback.empty()) {
+						return;
+					}
 
-			std::lock_guard lock(m_textureStreamingFeedbackMutex);
-			m_pendingTextureStreamingFeedback.insert(
-				m_pendingTextureStreamingFeedback.end(),
-				decodedFeedback.begin(),
-				decodedFeedback.end());
+					std::lock_guard lock(m_textureStreamingFeedbackMutex);
+					m_pendingTextureStreamingFeedback.insert(
+						m_pendingTextureStreamingFeedback.end(),
+						decodedFeedback.begin(),
+						decodedFeedback.end());
+				});
 		},
 		QueueKind::Copy);
 }

@@ -646,9 +646,10 @@ void Renderer::RunRenderResourceSyncStage() {
 
     auto* textureFactory = m_managerInterface.GetTextureFactory();
     auto* materialManager = m_managerInterface.GetMaterialManager();
-        if (materialManager) {
-            materialManager->BeginTextureStreamingFeedbackFrame(m_totalFramesRendered + 1u);
-        }
+    if (materialManager) {
+        const uint64_t nextFrameIndex = m_totalFramesRendered + 1u;
+        materialManager->BeginTextureStreamingFeedbackFrame(nextFrameIndex);
+    }
     if (textureFactory && materialManager) {
         for (Material* material : activeMaterials) {
             if (!material) {
