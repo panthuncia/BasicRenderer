@@ -758,7 +758,8 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
     const std::wstring& path,
     rhi::Resource destinationResource,
     const std::vector<DirectStorageTextureRegionCopy>& regions,
-    std::string* outMessage) {
+    std::string* outMessage)
+{
     const DirectStorageAsyncRequestHandle handle = EnqueueUploadTextureRegionsFromFile(path, destinationResource, regions, outMessage);
     return WaitForRequest(handle, outMessage);
 }
@@ -767,7 +768,8 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
     const std::wstring& path,
     rhi::Resource destinationResource,
     const std::vector<DirectStorageTextureRegionCopy>& regions,
-    std::string* outMessage) {
+    std::string* outMessage)
+{
     if (outMessage) {
         outMessage->clear();
     }
@@ -836,14 +838,6 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
     }
 
     auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
-    const D3D12_RESOURCE_DESC destinationDesc = nativeResource->GetDesc();
-    const uint32_t subresourceCount = static_cast<uint32_t>(destinationDesc.MipLevels) * static_cast<uint32_t>(destinationDesc.DepthOrArraySize);
-    if (subresourceCount == 0) {
-        if (outMessage) {
-            *outMessage = "destination texture has zero subresources";
-        }
-        return {};
-    }
 
     Microsoft::WRL::ComPtr<ID3D12Device> nativeDevice;
     const HRESULT getDeviceHr = nativeResource->GetDevice(IID_PPV_ARGS(nativeDevice.ReleaseAndGetAddressOf()));
@@ -972,8 +966,23 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
     rhi::Resource destinationResource,
     uint64_t sourceOffset,
     uint32_t sourceSizeBytes,
-    std::string* outMessage) {
+    std::string* outMessage)
+{
     const DirectStorageAsyncRequestHandle handle = EnqueueUploadTextureSubresourcesFromFile(path, destinationResource, sourceOffset, sourceSizeBytes, outMessage);
+    return WaitForRequest(handle, outMessage);
+}
+
+bool DirectStorageManager::UploadTextureSubresourceRangeFromFile(
+    const std::wstring& path,
+    rhi::Resource destinationResource,
+    const DirectStorageTextureSubresourceRangeCopy& range,
+    std::string* outMessage)
+{
+    if (outMessage) {
+        outMessage->clear();
+    }
+
+    const DirectStorageAsyncRequestHandle handle = EnqueueUploadTextureSubresourceRangeFromFile(path, destinationResource, range, outMessage);
     return WaitForRequest(handle, outMessage);
 }
 
@@ -982,7 +991,23 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     rhi::Resource destinationResource,
     uint64_t sourceOffset,
     uint32_t sourceSizeBytes,
-    std::string* outMessage) {
+    std::string* outMessage)
+{
+    DirectStorageTextureSubresourceRangeCopy fullRange{};
+    fullRange.sourceOffset = sourceOffset;
+    fullRange.sourceSizeBytes = sourceSizeBytes;
+    fullRange.uncompressedSizeBytes = sourceSizeBytes;
+    fullRange.firstSubresource = 0;
+    fullRange.subresourceCount = 0;
+    return EnqueueUploadTextureSubresourceRangeFromFile(path, destinationResource, fullRange, outMessage);
+}
+
+DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubresourceRangeFromFile(
+    const std::wstring& path,
+    rhi::Resource destinationResource,
+    const DirectStorageTextureSubresourceRangeCopy& range,
+    std::string* outMessage)
+{
     if (outMessage) {
         outMessage->clear();
     }
@@ -1001,7 +1026,7 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
         return {};
     }
 
-    if (sourceSizeBytes == 0) {
+    if (range.sourceSizeBytes == 0) {
         if (outMessage) {
             *outMessage = "source size is zero";
         }
@@ -1052,10 +1077,19 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
 
     auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
     const D3D12_RESOURCE_DESC destinationDesc = nativeResource->GetDesc();
-    const uint32_t subresourceCount = static_cast<uint32_t>(destinationDesc.MipLevels) * static_cast<uint32_t>(destinationDesc.DepthOrArraySize);
-    if (subresourceCount == 0) {
+    const uint32_t totalSubresourceCount = static_cast<uint32_t>(destinationDesc.MipLevels) * static_cast<uint32_t>(destinationDesc.DepthOrArraySize);
+    if (totalSubresourceCount == 0) {
         if (outMessage) {
             *outMessage = "destination texture has zero subresources";
+        }
+        return {};
+    }
+
+    const uint32_t firstSubresource = range.firstSubresource;
+    const uint32_t subresourceCount = range.subresourceCount == 0 ? totalSubresourceCount : range.subresourceCount;
+    if (firstSubresource >= totalSubresourceCount || subresourceCount == 0 || firstSubresource + subresourceCount > totalSubresourceCount) {
+        if (outMessage) {
+            *outMessage = "invalid destination texture subresource range";
         }
         return {};
     }
@@ -1100,12 +1134,12 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     request.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES_RANGE;
     request.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
     request.Source.File.Source = file.Get();
-    request.Source.File.Offset = sourceOffset;
-    request.Source.File.Size = sourceSizeBytes;
+    request.Source.File.Offset = range.sourceOffset;
+    request.Source.File.Size = range.sourceSizeBytes;
     request.Destination.MultipleSubresourcesRange.Resource = nativeResource;
-    request.Destination.MultipleSubresourcesRange.FirstSubresource = 0;
+    request.Destination.MultipleSubresourcesRange.FirstSubresource = firstSubresource;
     request.Destination.MultipleSubresourcesRange.NumSubresources = subresourceCount;
-    request.UncompressedSize = sourceSizeBytes;
+    request.UncompressedSize = range.uncompressedSizeBytes == 0 ? range.sourceSizeBytes : range.uncompressedSizeBytes;
     request.CancellationTag = reinterpret_cast<uint64_t>(this);
 
     constexpr uint64_t kFenceValue = 1;
@@ -1140,7 +1174,7 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     auto state = std::make_shared<DirectStorageAsyncRequestHandle::State>();
     state->queueKind = DirectStorageQueueKind::Gpu;
     state->pendingMessage = "DirectStorage GPU texture range upload enqueued";
-    state->successMessage = "uploaded conditioned texture cache through DirectStorage GPU queue";
+    state->successMessage = "uploaded texture subresource range through DirectStorage GPU queue";
     state->failureMessage = "DirectStorage GPU upload failed";
     state->debugLabel = std::filesystem::path(path).string();
     state->fenceValue = kFenceValue;

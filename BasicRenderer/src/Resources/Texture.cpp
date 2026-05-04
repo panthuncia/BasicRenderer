@@ -3,17 +3,21 @@
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 
 #include <DirectXTex.h>
 
 #include <spdlog/spdlog.h>
 
+#include <rhi_dx12.h>
 #include <rhi_helpers.h>
 
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/DirectStorageManager.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Managers/Singletons/TextureProcessingManager.h"
+#include "Utilities/ProcessedTextureCache.h"
 
 namespace {
 const char* ToString(TextureSemantic semantic) {
@@ -113,6 +117,245 @@ uint32_t CalcMipCountFromDescription(const TextureDescription& desc) {
 	}
 
 	return static_cast<uint32_t>((std::max)(size_t(1), desc.imageDimensions.size() / slices));
+}
+
+bool IsDDSFilePath(const std::string& path) {
+	if (path.empty()) {
+		return false;
+	}
+
+	std::wstring extension = std::filesystem::path(path).extension().wstring();
+	std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+	return extension == L".dds";
+}
+
+bool IsConditionedCacheFilePath(const std::string& path) {
+	if (path.empty()) {
+		return false;
+	}
+
+	std::wstring extension = std::filesystem::path(path).extension().wstring();
+	std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+	return br::processed_texture_cache::IsConditionedCacheExtension(extension);
+}
+
+bool ReadProcessedTextureCacheHeader(const std::wstring& filePath, br::processed_texture_cache::FileHeader& header, std::string* outError = nullptr) {
+	if (outError) {
+		outError->clear();
+	}
+
+	std::ifstream file(filePath, std::ios::binary);
+	if (!file) {
+		if (outError) {
+			*outError = "failed to open conditioned texture cache file";
+		}
+		return false;
+	}
+
+	file.read(reinterpret_cast<char*>(&header), sizeof(header));
+	if (!file || static_cast<size_t>(file.gcount()) != sizeof(header)) {
+		if (outError) {
+			*outError = "failed to read conditioned texture cache header";
+		}
+		return false;
+	}
+
+	if (header.magic != br::processed_texture_cache::kMagic ||
+		header.version != br::processed_texture_cache::kVersion ||
+		header.headerSize != sizeof(header) ||
+		header.dataOffset < sizeof(header) ||
+		header.dataSizeBytes == 0) {
+		if (outError) {
+			*outError = "conditioned texture cache header is invalid";
+		}
+		return false;
+	}
+
+	return true;
+}
+
+bool BuildProcessedTextureCacheLayouts(
+	const br::processed_texture_cache::FileHeader& header,
+	std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT>& layouts,
+	std::vector<UINT>& numRows,
+	UINT64& totalBytes,
+	std::string* outError = nullptr)
+{
+	if (outError) {
+		outError->clear();
+	}
+
+	if (header.baseWidth == 0 || header.baseHeight == 0 || header.mipLevels == 0 ||
+		header.totalArraySlices == 0 || header.subresourceCount == 0 ||
+		header.subresourceCount != header.totalArraySlices * header.mipLevels) {
+		if (outError) {
+			*outError = "conditioned texture cache header has inconsistent dimensions";
+		}
+		return false;
+	}
+
+	auto* nativeDevice = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
+	if (nativeDevice == nullptr) {
+		if (outError) {
+			*outError = "failed to get native D3D12 device for conditioned texture cache layout";
+		}
+		return false;
+	}
+
+	D3D12_RESOURCE_DESC resourceDesc{};
+	resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	resourceDesc.Width = header.baseWidth;
+	resourceDesc.Height = header.baseHeight;
+	resourceDesc.DepthOrArraySize = static_cast<uint16_t>(header.totalArraySlices);
+	resourceDesc.MipLevels = static_cast<uint16_t>(header.mipLevels);
+	resourceDesc.Format = rhi::ToDxgi(static_cast<rhi::Format>(header.format));
+	resourceDesc.SampleDesc.Count = 1;
+	resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+	layouts.resize(header.subresourceCount);
+	numRows.resize(header.subresourceCount);
+	std::vector<UINT64> rowSizes(header.subresourceCount);
+	totalBytes = 0;
+	nativeDevice->GetCopyableFootprints(
+		&resourceDesc,
+		0,
+		header.subresourceCount,
+		0,
+		layouts.data(),
+		numRows.data(),
+		rowSizes.data(),
+		&totalBytes);
+
+	if (totalBytes == 0 || totalBytes > header.dataSizeBytes) {
+		if (outError) {
+			*outError = "conditioned texture cache payload size did not match computed D3D12 copyable footprints";
+		}
+		return false;
+	}
+
+	return true;
+}
+
+std::shared_ptr<TextureSourceData> BuildSourceDataFromConditionedCacheFilePath(const std::string& path) {
+	const std::wstring widePath = std::filesystem::path(path).wstring();
+	br::processed_texture_cache::FileHeader header{};
+	std::string error;
+	if (!ReadProcessedTextureCacheHeader(widePath, header, &error)) {
+		throw std::runtime_error(error.empty() ? "failed to read conditioned texture cache header" : error);
+	}
+
+	std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts;
+	std::vector<UINT> numRows;
+	UINT64 totalBytes = 0;
+	if (!BuildProcessedTextureCacheLayouts(header, layouts, numRows, totalBytes, &error)) {
+		throw std::runtime_error(error.empty() ? "failed to compute conditioned texture cache layout" : error);
+	}
+
+	std::ifstream file(widePath, std::ios::binary);
+	if (!file) {
+		throw std::runtime_error("failed to open conditioned texture cache payload");
+	}
+	file.seekg(static_cast<std::streamoff>(header.dataOffset), std::ios::beg);
+	std::vector<uint8_t> payload(static_cast<size_t>(header.dataSizeBytes), 0u);
+	file.read(reinterpret_cast<char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+	if (!file || static_cast<size_t>(file.gcount()) != payload.size()) {
+		throw std::runtime_error("failed to read conditioned texture cache payload");
+	}
+
+	auto result = std::make_shared<TextureSourceData>();
+	result->desc.format = static_cast<rhi::Format>(header.format);
+	result->desc.channels = static_cast<unsigned short>(header.channels);
+	result->desc.isCubemap = br::processed_texture_cache::HasFlag(header, br::processed_texture_cache::FlagIsCubemap);
+	result->desc.isArray = br::processed_texture_cache::HasFlag(header, br::processed_texture_cache::FlagIsArray);
+	result->desc.arraySize = (std::max)(1u, header.arraySize);
+	result->desc.generateMipMaps = false;
+	result->desc.imageDimensions.reserve(header.subresourceCount);
+	result->subresources.reserve(header.subresourceCount);
+
+	for (uint32_t subresourceIndex = 0; subresourceIndex < header.subresourceCount; ++subresourceIndex) {
+		const auto& layout = layouts[subresourceIndex];
+		const size_t offset = static_cast<size_t>(layout.Offset);
+		const size_t slicePitch = static_cast<size_t>(layout.Footprint.RowPitch) * static_cast<size_t>(numRows[subresourceIndex]);
+		if (offset + slicePitch > payload.size()) {
+			throw std::runtime_error("conditioned texture cache payload ended before expected subresource data");
+		}
+
+		ImageDimensions dims{};
+		dims.width = static_cast<uint32_t>(layout.Footprint.Width);
+		dims.height = layout.Footprint.Height;
+		dims.rowPitch = layout.Footprint.RowPitch;
+		dims.slicePitch = slicePitch;
+		result->desc.imageDimensions.push_back(dims);
+		result->subresources.push_back(std::make_shared<std::vector<uint8_t>>(payload.begin() + offset, payload.begin() + offset + slicePitch));
+	}
+
+	result->hasFullMipChain = br::processed_texture_cache::HasFlag(header, br::processed_texture_cache::FlagHasFullMipChain);
+	result->isBlockCompressed = br::processed_texture_cache::HasFlag(header, br::processed_texture_cache::FlagIsBlockCompressed);
+	return result;
+}
+
+bool TryBuildConditionedCacheResidentUpload(
+	const std::string& path,
+	uint32_t topMip,
+	bool allowRTV,
+	bool allowUAV,
+	TextureDescription& outDesc,
+	DirectStorageTextureSubresourceRangeCopy& outRange,
+	uint32_t& outClampedTopMip,
+	std::string& outError)
+{
+	outError.clear();
+	const std::wstring widePath = std::filesystem::path(path).wstring();
+	br::processed_texture_cache::FileHeader header{};
+	if (!ReadProcessedTextureCacheHeader(widePath, header, &outError)) {
+		return false;
+	}
+
+	if (header.totalArraySlices != 1u) {
+		outError = "conditioned texture cache partial DirectStorage reload currently supports only non-array 2D textures";
+		return false;
+	}
+
+	std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts;
+	std::vector<UINT> numRows;
+	UINT64 totalBytes = 0;
+	if (!BuildProcessedTextureCacheLayouts(header, layouts, numRows, totalBytes, &outError)) {
+		return false;
+	}
+
+	outClampedTopMip = (std::min)(topMip, header.mipLevels - 1u);
+	const uint32_t residentMipCount = header.mipLevels - outClampedTopMip;
+	const auto& firstLayout = layouts[outClampedTopMip];
+	if (firstLayout.Offset > totalBytes || totalBytes - firstLayout.Offset > static_cast<UINT64>((std::numeric_limits<uint32_t>::max)())) {
+		outError = "conditioned texture cache resident range exceeded DirectStorage upload limits";
+		return false;
+	}
+
+	outDesc = {};
+	outDesc.format = static_cast<rhi::Format>(header.format);
+	outDesc.channels = static_cast<unsigned short>(header.channels);
+	outDesc.hasRTV = allowRTV;
+	outDesc.hasUAV = allowUAV;
+	outDesc.generateMipMaps = false;
+	outDesc.imageDimensions.reserve(residentMipCount);
+	for (uint32_t subresourceIndex = outClampedTopMip; subresourceIndex < header.mipLevels; ++subresourceIndex) {
+		const auto& layout = layouts[subresourceIndex];
+		ImageDimensions dims{};
+		dims.width = static_cast<uint32_t>(layout.Footprint.Width);
+		dims.height = layout.Footprint.Height;
+		dims.rowPitch = layout.Footprint.RowPitch;
+		dims.slicePitch = static_cast<size_t>(layout.Footprint.RowPitch) * static_cast<size_t>(numRows[subresourceIndex]);
+		outDesc.imageDimensions.push_back(dims);
+	}
+
+	outRange = {};
+	outRange.sourceOffset = header.dataOffset + firstLayout.Offset;
+	outRange.sourceSizeBytes = static_cast<uint32_t>(totalBytes - firstLayout.Offset);
+	outRange.uncompressedSizeBytes = outRange.sourceSizeBytes;
+	outRange.firstSubresource = 0u;
+	outRange.subresourceCount = residentMipCount;
+	return true;
 }
 
 uint32_t ComputeDefaultStreamingBootstrapTopMip(const TextureDescription& desc, uint32_t totalMipCount) {
@@ -432,6 +675,47 @@ std::shared_ptr<PixelBuffer> TryUploadDDSFilePathDirectToVRAM(
 	return pixelBuffer;
 }
 
+std::shared_ptr<PixelBuffer> TryUploadConditionedCacheFilePathDirectToVRAM(
+	const std::string& path,
+	uint32_t topMip,
+	bool allowRTV,
+	bool allowUAV)
+{
+	if (path.empty() || !DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu)) {
+		return {};
+	}
+
+	TextureDescription desc{};
+	DirectStorageTextureSubresourceRangeCopy range{};
+	uint32_t clampedTopMip = 0u;
+	std::string error;
+	if (!TryBuildConditionedCacheResidentUpload(path, topMip, allowRTV, allowUAV, desc, range, clampedTopMip, error)) {
+		if (!error.empty()) {
+			spdlog::debug("TextureAsset: conditioned cache DirectStorage fallback for '{}' because {}", path, error);
+		}
+		return {};
+	}
+
+	auto pixelBuffer = PixelBuffer::CreateShared(desc);
+	if (!pixelBuffer) {
+		return {};
+	}
+
+	std::string directStorageMessage;
+	if (!DirectStorageManager::GetInstance().UploadTextureSubresourceRangeFromFile(
+			std::filesystem::path(path).wstring(),
+			pixelBuffer->GetAPIResource(),
+			range,
+			&directStorageMessage)) {
+		if (!directStorageMessage.empty()) {
+			spdlog::debug("TextureAsset: conditioned cache DirectStorage fallback for '{}' because {}", path, directStorageMessage);
+		}
+		return {};
+	}
+
+	return pixelBuffer;
+}
+
 std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirectToVRAMAsync(
 	const std::string& path,
 	bool preferSRGB,
@@ -581,6 +865,70 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirec
 
 	return handle;
 }
+
+std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadConditionedCacheFilePathDirectToVRAMAsync(
+	const std::string& path,
+	uint32_t topMip,
+	bool allowRTV,
+	bool allowUAV)
+{
+	if (path.empty() || !DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu)) {
+		return {};
+	}
+
+	auto handle = std::make_shared<TextureDirectStorageReloadJobHandle>();
+	handle->state.store(TextureDirectStorageReloadJobState::Queued, std::memory_order_release);
+
+	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureAsset::BeginUploadConditionedCacheFilePathDirectToVRAMAsync", [handle, path, topMip, allowRTV, allowUAV]() mutable {
+		handle->state.store(TextureDirectStorageReloadJobState::CreatingResource, std::memory_order_release);
+
+		try {
+			TextureDescription desc{};
+			DirectStorageTextureSubresourceRangeCopy range{};
+			uint32_t clampedTopMip = 0u;
+			std::string error;
+			if (!TryBuildConditionedCacheResidentUpload(path, topMip, allowRTV, allowUAV, desc, range, clampedTopMip, error)) {
+				throw std::runtime_error(error.empty() ? "failed to build conditioned texture cache resident upload" : error);
+			}
+
+			auto uploadedImage = PixelBuffer::CreateShared(desc);
+			if (!uploadedImage) {
+				throw std::runtime_error("failed to create resident PixelBuffer for conditioned texture cache DirectStorage upload");
+			}
+
+			std::string directStorageMessage;
+			DirectStorageAsyncRequestHandle requestHandle = DirectStorageManager::GetInstance().EnqueueUploadTextureSubresourceRangeFromFile(
+				std::filesystem::path(path).wstring(),
+				uploadedImage->GetAPIResource(),
+				range,
+				&directStorageMessage);
+			if (!requestHandle.IsValid()) {
+				throw std::runtime_error(directStorageMessage.empty()
+					? "failed to enqueue conditioned texture cache DirectStorage upload"
+					: directStorageMessage);
+			}
+
+			{
+				std::scoped_lock lock(handle->mutex);
+				handle->targetTopMip = clampedTopMip;
+				handle->uploadedImage = std::move(uploadedImage);
+				handle->requestHandle = std::move(requestHandle);
+				handle->error.clear();
+			}
+
+			handle->state.store(TextureDirectStorageReloadJobState::Uploading, std::memory_order_release);
+		}
+		catch (const std::exception& ex) {
+			{
+				std::scoped_lock lock(handle->mutex);
+				handle->error = ex.what();
+			}
+			handle->state.store(TextureDirectStorageReloadJobState::Failed, std::memory_order_release);
+		}
+	});
+
+	return handle;
+}
 }
 
 uint32_t TextureAsset::NextStreamingTextureID() {
@@ -683,7 +1031,10 @@ void TextureAsset::BumpBindingRevision() {
 
 std::shared_ptr<TextureSourceData> TextureAsset::BuildSourceData() {
 	if (std::holds_alternative<std::string>(m_initialStorage)) {
-		auto sourceData = BuildSourceDataFromDDSFilePath(std::get<std::string>(m_initialStorage), m_meta.preferSRGB);
+		const auto& path = std::get<std::string>(m_initialStorage);
+		auto sourceData = IsConditionedCacheFilePath(path)
+			? BuildSourceDataFromConditionedCacheFilePath(path)
+			: BuildSourceDataFromDDSFilePath(path, m_meta.preferSRGB);
 		UpdateSourceShapeFromDescription(sourceData->desc, CalcMipCountFromDescription(sourceData->desc));
 		if (!m_streamingState.enabled) {
 			return sourceData;
@@ -983,12 +1334,18 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 			}
 		}
 
-		m_directStorageReloadHandle = BeginUploadDDSFilePathDirectToVRAMAsync(
-			*filePath,
-			m_meta.preferSRGB,
-			desiredResidentTopMip,
-			m_desc.hasRTV,
-			m_desc.hasUAV);
+		m_directStorageReloadHandle = IsConditionedCacheFilePath(*filePath)
+			? BeginUploadConditionedCacheFilePathDirectToVRAMAsync(
+				*filePath,
+				desiredResidentTopMip,
+				m_desc.hasRTV,
+				m_desc.hasUAV)
+			: BeginUploadDDSFilePathDirectToVRAMAsync(
+				*filePath,
+				m_meta.preferSRGB,
+				desiredResidentTopMip,
+				m_desc.hasRTV,
+				m_desc.hasUAV);
 		return m_directStorageReloadHandle != nullptr;
 	};
 
@@ -998,12 +1355,18 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 			return false;
 		}
 
-		auto uploadedImage = TryUploadDDSFilePathDirectToVRAM(
-			*filePath,
-			m_meta.preferSRGB,
-			desiredResidentTopMip,
-			m_desc.hasRTV,
-			m_desc.hasUAV);
+		auto uploadedImage = IsConditionedCacheFilePath(*filePath)
+			? TryUploadConditionedCacheFilePathDirectToVRAM(
+				*filePath,
+				desiredResidentTopMip,
+				m_desc.hasRTV,
+				m_desc.hasUAV)
+			: TryUploadDDSFilePathDirectToVRAM(
+				*filePath,
+				m_meta.preferSRGB,
+				desiredResidentTopMip,
+				m_desc.hasRTV,
+				m_desc.hasUAV);
 		if (!uploadedImage) {
 			return false;
 		}
@@ -1016,13 +1379,32 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		return true;
 	};
 
+	const bool preferDirectStorageStreamingReload = [&]() {
+		if (!needsStreamingReload) {
+			return false;
+		}
+
+		auto* filePath = std::get_if<std::string>(&m_initialStorage);
+		if (filePath == nullptr || (!IsDDSFilePath(*filePath) && !IsConditionedCacheFilePath(*filePath))) {
+			return false;
+		}
+
+		return m_meta.isProcessingCacheArtifact ||
+			m_lastReportedUploadPath == TextureUploadPathTelemetry::DirectStorageGpuDirect;
+	}();
+
+	if (preferDirectStorageStreamingReload &&
+		tryAdvanceAsyncDirectStorageReload("texture residency reloaded asynchronously from DDS-backed source through DirectStorage GPU queue")) {
+		return;
+	}
+
 	std::shared_ptr<TextureSourceData> sourceData;
 	if (m_reloadHandle && m_reloadHandle->targetTopMip != desiredResidentTopMip) {
 		m_reloadHandle.reset();
 	}
 	if (!m_reloadHandle && std::holds_alternative<std::string>(m_initialStorage)) {
 		const auto& filePath = std::get<std::string>(m_initialStorage);
-		if (!filePath.empty()) {
+		if (!filePath.empty() && !IsConditionedCacheFilePath(filePath)) {
 			m_reloadHandle = RequestReloadSourceDataAsync(
 				filePath,
 				m_meta.preferSRGB,

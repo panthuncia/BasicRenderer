@@ -44,6 +44,14 @@ struct DirectStorageTextureRegionCopy {
     uint32_t depth = 1;
 };
 
+struct DirectStorageTextureSubresourceRangeCopy {
+    uint64_t sourceOffset = 0;
+    uint32_t sourceSizeBytes = 0;
+    uint32_t uncompressedSizeBytes = 0;
+    uint32_t firstSubresource = 0;
+    uint32_t subresourceCount = 0;
+};
+
 struct DirectStorageBufferRegionCopy {
     uint64_t sourceOffset = 0;
     uint32_t sourceSizeBytes = 0;
@@ -141,11 +149,21 @@ public:
         uint64_t sourceOffset,
         uint32_t sourceSizeBytes,
         std::string* outMessage = nullptr);
+    DirectStorageAsyncRequestHandle EnqueueUploadTextureSubresourceRangeFromFile(
+        const std::wstring& path,
+        rhi::Resource destinationResource,
+        const DirectStorageTextureSubresourceRangeCopy& range,
+        std::string* outMessage = nullptr);
     bool UploadTextureSubresourcesFromFile(
         const std::wstring& path,
         rhi::Resource destinationResource,
         uint64_t sourceOffset,
         uint32_t sourceSizeBytes,
+        std::string* outMessage = nullptr);
+    bool UploadTextureSubresourceRangeFromFile(
+        const std::wstring& path,
+        rhi::Resource destinationResource,
+        const DirectStorageTextureSubresourceRangeCopy& range,
         std::string* outMessage = nullptr);
     DirectStorageAsyncRequestHandle EnqueueUploadTextureRegionsFromFile(
         const std::wstring& path,
@@ -180,6 +198,7 @@ private:
 using DirectStorageManager = br::DirectStorageManager;
 using DirectStorageQueueKind = br::DirectStorageQueueKind;
 using DirectStorageBufferRegionCopy = br::DirectStorageBufferRegionCopy;
+using DirectStorageTextureSubresourceRangeCopy = br::DirectStorageTextureSubresourceRangeCopy;
 using DirectStorageAsyncRequestHandle = br::DirectStorageAsyncRequestHandle;
 using DirectStorageAsyncRequestState = br::DirectStorageAsyncRequestState;
 using DirectStorageAsyncRequestStatus = br::DirectStorageAsyncRequestStatus;

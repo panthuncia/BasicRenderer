@@ -334,7 +334,10 @@ HRESULT InitializeScratchImageFromSource(const TextureSourceData& sourceData, Sc
 	const uint32_t baseHeight = sourceData.desc.imageDimensions[0].height;
 	const uint32_t faces = sourceData.desc.isCubemap ? 6u : 1u;
 	const uint32_t arraySize = (std::max)(1u, sourceData.desc.arraySize) * faces;
-	const uint32_t mipLevels = sourceData.hasFullMipChain ? CalcMipCount(baseWidth, baseHeight) : 1u;
+	const uint32_t mipLevels = GetTextureMipLevelCount(sourceData);
+	if (mipLevels == 0u) {
+		return E_INVALIDARG;
+	}
 
 	HRESULT hr = scratchImage.Initialize2D(format, baseWidth, baseHeight, arraySize, mipLevels);
 	if (FAILED(hr)) {
@@ -683,7 +686,13 @@ bool TextureProcessingManager::NeedsProcessing(const TextureSourceData& sourceDa
 		return false;
 	}
 
-	const bool needMipChain = meta.processing.requestMipChain && !sourceData.hasFullMipChain;
+	if (meta.isProcessingCacheArtifact) {
+		return false;
+	}
+
+	const uint32_t mipLevelCount = GetTextureMipLevelCount(sourceData);
+	const bool hasResidentMipChain = mipLevelCount > 1u;
+	const bool needMipChain = meta.processing.requestMipChain && !sourceData.hasFullMipChain && !hasResidentMipChain;
 	const bool needCompression = meta.processing.requestBlockCompression && !sourceData.isBlockCompressed;
 	const bool needDecompression = !meta.processing.requestBlockCompression && sourceData.isBlockCompressed;
 	const bool needNormalConventionConversion = NeedsNormalConventionConversion(meta);

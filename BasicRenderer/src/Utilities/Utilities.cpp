@@ -444,26 +444,15 @@ namespace detail {
             sampler = Sampler::GetDefaultSampler();
         }
 
-        const std::filesystem::path conditionedPath(filePath);
-        const std::filesystem::path ddsFallbackPath = conditionedPath.parent_path() / conditionedPath.stem().replace_extension(L".dds");
-        std::error_code ec;
-        const bool hasDdsFallback = std::filesystem::exists(ddsFallbackPath, ec) && !ec;
-
         TextureFileMeta meta{};
         meta.filePath = ws2s(filePath);
-        meta.fileType = hasDdsFallback ? ImageFiletype::DDS : ImageFiletype::UNKNOWN;
-        meta.loader = hasDdsFallback ? ImageLoader::DirectXTex : ImageLoader{};
+        meta.fileType = ImageFiletype::UNKNOWN;
+        meta.loader = ImageLoader{};
         meta.preferSRGB = rhi::helpers::IsSRGB(desc.format);
         meta.isProcessingCacheArtifact = true;
 
-        std::shared_ptr<TextureAsset> texture;
-        if (hasDdsFallback) {
-            texture = TextureAsset::CreateShared(desc, ws2s(ddsFallbackPath.wstring()), sampler, std::move(meta));
-            texture->AdoptUploadedImage(pixelBuffer);
-        }
-        else {
-            texture = TextureAsset::CreateShared(desc, pixelBuffer, sampler, std::move(meta));
-        }
+        auto texture = TextureAsset::CreateShared(desc, ws2s(filePath), sampler, std::move(meta));
+        texture->AdoptUploadedImage(pixelBuffer);
         texture->RecordLoadPath(TextureLoadPathTelemetry::DirectStorageGpuDirect, "conditioned texture cache uploaded directly into GPU texture through DirectStorage");
         texture->RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, "processing cache residency established through DirectStorage GPU queue");
         return texture;
