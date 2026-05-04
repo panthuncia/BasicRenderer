@@ -23,6 +23,7 @@ struct TextureProcessingJobHandle {
 	std::mutex mutex;
 	TextureFileMeta requestMeta;
 	std::string processingKey;
+	std::string conditionedCachePath;
 	std::shared_ptr<TextureSourceData> preparedSourceData;
 	std::shared_ptr<TextureSourceData> result;
 	std::shared_ptr<PixelBuffer> uploadedImage;

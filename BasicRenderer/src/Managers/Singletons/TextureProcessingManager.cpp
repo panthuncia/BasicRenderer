@@ -436,14 +436,27 @@ std::shared_ptr<TextureSourceData> TryLoadTextureSourceDataFromCache(const std::
 	}
 }
 
-void TryWriteTextureSourceDataToCache(const std::string& key, const TextureSourceData& sourceData) {
+std::wstring TryWriteTextureSourceDataToCache(const std::string& key, const TextureSourceData& sourceData) {
 	const std::wstring cachePath = BuildProcessingCachePath(key);
 	const std::wstring conditionedCachePath = BuildProcessingConditionedCachePath(key);
+	std::wstring writtenConditionedCachePath;
+	if (TryWriteConditionedTextureCache(conditionedCachePath, sourceData)) {
+		writtenConditionedCachePath = conditionedCachePath;
+		spdlog::info(
+			"TextureProcessingManager: wrote conditioned cache file '{}' format={} subresources={}",
+			ws2s(conditionedCachePath),
+			static_cast<uint32_t>(sourceData.desc.format),
+			sourceData.subresources.size());
+	}
+	else {
+		spdlog::warn("TextureProcessingManager: failed to write conditioned cache file '{}'", ws2s(conditionedCachePath));
+	}
+
 	ScratchImage cachedImage;
 	const HRESULT initHr = InitializeScratchImageFromSource(sourceData, cachedImage);
 	if (FAILED(initHr)) {
 		spdlog::warn("TextureProcessingManager: failed to initialize cache image for '{}'", ws2s(cachePath));
-		return;
+		return writtenConditionedCachePath;
 	}
 
 	const HRESULT writeHr = SaveToDDSFile(
@@ -454,7 +467,7 @@ void TryWriteTextureSourceDataToCache(const std::string& key, const TextureSourc
 		cachePath.c_str());
 	if (FAILED(writeHr)) {
 		spdlog::warn("TextureProcessingManager: failed to write cache file '{}'", ws2s(cachePath));
-		return;
+		return writtenConditionedCachePath;
 	}
 
 	spdlog::info(
@@ -465,16 +478,7 @@ void TryWriteTextureSourceDataToCache(const std::string& key, const TextureSourc
 		sourceData.hasFullMipChain,
 		sourceData.isBlockCompressed);
 
-	if (TryWriteConditionedTextureCache(conditionedCachePath, sourceData)) {
-		spdlog::info(
-			"TextureProcessingManager: wrote conditioned cache file '{}' format={} subresources={}",
-			ws2s(conditionedCachePath),
-			static_cast<uint32_t>(sourceData.desc.format),
-			sourceData.subresources.size());
-	}
-	else {
-		spdlog::warn("TextureProcessingManager: failed to write conditioned cache file '{}'", ws2s(conditionedCachePath));
-	}
+	return writtenConditionedCachePath;
 }
 
 constexpr bool kEnableGpuBc7Compression = true;
@@ -726,7 +730,7 @@ std::wstring TextureProcessingManager::GetExistingCachePathForFile(const Texture
 		}
 	}
 
-	return cachePath;
+	return {};
 }
 
 std::string TextureProcessingManager::BuildProcessingKey(
@@ -793,6 +797,30 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureProcessingManager::RequestProcessing", [handle, sourceData, meta, key]() {
 		handle->state.store(TextureProcessingJobState::CpuPreparing, std::memory_order_release);
 		try {
+			const std::wstring conditionedCachePath = BuildProcessingConditionedCachePath(key);
+			std::error_code cacheEc;
+			if (std::filesystem::exists(std::filesystem::path(conditionedCachePath), cacheEc) && !cacheEc) {
+				spdlog::info(
+					"TextureProcessingManager: conditioned cache hit for '{}' file='{}' semantic={} path='{}'",
+					key,
+					meta.filePath,
+					TextureSemanticToString(meta.processing.semantic),
+					ws2s(conditionedCachePath));
+				{
+					std::scoped_lock lock(handle->mutex);
+					handle->conditionedCachePath = ws2s(conditionedCachePath);
+					handle->preparedSourceData.reset();
+					handle->result.reset();
+					handle->uploadedImage.reset();
+					handle->loadedFromCache = true;
+					handle->requiresGpuCompression = false;
+					handle->completedOnGpu = false;
+					handle->error.clear();
+				}
+				handle->state.store(TextureProcessingJobState::Ready, std::memory_order_release);
+				return;
+			}
+
 			spdlog::info(
 				"TextureProcessingManager: begin processing '{}' semantic={} srcFormat={} blockCompressed={} fullMipChain={} subresources={} dims={}x{}",
 				key,
@@ -805,6 +833,7 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].height : 0u);
 
 			if (auto cachedResult = TryLoadTextureSourceDataFromCache(key)) {
+				const std::wstring backfilledConditionedCachePath = TryWriteTextureSourceDataToCache(key, *cachedResult);
 				spdlog::info(
 					"TextureProcessingManager: cache hit for '{}' file='{}' semantic={} bc={} mips={} fmt={} subresources={} dims={}x{}",
 					key,
@@ -818,6 +847,7 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 					cachedResult->desc.imageDimensions.empty() ? 0u : cachedResult->desc.imageDimensions[0].height);
 				{
 					std::scoped_lock lock(handle->mutex);
+					handle->conditionedCachePath = ws2s(backfilledConditionedCachePath);
 					handle->preparedSourceData.reset();
 					handle->result = std::move(cachedResult);
 					handle->uploadedImage.reset();
@@ -864,11 +894,13 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 			}
 
 			auto result = std::move(prepared.finalResult);
+			std::wstring writtenConditionedCachePath;
 			if (result) {
-				TryWriteTextureSourceDataToCache(key, *result);
+				writtenConditionedCachePath = TryWriteTextureSourceDataToCache(key, *result);
 			}
 			{
 				std::scoped_lock lock(handle->mutex);
+				handle->conditionedCachePath = ws2s(writtenConditionedCachePath);
 				handle->preparedSourceData.reset();
 				handle->result = std::move(result);
 				handle->uploadedImage.reset();
@@ -924,12 +956,14 @@ void TextureProcessingManager::CompleteGpuProcessing(
 		return;
 	}
 
+	std::wstring conditionedCachePath;
 	if (writeCacheArtifact && result && !handle->processingKey.empty()) {
-		TryWriteTextureSourceDataToCache(handle->processingKey, *result);
+		conditionedCachePath = TryWriteTextureSourceDataToCache(handle->processingKey, *result);
 	}
 
 	{
 		std::scoped_lock lock(handle->mutex);
+		handle->conditionedCachePath = ws2s(conditionedCachePath);
 		handle->preparedSourceData.reset();
 		handle->result = std::move(result);
 		handle->uploadedImage = std::move(uploadedImage);
