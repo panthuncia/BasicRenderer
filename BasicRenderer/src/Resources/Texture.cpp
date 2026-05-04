@@ -12,6 +12,7 @@
 #include <rhi_helpers.h>
 
 #include "Managers/Singletons/DirectStorageManager.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Managers/Singletons/TextureProcessingManager.h"
 
 namespace {
@@ -272,6 +273,49 @@ std::shared_ptr<TextureSourceData> BuildSourceDataFromDDSFilePath(const std::str
 	return result;
 }
 
+std::shared_ptr<TextureReloadJobHandle> RequestReloadSourceDataAsync(
+	std::string filePath,
+	bool preferSRGB,
+	uint32_t targetTopMip,
+	bool streamingEnabled)
+{
+	auto handle = std::make_shared<TextureReloadJobHandle>();
+	handle->targetTopMip = targetTopMip;
+	handle->state.store(TextureReloadJobState::Queued, std::memory_order_release);
+
+	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureAsset::RequestReloadSourceDataAsync", [handle, filePath = std::move(filePath), preferSRGB, targetTopMip, streamingEnabled]() mutable {
+		handle->state.store(TextureReloadJobState::BuildingSourceData, std::memory_order_release);
+		try {
+			auto sourceData = BuildSourceDataFromDDSFilePath(filePath, preferSRGB);
+			const uint32_t fullMipCount = CalcMipCountFromDescription(sourceData->desc);
+			const uint32_t clippedTopMip = (streamingEnabled && fullMipCount > 1u)
+				? (std::min)(targetTopMip, fullMipCount - 1u)
+				: 0u;
+			auto reloadSourceData = ClipTextureSourceDataTopMip(sourceData, clippedTopMip);
+
+			{
+				std::scoped_lock lock(handle->mutex);
+				handle->sourceData = std::move(reloadSourceData);
+				handle->sourceTotalMipCount = fullMipCount;
+				handle->sourceFullWidth = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].width;
+				handle->sourceFullHeight = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].height;
+				handle->error.clear();
+			}
+
+			handle->state.store(TextureReloadJobState::Ready, std::memory_order_release);
+		}
+		catch (const std::exception& ex) {
+			{
+				std::scoped_lock lock(handle->mutex);
+				handle->error = ex.what();
+			}
+			handle->state.store(TextureReloadJobState::Failed, std::memory_order_release);
+		}
+	});
+
+	return handle;
+}
+
 std::shared_ptr<PixelBuffer> TryUploadDDSFilePathDirectToVRAM(
 	const std::string& path,
 	bool preferSRGB,
@@ -387,6 +431,132 @@ std::shared_ptr<PixelBuffer> TryUploadDDSFilePathDirectToVRAM(
 
 	return pixelBuffer;
 }
+
+std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirectToVRAMAsync(
+	const std::string& path,
+	bool preferSRGB,
+	uint32_t topMip,
+	bool allowRTV,
+	bool allowUAV)
+{
+	if (path.empty() || !DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu)) {
+		return {};
+	}
+
+	const std::filesystem::path filePath(path);
+	std::wstring extension = filePath.extension().wstring();
+	std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+	if (extension != L".dds") {
+		return {};
+	}
+
+	DirectX::ScratchImage image;
+	DirectX::TexMetadata metadata{};
+	const HRESULT loadHr = DirectX::LoadFromDDSFile(filePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+	if (FAILED(loadHr) || metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.depth != 1) {
+		return {};
+	}
+
+	size_t headerSize = 0;
+	const HRESULT headerHr = DirectX::EncodeDDSHeader(
+		metadata,
+		DirectX::DDS_FLAGS_NONE,
+		nullptr,
+		(std::numeric_limits<size_t>::max)(),
+		headerSize);
+	if (FAILED(headerHr) || headerSize == 0) {
+		return {};
+	}
+
+	TextureDescription desc{};
+	desc.format = rhi::helpers::ToRHI(preferSRGB ? DirectX::MakeSRGB(metadata.format) : DirectX::MakeLinear(metadata.format));
+	desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(desc.format));
+	if (rhi::helpers::IsBlockCompressed(desc.format)) {
+		return {};
+	}
+
+	desc.isCubemap = metadata.IsCubemap();
+	desc.isArray = metadata.arraySize > 1 && !desc.isCubemap;
+	desc.arraySize = desc.isCubemap
+		? static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)))
+		: static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+	desc.hasRTV = allowRTV;
+	desc.hasUAV = allowUAV;
+	desc.generateMipMaps = false;
+
+	const uint32_t fullMipCount = static_cast<uint32_t>((std::max)(size_t(1), metadata.mipLevels));
+	const uint32_t clampedTopMip = (std::min)(topMip, fullMipCount - 1u);
+	const uint32_t arraySlices = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+	const DirectX::Image* images = image.GetImages();
+	const size_t imageCount = image.GetImageCount();
+	if (images == nullptr || imageCount != static_cast<size_t>(arraySlices) * fullMipCount) {
+		return {};
+	}
+
+	const uint32_t residentMipCount = fullMipCount - clampedTopMip;
+	desc.imageDimensions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
+	std::vector<br::DirectStorageTextureRegionCopy> regions;
+	regions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
+
+	uint64_t currentOffset = static_cast<uint64_t>(headerSize);
+	uint32_t destinationSubresourceIndex = 0u;
+	for (size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex) {
+		const DirectX::Image& srcImage = images[imageIndex];
+		if (srcImage.width > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+			srcImage.height > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+			srcImage.slicePitch == 0 ||
+			srcImage.slicePitch > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
+			return {};
+		}
+
+		const uint32_t mipIndex = static_cast<uint32_t>(imageIndex % fullMipCount);
+		if (mipIndex >= clampedTopMip) {
+			ImageDimensions dims{};
+			dims.width = static_cast<uint32_t>(srcImage.width);
+			dims.height = static_cast<uint32_t>(srcImage.height);
+			dims.rowPitch = srcImage.rowPitch;
+			dims.slicePitch = srcImage.slicePitch;
+			desc.imageDimensions.push_back(dims);
+
+			br::DirectStorageTextureRegionCopy region{};
+			region.sourceOffset = currentOffset;
+			region.sourceSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+			region.uncompressedSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+			region.subresourceIndex = destinationSubresourceIndex++;
+			region.width = dims.width;
+			region.height = dims.height;
+			region.depth = 1;
+			regions.push_back(region);
+		}
+
+		currentOffset += srcImage.slicePitch;
+	}
+
+	if (regions.empty()) {
+		return {};
+	}
+
+	auto handle = std::make_shared<TextureDirectStorageReloadJobHandle>();
+	handle->targetTopMip = clampedTopMip;
+	handle->uploadedImage = PixelBuffer::CreateShared(desc);
+	if (!handle->uploadedImage) {
+		return {};
+	}
+
+	std::string directStorageMessage;
+	handle->requestHandle = DirectStorageManager::GetInstance().EnqueueUploadTextureRegionsFromFile(
+		filePath.wstring(),
+		handle->uploadedImage->GetAPIResource(),
+		regions,
+		&directStorageMessage);
+	if (!handle->requestHandle.IsValid()) {
+		return {};
+	}
+
+	handle->state.store(TextureDirectStorageReloadJobState::Uploading, std::memory_order_release);
+
+	return handle;
+}
 }
 
 uint32_t TextureAsset::NextStreamingTextureID() {
@@ -401,11 +571,19 @@ void TextureAsset::UpdateSourceShapeFromDescription(const TextureDescription& de
 
 	const uint32_t descMipCount = CalcMipCountFromDescription(desc);
 	const uint32_t totalMipCount = (std::max)(descMipCount, totalMipCountHint);
+	ApplySourceShapeHint(desc.imageDimensions[0].width, desc.imageDimensions[0].height, totalMipCount);
+}
+
+void TextureAsset::ApplySourceShapeHint(uint32_t fullWidth, uint32_t fullHeight, uint32_t totalMipCount) {
+	if (fullWidth == 0u || fullHeight == 0u || totalMipCount == 0u) {
+		return;
+	}
+
 	if (m_sourceFullWidth == 0u ||
 		m_sourceFullHeight == 0u ||
 		totalMipCount >= m_sourceTotalMipCount) {
-		m_sourceFullWidth = desc.imageDimensions[0].width;
-		m_sourceFullHeight = desc.imageDimensions[0].height;
+		m_sourceFullWidth = fullWidth;
+		m_sourceFullHeight = fullHeight;
 	}
 
 	m_sourceTotalMipCount = (std::max)(m_sourceTotalMipCount, totalMipCount);
@@ -663,17 +841,89 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		return;
 	}
 
+	const uint32_t desiredResidentTopMip = GetDesiredResidentTopMip();
+
+	auto tryAdvanceAsyncDirectStorageReload = [&](const std::string& detail) -> bool {
+		auto* filePath = std::get_if<std::string>(&m_initialStorage);
+		if (filePath == nullptr || filePath->empty()) {
+			return false;
+		}
+
+		if (m_directStorageReloadHandle) {
+			TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
+			if (state == TextureDirectStorageReloadJobState::Queued || state == TextureDirectStorageReloadJobState::Uploading) {
+				const DirectStorageAsyncRequestStatus requestStatus = DirectStorageManager::GetInstance().PollRequest(m_directStorageReloadHandle->requestHandle);
+				if (requestStatus.state == DirectStorageAsyncRequestState::Ready) {
+					m_directStorageReloadHandle->state.store(TextureDirectStorageReloadJobState::Ready, std::memory_order_release);
+					state = TextureDirectStorageReloadJobState::Ready;
+				}
+				else if (requestStatus.state == DirectStorageAsyncRequestState::Failed || requestStatus.state == DirectStorageAsyncRequestState::Invalid) {
+					{
+						std::scoped_lock lock(m_directStorageReloadHandle->mutex);
+						m_directStorageReloadHandle->error = requestStatus.message;
+					}
+					m_directStorageReloadHandle->state.store(TextureDirectStorageReloadJobState::Failed, std::memory_order_release);
+					state = TextureDirectStorageReloadJobState::Failed;
+				}
+				else {
+					state = TextureDirectStorageReloadJobState::Uploading;
+				}
+			}
+
+			if (m_directStorageReloadHandle->targetTopMip != desiredResidentTopMip) {
+				if (state == TextureDirectStorageReloadJobState::Ready || state == TextureDirectStorageReloadJobState::Failed) {
+					m_directStorageReloadHandle.reset();
+				}
+				else {
+					return true;
+				}
+			}
+			else if (state == TextureDirectStorageReloadJobState::Ready) {
+				std::shared_ptr<PixelBuffer> uploadedImage;
+				{
+					std::scoped_lock lock(m_directStorageReloadHandle->mutex);
+					uploadedImage = m_directStorageReloadHandle->uploadedImage;
+				}
+				m_directStorageReloadHandle.reset();
+				if (!uploadedImage) {
+					return false;
+				}
+
+				AdoptUploadedImage(std::move(uploadedImage));
+				RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, detail);
+				if (!m_initialDataString.empty()) {
+					m_initialStorage = m_initialDataString;
+				}
+				return true;
+			}
+			else if (state == TextureDirectStorageReloadJobState::Failed) {
+				m_directStorageReloadHandle.reset();
+				return false;
+			}
+			else {
+				return true;
+			}
+		}
+
+		m_directStorageReloadHandle = BeginUploadDDSFilePathDirectToVRAMAsync(
+			*filePath,
+			m_meta.preferSRGB,
+			desiredResidentTopMip,
+			m_desc.hasRTV,
+			m_desc.hasUAV);
+		return m_directStorageReloadHandle != nullptr;
+	};
+
 	auto tryDirectStorageReload = [&](const std::string& detail) -> bool {
 		auto* filePath = std::get_if<std::string>(&m_initialStorage);
 		if (filePath == nullptr || filePath->empty()) {
 			return false;
 		}
 
-		const uint32_t residentTopMip = GetDesiredResidentTopMip();
 		auto uploadedImage = TryUploadDDSFilePathDirectToVRAM(
 			*filePath,
 			m_meta.preferSRGB,
-			residentTopMip,
+			desiredResidentTopMip,
 			m_desc.hasRTV,
 			m_desc.hasUAV);
 		if (!uploadedImage) {
@@ -689,12 +939,50 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 	};
 
 	std::shared_ptr<TextureSourceData> sourceData;
+	if (m_reloadHandle && m_reloadHandle->targetTopMip != desiredResidentTopMip) {
+		m_reloadHandle.reset();
+	}
+	if (!m_reloadHandle && std::holds_alternative<std::string>(m_initialStorage)) {
+		const auto& filePath = std::get<std::string>(m_initialStorage);
+		if (!filePath.empty()) {
+			m_reloadHandle = RequestReloadSourceDataAsync(
+				filePath,
+				m_meta.preferSRGB,
+				desiredResidentTopMip,
+				m_streamingState.enabled);
+		}
+	}
+	if (m_reloadHandle) {
+		const TextureReloadJobState reloadState = m_reloadHandle->state.load(std::memory_order_acquire);
+		if (reloadState == TextureReloadJobState::Ready) {
+			uint32_t sourceTotalMipCount = 0u;
+			uint32_t sourceFullWidth = 0u;
+			uint32_t sourceFullHeight = 0u;
+			{
+				std::scoped_lock lock(m_reloadHandle->mutex);
+				sourceData = m_reloadHandle->sourceData;
+				sourceTotalMipCount = m_reloadHandle->sourceTotalMipCount;
+				sourceFullWidth = m_reloadHandle->sourceFullWidth;
+				sourceFullHeight = m_reloadHandle->sourceFullHeight;
+			}
+			ApplySourceShapeHint(sourceFullWidth, sourceFullHeight, sourceTotalMipCount);
+			m_reloadHandle.reset();
+		}
+		else if (reloadState == TextureReloadJobState::Failed) {
+			m_reloadHandle.reset();
+		}
+	}
+
 	if (TextureProcessingManager::GetInstance().ShouldProcess(m_meta)) {
-		sourceData = BuildSourceData();
+		sourceData = sourceData ? sourceData : BuildSourceData();
 		if (!TextureProcessingManager::GetInstance().NeedsProcessing(*sourceData, m_meta)) {
-			const uint32_t residentTopMip = GetDesiredResidentTopMip();
 			const uint32_t residentMipCount = CalcMipCountFromDescription(sourceData->desc);
-			if (tryDirectStorageReload("texture residency reloaded from file-backed DDS through DirectStorage GPU queue")) {
+			if (needsStreamingReload) {
+				if (tryAdvanceAsyncDirectStorageReload("texture residency reloaded asynchronously from file-backed DDS through DirectStorage GPU queue")) {
+					return;
+				}
+			}
+			else if (tryDirectStorageReload("texture residency reloaded from file-backed DDS through DirectStorage GPU queue")) {
 				return;
 			}
 			m_desc = sourceData->desc;
@@ -705,8 +993,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				m_name);
 			m_hasUploadedFinalImage = true;
 			m_hasUploadedPlaceholder = false;
-			SetResidentMipWindow(residentTopMip, residentMipCount);
-			SetPendingTopMip(residentTopMip);
+			SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
+			SetPendingTopMip(desiredResidentTopMip);
 			RecordUploadPath(TextureUploadPathTelemetry::CpuImmediateUpload, "texture data uploaded through TextureFactory without async processing");
 			BumpBindingRevision();
 			if (!m_initialDataString.empty()) {
@@ -720,6 +1008,22 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 	}
 
 	if (TextureProcessingManager::GetInstance().ShouldProcess(m_meta)) {
+		if (!sourceData && m_reloadHandle) {
+			if (!m_image && m_meta.processing.allowAsyncPlaceholder) {
+				m_image = CreatePlaceholderTexture(factory, m_meta.processing);
+				m_desc = m_image->GetDescription();
+				if (!m_name.empty()) {
+					m_image->SetName(m_name + "[placeholder]");
+				}
+				RefreshStreamingStateFromDescription();
+				RecordUploadPath(TextureUploadPathTelemetry::AsyncProcessingPlaceholder, "async reload source build pending; placeholder texture uploaded");
+				m_hasUploadedPlaceholder = true;
+				BumpBindingRevision();
+			}
+
+			return;
+		}
+
 		const auto processingSourceData = sourceData ? sourceData : BuildSourceData();
 		m_processingHandle = TextureProcessingManager::GetInstance().RequestProcessing(processingSourceData, m_meta);
 
@@ -763,7 +1067,6 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				}
 
 				if (result) {
-					const uint32_t residentTopMip = GetDesiredResidentTopMip();
 					const uint32_t residentMipCount = CalcMipCountFromDescription(result->desc);
 					m_desc = result->desc;
 					RefreshStreamingStateFromDescription();
@@ -776,8 +1079,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 						result->desc,
 						TextureFactory::TextureInitialData::FromBytes(result->subresources),
 						m_name);
-					SetResidentMipWindow(residentTopMip, residentMipCount);
-					SetPendingTopMip(residentTopMip);
+					SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
+					SetPendingTopMip(desiredResidentTopMip);
 					RecordUploadPath(
 						loadedFromCache ? TextureUploadPathTelemetry::ProcessingCacheUpload : TextureUploadPathTelemetry::AsyncProcessingReadyUpload,
 						loadedFromCache
@@ -808,7 +1111,6 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					return;
 				}
 				const auto fallbackSourceData = BuildSourceData();
-				const uint32_t residentTopMip = GetDesiredResidentTopMip();
 				const uint32_t residentMipCount = CalcMipCountFromDescription(fallbackSourceData->desc);
 				m_meta.isProcessingCacheArtifact = false;
 				m_desc = fallbackSourceData->desc;
@@ -817,8 +1119,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					TextureFactory::TextureInitialData::FromBytes(fallbackSourceData->subresources),
 					m_name);
 				RefreshStreamingStateFromDescription();
-				SetResidentMipWindow(residentTopMip, residentMipCount);
-				SetPendingTopMip(residentTopMip);
+				SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
+				SetPendingTopMip(desiredResidentTopMip);
 				RecordUploadPath(
 					TextureUploadPathTelemetry::ProcessingFailedFallback,
 					processingError.empty()
@@ -850,8 +1152,10 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		if (tryDirectStorageReload("texture uploaded from file-backed DDS through DirectStorage GPU queue without preprocessing")) {
 			return;
 		}
-		const auto immediateSourceData = BuildSourceData();
-		const uint32_t residentTopMip = GetDesiredResidentTopMip();
+		if (!sourceData && m_reloadHandle) {
+			return;
+		}
+		const auto immediateSourceData = sourceData ? sourceData : BuildSourceData();
 		const uint32_t residentMipCount = CalcMipCountFromDescription(immediateSourceData->desc);
 		m_desc = immediateSourceData->desc;
 		m_image = factory.CreateAlwaysResidentPixelBuffer(
@@ -861,8 +1165,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		RecordUploadPath(TextureUploadPathTelemetry::CpuImmediateUpload, "texture uploaded through TextureFactory without preprocessing");
 		m_hasUploadedFinalImage = true;
 		RefreshStreamingStateFromDescription();
-		SetResidentMipWindow(residentTopMip, residentMipCount);
-		SetPendingTopMip(residentTopMip);
+		SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
+		SetPendingTopMip(desiredResidentTopMip);
 		BumpBindingRevision();
 		if (!m_initialDataString.empty()) {
 			m_initialStorage = m_initialDataString;

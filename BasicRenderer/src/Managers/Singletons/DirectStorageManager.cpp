@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -76,6 +77,32 @@ bool IsDirectStorageDisabledByEnvironment() {
 
 constexpr uint32_t kDefaultDirectStorageStagingBufferSizeBytes = 128u * 1024u * 1024u;
 
+bool WaitForAsyncRequestCompletion(DirectStorageManager& manager, const DirectStorageAsyncRequestHandle& handle, std::string* outMessage) {
+    if (outMessage) {
+        outMessage->clear();
+    }
+
+    if (!handle.IsValid()) {
+        if (outMessage) {
+            *outMessage = "DirectStorage async request handle is invalid";
+        }
+        return false;
+    }
+
+    for (;;) {
+        DirectStorageAsyncRequestStatus status = manager.PollRequest(handle);
+        if (status.state == DirectStorageAsyncRequestState::Pending) {
+            std::this_thread::yield();
+            continue;
+        }
+
+        if (outMessage) {
+            *outMessage = status.message;
+        }
+        return status.state == DirectStorageAsyncRequestState::Ready;
+    }
+}
+
 }
 
 struct DirectStorageManager::Impl {
@@ -91,6 +118,29 @@ struct DirectStorageManager::Impl {
     bool hasQueue3 = false;
 #endif
 };
+
+struct DirectStorageAsyncRequestHandle::State {
+    DirectStorageQueueKind queueKind = DirectStorageQueueKind::Gpu;
+    std::atomic<DirectStorageAsyncRequestState> state = DirectStorageAsyncRequestState::Pending;
+    std::mutex mutex;
+    std::string debugLabel;
+    std::string pendingMessage;
+    std::string successMessage;
+    std::string failureMessage;
+    uint64_t fenceValue = 0;
+#if BASICRENDERER_HAS_DIRECTSTORAGE
+    Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
+    Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+#endif
+};
+
+DirectStorageAsyncRequestHandle::DirectStorageAsyncRequestHandle(std::shared_ptr<State> state)
+    : m_state(std::move(state)) {
+}
+
+bool DirectStorageAsyncRequestHandle::IsValid() const noexcept {
+    return static_cast<bool>(m_state);
+}
 
 DirectStorageManager& DirectStorageManager::GetInstance() {
     static DirectStorageManager instance;
@@ -530,6 +580,14 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
     const std::wstring& path,
     const std::vector<DirectStorageBufferRegionCopy>& regions,
     std::string* outMessage) {
+    const DirectStorageAsyncRequestHandle handle = EnqueueUploadBufferRegionsFromFile(path, regions, outMessage);
+    return WaitForAsyncRequestCompletion(*this, handle, outMessage);
+}
+
+DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegionsFromFile(
+    const std::wstring& path,
+    const std::vector<DirectStorageBufferRegionCopy>& regions,
+    std::string* outMessage) {
     if (outMessage) {
         outMessage->clear();
     }
@@ -538,35 +596,35 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
         if (outMessage) {
             *outMessage = "path is empty";
         }
-        return false;
+        return {};
     }
 
     if (regions.empty()) {
         if (outMessage) {
             *outMessage = "no buffer regions were provided";
         }
-        return false;
+        return {};
     }
 
     if (!CanServiceQueue(DirectStorageQueueKind::Gpu)) {
         if (outMessage) {
             *outMessage = m_statusMessage.empty() ? "DirectStorage GPU queue unavailable" : m_statusMessage;
         }
-        return false;
+        return {};
     }
 
 #if !BASICRENDERER_HAS_DIRECTSTORAGE
     if (outMessage) {
         *outMessage = "DirectStorage SDK is not available in this build";
     }
-    return false;
+    return {};
 #else
     auto primeResult = PrimeFileHandle(path);
     if (!primeResult.success) {
         if (outMessage) {
             *outMessage = primeResult.message;
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<IDStorageFile> file;
@@ -577,7 +635,7 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
             if (outMessage) {
                 *outMessage = "cached DirectStorage file handle missing";
             }
-            return false;
+            return {};
         }
         file = it->second;
     }
@@ -587,7 +645,7 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
         if (outMessage) {
             *outMessage = "native D3D12 device unavailable for DirectStorage GPU fence";
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<ID3D12Fence> fence;
@@ -596,25 +654,21 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
         if (outMessage) {
             *outMessage = "failed to create DirectStorage GPU completion fence";
         }
-        return false;
+        return {};
     }
 
-    ScopedWinHandle completionEvent(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-    if (completionEvent.get() == nullptr) {
+    Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
+    const HRESULT createStatusArrayHr = m_impl->factory->CreateStatusArray(1u, "DirectStorageGpuBufferUpload", IID_PPV_ARGS(statusArray.ReleaseAndGetAddressOf()));
+    if (FAILED(createStatusArrayHr)) {
         if (outMessage) {
-            *outMessage = "failed to create DirectStorage GPU completion event";
+            *outMessage = "failed to create DirectStorage upload status array";
         }
-        return false;
+        return {};
     }
 
     constexpr uint64_t kFenceValue = 1;
-    const HRESULT setEventHr = fence->SetEventOnCompletion(kFenceValue, completionEvent.get());
-    if (FAILED(setEventHr)) {
-        if (outMessage) {
-            *outMessage = "failed to arm DirectStorage GPU completion event";
-        }
-        return false;
-    }
+    std::vector<DSTORAGE_REQUEST> requests;
+    requests.reserve(regions.size());
 
     {
         std::scoped_lock queueLock(m_impl->gpuQueueMutex);
@@ -624,7 +678,7 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
                 if (outMessage) {
                     *outMessage = "invalid DirectStorage buffer region request";
                 }
-                return false;
+                return {};
             }
 
             rhi::D3D12ResourceInfo resourceInfo{};
@@ -632,7 +686,7 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
                 if (outMessage) {
                     *outMessage = "failed to query native D3D12 buffer resource";
                 }
-                return false;
+                return {};
             }
 
             auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
@@ -641,7 +695,7 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
                 if (outMessage) {
                     *outMessage = "DirectStorage buffer upload destination is not a buffer resource";
                 }
-                return false;
+                return {};
             }
 
             const uint64_t destinationEnd = region.destinationOffset + static_cast<uint64_t>(region.uncompressedSizeBytes);
@@ -649,7 +703,7 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
                 if (outMessage) {
                     *outMessage = "DirectStorage buffer upload destination range is out of bounds";
                 }
-                return false;
+                return {};
             }
 
             DSTORAGE_REQUEST request{};
@@ -665,42 +719,59 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
             request.UncompressedSize = region.uncompressedSizeBytes;
             request.CancellationTag = reinterpret_cast<uint64_t>(this);
 
-            m_impl->gpuQueue->EnqueueRequest(&request);
+            requests.push_back(request);
         }
 
+        if (m_impl->hasQueue3) {
+            Microsoft::WRL::ComPtr<IDStorageQueue3> queue3;
+            if (SUCCEEDED(m_impl->gpuQueue.As(&queue3)) && queue3 != nullptr) {
+                queue3->EnqueueRequests(requests.data(), static_cast<UINT>(requests.size()), nullptr, 0u, DSTORAGE_ENQUEUE_REQUEST_FLAG_NONE);
+            }
+            else {
+                for (const auto& request : requests) {
+                    m_impl->gpuQueue->EnqueueRequest(&request);
+                }
+            }
+        }
+        else {
+            for (const auto& request : requests) {
+                m_impl->gpuQueue->EnqueueRequest(&request);
+            }
+        }
+
+        m_impl->gpuQueue->EnqueueStatus(statusArray.Get(), 0u);
         m_impl->gpuQueue->EnqueueSignal(fence.Get(), kFenceValue);
         m_impl->gpuQueue->Submit();
-
-        const DWORD waitResult = WaitForSingleObject(completionEvent.get(), INFINITE);
-        if (waitResult != WAIT_OBJECT_0) {
-            if (outMessage) {
-                *outMessage = "DirectStorage GPU wait failed";
-            }
-            return false;
-        }
-
-        DSTORAGE_ERROR_RECORD errorRecord{};
-        m_impl->gpuQueue->RetrieveErrorRecord(&errorRecord);
-        if (FAILED(errorRecord.FirstFailure.HResult)) {
-            if (outMessage) {
-                *outMessage = "DirectStorage GPU buffer upload failed";
-            }
-            spdlog::warn(
-                "DirectStorageManager: GPU buffer upload failed for '{}' hr=0x{:08X}",
-                std::filesystem::path(path).string(),
-                static_cast<unsigned int>(errorRecord.FirstFailure.HResult));
-            return false;
-        }
     }
+
+    auto state = std::make_shared<DirectStorageAsyncRequestHandle::State>();
+    state->queueKind = DirectStorageQueueKind::Gpu;
+    state->pendingMessage = "DirectStorage GPU buffer upload enqueued";
+    state->successMessage = "uploaded buffer regions through DirectStorage GPU queue";
+    state->failureMessage = "DirectStorage GPU buffer upload failed";
+    state->debugLabel = std::filesystem::path(path).string();
+    state->fenceValue = kFenceValue;
+    state->statusArray = std::move(statusArray);
+    state->fence = std::move(fence);
 
     if (outMessage) {
-        *outMessage = "uploaded buffer regions through DirectStorage GPU queue";
+        *outMessage = state->pendingMessage;
     }
-    return true;
+
+    return DirectStorageAsyncRequestHandle(std::move(state));
 #endif
 }
 
 bool DirectStorageManager::UploadTextureRegionsFromFile(
+    const std::wstring& path,
+    rhi::Resource destinationResource,
+    const std::vector<DirectStorageTextureRegionCopy>& regions,
+    std::string* outMessage) {
+    const DirectStorageAsyncRequestHandle handle = EnqueueUploadTextureRegionsFromFile(path, destinationResource, regions, outMessage);
+    return WaitForAsyncRequestCompletion(*this, handle, outMessage);
+}
+
+DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegionsFromFile(
     const std::wstring& path,
     rhi::Resource destinationResource,
     const std::vector<DirectStorageTextureRegionCopy>& regions,
@@ -713,42 +784,42 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
         if (outMessage) {
             *outMessage = "path is empty";
         }
-        return false;
+        return {};
     }
 
     if (!destinationResource.IsValid()) {
         if (outMessage) {
             *outMessage = "destination resource is invalid";
         }
-        return false;
+        return {};
     }
 
     if (regions.empty()) {
         if (outMessage) {
             *outMessage = "no texture regions were provided";
         }
-        return false;
+        return {};
     }
 
     if (!CanServiceQueue(DirectStorageQueueKind::Gpu)) {
         if (outMessage) {
             *outMessage = m_statusMessage.empty() ? "DirectStorage GPU queue unavailable" : m_statusMessage;
         }
-        return false;
+        return {};
     }
 
 #if !BASICRENDERER_HAS_DIRECTSTORAGE
     if (outMessage) {
         *outMessage = "DirectStorage SDK is not available in this build";
     }
-    return false;
+    return {};
 #else
     auto primeResult = PrimeFileHandle(path);
     if (!primeResult.success) {
         if (outMessage) {
             *outMessage = primeResult.message;
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<IDStorageFile> file;
@@ -759,7 +830,7 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
             if (outMessage) {
                 *outMessage = "cached DirectStorage file handle missing";
             }
-            return false;
+            return {};
         }
         file = it->second;
     }
@@ -769,7 +840,7 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
         if (outMessage) {
             *outMessage = "failed to query native D3D12 texture resource";
         }
-        return false;
+        return {};
     }
 
     auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
@@ -779,7 +850,7 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
         if (outMessage) {
             *outMessage = "destination texture has zero subresources";
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<ID3D12Device> nativeDevice;
@@ -788,7 +859,7 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
         if (outMessage) {
             *outMessage = "failed to get native D3D12 device from texture resource";
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<ID3D12Fence> fence;
@@ -797,95 +868,107 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
         if (outMessage) {
             *outMessage = "failed to create DirectStorage GPU completion fence";
         }
-        return false;
+        return {};
     }
 
-    ScopedWinHandle completionEvent(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-    if (completionEvent.get() == nullptr) {
+    Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
+    const HRESULT createStatusArrayHr = m_impl->factory->CreateStatusArray(1u, "DirectStorageGpuTextureRegionUpload", IID_PPV_ARGS(statusArray.ReleaseAndGetAddressOf()));
+    if (FAILED(createStatusArrayHr)) {
         if (outMessage) {
-            *outMessage = "failed to create DirectStorage GPU completion event";
+            *outMessage = "failed to create DirectStorage upload status array";
         }
-        return false;
+        return {};
     }
 
     constexpr uint64_t kFenceValue = 1;
-    const HRESULT setEventHr = fence->SetEventOnCompletion(kFenceValue, completionEvent.get());
-    if (FAILED(setEventHr)) {
-        if (outMessage) {
-            *outMessage = "failed to arm DirectStorage GPU completion event";
+    std::vector<DSTORAGE_REQUEST> requests;
+    requests.reserve(regions.size());
+
+    for (const auto& region : regions) {
+        if (region.sourceSizeBytes == 0 || region.uncompressedSizeBytes == 0 || region.width == 0 || region.height == 0 || region.depth == 0) {
+            if (outMessage) {
+                *outMessage = "invalid texture region request";
+            }
+            return {};
         }
-        return false;
+
+        DSTORAGE_REQUEST request{};
+        request.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+        request.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION;
+        request.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+        request.Source.File.Source = file.Get();
+        request.Source.File.Offset = region.sourceOffset;
+        request.Source.File.Size = region.sourceSizeBytes;
+        request.Destination.Texture.Resource = nativeResource;
+        request.Destination.Texture.SubresourceIndex = region.subresourceIndex;
+
+        D3D12_BOX destinationBox{};
+        destinationBox.left = 0;
+        destinationBox.top = 0;
+        destinationBox.front = 0;
+        destinationBox.right = region.width;
+        destinationBox.bottom = region.height;
+        destinationBox.back = region.depth;
+
+        request.Destination.Texture.Region = destinationBox;
+        request.UncompressedSize = region.uncompressedSizeBytes;
+        request.CancellationTag = reinterpret_cast<uint64_t>(this);
+        requests.push_back(request);
     }
 
     {
         std::scoped_lock queueLock(m_impl->gpuQueueMutex);
-
-        for (const auto& region : regions) {
-            if (region.sourceSizeBytes == 0 || region.uncompressedSizeBytes == 0 || region.width == 0 || region.height == 0 || region.depth == 0) {
-                if (outMessage) {
-                    *outMessage = "invalid texture region request";
-                }
-                return false;
+        if (m_impl->hasQueue3) {
+            Microsoft::WRL::ComPtr<IDStorageQueue3> queue3;
+            if (SUCCEEDED(m_impl->gpuQueue.As(&queue3)) && queue3 != nullptr) {
+                queue3->EnqueueRequests(requests.data(), static_cast<UINT>(requests.size()), nullptr, 0u, DSTORAGE_ENQUEUE_REQUEST_FLAG_NONE);
             }
-
-            DSTORAGE_REQUEST request{};
-            request.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
-            request.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION;
-            request.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
-            request.Source.File.Source = file.Get();
-            request.Source.File.Offset = region.sourceOffset;
-            request.Source.File.Size = region.sourceSizeBytes;
-            request.Destination.Texture.Resource = nativeResource;
-            request.Destination.Texture.SubresourceIndex = region.subresourceIndex;
-
-            D3D12_BOX destinationBox{};
-            destinationBox.left = 0;
-            destinationBox.top = 0;
-            destinationBox.front = 0;
-            destinationBox.right = region.width;
-            destinationBox.bottom = region.height;
-            destinationBox.back = region.depth;
-
-            request.Destination.Texture.Region = destinationBox;
-            request.UncompressedSize = region.uncompressedSizeBytes;
-            request.CancellationTag = reinterpret_cast<uint64_t>(this);
-
-            m_impl->gpuQueue->EnqueueRequest(&request);
+            else {
+                for (const auto& request : requests) {
+                    m_impl->gpuQueue->EnqueueRequest(&request);
+                }
+            }
+        }
+        else {
+            for (const auto& request : requests) {
+                m_impl->gpuQueue->EnqueueRequest(&request);
+            }
         }
 
+        m_impl->gpuQueue->EnqueueStatus(statusArray.Get(), 0u);
         m_impl->gpuQueue->EnqueueSignal(fence.Get(), kFenceValue);
         m_impl->gpuQueue->Submit();
-
-        const DWORD waitResult = WaitForSingleObject(completionEvent.get(), INFINITE);
-        if (waitResult != WAIT_OBJECT_0) {
-            if (outMessage) {
-                *outMessage = "DirectStorage GPU wait failed";
-            }
-            return false;
-        }
-
-        DSTORAGE_ERROR_RECORD errorRecord{};
-        m_impl->gpuQueue->RetrieveErrorRecord(&errorRecord);
-        if (FAILED(errorRecord.FirstFailure.HResult)) {
-            if (outMessage) {
-                *outMessage = "DirectStorage GPU upload failed";
-            }
-            spdlog::warn(
-                "DirectStorageManager: GPU upload failed for '{}' hr=0x{:08X}",
-                std::filesystem::path(path).string(),
-                static_cast<unsigned int>(errorRecord.FirstFailure.HResult));
-            return false;
-        }
     }
+
+    auto state = std::make_shared<DirectStorageAsyncRequestHandle::State>();
+    state->queueKind = DirectStorageQueueKind::Gpu;
+    state->pendingMessage = "DirectStorage GPU texture upload enqueued";
+    state->successMessage = "uploaded texture subresources through DirectStorage GPU queue";
+    state->failureMessage = "DirectStorage GPU upload failed";
+    state->debugLabel = std::filesystem::path(path).string();
+    state->fenceValue = kFenceValue;
+    state->statusArray = std::move(statusArray);
+    state->fence = std::move(fence);
 
     if (outMessage) {
-        *outMessage = "uploaded texture subresources through DirectStorage GPU queue";
+        *outMessage = state->pendingMessage;
     }
-    return true;
+
+    return DirectStorageAsyncRequestHandle(std::move(state));
 #endif
 }
 
 bool DirectStorageManager::UploadTextureSubresourcesFromFile(
+    const std::wstring& path,
+    rhi::Resource destinationResource,
+    uint64_t sourceOffset,
+    uint32_t sourceSizeBytes,
+    std::string* outMessage) {
+    const DirectStorageAsyncRequestHandle handle = EnqueueUploadTextureSubresourcesFromFile(path, destinationResource, sourceOffset, sourceSizeBytes, outMessage);
+    return WaitForAsyncRequestCompletion(*this, handle, outMessage);
+}
+
+DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubresourcesFromFile(
     const std::wstring& path,
     rhi::Resource destinationResource,
     uint64_t sourceOffset,
@@ -899,42 +982,42 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
         if (outMessage) {
             *outMessage = "path is empty";
         }
-        return false;
+        return {};
     }
 
     if (!destinationResource.IsValid()) {
         if (outMessage) {
             *outMessage = "destination resource is invalid";
         }
-        return false;
+        return {};
     }
 
     if (sourceSizeBytes == 0) {
         if (outMessage) {
             *outMessage = "source size is zero";
         }
-        return false;
+        return {};
     }
 
     if (!CanServiceQueue(DirectStorageQueueKind::Gpu)) {
         if (outMessage) {
             *outMessage = m_statusMessage.empty() ? "DirectStorage GPU queue unavailable" : m_statusMessage;
         }
-        return false;
+        return {};
     }
 
 #if !BASICRENDERER_HAS_DIRECTSTORAGE
     if (outMessage) {
         *outMessage = "DirectStorage SDK is not available in this build";
     }
-    return false;
+    return {};
 #else
     auto primeResult = PrimeFileHandle(path);
     if (!primeResult.success) {
         if (outMessage) {
             *outMessage = primeResult.message;
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<IDStorageFile> file;
@@ -945,7 +1028,7 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
             if (outMessage) {
                 *outMessage = "cached DirectStorage file handle missing";
             }
-            return false;
+            return {};
         }
         file = it->second;
     }
@@ -955,7 +1038,7 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
         if (outMessage) {
             *outMessage = "failed to query native D3D12 texture resource";
         }
-        return false;
+        return {};
     }
 
     auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
@@ -965,7 +1048,7 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
         if (outMessage) {
             *outMessage = "destination texture has zero subresources";
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<ID3D12Device> nativeDevice;
@@ -974,7 +1057,7 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
         if (outMessage) {
             *outMessage = "failed to get native D3D12 device from texture resource";
         }
-        return false;
+        return {};
     }
 
     Microsoft::WRL::ComPtr<ID3D12Fence> fence;
@@ -983,72 +1066,126 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
         if (outMessage) {
             *outMessage = "failed to create DirectStorage GPU completion fence";
         }
-        return false;
+        return {};
     }
 
-    ScopedWinHandle completionEvent(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-    if (completionEvent.get() == nullptr) {
+    Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
+    const HRESULT createStatusArrayHr = m_impl->factory->CreateStatusArray(1u, "DirectStorageGpuTextureRangeUpload", IID_PPV_ARGS(statusArray.ReleaseAndGetAddressOf()));
+    if (FAILED(createStatusArrayHr)) {
         if (outMessage) {
-            *outMessage = "failed to create DirectStorage GPU completion event";
+            *outMessage = "failed to create DirectStorage upload status array";
         }
-        return false;
+        return {};
     }
+
+    DSTORAGE_REQUEST request{};
+    request.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    request.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES_RANGE;
+    request.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+    request.Source.File.Source = file.Get();
+    request.Source.File.Offset = sourceOffset;
+    request.Source.File.Size = sourceSizeBytes;
+    request.Destination.MultipleSubresourcesRange.Resource = nativeResource;
+    request.Destination.MultipleSubresourcesRange.FirstSubresource = 0;
+    request.Destination.MultipleSubresourcesRange.NumSubresources = subresourceCount;
+    request.UncompressedSize = sourceSizeBytes;
+    request.CancellationTag = reinterpret_cast<uint64_t>(this);
 
     constexpr uint64_t kFenceValue = 1;
-    const HRESULT setEventHr = fence->SetEventOnCompletion(kFenceValue, completionEvent.get());
-    if (FAILED(setEventHr)) {
-        if (outMessage) {
-            *outMessage = "failed to arm DirectStorage GPU completion event";
-        }
-        return false;
-    }
-
     {
         std::scoped_lock queueLock(m_impl->gpuQueueMutex);
+        if (m_impl->hasQueue3) {
+            Microsoft::WRL::ComPtr<IDStorageQueue3> queue3;
+            if (SUCCEEDED(m_impl->gpuQueue.As(&queue3)) && queue3 != nullptr) {
+                queue3->EnqueueRequests(&request, 1u, nullptr, 0u, DSTORAGE_ENQUEUE_REQUEST_FLAG_NONE);
+            }
+            else {
+                m_impl->gpuQueue->EnqueueRequest(&request);
+            }
+        }
+        else {
+            m_impl->gpuQueue->EnqueueRequest(&request);
+        }
 
-        DSTORAGE_REQUEST request{};
-        request.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
-        request.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES_RANGE;
-        request.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
-        request.Source.File.Source = file.Get();
-        request.Source.File.Offset = sourceOffset;
-        request.Source.File.Size = sourceSizeBytes;
-        request.Destination.MultipleSubresourcesRange.Resource = nativeResource;
-        request.Destination.MultipleSubresourcesRange.FirstSubresource = 0;
-        request.Destination.MultipleSubresourcesRange.NumSubresources = subresourceCount;
-        request.UncompressedSize = sourceSizeBytes;
-        request.CancellationTag = reinterpret_cast<uint64_t>(this);
-
-        m_impl->gpuQueue->EnqueueRequest(&request);
+        m_impl->gpuQueue->EnqueueStatus(statusArray.Get(), 0u);
         m_impl->gpuQueue->EnqueueSignal(fence.Get(), kFenceValue);
         m_impl->gpuQueue->Submit();
-
-        const DWORD waitResult = WaitForSingleObject(completionEvent.get(), INFINITE);
-        if (waitResult != WAIT_OBJECT_0) {
-            if (outMessage) {
-                *outMessage = "DirectStorage GPU wait failed";
-            }
-            return false;
-        }
-
-        DSTORAGE_ERROR_RECORD errorRecord{};
-        m_impl->gpuQueue->RetrieveErrorRecord(&errorRecord);
-        if (FAILED(errorRecord.FirstFailure.HResult)) {
-            if (outMessage) {
-                *outMessage = "DirectStorage GPU upload failed";
-            }
-            spdlog::warn(
-                "DirectStorageManager: conditioned GPU upload failed for '{}' hr=0x{:08X}",
-                std::filesystem::path(path).string(),
-                static_cast<unsigned int>(errorRecord.FirstFailure.HResult));
-            return false;
-        }
     }
+
+    auto state = std::make_shared<DirectStorageAsyncRequestHandle::State>();
+    state->queueKind = DirectStorageQueueKind::Gpu;
+    state->pendingMessage = "DirectStorage GPU texture range upload enqueued";
+    state->successMessage = "uploaded conditioned texture cache through DirectStorage GPU queue";
+    state->failureMessage = "DirectStorage GPU upload failed";
+    state->debugLabel = std::filesystem::path(path).string();
+    state->fenceValue = kFenceValue;
+    state->statusArray = std::move(statusArray);
+    state->fence = std::move(fence);
 
     if (outMessage) {
-        *outMessage = "uploaded conditioned texture cache through DirectStorage GPU queue";
+        *outMessage = state->pendingMessage;
     }
-    return true;
+
+    return DirectStorageAsyncRequestHandle(std::move(state));
+#endif
+}
+
+DirectStorageAsyncRequestStatus DirectStorageManager::PollRequest(const DirectStorageAsyncRequestHandle& handle) const {
+    DirectStorageAsyncRequestStatus status{};
+    if (!handle.m_state) {
+        status.message = "DirectStorage async request handle is invalid";
+        return status;
+    }
+
+    const auto& state = handle.m_state;
+    status.fenceValue = state->fenceValue;
+#if BASICRENDERER_HAS_DIRECTSTORAGE
+    status.fence = state->fence.Get();
+#endif
+
+    const DirectStorageAsyncRequestState currentState = state->state.load(std::memory_order_acquire);
+    if (currentState == DirectStorageAsyncRequestState::Ready || currentState == DirectStorageAsyncRequestState::Failed) {
+        status.state = currentState;
+        std::scoped_lock lock(state->mutex);
+        status.message = currentState == DirectStorageAsyncRequestState::Ready ? state->successMessage : state->failureMessage;
+        return status;
+    }
+
+#if !BASICRENDERER_HAS_DIRECTSTORAGE
+    status.state = DirectStorageAsyncRequestState::Failed;
+    status.message = "DirectStorage SDK is not available in this build";
+    return status;
+#else
+    const HRESULT requestHr = state->statusArray ? state->statusArray->GetHResult(0u) : E_FAIL;
+    if (requestHr == E_PENDING) {
+        status.state = DirectStorageAsyncRequestState::Pending;
+        std::scoped_lock lock(state->mutex);
+        status.message = state->pendingMessage;
+        return status;
+    }
+
+    if (SUCCEEDED(requestHr)) {
+        state->state.store(DirectStorageAsyncRequestState::Ready, std::memory_order_release);
+        status.state = DirectStorageAsyncRequestState::Ready;
+        std::scoped_lock lock(state->mutex);
+        status.message = state->successMessage;
+        return status;
+    }
+
+    state->state.store(DirectStorageAsyncRequestState::Failed, std::memory_order_release);
+    {
+        std::scoped_lock lock(state->mutex);
+        if (state->failureMessage.empty()) {
+            state->failureMessage = "DirectStorage request failed";
+        }
+        status.message = state->failureMessage;
+    }
+    status.state = DirectStorageAsyncRequestState::Failed;
+    spdlog::warn(
+        "DirectStorageManager: async request failed for '{}' hr=0x{:08X}",
+        state->debugLabel,
+        static_cast<unsigned int>(requestHr));
+    return status;
 #endif
 }
 

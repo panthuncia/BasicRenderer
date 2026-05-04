@@ -12,6 +12,7 @@
 #include "ShaderBuffers.h"
 #include "Mesh/Mesh.h"
 #include "Import/CLodCache.h"
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/PagePool.h"
 #include "Interfaces/IResourceProvider.h"
@@ -257,6 +258,20 @@ private:
 		uint64_t generation = 0; // generation at time of request
 	};
 
+	struct CLodPendingDirectStorageUpload {
+		uint32_t groupGlobalIndex = 0;
+		uint64_t generation = 0;
+		std::shared_ptr<CLodSharedStreamingState> sharedState;
+		uint32_t groupLocalIndex = 0;
+		ClusterLODGroupChunk chunk{};
+		std::vector<PagePool::PageAllocation> pageAllocations;
+		std::vector<GroupPageMapEntry> pageMapEntries;
+		uint32_t fetchedPageCount = 0;
+		uint64_t totalBlobBytes = 0;
+		std::string uploadPathLabel = "DirectStorageGpuDirect";
+		DirectStorageAsyncRequestHandle uploadHandle;
+	};
+
 	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
 	mutable std::mutex m_clodDiskStreamingMutex;
 	std::vector<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
@@ -271,6 +286,7 @@ private:
 	// Completed results waiting to be applied on the main thread.
 	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
+	std::vector<CLodPendingDirectStorageUpload> m_clodPendingDirectStorageUploads;
 
 	// Guards CLodSharedStreamingState interiors (groupResidentFlags,
 	// baselineGroupChunks, residentGroupAllocations),
@@ -286,9 +302,11 @@ private:
 
 	enum class DiskStreamingApplyResult {
 		Applied,
+		DeferredPendingUpload,
 		FailedPermanent,
 	};
 	DiskStreamingApplyResult ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result, const std::vector<uint32_t>& preAllocatedPages);
+	void FinalizePendingCLodDirectStorageUploads(uint64_t currentGeneration, std::vector<CLodDiskStreamingCompletion>& outCompletions, std::vector<uint32_t>& outFinishedGroups);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);
 	bool IsCLodGroupResident(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const;
 	void DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex);

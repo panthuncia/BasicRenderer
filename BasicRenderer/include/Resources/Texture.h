@@ -10,6 +10,7 @@
 #include "Import/Filetypes.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Factories/TextureFactory.h"
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Resources/Sampler.h"
 
 struct RenderContext;
@@ -146,6 +147,40 @@ struct TextureStreamingState {
     uint64_t bindingRevision = 0;
 };
 
+enum class TextureReloadJobState : uint8_t {
+    Queued = 0,
+    BuildingSourceData,
+    Ready,
+    Failed,
+};
+
+struct TextureReloadJobHandle {
+    std::atomic<TextureReloadJobState> state = TextureReloadJobState::Queued;
+    std::mutex mutex;
+    uint32_t targetTopMip = 0;
+    uint32_t sourceTotalMipCount = 1;
+    uint32_t sourceFullWidth = 0;
+    uint32_t sourceFullHeight = 0;
+    std::shared_ptr<TextureSourceData> sourceData;
+    std::string error;
+};
+
+enum class TextureDirectStorageReloadJobState : uint8_t {
+    Queued = 0,
+    Uploading,
+    Ready,
+    Failed,
+};
+
+struct TextureDirectStorageReloadJobHandle {
+    std::atomic<TextureDirectStorageReloadJobState> state = TextureDirectStorageReloadJobState::Queued;
+    std::mutex mutex;
+    uint32_t targetTopMip = 0;
+    std::shared_ptr<PixelBuffer> uploadedImage;
+    DirectStorageAsyncRequestHandle requestHandle;
+    std::string error;
+};
+
 // Helper for std::visit with multiple lambdas
 template<class... Ts>
 struct Overloaded : Ts... { using Ts::operator()...; };
@@ -280,6 +315,8 @@ private:
     std::shared_ptr<Sampler> m_sampler;
     TextureFileMeta m_meta;
 	std::shared_ptr<TextureProcessingJobHandle> m_processingHandle;
+    std::shared_ptr<TextureReloadJobHandle> m_reloadHandle;
+    std::shared_ptr<TextureDirectStorageReloadJobHandle> m_directStorageReloadHandle;
     TextureStreamingState m_streamingState;
 	uint32_t m_sourceTotalMipCount = 0;
     uint32_t m_sourceFullWidth = 0;
@@ -293,6 +330,7 @@ private:
 
     void RefreshStreamingStateFromDescription();
 	void UpdateSourceShapeFromDescription(const TextureDescription& desc, uint32_t totalMipCountHint = 0u);
+    void ApplySourceShapeHint(uint32_t fullWidth, uint32_t fullHeight, uint32_t totalMipCount);
 	void ApplyStreamingBootstrapTopMip();
     bool HasStreamingSourceData() const;
     uint32_t GetDesiredResidentTopMip() const;

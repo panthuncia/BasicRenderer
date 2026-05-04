@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+struct ID3D12Fence;
+
 namespace br {
 
 enum class DirectStorageQueueKind : uint8_t {
@@ -48,6 +50,36 @@ struct DirectStorageBufferRegionCopy {
     uint32_t uncompressedSizeBytes = 0;
     rhi::Resource destinationResource{};
     uint64_t destinationOffset = 0;
+};
+
+enum class DirectStorageAsyncRequestState : uint8_t {
+    Invalid = 0,
+    Pending,
+    Ready,
+    Failed,
+};
+
+struct DirectStorageAsyncRequestStatus {
+    DirectStorageAsyncRequestState state = DirectStorageAsyncRequestState::Invalid;
+    ID3D12Fence* fence = nullptr;
+    uint64_t fenceValue = 0;
+    std::string message;
+};
+
+class DirectStorageAsyncRequestHandle {
+public:
+    DirectStorageAsyncRequestHandle() = default;
+
+    bool IsValid() const noexcept;
+
+private:
+    struct State;
+
+    explicit DirectStorageAsyncRequestHandle(std::shared_ptr<State> state);
+
+    std::shared_ptr<State> m_state;
+
+    friend class DirectStorageManager;
 };
 
 
@@ -95,9 +127,19 @@ public:
         std::vector<std::byte>& outData,
         std::string* outMessage = nullptr);
     bool ReadFileToMemory(const std::wstring& path, std::vector<std::byte>& outData, std::string* outMessage = nullptr);
+    DirectStorageAsyncRequestHandle EnqueueUploadBufferRegionsFromFile(
+        const std::wstring& path,
+        const std::vector<DirectStorageBufferRegionCopy>& regions,
+        std::string* outMessage = nullptr);
     bool UploadBufferRegionsFromFile(
         const std::wstring& path,
         const std::vector<DirectStorageBufferRegionCopy>& regions,
+        std::string* outMessage = nullptr);
+    DirectStorageAsyncRequestHandle EnqueueUploadTextureSubresourcesFromFile(
+        const std::wstring& path,
+        rhi::Resource destinationResource,
+        uint64_t sourceOffset,
+        uint32_t sourceSizeBytes,
         std::string* outMessage = nullptr);
     bool UploadTextureSubresourcesFromFile(
         const std::wstring& path,
@@ -105,11 +147,17 @@ public:
         uint64_t sourceOffset,
         uint32_t sourceSizeBytes,
         std::string* outMessage = nullptr);
+    DirectStorageAsyncRequestHandle EnqueueUploadTextureRegionsFromFile(
+        const std::wstring& path,
+        rhi::Resource destinationResource,
+        const std::vector<DirectStorageTextureRegionCopy>& regions,
+        std::string* outMessage = nullptr);
     bool UploadTextureRegionsFromFile(
         const std::wstring& path,
         rhi::Resource destinationResource,
         const std::vector<DirectStorageTextureRegionCopy>& regions,
         std::string* outMessage = nullptr);
+    DirectStorageAsyncRequestStatus PollRequest(const DirectStorageAsyncRequestHandle& handle) const;
 
 private:
     DirectStorageManager() = default;
@@ -130,3 +178,6 @@ private:
 using DirectStorageManager = br::DirectStorageManager;
 using DirectStorageQueueKind = br::DirectStorageQueueKind;
 using DirectStorageBufferRegionCopy = br::DirectStorageBufferRegionCopy;
+using DirectStorageAsyncRequestHandle = br::DirectStorageAsyncRequestHandle;
+using DirectStorageAsyncRequestState = br::DirectStorageAsyncRequestState;
+using DirectStorageAsyncRequestStatus = br::DirectStorageAsyncRequestStatus;
