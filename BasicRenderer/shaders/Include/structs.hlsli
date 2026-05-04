@@ -474,6 +474,9 @@ struct TextureStreamingGPUInfo {
     uint residentTopMip;
     uint residentMipCount;
 
+    uint fullWidth;
+    uint fullHeight;
+
     uint requestedTopMip;
     uint pendingTopMip;
     uint bindingRevisionLo;

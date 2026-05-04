@@ -219,17 +219,16 @@ public:
     bool IsMipStreamingEnabled() const { return m_streamingState.enabled; }
     uint64_t GetBindingRevision() const { return m_streamingState.bindingRevision; }
     uint64_t GetStreamingStateRevision() const { return m_streamingState.stateRevision; }
+    uint32_t GetFullMip0Width() const { return m_sourceFullWidth != 0u ? m_sourceFullWidth : GetWidth(); }
+    uint32_t GetFullMip0Height() const { return m_sourceFullHeight != 0u ? m_sourceFullHeight : GetHeight(); }
+    void ApplyStreamingSystemRequest(uint32_t topMip, uint64_t frameIndex = 0);
     void EnableMipStreaming(bool enabled);
-    void SetRequestedTopMip(uint32_t topMip, uint64_t frameIndex = 0);
-    void SetPendingTopMip(uint32_t topMip);
-    void SetResidentMipWindow(uint32_t residentTopMip, uint32_t residentMipCount);
-    void NoteTextureSeen(uint64_t frameIndex);
 
     void AdoptUploadedImage(std::shared_ptr<PixelBuffer> image);
     void RecordLoadPath(TextureLoadPathTelemetry path, std::string detail = {});
     void RecordUploadPath(TextureUploadPathTelemetry path, std::string detail = {});
 
-    std::shared_ptr<TextureSourceData> BuildSourceData() const;
+    std::shared_ptr<TextureSourceData> BuildSourceData();
 
     void SetName(const std::string& name)
     {
@@ -273,6 +272,7 @@ private:
         if (m_streamingState.eligible) {
             m_streamingState.enabled = true;
 			ApplyStreamingBootstrapTopMip();
+            InvalidateResidentImageForStreamingRequest();
         }
     }
 	TextureDescription m_desc;
@@ -282,6 +282,8 @@ private:
 	std::shared_ptr<TextureProcessingJobHandle> m_processingHandle;
     TextureStreamingState m_streamingState;
 	uint32_t m_sourceTotalMipCount = 0;
+    uint32_t m_sourceFullWidth = 0;
+    uint32_t m_sourceFullHeight = 0;
     std::string m_initialDataString;
     std::string m_name;
 	bool m_hasUploadedPlaceholder = false;
@@ -290,7 +292,15 @@ private:
     TextureUploadPathTelemetry m_lastReportedUploadPath = TextureUploadPathTelemetry::Unknown;
 
     void RefreshStreamingStateFromDescription();
+	void UpdateSourceShapeFromDescription(const TextureDescription& desc, uint32_t totalMipCountHint = 0u);
 	void ApplyStreamingBootstrapTopMip();
+    bool HasStreamingSourceData() const;
+    uint32_t GetDesiredResidentTopMip() const;
+    void InvalidateResidentImageForStreamingRequest();
+    void SetRequestedTopMip(uint32_t topMip, uint64_t frameIndex = 0);
+    void SetPendingTopMip(uint32_t topMip);
+    void SetResidentMipWindow(uint32_t residentTopMip, uint32_t residentMipCount);
+    void NoteTextureSeen(uint64_t frameIndex);
     void BumpStreamingStateRevision();
     void BumpBindingRevision();
 };

@@ -36,6 +36,8 @@ namespace {
 		info.totalMipCount = state.residency.totalMipCount;
 		info.residentTopMip = state.residency.residentTopMip;
 		info.residentMipCount = state.residency.residentMipCount;
+		info.fullWidth = texture.GetFullMip0Width();
+		info.fullHeight = texture.GetFullMip0Height();
 		info.requestedTopMip = state.requestedTopMip;
 		info.pendingTopMip = state.pendingTopMip;
 		info.bindingRevisionLo = static_cast<uint32_t>(state.bindingRevision & 0xffffffffull);
@@ -327,7 +329,7 @@ void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
 			continue;
 		}
 
-		texture->SetRequestedTopMip(requestedTopMip, frameIndex);
+		texture->ApplyStreamingSystemRequest(requestedTopMip, frameIndex);
 	}
 
 	for (uint32_t streamingTextureID : expiredTextureIDs) {
@@ -356,10 +358,7 @@ void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
 			state.residency.totalMipCount - 1u,
 			(std::max)(state.requestedTopMip, state.residency.residentTopMip + 1u));
 		if (coarsenedTopMip != state.requestedTopMip) {
-			texture->SetRequestedTopMip(coarsenedTopMip);
-		}
-		if (coarsenedTopMip != state.residency.residentTopMip) {
-			texture->SetPendingTopMip(coarsenedTopMip);
+			texture->ApplyStreamingSystemRequest(coarsenedTopMip, frameIndex);
 		}
 
 		++it;

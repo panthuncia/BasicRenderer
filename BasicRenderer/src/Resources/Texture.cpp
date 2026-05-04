@@ -11,6 +11,7 @@
 
 #include <rhi_helpers.h>
 
+#include "Managers/Singletons/DirectStorageManager.h"
 #include "Managers/Singletons/TextureProcessingManager.h"
 
 namespace {
@@ -270,6 +271,122 @@ std::shared_ptr<TextureSourceData> BuildSourceDataFromDDSFilePath(const std::str
 		result->desc.imageDimensions[0].height);
 	return result;
 }
+
+std::shared_ptr<PixelBuffer> TryUploadDDSFilePathDirectToVRAM(
+	const std::string& path,
+	bool preferSRGB,
+	uint32_t topMip,
+	bool allowRTV,
+	bool allowUAV)
+{
+	if (path.empty() || !DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu)) {
+		return {};
+	}
+
+	const std::filesystem::path filePath(path);
+	std::wstring extension = filePath.extension().wstring();
+	std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+	if (extension != L".dds") {
+		return {};
+	}
+
+	DirectX::ScratchImage image;
+	DirectX::TexMetadata metadata{};
+	const HRESULT loadHr = DirectX::LoadFromDDSFile(filePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+	if (FAILED(loadHr) || metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.depth != 1) {
+		return {};
+	}
+
+	size_t headerSize = 0;
+	const HRESULT headerHr = DirectX::EncodeDDSHeader(
+		metadata,
+		DirectX::DDS_FLAGS_NONE,
+		nullptr,
+		(std::numeric_limits<size_t>::max)(),
+		headerSize);
+	if (FAILED(headerHr) || headerSize == 0) {
+		return {};
+	}
+
+	TextureDescription desc{};
+	desc.format = rhi::helpers::ToRHI(preferSRGB ? DirectX::MakeSRGB(metadata.format) : DirectX::MakeLinear(metadata.format));
+	desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(desc.format));
+	if (rhi::helpers::IsBlockCompressed(desc.format)) {
+		return {};
+	}
+
+	desc.isCubemap = metadata.IsCubemap();
+	desc.isArray = metadata.arraySize > 1 && !desc.isCubemap;
+	desc.arraySize = desc.isCubemap
+		? static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)))
+		: static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+	desc.hasRTV = allowRTV;
+	desc.hasUAV = allowUAV;
+	desc.generateMipMaps = false;
+
+	const uint32_t fullMipCount = static_cast<uint32_t>((std::max)(size_t(1), metadata.mipLevels));
+	const uint32_t clampedTopMip = (std::min)(topMip, fullMipCount - 1u);
+	const uint32_t arraySlices = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+	const DirectX::Image* images = image.GetImages();
+	const size_t imageCount = image.GetImageCount();
+	if (images == nullptr || imageCount != static_cast<size_t>(arraySlices) * fullMipCount) {
+		return {};
+	}
+
+	const uint32_t residentMipCount = fullMipCount - clampedTopMip;
+	desc.imageDimensions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
+	std::vector<br::DirectStorageTextureRegionCopy> regions;
+	regions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
+
+	uint64_t currentOffset = static_cast<uint64_t>(headerSize);
+	uint32_t destinationSubresourceIndex = 0u;
+	for (size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex) {
+		const DirectX::Image& srcImage = images[imageIndex];
+		if (srcImage.width > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+			srcImage.height > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+			srcImage.slicePitch == 0 ||
+			srcImage.slicePitch > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
+			return {};
+		}
+
+		const uint32_t mipIndex = static_cast<uint32_t>(imageIndex % fullMipCount);
+		if (mipIndex >= clampedTopMip) {
+			ImageDimensions dims{};
+			dims.width = static_cast<uint32_t>(srcImage.width);
+			dims.height = static_cast<uint32_t>(srcImage.height);
+			dims.rowPitch = srcImage.rowPitch;
+			dims.slicePitch = srcImage.slicePitch;
+			desc.imageDimensions.push_back(dims);
+
+			br::DirectStorageTextureRegionCopy region{};
+			region.sourceOffset = currentOffset;
+			region.sourceSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+			region.uncompressedSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+			region.subresourceIndex = destinationSubresourceIndex++;
+			region.width = dims.width;
+			region.height = dims.height;
+			region.depth = 1;
+			regions.push_back(region);
+		}
+
+		currentOffset += srcImage.slicePitch;
+	}
+
+	if (regions.empty()) {
+		return {};
+	}
+
+	auto pixelBuffer = PixelBuffer::CreateShared(desc);
+	std::string directStorageMessage;
+	if (!DirectStorageManager::GetInstance().UploadTextureRegionsFromFile(filePath.wstring(), pixelBuffer->GetAPIResource(), regions, &directStorageMessage)) {
+		if (!directStorageMessage.empty()) {
+			spdlog::debug("TextureAsset: DirectStorage fallback for '{}' because {}", path, directStorageMessage);
+		}
+		return {};
+	}
+
+	return pixelBuffer;
+}
 }
 
 uint32_t TextureAsset::NextStreamingTextureID() {
@@ -277,12 +394,29 @@ uint32_t TextureAsset::NextStreamingTextureID() {
 	return nextID.fetch_add(1u, std::memory_order_relaxed);
 }
 
+void TextureAsset::UpdateSourceShapeFromDescription(const TextureDescription& desc, uint32_t totalMipCountHint) {
+	if (desc.imageDimensions.empty()) {
+		return;
+	}
+
+	const uint32_t descMipCount = CalcMipCountFromDescription(desc);
+	const uint32_t totalMipCount = (std::max)(descMipCount, totalMipCountHint);
+	if (m_sourceFullWidth == 0u ||
+		m_sourceFullHeight == 0u ||
+		totalMipCount >= m_sourceTotalMipCount) {
+		m_sourceFullWidth = desc.imageDimensions[0].width;
+		m_sourceFullHeight = desc.imageDimensions[0].height;
+	}
+
+	m_sourceTotalMipCount = (std::max)(m_sourceTotalMipCount, totalMipCount);
+}
+
 void TextureAsset::RefreshStreamingStateFromDescription() {
+	UpdateSourceShapeFromDescription(m_desc);
 	const uint32_t descMipCount = CalcMipCountFromDescription(m_desc);
-	m_sourceTotalMipCount = (std::max)(m_sourceTotalMipCount, descMipCount);
 	const uint32_t totalMipCount = (std::max)(1u, m_sourceTotalMipCount);
 
-	m_streamingState.eligible = m_meta.processing.isParticipatingMaterialTexture && totalMipCount > 1u;
+	m_streamingState.eligible = m_meta.processing.isParticipatingMaterialTexture && totalMipCount > 1u && HasStreamingSourceData();
 	m_streamingState.enabled = m_streamingState.enabled && m_streamingState.eligible;
 	m_streamingState.residency.totalMipCount = totalMipCount;
 	m_streamingState.residency.residentTopMip = (std::min)(m_streamingState.residency.residentTopMip, totalMipCount - 1u);
@@ -311,6 +445,31 @@ void TextureAsset::ApplyStreamingBootstrapTopMip() {
 	m_streamingState.pendingTopMip = bootstrapTopMip;
 }
 
+bool TextureAsset::HasStreamingSourceData() const {
+	return !m_initialDataString.empty();
+}
+
+uint32_t TextureAsset::GetDesiredResidentTopMip() const {
+	return m_streamingState.enabled
+		? (std::min)(m_streamingState.pendingTopMip, m_streamingState.residency.totalMipCount - 1u)
+		: 0u;
+}
+
+void TextureAsset::InvalidateResidentImageForStreamingRequest() {
+	if (!m_hasUploadedFinalImage || !HasStreamingSourceData()) {
+		return;
+	}
+
+	if (m_streamingState.residency.residentTopMip == GetDesiredResidentTopMip()) {
+		return;
+	}
+
+	m_image.reset();
+	m_hasUploadedFinalImage = false;
+	m_hasUploadedPlaceholder = false;
+	BumpBindingRevision();
+}
+
 void TextureAsset::BumpStreamingStateRevision() {
 	++m_streamingState.stateRevision;
 }
@@ -320,9 +479,10 @@ void TextureAsset::BumpBindingRevision() {
 	BumpStreamingStateRevision();
 }
 
-std::shared_ptr<TextureSourceData> TextureAsset::BuildSourceData() const {
+std::shared_ptr<TextureSourceData> TextureAsset::BuildSourceData() {
 	if (std::holds_alternative<std::string>(m_initialStorage)) {
 		auto sourceData = BuildSourceDataFromDDSFilePath(std::get<std::string>(m_initialStorage), m_meta.preferSRGB);
+		UpdateSourceShapeFromDescription(sourceData->desc, CalcMipCountFromDescription(sourceData->desc));
 		if (!m_streamingState.enabled) {
 			return sourceData;
 		}
@@ -332,14 +492,15 @@ std::shared_ptr<TextureSourceData> TextureAsset::BuildSourceData() const {
 			return sourceData;
 		}
 
-		const uint32_t requestedTopMip = (std::min)(m_streamingState.requestedTopMip, fullMipCount - 1u);
-		return ClipTextureSourceDataTopMip(sourceData, requestedTopMip);
+		const uint32_t targetTopMip = (std::min)(GetDesiredResidentTopMip(), fullMipCount - 1u);
+		return ClipTextureSourceDataTopMip(sourceData, targetTopMip);
 	}
 
 	auto sourceData = std::make_shared<TextureSourceData>();
 	sourceData->desc = m_desc;
 	sourceData->subresources = ResolveToBytes();
 	sourceData->isBlockCompressed = rhi::helpers::IsBlockCompressed(m_desc.format);
+	UpdateSourceShapeFromDescription(sourceData->desc);
 
 	if (m_desc.imageDimensions.empty()) {
 		return sourceData;
@@ -399,13 +560,24 @@ void TextureAsset::SetProcessingSettings(TextureProcessingSettings settings) {
 		}
 	}
 	BumpStreamingStateRevision();
+	InvalidateResidentImageForStreamingRequest();
+}
 
-	if (m_hasUploadedFinalImage && std::holds_alternative<std::string>(m_initialStorage)) {
-		m_image.reset();
-		m_hasUploadedFinalImage = false;
-		m_hasUploadedPlaceholder = false;
-		BumpBindingRevision();
+void TextureAsset::ApplyStreamingSystemRequest(uint32_t topMip, uint64_t frameIndex) {
+	const uint32_t clampedTopMip = (std::min)(topMip, m_streamingState.residency.totalMipCount - 1u);
+	const bool requestChanged = m_streamingState.requestedTopMip != clampedTopMip;
+	const bool pendingChanged = m_streamingState.pendingTopMip != clampedTopMip;
+	const bool frameChanged = frameIndex != 0u && m_streamingState.lastSeenFrame != frameIndex;
+	if (!requestChanged && !pendingChanged && !frameChanged) {
+		return;
 	}
+
+	m_streamingState.requestedTopMip = clampedTopMip;
+	m_streamingState.pendingTopMip = clampedTopMip;
+	if (frameIndex != 0u) {
+		m_streamingState.lastSeenFrame = frameIndex;
+	}
+	BumpStreamingStateRevision();
 }
 
 void TextureAsset::EnableMipStreaming(bool enabled) {
@@ -418,6 +590,7 @@ void TextureAsset::EnableMipStreaming(bool enabled) {
 		ApplyStreamingBootstrapTopMip();
 	}
 	BumpStreamingStateRevision();
+	InvalidateResidentImageForStreamingRequest();
 }
 
 void TextureAsset::SetRequestedTopMip(uint32_t topMip, uint64_t frameIndex) {
@@ -464,9 +637,7 @@ void TextureAsset::NoteTextureSeen(uint64_t frameIndex) {
 }
 
 void TextureAsset::AdoptUploadedImage(std::shared_ptr<PixelBuffer> image) {
-	const uint32_t residentTopMip = m_streamingState.enabled
-		? (std::min)(m_streamingState.requestedTopMip, m_streamingState.residency.totalMipCount - 1u)
-		: 0u;
+	const uint32_t residentTopMip = GetDesiredResidentTopMip();
 	m_image = std::move(image);
 	if (m_image) {
 		m_desc = m_image->GetDescription();
@@ -486,20 +657,46 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 	const bool needsStreamingReload =
 		m_hasUploadedFinalImage &&
 		m_streamingState.enabled &&
-		!m_initialDataString.empty() &&
-		m_streamingState.requestedTopMip != m_streamingState.residency.residentTopMip;
+		HasStreamingSourceData() &&
+		m_streamingState.pendingTopMip != m_streamingState.residency.residentTopMip;
 	if (m_hasUploadedFinalImage && !needsStreamingReload) {
 		return;
 	}
+
+	auto tryDirectStorageReload = [&](const std::string& detail) -> bool {
+		auto* filePath = std::get_if<std::string>(&m_initialStorage);
+		if (filePath == nullptr || filePath->empty()) {
+			return false;
+		}
+
+		const uint32_t residentTopMip = GetDesiredResidentTopMip();
+		auto uploadedImage = TryUploadDDSFilePathDirectToVRAM(
+			*filePath,
+			m_meta.preferSRGB,
+			residentTopMip,
+			m_desc.hasRTV,
+			m_desc.hasUAV);
+		if (!uploadedImage) {
+			return false;
+		}
+
+		AdoptUploadedImage(std::move(uploadedImage));
+		RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, detail);
+		if (!m_initialDataString.empty()) {
+			m_initialStorage = m_initialDataString;
+		}
+		return true;
+	};
 
 	std::shared_ptr<TextureSourceData> sourceData;
 	if (TextureProcessingManager::GetInstance().ShouldProcess(m_meta)) {
 		sourceData = BuildSourceData();
 		if (!TextureProcessingManager::GetInstance().NeedsProcessing(*sourceData, m_meta)) {
-			const uint32_t residentTopMip = m_streamingState.enabled
-				? (std::min)(m_streamingState.requestedTopMip, m_streamingState.residency.totalMipCount - 1u)
-				: 0u;
+			const uint32_t residentTopMip = GetDesiredResidentTopMip();
 			const uint32_t residentMipCount = CalcMipCountFromDescription(sourceData->desc);
+			if (tryDirectStorageReload("texture residency reloaded from file-backed DDS through DirectStorage GPU queue")) {
+				return;
+			}
 			m_desc = sourceData->desc;
 			RefreshStreamingStateFromDescription();
 			m_image = factory.CreateAlwaysResidentPixelBuffer(
@@ -523,9 +720,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 	}
 
 	if (TextureProcessingManager::GetInstance().ShouldProcess(m_meta)) {
-		if (!m_processingHandle) {
-			m_processingHandle = TextureProcessingManager::GetInstance().RequestProcessing(sourceData ? sourceData : BuildSourceData(), m_meta);
-		}
+		const auto processingSourceData = sourceData ? sourceData : BuildSourceData();
+		m_processingHandle = TextureProcessingManager::GetInstance().RequestProcessing(processingSourceData, m_meta);
 
 		if (m_processingHandle) {
 			const TextureProcessingJobState state = m_processingHandle->state.load(std::memory_order_acquire);
@@ -567,9 +763,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				}
 
 				if (result) {
-					const uint32_t residentTopMip = m_streamingState.enabled
-						? (std::min)(m_streamingState.requestedTopMip, m_streamingState.residency.totalMipCount - 1u)
-						: 0u;
+					const uint32_t residentTopMip = GetDesiredResidentTopMip();
 					const uint32_t residentMipCount = CalcMipCountFromDescription(result->desc);
 					m_desc = result->desc;
 					RefreshStreamingStateFromDescription();
@@ -607,16 +801,23 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					std::scoped_lock lock(m_processingHandle->mutex);
 					processingError = m_processingHandle->error;
 				}
-				const uint32_t residentTopMip = m_streamingState.enabled
-					? (std::min)(m_streamingState.requestedTopMip, m_streamingState.residency.totalMipCount - 1u)
-					: 0u;
+				if (tryDirectStorageReload(
+						processingError.empty()
+							? "async processing failed; residency restored from file-backed DDS through DirectStorage GPU queue"
+							: "async processing failed ('" + processingError + "'); residency restored from file-backed DDS through DirectStorage GPU queue")) {
+					return;
+				}
+				const auto fallbackSourceData = BuildSourceData();
+				const uint32_t residentTopMip = GetDesiredResidentTopMip();
+				const uint32_t residentMipCount = CalcMipCountFromDescription(fallbackSourceData->desc);
 				m_meta.isProcessingCacheArtifact = false;
+				m_desc = fallbackSourceData->desc;
 				m_image = factory.CreateAlwaysResidentPixelBuffer(
-					m_desc,
-					TextureFactory::TextureInitialData::FromBytes(ResolveToBytes()),
+					fallbackSourceData->desc,
+					TextureFactory::TextureInitialData::FromBytes(fallbackSourceData->subresources),
 					m_name);
 				RefreshStreamingStateFromDescription();
-				SetResidentMipWindow(residentTopMip, CalcMipCountFromDescription(m_desc));
+				SetResidentMipWindow(residentTopMip, residentMipCount);
 				SetPendingTopMip(residentTopMip);
 				RecordUploadPath(
 					TextureUploadPathTelemetry::ProcessingFailedFallback,
@@ -646,13 +847,22 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 	}
 
 	if (!m_image) {
+		if (tryDirectStorageReload("texture uploaded from file-backed DDS through DirectStorage GPU queue without preprocessing")) {
+			return;
+		}
+		const auto immediateSourceData = BuildSourceData();
+		const uint32_t residentTopMip = GetDesiredResidentTopMip();
+		const uint32_t residentMipCount = CalcMipCountFromDescription(immediateSourceData->desc);
+		m_desc = immediateSourceData->desc;
 		m_image = factory.CreateAlwaysResidentPixelBuffer(
-			m_desc,
-			TextureFactory::TextureInitialData::FromBytes(ResolveToBytes()),
+			immediateSourceData->desc,
+			TextureFactory::TextureInitialData::FromBytes(immediateSourceData->subresources),
 			m_name);
 		RecordUploadPath(TextureUploadPathTelemetry::CpuImmediateUpload, "texture uploaded through TextureFactory without preprocessing");
 		m_hasUploadedFinalImage = true;
 		RefreshStreamingStateFromDescription();
+		SetResidentMipWindow(residentTopMip, residentMipCount);
+		SetPendingTopMip(residentTopMip);
 		BumpBindingRevision();
 		if (!m_initialDataString.empty()) {
 			m_initialStorage = m_initialDataString;

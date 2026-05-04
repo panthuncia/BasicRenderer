@@ -9,6 +9,7 @@
 #include "include/constants.hlsli"
 #include "include/dynamicSwizzle.hlsli"
 #include "include/outputTypes.hlsli"
+#include "include/waveIntrinsicsHelpers.hlsli"
 
 struct OpenPBRSurfaceSample
 {
@@ -52,6 +53,56 @@ TextureStreamingGPUInfo LoadTextureStreamingInfo(uint streamingTextureID)
 
 static const uint kTextureStreamingFlagEnabled = 1u << 1;
 
+bool TextureStreamingHasFullMip0Dimensions(TextureStreamingGPUInfo streamingInfo)
+{
+    return streamingInfo.fullWidth != 0u && streamingInfo.fullHeight != 0u;
+}
+
+float2 ResolveTextureStreamingTexelScale(
+    TextureStreamingGPUInfo streamingInfo,
+    uint residentWidth,
+    uint residentHeight)
+{
+    const uint width = TextureStreamingHasFullMip0Dimensions(streamingInfo)
+        ? streamingInfo.fullWidth
+        : residentWidth;
+    const uint height = TextureStreamingHasFullMip0Dimensions(streamingInfo)
+        ? streamingInfo.fullHeight
+        : residentHeight;
+    return float2((float)max(width, 1u), (float)max(height, 1u));
+}
+
+uint ComputeTextureStreamingRequestedTopMip(TextureStreamingGPUInfo streamingInfo, float2 texelDdx, float2 texelDdy)
+{
+    const float maxFootprintSq = max(dot(texelDdx, texelDdx), dot(texelDdy, texelDdy));
+    const float lod = max(0.0f, 0.5f * log2(max(maxFootprintSq, 1e-8f)));
+    const uint localRequestedTopMip = (uint)lod;
+    const uint requestedTopMipBase = TextureStreamingHasFullMip0Dimensions(streamingInfo)
+        ? 0u
+        : streamingInfo.residentTopMip;
+    return min(streamingInfo.totalMipCount - 1u, requestedTopMipBase + localRequestedTopMip);
+}
+
+uint ReduceWaveGroupRequestedTopMipMin(uint4 groupMask, uint requestedTopMip)
+{
+    uint minRequestedTopMip = 0xffffffffu;
+
+    [unroll]
+    for (uint wordIndex = 0u; wordIndex < 4u; ++wordIndex)
+    {
+        uint wordMask = groupMask[wordIndex];
+        while (wordMask != 0u)
+        {
+            const uint bitIndex = firstbitlow(wordMask);
+            const uint laneIndex = wordIndex * 32u + bitIndex;
+            minRequestedTopMip = min(minRequestedTopMip, WaveReadLaneAt(requestedTopMip, laneIndex));
+            wordMask &= ~(1u << bitIndex);
+        }
+    }
+
+    return minRequestedTopMip;
+}
+
 void RecordTextureStreamingFeedback(
     TextureStreamingGPUInfo streamingInfo,
     uint streamingTextureID,
@@ -69,13 +120,17 @@ void RecordTextureStreamingFeedback(
     RWStructuredBuffer<uint> textureStreamingFeedbackBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Material::TextureStreamingFeedbackBuffer)];
 
-    const float maxFootprintSq = max(dot(texelDdx, texelDdx), dot(texelDdy, texelDdy));
-    const float lod = max(0.0f, 0.5f * log2(max(maxFootprintSq, 1e-8f)));
-    const uint localRequestedTopMip = (uint)lod;
-    const uint requestedTopMip = min(streamingInfo.totalMipCount - 1u, streamingInfo.residentTopMip + localRequestedTopMip);
+    const uint requestedTopMip = ComputeTextureStreamingRequestedTopMip(streamingInfo, texelDdx, texelDdy);
+    const uint4 groupMask = WaveMatch(streamingTextureID);
+    const uint leaderLane = WaveFirstLaneFromMask(groupMask);
+    if (WaveGetLaneIndex() != leaderLane) {
+        return;
+    }
+
+    const uint groupRequestedTopMip = ReduceWaveGroupRequestedTopMipMin(groupMask, requestedTopMip);
 
     uint previousRequestedTopMip;
-    InterlockedMin(textureStreamingFeedbackBuffer[streamingTextureID], requestedTopMip, previousRequestedTopMip);
+    InterlockedMin(textureStreamingFeedbackBuffer[streamingTextureID], groupRequestedTopMip, previousRequestedTopMip);
 }
 
 OpenPBRSurfaceSample ResolveCanonicalOpenPBRSurface(
@@ -388,7 +443,8 @@ void AccumulateMaterialSelectedMipDebug(inout MaterialInputs materialInputs, uin
 
 void RecordMaterialSelectedMipDebug(
     inout MaterialInputs materialInputs,
-    uint streamingTextureID,
+    TextureStreamingGPUInfo streamingInfo,
+    bool hasStreamingInfo,
     uint width,
     uint height,
     float2 dUVdx,
@@ -396,17 +452,20 @@ void RecordMaterialSelectedMipDebug(
 {
     uint residentTopMip = 0u;
     uint totalMipCount = ComputeTextureMipCountFromDimensions(width, height);
-    if (streamingTextureID != 0u)
+    float2 texelScale = float2((float)width, (float)height);
+    if (hasStreamingInfo)
     {
-        TextureStreamingGPUInfo streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
         residentTopMip = streamingInfo.residentTopMip;
         totalMipCount = max(streamingInfo.totalMipCount, 1u);
+        texelScale = ResolveTextureStreamingTexelScale(streamingInfo, width, height);
     }
 
-    const float2 texelScale = float2((float)width, (float)height);
+    const uint selectedMipBase = (hasStreamingInfo && TextureStreamingHasFullMip0Dimensions(streamingInfo))
+        ? 0u
+        : residentTopMip;
     const uint selectedMipLevel = min(
         totalMipCount - 1u,
-        residentTopMip + (uint)ComputeMaterialSelectedMipLod(dUVdx * texelScale, dUVdy * texelScale));
+        selectedMipBase + (uint)ComputeMaterialSelectedMipLod(dUVdx * texelScale, dUVdy * texelScale));
     AccumulateMaterialSelectedMipDebug(materialInputs, selectedMipLevel, totalMipCount - 1u);
 }
 
@@ -423,15 +482,20 @@ float4 SampleMaterialTexture2DGrad(
     uint height;
     tex.GetDimensions(width, height);
 
-    if (streamingTextureID != 0u) {
-        TextureStreamingGPUInfo streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
-        const float2 texelScale = float2((float)width, (float)height);
+    const bool hasStreamingInfo = streamingTextureID != 0u;
+    TextureStreamingGPUInfo streamingInfo = (TextureStreamingGPUInfo)0;
+    if (hasStreamingInfo) {
+        streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
+    }
+
+    if (hasStreamingInfo) {
+        const float2 texelScale = ResolveTextureStreamingTexelScale(streamingInfo, width, height);
         RecordTextureStreamingFeedback(streamingInfo, streamingTextureID, dUVdx * texelScale, dUVdy * texelScale);
     }
 
     if (ShouldTrackMaterialSelectedMipDebug())
     {
-        RecordMaterialSelectedMipDebug(materialInputs, streamingTextureID, width, height, dUVdx, dUVdy);
+        RecordMaterialSelectedMipDebug(materialInputs, streamingInfo, hasStreamingInfo, width, height, dUVdx, dUVdy);
     }
 
     return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
@@ -457,15 +521,20 @@ float SampleMaterialTexture2DGrad(
     uint height;
     tex.GetDimensions(width, height);
 
-    if (streamingTextureID != 0u) {
-        TextureStreamingGPUInfo streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
-        const float2 texelScale = float2((float)width, (float)height);
+    const bool hasStreamingInfo = streamingTextureID != 0u;
+    TextureStreamingGPUInfo streamingInfo = (TextureStreamingGPUInfo)0;
+    if (hasStreamingInfo) {
+        streamingInfo = LoadTextureStreamingInfo(streamingTextureID);
+    }
+
+    if (hasStreamingInfo) {
+        const float2 texelScale = ResolveTextureStreamingTexelScale(streamingInfo, width, height);
         RecordTextureStreamingFeedback(streamingInfo, streamingTextureID, dUVdx * texelScale, dUVdy * texelScale);
     }
 
     if (ShouldTrackMaterialSelectedMipDebug())
     {
-        RecordMaterialSelectedMipDebug(materialInputs, streamingTextureID, width, height, dUVdx, dUVdy);
+        RecordMaterialSelectedMipDebug(materialInputs, streamingInfo, hasStreamingInfo, width, height, dUVdx, dUVdy);
     }
 
     return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);

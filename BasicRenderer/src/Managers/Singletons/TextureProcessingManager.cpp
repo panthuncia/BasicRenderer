@@ -724,7 +724,6 @@ std::string TextureProcessingManager::BuildProcessingKey(
 	const std::shared_ptr<TextureSourceData>& sourceData,
 	const TextureFileMeta& meta) const
 {
-	static_cast<void>(sourceData);
 	const std::string normalizedIdentity = ResolveProcessingIdentity(meta);
 	const std::string sourceVersionTag = TryGetSourceVersionTag(meta);
 
@@ -737,6 +736,18 @@ std::string TextureProcessingManager::BuildProcessingKey(
 	boost::hash_combine(seed, meta.processing.preferSRGB);
 	boost::hash_combine(seed, meta.processing.preservePackedChannels);
 	boost::hash_combine(seed, static_cast<uint32_t>(meta.processing.normalConvention));
+	if (sourceData) {
+		const uint32_t mipLevelCount = GetTextureMipLevelCount(*sourceData);
+		const uint32_t baseWidth = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].width;
+		const uint32_t baseHeight = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].height;
+		boost::hash_combine(seed, static_cast<uint32_t>(sourceData->desc.format));
+		boost::hash_combine(seed, baseWidth);
+		boost::hash_combine(seed, baseHeight);
+		boost::hash_combine(seed, mipLevelCount);
+		boost::hash_combine(seed, static_cast<uint32_t>(sourceData->subresources.size()));
+		boost::hash_combine(seed, sourceData->hasFullMipChain);
+		boost::hash_combine(seed, sourceData->isBlockCompressed);
+	}
 	return normalizedIdentity + "#" + TextureSemanticToString(meta.processing.semantic) + "#" + std::to_string(seed);
 }
 
