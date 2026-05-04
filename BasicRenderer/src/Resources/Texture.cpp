@@ -962,18 +962,27 @@ void TextureAsset::ApplySourceShapeHint(uint32_t fullWidth, uint32_t fullHeight,
 }
 
 void TextureAsset::RefreshStreamingStateFromDescription() {
+	const bool wasEligible = m_streamingState.eligible;
 	UpdateSourceShapeFromDescription(m_desc);
 	const uint32_t descMipCount = CalcMipCountFromDescription(m_desc);
 	const uint32_t totalMipCount = (std::max)(1u, m_sourceTotalMipCount);
 
 	m_streamingState.eligible = m_meta.processing.isParticipatingMaterialTexture && totalMipCount > 1u && HasStreamingSourceData();
-	m_streamingState.enabled = m_streamingState.enabled && m_streamingState.eligible;
+	if (!wasEligible && m_streamingState.eligible) {
+		m_streamingState.enabled = true;
+	}
+	else {
+		m_streamingState.enabled = m_streamingState.enabled && m_streamingState.eligible;
+	}
 	m_streamingState.residency.totalMipCount = totalMipCount;
 	m_streamingState.residency.residentTopMip = (std::min)(m_streamingState.residency.residentTopMip, totalMipCount - 1u);
 	const uint32_t maxResidentMipCount = totalMipCount - m_streamingState.residency.residentTopMip;
 	m_streamingState.residency.residentMipCount = (std::max)(1u, (std::min)(descMipCount, maxResidentMipCount));
 	m_streamingState.requestedTopMip = (std::min)(m_streamingState.requestedTopMip, totalMipCount - 1u);
 	m_streamingState.pendingTopMip = (std::min)(m_streamingState.pendingTopMip, totalMipCount - 1u);
+	if (!wasEligible && m_streamingState.enabled) {
+		ApplyStreamingBootstrapTopMip();
+	}
 }
 
 void TextureAsset::ApplyStreamingBootstrapTopMip() {
@@ -996,7 +1005,7 @@ void TextureAsset::ApplyStreamingBootstrapTopMip() {
 }
 
 bool TextureAsset::HasStreamingSourceData() const {
-	return !m_initialDataString.empty();
+	return !m_initialDataString.empty() || !m_originalSourceBytes.empty();
 }
 
 uint32_t TextureAsset::GetDesiredResidentTopMip() const {
@@ -1049,6 +1058,35 @@ std::shared_ptr<TextureSourceData> TextureAsset::BuildSourceData() {
 		return ClipTextureSourceDataTopMip(sourceData, targetTopMip);
 	}
 
+	if (!m_originalSourceBytes.empty()) {
+		auto sourceData = std::make_shared<TextureSourceData>();
+		sourceData->desc = m_originalSourceDesc;
+		sourceData->subresources = m_originalSourceBytes;
+		sourceData->isBlockCompressed = rhi::helpers::IsBlockCompressed(m_originalSourceDesc.format);
+		UpdateSourceShapeFromDescription(sourceData->desc);
+
+		if (!sourceData->desc.imageDimensions.empty()) {
+			const uint32_t faces = sourceData->desc.isCubemap ? 6u : 1u;
+			const uint32_t slices = faces * (std::max)(1u, sourceData->desc.arraySize);
+			const uint32_t fullMipCount = CalcFullMipCount(
+				sourceData->desc.imageDimensions[0].width,
+				sourceData->desc.imageDimensions[0].height);
+			const size_t expectedSubresources = static_cast<size_t>(slices) * fullMipCount;
+
+			sourceData->hasFullMipChain =
+				!sourceData->subresources.empty() &&
+				sourceData->subresources.size() == expectedSubresources &&
+				sourceData->desc.imageDimensions.size() == expectedSubresources;
+
+			if (m_streamingState.enabled && fullMipCount > 1u) {
+				const uint32_t targetTopMip = (std::min)(GetDesiredResidentTopMip(), fullMipCount - 1u);
+				return ClipTextureSourceDataTopMip(sourceData, targetTopMip);
+			}
+		}
+
+		return sourceData;
+	}
+
 	auto sourceData = std::make_shared<TextureSourceData>();
 	sourceData->desc = m_desc;
 	sourceData->subresources = ResolveToBytes();
@@ -1072,6 +1110,42 @@ std::shared_ptr<TextureSourceData> TextureAsset::BuildSourceData() {
 		m_desc.imageDimensions.size() == expectedSubresources;
 
 	return sourceData;
+}
+
+std::shared_ptr<TextureSourceData> TextureAsset::BuildProcessingSourceData() {
+	if (!m_initialDataString.empty()) {
+		auto sourceData = IsConditionedCacheFilePath(m_initialDataString)
+			? BuildSourceDataFromConditionedCacheFilePath(m_initialDataString)
+			: BuildSourceDataFromDDSFilePath(m_initialDataString, m_meta.preferSRGB);
+		UpdateSourceShapeFromDescription(sourceData->desc, CalcMipCountFromDescription(sourceData->desc));
+		return sourceData;
+	}
+
+	if (!m_originalSourceBytes.empty()) {
+		auto sourceData = std::make_shared<TextureSourceData>();
+		sourceData->desc = m_originalSourceDesc;
+		sourceData->subresources = m_originalSourceBytes;
+		sourceData->isBlockCompressed = rhi::helpers::IsBlockCompressed(m_originalSourceDesc.format);
+		UpdateSourceShapeFromDescription(sourceData->desc);
+
+		if (!sourceData->desc.imageDimensions.empty()) {
+			const uint32_t faces = sourceData->desc.isCubemap ? 6u : 1u;
+			const uint32_t slices = faces * (std::max)(1u, sourceData->desc.arraySize);
+			const uint32_t fullMipCount = CalcFullMipCount(
+				sourceData->desc.imageDimensions[0].width,
+				sourceData->desc.imageDimensions[0].height);
+			const size_t expectedSubresources = static_cast<size_t>(slices) * fullMipCount;
+
+			sourceData->hasFullMipChain =
+				!sourceData->subresources.empty() &&
+				sourceData->subresources.size() == expectedSubresources &&
+				sourceData->desc.imageDimensions.size() == expectedSubresources;
+		}
+
+		return sourceData;
+	}
+
+	return BuildSourceData();
 }
 
 void TextureAsset::RecordLoadPath(TextureLoadPathTelemetry path, std::string detail) {
@@ -1484,7 +1558,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 			return;
 		}
 
-		const auto processingSourceData = sourceData ? sourceData : BuildSourceData();
+		const auto processingSourceData = BuildProcessingSourceData();
 		m_processingHandle = TextureProcessingManager::GetInstance().RequestProcessing(processingSourceData, m_meta);
 
 		if (m_processingHandle) {

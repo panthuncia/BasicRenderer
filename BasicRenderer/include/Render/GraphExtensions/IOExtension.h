@@ -71,7 +71,8 @@ public:
 			if (auto bc7Readback = m_textureFactory->GetBC7CompressionReadbackPass()) {
 				outPasses.push_back(
 					RenderGraph::ExternalPassDesc::Copy("Builtin::BC7CompressionReadback", bc7Readback)
-						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/4)));
+						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/4))
+						.PinToQueue(static_cast<QueueSlotIndex>(2)));
 			}
 		}
 
@@ -80,7 +81,8 @@ public:
 			if (auto rb = m_readbackManager->GetReadbackPass()) {
 				outPasses.push_back(
 					RenderGraph::ExternalPassDesc::Render("Builtin::Readbacks", rb)
-						.At(RenderGraph::ExternalInsertPoint::End(/*prio*/0)));
+						.At(RenderGraph::ExternalInsertPoint::End(/*prio*/0))
+						.PinToQueue(static_cast<QueueSlotIndex>(0)));
 			}
 		}
 	}

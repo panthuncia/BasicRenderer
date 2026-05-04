@@ -265,6 +265,7 @@ public:
     void RecordUploadPath(TextureUploadPathTelemetry path, std::string detail = {});
 
     std::shared_ptr<TextureSourceData> BuildSourceData();
+    std::shared_ptr<TextureSourceData> BuildProcessingSourceData();
 
     void SetName(const std::string& name)
     {
@@ -305,6 +306,10 @@ private:
 		if (std::holds_alternative<std::string>(m_initialStorage)) { // Store path for potential re-use
             m_initialDataString = std::get<std::string>(m_initialStorage);
 		}
+        if (std::holds_alternative<BytesList>(m_initialStorage)) {
+            m_originalSourceDesc = m_desc;
+            m_originalSourceBytes = std::get<BytesList>(m_initialStorage);
+        }
         RefreshStreamingStateFromDescription();
         if (m_streamingState.eligible) {
             m_streamingState.enabled = true;
@@ -324,6 +329,8 @@ private:
     uint32_t m_sourceFullWidth = 0;
     uint32_t m_sourceFullHeight = 0;
     std::string m_initialDataString;
+    TextureDescription m_originalSourceDesc;
+    BytesList m_originalSourceBytes;
     std::string m_name;
 	bool m_hasUploadedPlaceholder = false;
 	bool m_hasUploadedFinalImage = false;

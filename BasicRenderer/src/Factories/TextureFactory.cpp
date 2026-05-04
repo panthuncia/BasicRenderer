@@ -1349,13 +1349,16 @@ PassReturn TextureFactory::BC7CompressionReadbackPass::Execute(PassExecutionCont
         return {};
     }
 
-    const uint64_t fenceValue = m_readbackService->GetNextReadbackFenceValue();
+    auto signalFenceOwner = std::make_shared<rhi::TimelinePtr>();
+    context.device.CreateTimeline(*signalFenceOwner);
+    const rhi::Timeline signalFence = signalFenceOwner->Get();
+    constexpr uint64_t fenceValue = 1;
     for (uint64_t captureId : m_pendingCaptureIds) {
-        m_readbackService->FinalizeCapture(rg::runtime::ReadbackCaptureToken{ captureId }, fenceValue);
+        m_readbackService->FinalizeCapture(rg::runtime::ReadbackCaptureToken{ captureId }, QueueKind::Copy, signalFenceOwner, fenceValue);
     }
 
     m_pendingCaptureIds.clear();
-    return { m_readbackService->GetReadbackFence(), fenceValue };
+    return { signalFence, fenceValue };
 }
 
 void TextureFactory::BC7CompressionReadbackPass::Cleanup()

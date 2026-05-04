@@ -349,11 +349,11 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after PSO and command signatures");
     Menu::GetInstance().Initialize(hwnd, m_swapChain.Get());
     if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
-        readbackService->Initialize(m_readbackFence.Get());
+        readbackService->Initialize(m_readbackFence.Get(), m_copyReadbackFence.Get());
     }
     m_pReadbackManager = std::make_unique<br::ReadbackManager>();
     
-    m_pReadbackManager->Initialize(m_readbackFence.Get());
+    m_pReadbackManager->Initialize(m_legacyReadbackFence.Get());
     if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
         statisticsService->Initialize();
     }
@@ -1178,7 +1178,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphVramDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphDisableCaching", false);
     settingsManager.registerSetting<bool>("renderGraphQueueSyncTraceEnabled", false);
@@ -1543,6 +1543,8 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     result = device.CreateTimeline(m_frameFence);
     result = device.CreateTimeline(m_readbackFence);
+    result = device.CreateTimeline(m_copyReadbackFence);
+    result = device.CreateTimeline(m_legacyReadbackFence);
 }
 
 void Renderer::CreateTextures() {
@@ -2261,6 +2263,7 @@ void Renderer::Cleanup() {
     m_warnedNullScene = false;
     m_warnedMissingPrimaryCamera = false;
     m_readbackFence.Reset();
+	m_legacyReadbackFence.Reset();
 	spdlog::info("Cleaning up singletons");
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();

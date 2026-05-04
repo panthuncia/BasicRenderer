@@ -79,6 +79,7 @@ public:
                         std::move(pass))
                         .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
                         .PreferQueue(QueueKind::Copy)
+                        .PinToQueue(static_cast<QueueSlotIndex>(2))
                         .CollectStatistics(false)
                         .RegisterByName(false));
             }
@@ -93,6 +94,7 @@ public:
                         passInstanceName,
                         std::move(pass))
                         .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
+                        .PinToQueue(static_cast<QueueSlotIndex>(0))
                         .CollectStatistics(false)
                         .RegisterByName(false));
             }

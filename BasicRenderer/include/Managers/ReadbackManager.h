@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <atomic>
 #include <vector>
 
 #include <rhi.h>
@@ -66,9 +67,13 @@ private:
     private:
         ReadbackManager& m_owner;
         rhi::Timeline m_readbackFence;
-        uint64_t m_fenceValue = 0;
+        uint64_t m_pendingFenceValue = 0;
         bool m_hasWork = false;
     };
+
+    uint64_t AcquireNextFenceValue() noexcept {
+        return m_nextFenceValue.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
 
     void ClearReadbacks();
 
@@ -88,6 +93,7 @@ private:
 
     std::shared_ptr<ReadbackPass> m_readbackPass;
     rhi::Timeline m_readbackFence;
+    std::atomic<uint64_t> m_nextFenceValue{ 0 };
     std::mutex m_mutex;
     std::vector<ReadbackInfo> m_queuedReadbacks;
     std::vector<ReadbackRequest> m_readbackRequests;
