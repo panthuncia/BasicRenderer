@@ -443,117 +443,141 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirec
 		return {};
 	}
 
-	const std::filesystem::path filePath(path);
-	std::wstring extension = filePath.extension().wstring();
-	std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
-	if (extension != L".dds") {
-		return {};
-	}
-
-	DirectX::ScratchImage image;
-	DirectX::TexMetadata metadata{};
-	const HRESULT loadHr = DirectX::LoadFromDDSFile(filePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
-	if (FAILED(loadHr) || metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.depth != 1) {
-		return {};
-	}
-
-	size_t headerSize = 0;
-	const HRESULT headerHr = DirectX::EncodeDDSHeader(
-		metadata,
-		DirectX::DDS_FLAGS_NONE,
-		nullptr,
-		(std::numeric_limits<size_t>::max)(),
-		headerSize);
-	if (FAILED(headerHr) || headerSize == 0) {
-		return {};
-	}
-
-	TextureDescription desc{};
-	desc.format = rhi::helpers::ToRHI(preferSRGB ? DirectX::MakeSRGB(metadata.format) : DirectX::MakeLinear(metadata.format));
-	desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(desc.format));
-	if (rhi::helpers::IsBlockCompressed(desc.format)) {
-		return {};
-	}
-
-	desc.isCubemap = metadata.IsCubemap();
-	desc.isArray = metadata.arraySize > 1 && !desc.isCubemap;
-	desc.arraySize = desc.isCubemap
-		? static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)))
-		: static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
-	desc.hasRTV = allowRTV;
-	desc.hasUAV = allowUAV;
-	desc.generateMipMaps = false;
-
-	const uint32_t fullMipCount = static_cast<uint32_t>((std::max)(size_t(1), metadata.mipLevels));
-	const uint32_t clampedTopMip = (std::min)(topMip, fullMipCount - 1u);
-	const uint32_t arraySlices = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
-	const DirectX::Image* images = image.GetImages();
-	const size_t imageCount = image.GetImageCount();
-	if (images == nullptr || imageCount != static_cast<size_t>(arraySlices) * fullMipCount) {
-		return {};
-	}
-
-	const uint32_t residentMipCount = fullMipCount - clampedTopMip;
-	desc.imageDimensions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
-	std::vector<br::DirectStorageTextureRegionCopy> regions;
-	regions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
-
-	uint64_t currentOffset = static_cast<uint64_t>(headerSize);
-	uint32_t destinationSubresourceIndex = 0u;
-	for (size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex) {
-		const DirectX::Image& srcImage = images[imageIndex];
-		if (srcImage.width > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
-			srcImage.height > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
-			srcImage.slicePitch == 0 ||
-			srcImage.slicePitch > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
-			return {};
-		}
-
-		const uint32_t mipIndex = static_cast<uint32_t>(imageIndex % fullMipCount);
-		if (mipIndex >= clampedTopMip) {
-			ImageDimensions dims{};
-			dims.width = static_cast<uint32_t>(srcImage.width);
-			dims.height = static_cast<uint32_t>(srcImage.height);
-			dims.rowPitch = srcImage.rowPitch;
-			dims.slicePitch = srcImage.slicePitch;
-			desc.imageDimensions.push_back(dims);
-
-			br::DirectStorageTextureRegionCopy region{};
-			region.sourceOffset = currentOffset;
-			region.sourceSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
-			region.uncompressedSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
-			region.subresourceIndex = destinationSubresourceIndex++;
-			region.width = dims.width;
-			region.height = dims.height;
-			region.depth = 1;
-			regions.push_back(region);
-		}
-
-		currentOffset += srcImage.slicePitch;
-	}
-
-	if (regions.empty()) {
-		return {};
-	}
-
 	auto handle = std::make_shared<TextureDirectStorageReloadJobHandle>();
-	handle->targetTopMip = clampedTopMip;
-	handle->uploadedImage = PixelBuffer::CreateShared(desc);
-	if (!handle->uploadedImage) {
-		return {};
-	}
+	handle->state.store(TextureDirectStorageReloadJobState::Queued, std::memory_order_release);
 
-	std::string directStorageMessage;
-	handle->requestHandle = DirectStorageManager::GetInstance().EnqueueUploadTextureRegionsFromFile(
-		filePath.wstring(),
-		handle->uploadedImage->GetAPIResource(),
-		regions,
-		&directStorageMessage);
-	if (!handle->requestHandle.IsValid()) {
-		return {};
-	}
+	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureAsset::BeginUploadDDSFilePathDirectToVRAMAsync", [handle, path, preferSRGB, topMip, allowRTV, allowUAV]() mutable {
+		handle->state.store(TextureDirectStorageReloadJobState::CreatingResource, std::memory_order_release);
 
-	handle->state.store(TextureDirectStorageReloadJobState::Uploading, std::memory_order_release);
+		try {
+			const std::filesystem::path filePath(path);
+			std::wstring extension = filePath.extension().wstring();
+			std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+			if (extension != L".dds") {
+				throw std::runtime_error("only DDS files support DirectStorage GPU-direct texture upload");
+			}
+
+			DirectX::ScratchImage image;
+			DirectX::TexMetadata metadata{};
+			const HRESULT loadHr = DirectX::LoadFromDDSFile(filePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+			if (FAILED(loadHr) || metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.depth != 1) {
+				throw std::runtime_error("failed to load DDS metadata for DirectStorage GPU-direct texture upload");
+			}
+
+			size_t headerSize = 0;
+			const HRESULT headerHr = DirectX::EncodeDDSHeader(
+				metadata,
+				DirectX::DDS_FLAGS_NONE,
+				nullptr,
+				(std::numeric_limits<size_t>::max)(),
+				headerSize);
+			if (FAILED(headerHr) || headerSize == 0) {
+				throw std::runtime_error("failed to encode DDS header for DirectStorage GPU-direct texture upload");
+			}
+
+			TextureDescription desc{};
+			desc.format = rhi::helpers::ToRHI(preferSRGB ? DirectX::MakeSRGB(metadata.format) : DirectX::MakeLinear(metadata.format));
+			desc.channels = static_cast<unsigned short>(rhi::helpers::FormatChannelCount(desc.format));
+			if (rhi::helpers::IsBlockCompressed(desc.format)) {
+				throw std::runtime_error("block-compressed DDS textures do not use this DirectStorage GPU-direct path");
+			}
+
+			desc.isCubemap = metadata.IsCubemap();
+			desc.isArray = metadata.arraySize > 1 && !desc.isCubemap;
+			desc.arraySize = desc.isCubemap
+				? static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize / size_t(6)))
+				: static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+			desc.hasRTV = allowRTV;
+			desc.hasUAV = allowUAV;
+			desc.generateMipMaps = false;
+
+			const uint32_t fullMipCount = static_cast<uint32_t>((std::max)(size_t(1), metadata.mipLevels));
+			const uint32_t clampedTopMip = (std::min)(topMip, fullMipCount - 1u);
+			const uint32_t arraySlices = static_cast<uint32_t>((std::max)(size_t(1), metadata.arraySize));
+			const DirectX::Image* images = image.GetImages();
+			const size_t imageCount = image.GetImageCount();
+			if (images == nullptr || imageCount != static_cast<size_t>(arraySlices) * fullMipCount) {
+				throw std::runtime_error("DDS image layout did not match expected subresource count for DirectStorage GPU-direct texture upload");
+			}
+
+			const uint32_t residentMipCount = fullMipCount - clampedTopMip;
+			desc.imageDimensions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
+			std::vector<br::DirectStorageTextureRegionCopy> regions;
+			regions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
+
+			uint64_t currentOffset = static_cast<uint64_t>(headerSize);
+			uint32_t destinationSubresourceIndex = 0u;
+			for (size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex) {
+				const DirectX::Image& srcImage = images[imageIndex];
+				if (srcImage.width > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+					srcImage.height > static_cast<size_t>((std::numeric_limits<uint32_t>::max)()) ||
+					srcImage.slicePitch == 0 ||
+					srcImage.slicePitch > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
+					throw std::runtime_error("DDS image dimensions exceeded DirectStorage GPU-direct texture upload limits");
+				}
+
+				const uint32_t mipIndex = static_cast<uint32_t>(imageIndex % fullMipCount);
+				if (mipIndex >= clampedTopMip) {
+					ImageDimensions dims{};
+					dims.width = static_cast<uint32_t>(srcImage.width);
+					dims.height = static_cast<uint32_t>(srcImage.height);
+					dims.rowPitch = srcImage.rowPitch;
+					dims.slicePitch = srcImage.slicePitch;
+					desc.imageDimensions.push_back(dims);
+
+					br::DirectStorageTextureRegionCopy region{};
+					region.sourceOffset = currentOffset;
+					region.sourceSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+					region.uncompressedSizeBytes = static_cast<uint32_t>(srcImage.slicePitch);
+					region.subresourceIndex = destinationSubresourceIndex++;
+					region.width = dims.width;
+					region.height = dims.height;
+					region.depth = 1;
+					regions.push_back(region);
+				}
+
+				currentOffset += srcImage.slicePitch;
+			}
+
+			if (regions.empty()) {
+				throw std::runtime_error("no texture regions were produced for DirectStorage GPU-direct texture upload");
+			}
+
+			auto uploadedImage = PixelBuffer::CreateShared(desc);
+			if (!uploadedImage) {
+				throw std::runtime_error("failed to create resident PixelBuffer for DirectStorage GPU-direct texture upload");
+			}
+
+			std::string directStorageMessage;
+			DirectStorageAsyncRequestHandle requestHandle = DirectStorageManager::GetInstance().EnqueueUploadTextureRegionsFromFile(
+				filePath.wstring(),
+				uploadedImage->GetAPIResource(),
+				regions,
+				&directStorageMessage);
+			if (!requestHandle.IsValid()) {
+				throw std::runtime_error(directStorageMessage.empty()
+					? "failed to enqueue DirectStorage GPU-direct texture upload"
+					: directStorageMessage);
+			}
+
+			{
+				std::scoped_lock lock(handle->mutex);
+				handle->targetTopMip = clampedTopMip;
+				handle->uploadedImage = std::move(uploadedImage);
+				handle->requestHandle = std::move(requestHandle);
+				handle->error.clear();
+			}
+
+			handle->state.store(TextureDirectStorageReloadJobState::Uploading, std::memory_order_release);
+		}
+		catch (const std::exception& ex) {
+			{
+				std::scoped_lock lock(handle->mutex);
+				handle->error = ex.what();
+			}
+			handle->state.store(TextureDirectStorageReloadJobState::Failed, std::memory_order_release);
+		}
+	});
 
 	return handle;
 }
@@ -841,12 +865,15 @@ DirectStorageAsyncRequestHandle TextureAsset::QueueInitialDirectStorageUploadIfN
 		const TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
 		if (m_directStorageReloadHandle->targetTopMip == desiredResidentTopMip &&
 			(state == TextureDirectStorageReloadJobState::Queued ||
+			 state == TextureDirectStorageReloadJobState::CreatingResource ||
 			 state == TextureDirectStorageReloadJobState::Uploading ||
 			 state == TextureDirectStorageReloadJobState::Ready)) {
 			return m_directStorageReloadHandle->requestHandle;
 		}
 
-		if (state == TextureDirectStorageReloadJobState::Queued || state == TextureDirectStorageReloadJobState::Uploading) {
+		if (state == TextureDirectStorageReloadJobState::Queued ||
+			state == TextureDirectStorageReloadJobState::CreatingResource ||
+			state == TextureDirectStorageReloadJobState::Uploading) {
 			return {};
 		}
 
@@ -902,7 +929,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 
 		if (m_directStorageReloadHandle) {
 			TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
-			if (state == TextureDirectStorageReloadJobState::Queued || state == TextureDirectStorageReloadJobState::Uploading) {
+			if (state == TextureDirectStorageReloadJobState::Uploading) {
 				const DirectStorageAsyncRequestStatus requestStatus = DirectStorageManager::GetInstance().PollRequest(m_directStorageReloadHandle->requestHandle);
 				if (requestStatus.state == DirectStorageAsyncRequestState::Ready) {
 					m_directStorageReloadHandle->state.store(TextureDirectStorageReloadJobState::Ready, std::memory_order_release);
@@ -916,9 +943,9 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					m_directStorageReloadHandle->state.store(TextureDirectStorageReloadJobState::Failed, std::memory_order_release);
 					state = TextureDirectStorageReloadJobState::Failed;
 				}
-				else {
-					state = TextureDirectStorageReloadJobState::Uploading;
-				}
+			}
+			else if (state == TextureDirectStorageReloadJobState::Queued || state == TextureDirectStorageReloadJobState::CreatingResource) {
+				return true;
 			}
 
 			if (m_directStorageReloadHandle->targetTopMip != desiredResidentTopMip) {

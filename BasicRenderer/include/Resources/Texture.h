@@ -167,6 +167,7 @@ struct TextureReloadJobHandle {
 
 enum class TextureDirectStorageReloadJobState : uint8_t {
     Queued = 0,
+    CreatingResource,
     Uploading,
     Ready,
     Failed,

@@ -9,6 +9,7 @@ void RendererECSManager::Initialize() {
         return;
     }
 
+    m_mainThreadId = std::this_thread::get_id();
     m_world = std::make_unique<flecs::world>();
     auto& world = *m_world;
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -17,12 +18,20 @@ void RendererECSManager::Initialize() {
 }
 
 void RendererECSManager::Cleanup() {
+    FlushDeferredWorldOperations();
     m_renderPhaseEntities.clear();
     m_world.reset();
+    std::scoped_lock lock(m_deferredWorldOperationsMutex);
+    m_deferredWorldOperations.clear();
+    m_mainThreadId = {};
 }
 
 bool RendererECSManager::IsAlive() const {
     return m_world != nullptr;
+}
+
+bool RendererECSManager::IsMainThread() const {
+    return m_mainThreadId != std::thread::id{} && std::this_thread::get_id() == m_mainThreadId;
 }
 
 flecs::world& RendererECSManager::GetWorld() {
@@ -49,6 +58,30 @@ void RendererECSManager::CreateRenderPhaseEntity(const RenderPhase& phase) {
     }
 
     m_renderPhaseEntities[phase] = GetWorld().entity(phase.name.c_str());
+}
+
+void RendererECSManager::EnqueueDeferredWorldOperation(std::function<void(flecs::world&)>&& op) {
+    std::scoped_lock lock(m_deferredWorldOperationsMutex);
+    m_deferredWorldOperations.push_back(std::move(op));
+}
+
+void RendererECSManager::FlushDeferredWorldOperations() {
+    if (!m_world) {
+        std::scoped_lock lock(m_deferredWorldOperationsMutex);
+        m_deferredWorldOperations.clear();
+        return;
+    }
+
+    std::deque<std::function<void(flecs::world&)>> pending;
+    {
+        std::scoped_lock lock(m_deferredWorldOperationsMutex);
+        pending.swap(m_deferredWorldOperations);
+    }
+
+    auto& world = *m_world;
+    for (auto& op : pending) {
+        op(world);
+    }
 }
 
 const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& RendererECSManager::GetRenderPhaseEntities() const {
