@@ -651,6 +651,39 @@ void Renderer::RunRenderResourceSyncStage() {
         materialManager->BeginTextureStreamingFeedbackFrame(nextFrameIndex);
     }
     if (textureFactory && materialManager) {
+        std::vector<DirectStorageAsyncRequestHandle> initialTextureUploadHandles;
+        std::unordered_set<uint32_t> queuedTextureIds;
+        queuedTextureIds.reserve(activeMaterials.size() * 4u);
+
+        for (Material* material : activeMaterials) {
+            if (!material) {
+                continue;
+            }
+
+            material->ForEachReferencedTexture([&](const std::shared_ptr<TextureAsset>& texture) {
+                if (!texture) {
+                    return;
+                }
+
+                if (!queuedTextureIds.insert(texture->GetStreamingTextureID()).second) {
+                    return;
+                }
+
+                DirectStorageAsyncRequestHandle handle = texture->QueueInitialDirectStorageUploadIfNeeded();
+                if (handle.IsValid()) {
+                    initialTextureUploadHandles.push_back(std::move(handle));
+                }
+            });
+        }
+
+        if (!initialTextureUploadHandles.empty()) {
+            std::string directStorageWaitMessage;
+            if (!DirectStorageManager::GetInstance().WaitForRequests(initialTextureUploadHandles, &directStorageWaitMessage) &&
+                !directStorageWaitMessage.empty()) {
+                spdlog::debug("Renderer: batched DirectStorage material upload wait reported '{}'", directStorageWaitMessage);
+            }
+        }
+
         for (Material* material : activeMaterials) {
             if (!material) {
                 continue;

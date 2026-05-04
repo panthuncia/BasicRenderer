@@ -831,6 +831,57 @@ void TextureAsset::AdoptUploadedImage(std::shared_ptr<PixelBuffer> image) {
 	}
 }
 
+DirectStorageAsyncRequestHandle TextureAsset::QueueInitialDirectStorageUploadIfNeeded() {
+	if (m_hasUploadedFinalImage) {
+		return {};
+	}
+
+	const uint32_t desiredResidentTopMip = GetDesiredResidentTopMip();
+	if (m_directStorageReloadHandle) {
+		const TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
+		if (m_directStorageReloadHandle->targetTopMip == desiredResidentTopMip &&
+			(state == TextureDirectStorageReloadJobState::Queued ||
+			 state == TextureDirectStorageReloadJobState::Uploading ||
+			 state == TextureDirectStorageReloadJobState::Ready)) {
+			return m_directStorageReloadHandle->requestHandle;
+		}
+
+		if (state == TextureDirectStorageReloadJobState::Queued || state == TextureDirectStorageReloadJobState::Uploading) {
+			return {};
+		}
+
+		m_directStorageReloadHandle.reset();
+	}
+
+	auto* filePath = std::get_if<std::string>(&m_initialStorage);
+	if (filePath == nullptr || filePath->empty()) {
+		return {};
+	}
+
+	try {
+		auto sourceData = BuildSourceData();
+		if (!sourceData) {
+			return {};
+		}
+
+		if (TextureProcessingManager::GetInstance().ShouldProcess(m_meta) &&
+			TextureProcessingManager::GetInstance().NeedsProcessing(*sourceData, m_meta)) {
+			return {};
+		}
+	}
+	catch (const std::exception&) {
+		return {};
+	}
+
+	m_directStorageReloadHandle = BeginUploadDDSFilePathDirectToVRAMAsync(
+		*filePath,
+		m_meta.preferSRGB,
+		desiredResidentTopMip,
+		m_desc.hasRTV,
+		m_desc.hasUAV);
+	return m_directStorageReloadHandle ? m_directStorageReloadHandle->requestHandle : DirectStorageAsyncRequestHandle{};
+}
+
 void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 	const bool needsStreamingReload =
 		m_hasUploadedFinalImage &&

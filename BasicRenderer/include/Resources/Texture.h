@@ -273,6 +273,7 @@ public:
         }
     }
 
+    DirectStorageAsyncRequestHandle QueueInitialDirectStorageUploadIfNeeded();
     void EnsureUploaded(const TextureFactory& factory);
 
     unsigned int GetWidth() const {

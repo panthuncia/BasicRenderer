@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
-#include <thread>
+#include <unordered_set>
 #include <unordered_map>
 #include <utility>
 
@@ -77,32 +77,6 @@ bool IsDirectStorageDisabledByEnvironment() {
 
 constexpr uint32_t kDefaultDirectStorageStagingBufferSizeBytes = 128u * 1024u * 1024u;
 
-bool WaitForAsyncRequestCompletion(DirectStorageManager& manager, const DirectStorageAsyncRequestHandle& handle, std::string* outMessage) {
-    if (outMessage) {
-        outMessage->clear();
-    }
-
-    if (!handle.IsValid()) {
-        if (outMessage) {
-            *outMessage = "DirectStorage async request handle is invalid";
-        }
-        return false;
-    }
-
-    for (;;) {
-        DirectStorageAsyncRequestStatus status = manager.PollRequest(handle);
-        if (status.state == DirectStorageAsyncRequestState::Pending) {
-            std::this_thread::yield();
-            continue;
-        }
-
-        if (outMessage) {
-            *outMessage = status.message;
-        }
-        return status.state == DirectStorageAsyncRequestState::Ready;
-    }
-}
-
 }
 
 struct DirectStorageManager::Impl {
@@ -131,6 +105,7 @@ struct DirectStorageAsyncRequestHandle::State {
 #if BASICRENDERER_HAS_DIRECTSTORAGE
     Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
     Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+    ScopedWinHandle completionEvent;
 #endif
 };
 
@@ -581,7 +556,7 @@ bool DirectStorageManager::UploadBufferRegionsFromFile(
     const std::vector<DirectStorageBufferRegionCopy>& regions,
     std::string* outMessage) {
     const DirectStorageAsyncRequestHandle handle = EnqueueUploadBufferRegionsFromFile(path, regions, outMessage);
-    return WaitForAsyncRequestCompletion(*this, handle, outMessage);
+    return WaitForRequest(handle, outMessage);
 }
 
 DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegionsFromFile(
@@ -657,6 +632,14 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
         return {};
     }
 
+    ScopedWinHandle completionEvent(CreateEvent(nullptr, TRUE, FALSE, nullptr));
+    if (completionEvent.get() == nullptr) {
+        if (outMessage) {
+            *outMessage = "failed to create DirectStorage GPU completion event";
+        }
+        return {};
+    }
+
     Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
     const HRESULT createStatusArrayHr = m_impl->factory->CreateStatusArray(1u, "DirectStorageGpuBufferUpload", IID_PPV_ARGS(statusArray.ReleaseAndGetAddressOf()));
     if (FAILED(createStatusArrayHr)) {
@@ -667,6 +650,14 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
     }
 
     constexpr uint64_t kFenceValue = 1;
+    const HRESULT setEventHr = fence->SetEventOnCompletion(kFenceValue, completionEvent.get());
+    if (FAILED(setEventHr)) {
+        if (outMessage) {
+            *outMessage = "failed to arm DirectStorage GPU completion event";
+        }
+        return {};
+    }
+
     std::vector<DSTORAGE_REQUEST> requests;
     requests.reserve(regions.size());
 
@@ -753,6 +744,7 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
     state->fenceValue = kFenceValue;
     state->statusArray = std::move(statusArray);
     state->fence = std::move(fence);
+    state->completionEvent = std::move(completionEvent);
 
     if (outMessage) {
         *outMessage = state->pendingMessage;
@@ -768,7 +760,7 @@ bool DirectStorageManager::UploadTextureRegionsFromFile(
     const std::vector<DirectStorageTextureRegionCopy>& regions,
     std::string* outMessage) {
     const DirectStorageAsyncRequestHandle handle = EnqueueUploadTextureRegionsFromFile(path, destinationResource, regions, outMessage);
-    return WaitForAsyncRequestCompletion(*this, handle, outMessage);
+    return WaitForRequest(handle, outMessage);
 }
 
 DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegionsFromFile(
@@ -871,6 +863,14 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
         return {};
     }
 
+    ScopedWinHandle completionEvent(CreateEvent(nullptr, TRUE, FALSE, nullptr));
+    if (completionEvent.get() == nullptr) {
+        if (outMessage) {
+            *outMessage = "failed to create DirectStorage GPU completion event";
+        }
+        return {};
+    }
+
     Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
     const HRESULT createStatusArrayHr = m_impl->factory->CreateStatusArray(1u, "DirectStorageGpuTextureRegionUpload", IID_PPV_ARGS(statusArray.ReleaseAndGetAddressOf()));
     if (FAILED(createStatusArrayHr)) {
@@ -881,6 +881,14 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
     }
 
     constexpr uint64_t kFenceValue = 1;
+    const HRESULT setEventHr = fence->SetEventOnCompletion(kFenceValue, completionEvent.get());
+    if (FAILED(setEventHr)) {
+        if (outMessage) {
+            *outMessage = "failed to arm DirectStorage GPU completion event";
+        }
+        return {};
+    }
+
     std::vector<DSTORAGE_REQUEST> requests;
     requests.reserve(regions.size());
 
@@ -949,6 +957,7 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
     state->fenceValue = kFenceValue;
     state->statusArray = std::move(statusArray);
     state->fence = std::move(fence);
+    state->completionEvent = std::move(completionEvent);
 
     if (outMessage) {
         *outMessage = state->pendingMessage;
@@ -965,7 +974,7 @@ bool DirectStorageManager::UploadTextureSubresourcesFromFile(
     uint32_t sourceSizeBytes,
     std::string* outMessage) {
     const DirectStorageAsyncRequestHandle handle = EnqueueUploadTextureSubresourcesFromFile(path, destinationResource, sourceOffset, sourceSizeBytes, outMessage);
-    return WaitForAsyncRequestCompletion(*this, handle, outMessage);
+    return WaitForRequest(handle, outMessage);
 }
 
 DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubresourcesFromFile(
@@ -1069,6 +1078,14 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
         return {};
     }
 
+    ScopedWinHandle completionEvent(CreateEvent(nullptr, TRUE, FALSE, nullptr));
+    if (completionEvent.get() == nullptr) {
+        if (outMessage) {
+            *outMessage = "failed to create DirectStorage GPU completion event";
+        }
+        return {};
+    }
+
     Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
     const HRESULT createStatusArrayHr = m_impl->factory->CreateStatusArray(1u, "DirectStorageGpuTextureRangeUpload", IID_PPV_ARGS(statusArray.ReleaseAndGetAddressOf()));
     if (FAILED(createStatusArrayHr)) {
@@ -1092,6 +1109,14 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     request.CancellationTag = reinterpret_cast<uint64_t>(this);
 
     constexpr uint64_t kFenceValue = 1;
+    const HRESULT setEventHr = fence->SetEventOnCompletion(kFenceValue, completionEvent.get());
+    if (FAILED(setEventHr)) {
+        if (outMessage) {
+            *outMessage = "failed to arm DirectStorage GPU completion event";
+        }
+        return {};
+    }
+
     {
         std::scoped_lock queueLock(m_impl->gpuQueueMutex);
         if (m_impl->hasQueue3) {
@@ -1121,6 +1146,7 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     state->fenceValue = kFenceValue;
     state->statusArray = std::move(statusArray);
     state->fence = std::move(fence);
+    state->completionEvent = std::move(completionEvent);
 
     if (outMessage) {
         *outMessage = state->pendingMessage;
@@ -1186,6 +1212,119 @@ DirectStorageAsyncRequestStatus DirectStorageManager::PollRequest(const DirectSt
         state->debugLabel,
         static_cast<unsigned int>(requestHr));
     return status;
+#endif
+}
+
+bool DirectStorageManager::WaitForRequest(const DirectStorageAsyncRequestHandle& handle, std::string* outMessage) const {
+    if (outMessage) {
+        outMessage->clear();
+    }
+
+    if (!handle.IsValid()) {
+        if (outMessage) {
+            *outMessage = "DirectStorage async request handle is invalid";
+        }
+        return false;
+    }
+
+#if !BASICRENDERER_HAS_DIRECTSTORAGE
+    if (outMessage) {
+        *outMessage = "DirectStorage SDK is not available in this build";
+    }
+    return false;
+#else
+    if (handle.m_state->completionEvent.get() != nullptr) {
+        const DWORD waitResult = WaitForSingleObject(handle.m_state->completionEvent.get(), INFINITE);
+        if (waitResult != WAIT_OBJECT_0) {
+            if (outMessage) {
+                *outMessage = "DirectStorage wait failed";
+            }
+            return false;
+        }
+    }
+
+    const DirectStorageAsyncRequestStatus status = PollRequest(handle);
+    if (outMessage) {
+        *outMessage = status.message;
+    }
+    return status.state == DirectStorageAsyncRequestState::Ready;
+#endif
+}
+
+bool DirectStorageManager::WaitForRequests(const std::vector<DirectStorageAsyncRequestHandle>& handles, std::string* outMessage) const {
+    if (outMessage) {
+        outMessage->clear();
+    }
+
+    if (handles.empty()) {
+        return true;
+    }
+
+#if !BASICRENDERER_HAS_DIRECTSTORAGE
+    if (outMessage) {
+        *outMessage = "DirectStorage SDK is not available in this build";
+    }
+    return false;
+#else
+    std::vector<DirectStorageAsyncRequestHandle> uniqueHandles;
+    uniqueHandles.reserve(handles.size());
+    std::unordered_set<const DirectStorageAsyncRequestHandle::State*> seenStates;
+
+    for (const auto& handle : handles) {
+        if (!handle.IsValid() || !handle.m_state) {
+            if (outMessage) {
+                *outMessage = "DirectStorage async request handle is invalid";
+            }
+            return false;
+        }
+
+        const auto* state = handle.m_state.get();
+        if (seenStates.insert(state).second) {
+            uniqueHandles.push_back(handle);
+        }
+    }
+
+    constexpr size_t kMaxWaitCount = MAXIMUM_WAIT_OBJECTS;
+    std::string failureMessage;
+    bool success = true;
+
+    for (size_t beginIndex = 0; beginIndex < uniqueHandles.size(); beginIndex += kMaxWaitCount) {
+        const size_t endIndex = (std::min)(uniqueHandles.size(), beginIndex + kMaxWaitCount);
+        std::vector<HANDLE> waitHandles;
+        waitHandles.reserve(endIndex - beginIndex);
+        for (size_t stateIndex = beginIndex; stateIndex < endIndex; ++stateIndex) {
+            HANDLE completionHandle = uniqueHandles[stateIndex].m_state->completionEvent.get();
+            if (completionHandle != nullptr) {
+                waitHandles.push_back(completionHandle);
+            }
+        }
+
+        if (!waitHandles.empty()) {
+            const DWORD waitResult = WaitForMultipleObjects(static_cast<DWORD>(waitHandles.size()), waitHandles.data(), TRUE, INFINITE);
+            if (waitResult < WAIT_OBJECT_0 || waitResult >= WAIT_OBJECT_0 + waitHandles.size()) {
+                if (outMessage) {
+                    *outMessage = "DirectStorage batched wait failed";
+                }
+                return false;
+            }
+        }
+    }
+
+    for (const auto& handle : uniqueHandles) {
+        const DirectStorageAsyncRequestStatus status = PollRequest(handle);
+        if (status.state != DirectStorageAsyncRequestState::Ready) {
+            success = false;
+            if (failureMessage.empty()) {
+                failureMessage = status.message;
+            }
+        }
+    }
+
+    if (outMessage && !success) {
+        *outMessage = failureMessage.empty() ? "One or more DirectStorage requests failed" : failureMessage;
+    }
+
+    return success;
 #endif
 }
 

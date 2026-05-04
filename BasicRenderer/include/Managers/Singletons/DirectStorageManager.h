@@ -158,6 +158,8 @@ public:
         const std::vector<DirectStorageTextureRegionCopy>& regions,
         std::string* outMessage = nullptr);
     DirectStorageAsyncRequestStatus PollRequest(const DirectStorageAsyncRequestHandle& handle) const;
+    bool WaitForRequest(const DirectStorageAsyncRequestHandle& handle, std::string* outMessage = nullptr) const;
+    bool WaitForRequests(const std::vector<DirectStorageAsyncRequestHandle>& handles, std::string* outMessage = nullptr) const;
 
 private:
     DirectStorageManager() = default;
