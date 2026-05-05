@@ -32,29 +32,6 @@ struct VoxelizeTrianglesInput
 // then casts rays for per-cell opacity sampling.
 VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input);
 
-// Input: child voxel groups to re-voxelize into a coarser parent group.
-// Each child is a VoxelGroupPayload whose cells are treated as box primitives.
-struct VoxelizeVoxelsInput
-{
-	// Child voxel payloads to merge.
-	const std::vector<const VoxelGroupPayload*>* children = nullptr;
-
-	// Parent AABB (typically union of child AABBs, slightly expanded).
-	DirectX::XMFLOAT3 aabbMin{};
-	DirectX::XMFLOAT3 aabbMax{};
-
-	// Resolution (cells per axis) for the parent voxel grid.
-	uint32_t resolution = 16;
-
-	// Number of rays cast per active parent cell for opacity sampling.
-	uint32_t raysPerCell = 64;
-};
-
-// Re-voxelize child voxel grids into a coarser parent grid.
-// Child active cells are treated as axis-aligned box primitives for both
-// rasterization (box-AABB overlap) and opacity tracing (ray-slab intersection).
-VoxelGroupPayload VoxelizeVoxels(const VoxelizeVoxelsInput& input);
-
 // Morton sorting: returns a permutation of [0, count) that places positions
 // in 3D Morton (Z-order) order within the given AABB.
 std::vector<uint32_t> MortonSort(

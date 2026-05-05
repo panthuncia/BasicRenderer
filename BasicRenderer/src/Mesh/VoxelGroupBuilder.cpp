@@ -118,16 +118,6 @@ namespace
 		return true;
 	}
 
-	// AABB-AABB overlap test (for box-to-grid rasterization)
-	bool AABBOverlap(const Float3& aMin, const Float3& aMax,
-		const Float3& bMin, const Float3& bMax)
-	{
-		if (aMax.x < bMin.x || aMin.x > bMax.x) return false;
-		if (aMax.y < bMin.y || aMin.y > bMax.y) return false;
-		if (aMax.z < bMin.z || aMin.z > bMax.z) return false;
-		return true;
-	}
-
 	// Möller–Trumbore ray-triangle intersection
 	bool RayTriangleIntersect(const Float3& origin, const Float3& dir,
 		const Float3& v0, const Float3& v1, const Float3& v2,
@@ -154,29 +144,6 @@ namespace
 
 		float t = f * e2.dot(q);
 		return (t > kEpsilon && t < tMax);
-	}
-
-	// Ray-AABB slab intersection (for voxel-to-voxel ray tracing)
-	bool RayAABBIntersect(const Float3& origin, const Float3& invDir,
-		const Float3& boxMin, const Float3& boxMax,
-		float tMax)
-	{
-		float t1 = (boxMin.x - origin.x) * invDir.x;
-		float t2 = (boxMax.x - origin.x) * invDir.x;
-		float tmin = std::min(t1, t2);
-		float tmax = std::max(t1, t2);
-
-		t1 = (boxMin.y - origin.y) * invDir.y;
-		t2 = (boxMax.y - origin.y) * invDir.y;
-		tmin = std::max(tmin, std::min(t1, t2));
-		tmax = std::min(tmax, std::max(t1, t2));
-
-		t1 = (boxMin.z - origin.z) * invDir.z;
-		t2 = (boxMax.z - origin.z) * invDir.z;
-		tmin = std::max(tmin, std::min(t1, t2));
-		tmax = std::min(tmax, std::max(t1, t2));
-
-		return tmax >= std::max(tmin, 1e-8f) && tmin < tMax;
 	}
 
 	// Deterministic ray set generation for a unit cube [0,1]^3
@@ -344,111 +311,6 @@ namespace
 		return cellTriMap;
 	}
 
-	// Rasterize child voxel cells (as boxes) into a parent grid.
-	// Returns per-parent-cell list of (childIndex, cellIndex) pairs.
-	struct ChildCellRef
-	{
-		uint32_t childIndex = 0;  // Index into children array
-		uint32_t cellIndex = 0;   // Index into that child's activeCells
-	};
-
-	std::unordered_map<uint64_t, std::vector<ChildCellRef>> RasterizeVoxelsToGrid(
-		const std::vector<const VoxelGroupPayload*>& children,
-		const Float3& parentAabbMin,
-		const Float3& parentAabbMax,
-		uint32_t parentResolution)
-	{
-		std::unordered_map<uint64_t, std::vector<ChildCellRef>> cellRefMap;
-		if (children.empty() || parentResolution == 0)
-			return cellRefMap;
-
-		const Float3 extent = parentAabbMax - parentAabbMin;
-		const Float3 cellSize = {
-			extent.x / static_cast<float>(parentResolution),
-			extent.y / static_cast<float>(parentResolution),
-			extent.z / static_cast<float>(parentResolution)
-		};
-
-		if (cellSize.x <= 0.0f || cellSize.y <= 0.0f || cellSize.z <= 0.0f)
-			return cellRefMap;
-
-		const Float3 invCellSize = {
-			1.0f / cellSize.x,
-			1.0f / cellSize.y,
-			1.0f / cellSize.z
-		};
-
-		for (uint32_t ci = 0; ci < static_cast<uint32_t>(children.size()); ++ci)
-		{
-			const VoxelGroupPayload* child = children[ci];
-			if (!child || child->activeCells.empty() || child->resolution == 0)
-				continue;
-
-			const Float3 childAabbMin = ToFloat3(child->aabbMin);
-			const Float3 childExtent = ToFloat3(child->aabbMax) - childAabbMin;
-			const float childCellSizeX = childExtent.x / static_cast<float>(child->resolution);
-			const float childCellSizeY = childExtent.y / static_cast<float>(child->resolution);
-			const float childCellSizeZ = childExtent.z / static_cast<float>(child->resolution);
-
-			for (uint32_t cellIdx = 0; cellIdx < static_cast<uint32_t>(child->activeCells.size()); ++cellIdx)
-			{
-				const VoxelCell& vc = child->activeCells[cellIdx];
-
-				// Skip near-empty cells
-				if (vc.opacity < 1e-6f)
-					continue;
-
-				// Child cell world-space AABB
-				const Float3 childCellMin = {
-					childAabbMin.x + static_cast<float>(vc.x) * childCellSizeX,
-					childAabbMin.y + static_cast<float>(vc.y) * childCellSizeY,
-					childAabbMin.z + static_cast<float>(vc.z) * childCellSizeZ
-				};
-				const Float3 childCellMax = {
-					childCellMin.x + childCellSizeX,
-					childCellMin.y + childCellSizeY,
-					childCellMin.z + childCellSizeZ
-				};
-
-				// Find parent cell range that this child cell can overlap
-				const uint32_t pcxMin = ToCellCoord(childCellMin.x, parentAabbMin.x, invCellSize.x, parentResolution);
-				const uint32_t pcyMin = ToCellCoord(childCellMin.y, parentAabbMin.y, invCellSize.y, parentResolution);
-				const uint32_t pczMin = ToCellCoord(childCellMin.z, parentAabbMin.z, invCellSize.z, parentResolution);
-				const uint32_t pcxMax = ToCellCoord(childCellMax.x, parentAabbMin.x, invCellSize.x, parentResolution);
-				const uint32_t pcyMax = ToCellCoord(childCellMax.y, parentAabbMin.y, invCellSize.y, parentResolution);
-				const uint32_t pczMax = ToCellCoord(childCellMax.z, parentAabbMin.z, invCellSize.z, parentResolution);
-
-				for (uint32_t pz = pczMin; pz <= pczMax; ++pz)
-				{
-					for (uint32_t py = pcyMin; py <= pcyMax; ++py)
-					{
-						for (uint32_t px = pcxMin; px <= pcxMax; ++px)
-						{
-							// Parent cell AABB
-							const Float3 pCellMin = {
-								parentAabbMin.x + static_cast<float>(px) * cellSize.x,
-								parentAabbMin.y + static_cast<float>(py) * cellSize.y,
-								parentAabbMin.z + static_cast<float>(pz) * cellSize.z
-							};
-							const Float3 pCellMax = {
-								pCellMin.x + cellSize.x,
-								pCellMin.y + cellSize.y,
-								pCellMin.z + cellSize.z
-							};
-
-							if (AABBOverlap(childCellMin, childCellMax, pCellMin, pCellMax))
-							{
-								cellRefMap[PackCell(px, py, pz)].push_back({ ci, cellIdx });
-							}
-						}
-					}
-				}
-			}
-		}
-
-		return cellRefMap;
-	}
-
 	// Per-cell opacity sampling via ray tracing against triangles.
 	float SampleCellOpacityTriangles(
 		const std::vector<std::byte>& vertices,
@@ -496,99 +358,6 @@ namespace
 		}
 
 		return static_cast<float>(hitCount) / static_cast<float>(rays.size());
-	}
-
-	// Per-cell opacity sampling via ray tracing against child voxel boxes.
-	// Each child cell is an axis-aligned box; we test ray-AABB intersection.
-	// A child cell with opacity < 1 is treated probabilistically:
-	// the ray "hits" with probability = child opacity.
-	// For determinism, we use opacity-weighted hit counting.
-	float SampleCellOpacityVoxels(
-		const std::vector<const VoxelGroupPayload*>& children,
-		const std::vector<ChildCellRef>& cellRefs,
-		const Float3& cellWorldMin,
-		const Float3& cellWorldMax,
-		const std::vector<Ray>& rays)
-	{
-		if (rays.empty() || cellRefs.empty())
-			return 0.0f;
-
-		const Float3 cellExtent = cellWorldMax - cellWorldMin;
-
-		// Pre-compute child cell world-space AABBs for all refs in this parent cell.
-		struct ChildCellBox
-		{
-			Float3 boxMin{};
-			Float3 boxMax{};
-			float opacity = 0.0f;
-		};
-
-		std::vector<ChildCellBox> boxes;
-		boxes.reserve(cellRefs.size());
-
-		for (const ChildCellRef& ref : cellRefs)
-		{
-			const VoxelGroupPayload* child = children[ref.childIndex];
-			const Float3 childAabbMin = ToFloat3(child->aabbMin);
-			const Float3 childExtent = ToFloat3(child->aabbMax) - childAabbMin;
-			const float childCellSizeX = childExtent.x / static_cast<float>(child->resolution);
-			const float childCellSizeY = childExtent.y / static_cast<float>(child->resolution);
-			const float childCellSizeZ = childExtent.z / static_cast<float>(child->resolution);
-
-			const VoxelCell& vc = child->activeCells[ref.cellIndex];
-
-			ChildCellBox box;
-			box.boxMin = {
-				childAabbMin.x + static_cast<float>(vc.x) * childCellSizeX,
-				childAabbMin.y + static_cast<float>(vc.y) * childCellSizeY,
-				childAabbMin.z + static_cast<float>(vc.z) * childCellSizeZ
-			};
-			box.boxMax = {
-				box.boxMin.x + childCellSizeX,
-				box.boxMin.y + childCellSizeY,
-				box.boxMin.z + childCellSizeZ
-			};
-			box.opacity = vc.opacity;
-			boxes.push_back(box);
-		}
-
-		float weightedHits = 0.0f;
-
-		for (const Ray& ray : rays)
-		{
-			Float3 origin, dir;
-			float tMax;
-			MapRayToWorldCell(ray, cellWorldMin, cellExtent, origin, dir, tMax);
-			if (tMax < 1e-12f)
-				continue;
-
-			// Compute inverse direction for slab test (handle near-zero axes)
-			constexpr float kHuge = 1e30f;
-			Float3 invDir = {
-				std::abs(dir.x) > 1e-12f ? 1.0f / dir.x : (dir.x >= 0.0f ? kHuge : -kHuge),
-				std::abs(dir.y) > 1e-12f ? 1.0f / dir.y : (dir.y >= 0.0f ? kHuge : -kHuge),
-				std::abs(dir.z) > 1e-12f ? 1.0f / dir.z : (dir.z >= 0.0f ? kHuge : -kHuge)
-			};
-
-			// Find the maximum opacity among all hit child boxes.
-			// This is a conservative estimate: if a ray passes through multiple
-			// partially-opaque child cells, we take the densest one.
-			float maxHitOpacity = 0.0f;
-
-			for (const ChildCellBox& box : boxes)
-			{
-				if (RayAABBIntersect(origin, invDir, box.boxMin, box.boxMax, tMax))
-				{
-					maxHitOpacity = std::max(maxHitOpacity, box.opacity);
-					if (maxHitOpacity >= 1.0f)
-						break;
-				}
-			}
-
-			weightedHits += maxHitOpacity;
-		}
-
-		return weightedHits / static_cast<float>(rays.size());
 	}
 
 	// Morton code: 10-bit per axis -> 30-bit interleaved
@@ -679,88 +448,6 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 			triIndices,
 			cellMin, cellMax,
 			rays);
-
-		VoxelCell vc{};
-		vc.x = cx;
-		vc.y = cy;
-		vc.z = cz;
-		vc.opacity = opacity;
-
-		result.activeCells.push_back(vc);
-	}
-
-	return result;
-}
-
-// Public API: VoxelizeVoxels
-VoxelGroupPayload VoxelizeVoxels(const VoxelizeVoxelsInput& input)
-{
-	VoxelGroupPayload result{};
-
-	if (!input.children || input.children->empty())
-		return result;
-
-	if (input.resolution < 2)
-		return result;
-
-	const Float3 aabbMin = ToFloat3(input.aabbMin);
-	const Float3 aabbMax = ToFloat3(input.aabbMax);
-
-	if (aabbMax.x - aabbMin.x <= 0.0f ||
-		aabbMax.y - aabbMin.y <= 0.0f ||
-		aabbMax.z - aabbMin.z <= 0.0f)
-	{
-		spdlog::warn("VoxelGroupBuilder: degenerate AABB, skipping voxel-to-voxel reduction");
-		return result;
-	}
-
-	result.resolution = input.resolution;
-	result.aabbMin = input.aabbMin;
-	result.aabbMax = input.aabbMax;
-
-	auto cellRefMap = RasterizeVoxelsToGrid(
-		*input.children,
-		aabbMin, aabbMax,
-		input.resolution);
-
-	if (cellRefMap.empty())
-		return result;
-
-	const std::vector<Ray> rays = GenerateCellRays(input.raysPerCell, input.resolution * 2654435761u);
-
-	const Float3 extent = aabbMax - aabbMin;
-	const Float3 cellSize = {
-		extent.x / static_cast<float>(input.resolution),
-		extent.y / static_cast<float>(input.resolution),
-		extent.z / static_cast<float>(input.resolution)
-	};
-
-	result.activeCells.reserve(cellRefMap.size());
-
-	for (auto& [key, refs] : cellRefMap)
-	{
-		uint32_t cx, cy, cz;
-		UnpackCell(key, cx, cy, cz);
-
-		Float3 cellMin = {
-			aabbMin.x + static_cast<float>(cx) * cellSize.x,
-			aabbMin.y + static_cast<float>(cy) * cellSize.y,
-			aabbMin.z + static_cast<float>(cz) * cellSize.z
-		};
-		Float3 cellMax = {
-			cellMin.x + cellSize.x,
-			cellMin.y + cellSize.y,
-			cellMin.z + cellSize.z
-		};
-
-		float opacity = SampleCellOpacityVoxels(
-			*input.children,
-			refs,
-			cellMin, cellMax,
-			rays);
-
-		if (opacity < 1e-6f)
-			continue;
 
 		VoxelCell vc{};
 		vc.x = cx;

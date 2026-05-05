@@ -150,6 +150,13 @@ struct ClusterLODPrebuildArtifacts
 
 // Builder settings
 
+enum class ClusterLODVoxelFallbackMode : uint8_t
+{
+	Auto,
+	MeshOnly,
+	VoxelOnly,
+};
+
 struct ClusterLODBuilderSettings
 {
 	bool disableSloppyFallback = false;
@@ -163,11 +170,15 @@ struct ClusterLODBuilderSettings
 	float simplifyTangentSignWeight = 0.5f;
 
 	bool enableVoxelFallback = false;
+	ClusterLODVoxelFallbackMode voxelFallbackMode = ClusterLODVoxelFallbackMode::Auto;
 	uint32_t voxelGridBaseResolution = 32u;
 	uint32_t voxelMinResolution = 2u;
 	uint32_t voxelRaysPerCell = 64u;
-	float    voxelTerminalErrorMultiplier = 2.0f;
-	uint32_t voxelCoarsenFactor = 2u;
+	float voxelFallbackScalingFactor = 1.0f;
+	uint32_t voxelFallbackMaxRetryCount = 4u;
+	float voxelFallbackGrowthFactor = 1.25f;
+	float voxelFallbackAcceptanceBias = 1.0f;
+	float voxelFallbackOpacityThreshold = 1.0e-6f;
 };
 
 // Runtime summary
