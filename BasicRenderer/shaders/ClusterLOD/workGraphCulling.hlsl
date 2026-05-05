@@ -790,6 +790,9 @@ uint CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
     uint2 blockCount)
 {
     uint activeBlockCount = 0u;
+    const uint blockSoftCap = min(
+        max(1u, CLodPageJobMaxPagesPerCluster()),
+        kCLodVirtualShadowBlockMaxTrackedPerCluster);
     const uint totalBlockCount = blockCount.x * blockCount.y;
     [loop]
     for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
@@ -806,6 +809,10 @@ uint CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
                 vsmPayload))
         {
             activeBlockCount++;
+            if (activeBlockCount > blockSoftCap)
+            {
+                return 1u;
+            }
         }
     }
 
@@ -830,8 +837,47 @@ void CLodVirtualShadowEmitVisibleClusterBlocksForMeshlet(
     uint2 minBlockCoord,
     uint2 blockCount)
 {
-    uint emittedCount = 0u;
+    const uint blockSoftCap = min(
+        max(1u, CLodPageJobMaxPagesPerCluster()),
+        kCLodVirtualShadowBlockMaxTrackedPerCluster);
+    uint activeBlockCount = 0u;
     const uint totalBlockCount = blockCount.x * blockCount.y;
+    [loop]
+    for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
+    {
+        const uint2 blockCoord = uint2(blockLinearIndex % blockCount.x, blockLinearIndex / blockCount.x) + minBlockCoord;
+        uint vsmPayload = 0u;
+        if (CLodVirtualShadowBuildVisibleClusterBlockPayload(
+                shadowClipmapIndex,
+                clipmapInfo,
+                pageTable,
+                meshletMinPageCoord,
+                meshletMaxPageCoord,
+                blockCoord,
+                vsmPayload))
+        {
+            activeBlockCount++;
+            if (activeBlockCount > blockSoftCap)
+            {
+                if (maxWriteCount != 0u)
+                {
+                    CLodStoreVisibleClusterGloballyCoherent(
+                        visibleClusters,
+                        writeBase,
+                        viewId,
+                        instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        pageSlabDescriptorIndex,
+                        pageSlabByteOffset,
+                        shadowClipmapIndex);
+                }
+                return;
+            }
+        }
+    }
+
+    uint emittedCount = 0u;
     [loop]
     for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
     {

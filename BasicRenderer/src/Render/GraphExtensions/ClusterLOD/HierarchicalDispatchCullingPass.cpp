@@ -415,7 +415,9 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
 
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
         builder->WithUnorderedAccess(m_viewDepthSrvIndicesBuffer)
-            .WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }));
+            .WithShaderResource(m_isFirstPass
+                ? Builtin::LastFrameLinearDepthMaps
+                : Builtin::PrimaryCamera::LinearDepthMap);
     }
 
     if (m_phase1VisibleClustersCounterBuffer && !m_isFirstPass) {

@@ -1550,6 +1550,33 @@ void CLodVirtualShadowAccumulateTileClipmapRange(
     maxClipmapIndex = max(maxClipmapIndex, clipmapIndex);
 }
 
+float CLodViewRayLengthFromScreenUv(float2 screenUv, CLodVirtualShadowMainCameraInfo camera)
+{
+    const float2 ndc = float2(screenUv.x * 2.0f - 1.0f, (1.0f - screenUv.y) * 2.0f - 1.0f);
+    const float4 clipPos = float4(ndc, 1.0f, 1.0f);
+    const float4 viewPosH = mul(clipPos, camera.projectionInverse);
+    return max(length(viewPosH.xyz), 1.0e-5f);
+}
+
+float CLodVirtualShadowRepresentativeDepthForClipmap(
+    float2 sampleUv,
+    float minDepth,
+    float maxDepth,
+    CLodVirtualShadowMainCameraInfo mainCamera,
+    float clip0TexelWorldSize,
+    float directionalLodBias,
+    uint clipmapIndex)
+{
+    const float pageCount = (float)kCLodVirtualShadowFixedVirtualPageCountPerAxis;
+    const float scaleRatio = pageCount > 0.0f ? max((pageCount - 2.0f) / pageCount, 0.0f) : 1.0f;
+    const float clip0FrustumScale = 0.5f * max(clip0TexelWorldSize, 1.0e-5f) * (float)kCLodVirtualShadowFixedVirtualResolution;
+    const float baseScale = max(clip0FrustumScale * scaleRatio, 1.0e-5f);
+    const float clipLevelCenter = (float)clipmapIndex - directionalLodBias - 0.5f;
+    const float representativeDistance = baseScale * exp2(clipLevelCenter);
+    const float representativeDepth = representativeDistance / CLodViewRayLengthFromScreenUv(sampleUv, mainCamera);
+    return clamp(representativeDepth, min(minDepth, maxDepth), max(minDepth, maxDepth));
+}
+
 void CLodVirtualShadowAccumulateTileProjectedBounds(
     float2 sampleUv,
     float depth,
@@ -1569,6 +1596,44 @@ void CLodVirtualShadowAccumulateTileProjectedBounds(
     shadowUv.y = 1.0f - shadowUv.y;
     shadowUvMin = min(shadowUvMin, shadowUv);
     shadowUvMax = max(shadowUvMax, shadowUv);
+}
+
+void CLodVirtualShadowAccumulateTileProjectedBoundsForClipmap(
+    float2 sampleUv,
+    float depth,
+    uint targetClipmapIndex,
+    CLodVirtualShadowMainCameraInfo mainCamera,
+    float clip0TexelWorldSize,
+    float directionalLodBias,
+    uint activeClipmapCount,
+    row_major matrix shadowViewProjection,
+    inout float2 shadowUvMin,
+    inout float2 shadowUvMax,
+    inout float minProjectedZ,
+    inout float maxProjectedZ,
+    inout bool hasSample)
+{
+    const float3 positionWS = CLodWorldSpaceFromScreenUv(sampleUv, depth, mainCamera);
+    const uint selectedClipmapIndex = CLodVirtualShadowSelectClipmapIndex(
+        positionWS,
+        mainCamera.positionWorldSpace.xyz,
+        clip0TexelWorldSize,
+        directionalLodBias,
+        activeClipmapCount);
+    if (selectedClipmapIndex != targetClipmapIndex)
+    {
+        return;
+    }
+
+    const float3 projected = CLodProjectWorldToShadowProjected(positionWS, shadowViewProjection);
+    minProjectedZ = min(minProjectedZ, projected.z);
+    maxProjectedZ = max(maxProjectedZ, projected.z);
+
+    float2 shadowUv = projected.xy * 0.5f + 0.5f;
+    shadowUv.y = 1.0f - shadowUv.y;
+    shadowUvMin = min(shadowUvMin, shadowUv);
+    shadowUvMax = max(shadowUvMax, shadowUv);
+    hasSample = true;
 }
 
 [shader("compute")]
@@ -1655,17 +1720,23 @@ void CLodVirtualShadowMarkBlocksCSMain(uint3 dispatchThreadId : SV_DispatchThrea
         float2 shadowUvMax = float2(-1.0e30f, -1.0e30f);
         float minProjectedZ = 1.0e30f;
         float maxProjectedZ = -1.0e30f;
+        bool hasClipmapSample = false;
 
 #define CLOD_ACCUMULATE_TILE_BOUNDS(sampleUvValue, depthValue) \
-        CLodVirtualShadowAccumulateTileProjectedBounds( \
+        CLodVirtualShadowAccumulateTileProjectedBoundsForClipmap( \
             sampleUvValue, \
             depthValue, \
+            clipmapIndex, \
             mainCamera, \
+            markClipmapDataBuffer[0].texelWorldSize, \
+            markClipmapDataBuffer[0].directionalLodBias, \
+            activeClipmapCount, \
             clipmapData.shadowViewProjection, \
             shadowUvMin, \
             shadowUvMax, \
             minProjectedZ, \
-            maxProjectedZ)
+            maxProjectedZ, \
+            hasClipmapSample)
 
         CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMin, minDepth);
         CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMax.x, tileUvMin.y), minDepth);
@@ -1677,8 +1748,63 @@ void CLodVirtualShadowMarkBlocksCSMain(uint3 dispatchThreadId : SV_DispatchThrea
         CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMin.x, tileUvMax.y), maxDepth);
         CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMax, maxDepth);
         CLOD_ACCUMULATE_TILE_BOUNDS(tileUvCenter, maxDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            tileUvMin,
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                tileUvMin,
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            float2(tileUvMax.x, tileUvMin.y),
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                float2(tileUvMax.x, tileUvMin.y),
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            float2(tileUvMin.x, tileUvMax.y),
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                float2(tileUvMin.x, tileUvMax.y),
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            tileUvMax,
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                tileUvMax,
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            tileUvCenter,
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                tileUvCenter,
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
 
 #undef CLOD_ACCUMULATE_TILE_BOUNDS
+
+        if (!hasClipmapSample)
+        {
+            continue;
+        }
 
         if (maxProjectedZ < 0.0f || minProjectedZ > 1.0f)
         {
@@ -1896,17 +2022,23 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         float2 shadowUvMax = float2(-1.0e30f, -1.0e30f);
         float minProjectedZ = 1.0e30f;
         float maxProjectedZ = -1.0e30f;
+        bool hasClipmapSample = false;
 
 #define CLOD_ACCUMULATE_TILE_BOUNDS(sampleUvValue, depthValue) \
-        CLodVirtualShadowAccumulateTileProjectedBounds( \
+        CLodVirtualShadowAccumulateTileProjectedBoundsForClipmap( \
             sampleUvValue, \
             depthValue, \
+            clipmapIndex, \
             mainCamera, \
+            markClipmapDataBuffer[0].texelWorldSize, \
+            markClipmapDataBuffer[0].directionalLodBias, \
+            activeClipmapCount, \
             clipmapData.shadowViewProjection, \
             shadowUvMin, \
             shadowUvMax, \
             minProjectedZ, \
-            maxProjectedZ)
+            maxProjectedZ, \
+            hasClipmapSample)
 
         CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMin, minDepth);
         CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMax.x, tileUvMin.y), minDepth);
@@ -1918,8 +2050,63 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         CLOD_ACCUMULATE_TILE_BOUNDS(float2(tileUvMin.x, tileUvMax.y), maxDepth);
         CLOD_ACCUMULATE_TILE_BOUNDS(tileUvMax, maxDepth);
         CLOD_ACCUMULATE_TILE_BOUNDS(tileUvCenter, maxDepth);
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            tileUvMin,
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                tileUvMin,
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            float2(tileUvMax.x, tileUvMin.y),
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                float2(tileUvMax.x, tileUvMin.y),
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            float2(tileUvMin.x, tileUvMax.y),
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                float2(tileUvMin.x, tileUvMax.y),
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            tileUvMax,
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                tileUvMax,
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
+        CLOD_ACCUMULATE_TILE_BOUNDS(
+            tileUvCenter,
+            CLodVirtualShadowRepresentativeDepthForClipmap(
+                tileUvCenter,
+                minDepth,
+                maxDepth,
+                mainCamera,
+                markClipmapDataBuffer[0].texelWorldSize,
+                markClipmapDataBuffer[0].directionalLodBias,
+                clipmapIndex));
 
 #undef CLOD_ACCUMULATE_TILE_BOUNDS
+
+        if (!hasClipmapSample)
+        {
+            continue;
+        }
 
         if (maxProjectedZ < 0.0f || minProjectedZ > 1.0f)
         {

@@ -3501,11 +3501,20 @@ inline void Menu::DrawCLodTelemetryWindow() {
             runtimeState.maxPhysicalPages,
             runtimeState.maxAllocationRequests,
             runtimeState.directionalLodBias);
-        ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u",
+        const uint32_t allocatablePhysicalPages = std::min(
+            stats.freePhysicalPageCount + stats.reusablePhysicalPageCount,
+            runtimeState.maxPhysicalPages);
+        const uint32_t unbackedAllocationRequests =
+            stats.allocationRequestCount > allocatablePhysicalPages
+            ? stats.allocationRequestCount - allocatablePhysicalPages
+            : 0u;
+        ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u allocatable=%u unbacked=%u",
             stats.allocationRequestCount,
             stats.allocationDispatchGroupCount,
             stats.freePhysicalPageCount,
-            stats.reusablePhysicalPageCount);
+            stats.reusablePhysicalPageCount,
+            allocatablePhysicalPages,
+            unbackedAllocationRequests);
         ImGui::Text(
             "Controller: requestAllocation=%.1f%% targetBias=%.2f smoothedBias=%.2f recoveryStableFrames=%u",
             stats.currentAllocationPercentage * 100.0f,
