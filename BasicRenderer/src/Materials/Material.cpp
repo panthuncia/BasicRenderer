@@ -222,6 +222,14 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
             m_materialData.materialFlags &= ~negateNormalsFlag;
         }
 	}
+    if (m_baseColorTexture) {
+        m_baseColorTexture->SetGenerateMipmaps(true);
+        m_baseColorTexture->EnsureUploaded(factory);
+    }
+    if (m_normalTexture) {
+        m_normalTexture->SetGenerateMipmaps(true);
+        m_normalTexture->EnsureUploaded(factory);
+    }
     if (m_aoMap) {
         m_aoMap->SetGenerateMipmaps(true);
         m_aoMap->EnsureUploaded(factory);

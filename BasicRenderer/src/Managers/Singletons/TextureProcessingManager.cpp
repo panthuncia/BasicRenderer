@@ -708,7 +708,7 @@ std::wstring TextureProcessingManager::GetExistingCachePathForFile(const Texture
 		return {};
 	}
 
-	const std::string key = BuildProcessingKey({}, meta);
+	const std::string key = BuildProcessingCacheKey(meta);
 	const std::wstring conditionedCachePath = BuildProcessingConditionedCachePath(key);
 	std::error_code ec;
 	if (std::filesystem::exists(std::filesystem::path(conditionedCachePath), ec) && !ec) {
@@ -733,8 +733,7 @@ std::wstring TextureProcessingManager::GetExistingCachePathForFile(const Texture
 	return {};
 }
 
-std::string TextureProcessingManager::BuildProcessingKey(
-	const std::shared_ptr<TextureSourceData>& sourceData,
+std::string TextureProcessingManager::BuildProcessingCacheKey(
 	const TextureFileMeta& meta) const
 {
 	const std::string normalizedIdentity = ResolveProcessingIdentity(meta);
@@ -749,19 +748,31 @@ std::string TextureProcessingManager::BuildProcessingKey(
 	boost::hash_combine(seed, meta.processing.preferSRGB);
 	boost::hash_combine(seed, meta.processing.preservePackedChannels);
 	boost::hash_combine(seed, static_cast<uint32_t>(meta.processing.normalConvention));
-	if (sourceData) {
-		const uint32_t mipLevelCount = GetTextureMipLevelCount(*sourceData);
-		const uint32_t baseWidth = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].width;
-		const uint32_t baseHeight = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].height;
-		boost::hash_combine(seed, static_cast<uint32_t>(sourceData->desc.format));
-		boost::hash_combine(seed, baseWidth);
-		boost::hash_combine(seed, baseHeight);
-		boost::hash_combine(seed, mipLevelCount);
-		boost::hash_combine(seed, static_cast<uint32_t>(sourceData->subresources.size()));
-		boost::hash_combine(seed, sourceData->hasFullMipChain);
-		boost::hash_combine(seed, sourceData->isBlockCompressed);
-	}
 	return normalizedIdentity + "#" + TextureSemanticToString(meta.processing.semantic) + "#" + std::to_string(seed);
+}
+
+std::string TextureProcessingManager::BuildProcessingJobKey(
+	const std::shared_ptr<TextureSourceData>& sourceData,
+	const TextureFileMeta& meta) const
+{
+	const std::string cacheKey = BuildProcessingCacheKey(meta);
+	if (!sourceData) {
+		return cacheKey;
+	}
+
+	size_t seed = 0;
+	boost::hash_combine(seed, cacheKey);
+	const uint32_t mipLevelCount = GetTextureMipLevelCount(*sourceData);
+	const uint32_t baseWidth = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].width;
+	const uint32_t baseHeight = sourceData->desc.imageDimensions.empty() ? 0u : sourceData->desc.imageDimensions[0].height;
+	boost::hash_combine(seed, static_cast<uint32_t>(sourceData->desc.format));
+	boost::hash_combine(seed, baseWidth);
+	boost::hash_combine(seed, baseHeight);
+	boost::hash_combine(seed, mipLevelCount);
+	boost::hash_combine(seed, static_cast<uint32_t>(sourceData->subresources.size()));
+	boost::hash_combine(seed, sourceData->hasFullMipChain);
+	boost::hash_combine(seed, sourceData->isBlockCompressed);
+	return cacheKey + "#job#" + std::to_string(seed);
 }
 
 std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestProcessing(
@@ -772,7 +783,8 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 		return {};
 	}
 
-	const std::string key = BuildProcessingKey(sourceData, meta);
+	const std::string cacheKey = BuildProcessingCacheKey(meta);
+	const std::string key = BuildProcessingJobKey(sourceData, meta);
 	{
 		std::scoped_lock lock(m_mutex);
 		auto existing = m_jobsByKey.find(key);
@@ -787,6 +799,7 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 	auto handle = std::make_shared<TextureProcessingJobHandle>();
 	handle->requestMeta = meta;
 	handle->processingKey = key;
+	handle->cacheKey = cacheKey;
 	handle->state.store(TextureProcessingJobState::Queued, std::memory_order_release);
 
 	{
@@ -794,15 +807,15 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 		m_jobsByKey[key] = handle;
 	}
 
-	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureProcessingManager::RequestProcessing", [handle, sourceData, meta, key]() {
+	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureProcessingManager::RequestProcessing", [handle, sourceData, meta, key, cacheKey]() {
 		handle->state.store(TextureProcessingJobState::CpuPreparing, std::memory_order_release);
 		try {
-			const std::wstring conditionedCachePath = BuildProcessingConditionedCachePath(key);
+			const std::wstring conditionedCachePath = BuildProcessingConditionedCachePath(cacheKey);
 			std::error_code cacheEc;
 			if (std::filesystem::exists(std::filesystem::path(conditionedCachePath), cacheEc) && !cacheEc) {
 				spdlog::info(
 					"TextureProcessingManager: conditioned cache hit for '{}' file='{}' semantic={} path='{}'",
-					key,
+					cacheKey,
 					meta.filePath,
 					TextureSemanticToString(meta.processing.semantic),
 					ws2s(conditionedCachePath));
@@ -832,11 +845,12 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].width : 0u,
 				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].height : 0u);
 
-			if (auto cachedResult = TryLoadTextureSourceDataFromCache(key)) {
-				const std::wstring backfilledConditionedCachePath = TryWriteTextureSourceDataToCache(key, *cachedResult);
+			if (auto cachedResult = TryLoadTextureSourceDataFromCache(cacheKey)) {
+				const std::wstring backfilledConditionedCachePath = TryWriteTextureSourceDataToCache(cacheKey, *cachedResult);
 				spdlog::info(
-					"TextureProcessingManager: cache hit for '{}' file='{}' semantic={} bc={} mips={} fmt={} subresources={} dims={}x{}",
+					"TextureProcessingManager: cache hit for request='{}' cache='{}' file='{}' semantic={} bc={} mips={} fmt={} subresources={} dims={}x{}",
 					key,
+					cacheKey,
 					meta.filePath,
 					TextureSemanticToString(meta.processing.semantic),
 					meta.processing.requestBlockCompression,
@@ -896,7 +910,7 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 			auto result = std::move(prepared.finalResult);
 			std::wstring writtenConditionedCachePath;
 			if (result) {
-				writtenConditionedCachePath = TryWriteTextureSourceDataToCache(key, *result);
+				writtenConditionedCachePath = TryWriteTextureSourceDataToCache(cacheKey, *result);
 			}
 			{
 				std::scoped_lock lock(handle->mutex);
@@ -957,8 +971,8 @@ void TextureProcessingManager::CompleteGpuProcessing(
 	}
 
 	std::wstring conditionedCachePath;
-	if (writeCacheArtifact && result && !handle->processingKey.empty()) {
-		conditionedCachePath = TryWriteTextureSourceDataToCache(handle->processingKey, *result);
+	if (writeCacheArtifact && result && !handle->cacheKey.empty()) {
+		conditionedCachePath = TryWriteTextureSourceDataToCache(handle->cacheKey, *result);
 	}
 
 	{

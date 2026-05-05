@@ -1552,6 +1552,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 	}
 	if (useConditionedCacheResidency && m_meta.isProcessingCacheArtifact) {
 		if (tryAdvanceAsyncDirectStorageReload("texture residency uploaded asynchronously from conditioned cache through DirectStorage GPU queue")) {
+			ensureProcessingPlaceholder("conditioned cache DirectStorage upload pending; placeholder texture uploaded");
 			return;
 		}
 
@@ -1696,6 +1697,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 							loadedFromCache
 								? "processed texture cache hit; residency uploaded asynchronously from conditioned cache through DirectStorage GPU queue"
 								: "async processing completed; residency uploaded asynchronously from conditioned cache through DirectStorage GPU queue")) {
+						ensureProcessingPlaceholder("conditioned cache DirectStorage upload pending; placeholder texture uploaded");
 						return;
 					}
 

@@ -23,6 +23,7 @@ struct TextureProcessingJobHandle {
 	std::mutex mutex;
 	TextureFileMeta requestMeta;
 	std::string processingKey;
+	std::string cacheKey;
 	std::string conditionedCachePath;
 	std::shared_ptr<TextureSourceData> preparedSourceData;
 	std::shared_ptr<TextureSourceData> result;
@@ -56,7 +57,9 @@ public:
 private:
 	TextureProcessingManager() = default;
 
-	std::string BuildProcessingKey(
+	std::string BuildProcessingCacheKey(
+		const TextureFileMeta& meta) const;
+	std::string BuildProcessingJobKey(
 		const std::shared_ptr<TextureSourceData>& sourceData,
 		const TextureFileMeta& meta) const;
 
