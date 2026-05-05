@@ -299,7 +299,7 @@ public:
 	}
 
 	bool HasVoxelGroups() const {
-		return !m_voxelGroupMapping.payloads.empty();
+		return !m_voxelGroupMapping.payloads.empty() || !m_voxelGroupMapping.packedGroupDescriptors.empty();
 	}
 
 	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;

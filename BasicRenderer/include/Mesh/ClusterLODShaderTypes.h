@@ -133,3 +133,26 @@ struct ClusterLODGroup
 };
 
 static constexpr uint32_t CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
+
+static constexpr uint32_t CLOD_VOXEL_STATIC_BONE_INDEX = 0xFFFFFFFFu;
+
+struct CLodVoxelGroupDescriptor
+{
+	DirectX::XMFLOAT4 aabbMinAndVoxelWidth = {}; // xyz=min, w=voxel width
+	DirectX::XMFLOAT4 aabbMaxAndError = {};      // xyz=max, w=accepted voxel error
+	uint32_t firstCube = 0;
+	uint32_t cubeCount = 0;
+	uint32_t resolution = 0;
+	uint32_t flags = 0;
+};
+static_assert(sizeof(CLodVoxelGroupDescriptor) == 48, "CLodVoxelGroupDescriptor must be 48 bytes");
+
+struct CLodVoxelCubeRecord
+{
+	uint32_t cubeCoord = 0; // x:10 | y:10 | z:10 in 4x4x4-cell cube coordinates
+	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+	uint64_t occupancyMask = 0;
+	float opacitySum = 0.0f;
+	uint32_t reserved = 0;
+};
+static_assert(sizeof(CLodVoxelCubeRecord) == 24, "CLodVoxelCubeRecord must be 24 bytes");

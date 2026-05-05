@@ -168,6 +168,27 @@ struct ClusterLODGroup
 
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
+static const uint CLOD_VOXEL_STATIC_BONE_INDEX = 0xFFFFFFFFu;
+
+struct CLodVoxelGroupDescriptor
+{
+    float4 aabbMinAndVoxelWidth;
+    float4 aabbMaxAndError;
+    uint firstCube;
+    uint cubeCount;
+    uint resolution;
+    uint flags;
+};
+
+struct CLodVoxelCubeRecord
+{
+    uint cubeCoord; // x:10 | y:10 | z:10 in 4x4x4-cell cube coordinates
+    uint dominantBoneIndex;
+    uint2 occupancyMask;
+    float opacitySum;
+    uint reserved;
+};
+
 // Replay buffer: single physical buffer split into two regions.
 // Node region stores TraverseNodeRecord (12 bytes), meshlet region stores MeshletBucketRecord (24 bytes).
 static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES       = 100u * 1024u * 1024u;

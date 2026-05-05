@@ -1,6 +1,7 @@
 #include "Import/CLodCache.h"
 
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -208,6 +209,9 @@ namespace CLodCache {
 				WriteVectorPod(out, payload.activeCells);
 			}
 			WriteVectorPod(out, vgm.groupToPayloadIndex);
+			WriteVectorPod(out, vgm.groupToPackedDescriptorIndex);
+			WriteVectorPod(out, vgm.packedGroupDescriptors);
+			WriteVectorPod(out, vgm.packedCubeRecords);
 
 			return out;
 		}
@@ -259,6 +263,9 @@ namespace CLodCache {
 				if (!ReadVectorPod(blob, offset, payload.activeCells)) return false;
 			}
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.groupToPayloadIndex)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.groupToPackedDescriptorIndex)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedGroupDescriptors)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedCubeRecords)) return false;
 
 			return offset == blob.size();
 		}
@@ -678,6 +685,11 @@ namespace CLodCache {
 	uint64_t ComputeBuildConfigHash()
 	{
 		size_t seed = 0;
+		auto hashEnvironmentString = [&seed](const char* name)
+		{
+			boost::hash_combine(seed, GetClusterLODEnvironmentVariable(name));
+		};
+
 		boost::hash_combine(seed, static_cast<uint32_t>(kSchemaVersion));
 		boost::hash_combine(seed, static_cast<uint32_t>(MS_MESHLET_SIZE));
 		boost::hash_combine(seed, static_cast<uint32_t>(32)); // target bucket clusters
@@ -690,6 +702,15 @@ namespace CLodCache {
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // mesh quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // UV quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(7));  // USD compliance layout + inherited primvar card isolation
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MODE");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_GRID");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MIN_RES");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_RAYS");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_SCALE");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_RETRIES");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_GROWTH");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD");
 		return static_cast<uint64_t>(seed);
 	}
 

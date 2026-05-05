@@ -57,6 +57,45 @@ static const char* FormatName(AssetFormat f) {
     return "?";
 }
 
+static void SetProcessEnvironment(const char* name, const std::string& value) {
+#if defined(_WIN32)
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
+static bool TryConsumeOption(const std::string& arg) {
+    constexpr const char* modePrefix = "--clod-voxel-mode=";
+    constexpr const char* gridPrefix = "--clod-voxel-grid=";
+    constexpr const char* minResPrefix = "--clod-voxel-min-res=";
+    constexpr const char* raysPrefix = "--clod-voxel-rays=";
+    constexpr const char* scalePrefix = "--clod-voxel-scale=";
+    constexpr const char* retriesPrefix = "--clod-voxel-retries=";
+    constexpr const char* growthPrefix = "--clod-voxel-growth=";
+    constexpr const char* biasPrefix = "--clod-voxel-acceptance-bias=";
+    constexpr const char* opacityPrefix = "--clod-voxel-opacity-threshold=";
+
+    auto consumeValue = [&arg](const char* prefix, const char* envName) -> bool {
+        const std::string prefixString(prefix);
+        if (arg.rfind(prefixString, 0) != 0) {
+            return false;
+        }
+        SetProcessEnvironment(envName, arg.substr(prefixString.size()));
+        return true;
+    };
+
+    return consumeValue(modePrefix, "BASICRENDERER_CLOD_VOXEL_MODE") ||
+        consumeValue(gridPrefix, "BASICRENDERER_CLOD_VOXEL_GRID") ||
+        consumeValue(minResPrefix, "BASICRENDERER_CLOD_VOXEL_MIN_RES") ||
+        consumeValue(raysPrefix, "BASICRENDERER_CLOD_VOXEL_RAYS") ||
+        consumeValue(scalePrefix, "BASICRENDERER_CLOD_VOXEL_SCALE") ||
+        consumeValue(retriesPrefix, "BASICRENDERER_CLOD_VOXEL_RETRIES") ||
+        consumeValue(growthPrefix, "BASICRENDERER_CLOD_VOXEL_GROWTH") ||
+        consumeValue(biasPrefix, "BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS") ||
+        consumeValue(opacityPrefix, "BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD");
+}
+
 // Processing
 
 static bool ProcessFile(const fs::path& path) {
@@ -137,7 +176,7 @@ int main(int argc, char* argv[]) {
 
     if (argc < 2) {
         spdlog::error("No arguments provided.");
-        std::cerr << "Usage: CLodCacheTool <file1|dir1> [file2|dir2 ...]\n";
+            std::cerr << "Usage: CLodCacheTool [--clod-voxel-mode=mesh|auto|voxel] <file1|dir1> [file2|dir2 ...]\n";
         return 1;
     }
 
@@ -153,6 +192,12 @@ int main(int argc, char* argv[]) {
     // Gather files
     std::vector<fs::path> files;
     for (int i = 1; i < argc; ++i) {
+        const std::string arg(argv[i]);
+        if (TryConsumeOption(arg)) {
+            spdlog::info("Consumed option: {}", arg);
+            continue;
+        }
+
         fs::path p(argv[i]);
         if (!fs::exists(p)) {
             spdlog::warn("Skipping non-existent path: {}", argv[i]);

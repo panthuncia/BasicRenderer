@@ -375,6 +375,11 @@ namespace
 	{
 		return (ExpandBits10(x) << 2) | (ExpandBits10(y) << 1) | ExpandBits10(z);
 	}
+
+	uint32_t PackCubeCoord(uint32_t cubeX, uint32_t cubeY, uint32_t cubeZ)
+	{
+		return (cubeX & 0x3FFu) | ((cubeY & 0x3FFu) << 10u) | ((cubeZ & 0x3FFu) << 20u);
+	}
 }
 
 // Public API: VoxelizeTriangles
@@ -458,6 +463,92 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 		result.activeCells.push_back(vc);
 	}
 
+	return result;
+}
+
+PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& input)
+{
+	PackedVoxelGroupBuildResult result{};
+
+	if (input.payload == nullptr || input.payload->resolution == 0u)
+	{
+		return result;
+	}
+
+	const VoxelGroupPayload& payload = *input.payload;
+	const DirectX::XMFLOAT3 extent{
+		payload.aabbMax.x - payload.aabbMin.x,
+		payload.aabbMax.y - payload.aabbMin.y,
+		payload.aabbMax.z - payload.aabbMin.z };
+	const float longestExtent = std::max({ extent.x, extent.y, extent.z });
+	const float voxelWidth = payload.resolution > 0u
+		? longestExtent / static_cast<float>(payload.resolution)
+		: 0.0f;
+
+	result.descriptor.aabbMinAndVoxelWidth = DirectX::XMFLOAT4(
+		payload.aabbMin.x,
+		payload.aabbMin.y,
+		payload.aabbMin.z,
+		voxelWidth);
+	result.descriptor.aabbMaxAndError = DirectX::XMFLOAT4(
+		payload.aabbMax.x,
+		payload.aabbMax.y,
+		payload.aabbMax.z,
+		input.voxelError);
+	result.descriptor.firstCube = input.firstCube;
+	result.descriptor.resolution = payload.resolution;
+
+	struct CubeAccum
+	{
+		uint64_t mask = 0;
+		float opacitySum = 0.0f;
+	};
+
+	std::unordered_map<uint32_t, CubeAccum> cubeMap;
+	cubeMap.reserve(payload.activeCells.size());
+
+	for (const VoxelCell& cell : payload.activeCells)
+	{
+		if (cell.opacity < input.opacityThreshold)
+		{
+			continue;
+		}
+
+		const uint32_t cubeX = cell.x / 4u;
+		const uint32_t cubeY = cell.y / 4u;
+		const uint32_t cubeZ = cell.z / 4u;
+		const uint32_t localX = cell.x & 3u;
+		const uint32_t localY = cell.y & 3u;
+		const uint32_t localZ = cell.z & 3u;
+		const uint32_t localBit = localX | (localY << 2u) | (localZ << 4u);
+		const uint32_t cubeCoord = PackCubeCoord(cubeX, cubeY, cubeZ);
+
+		CubeAccum& accum = cubeMap[cubeCoord];
+		accum.mask |= (uint64_t{ 1 } << localBit);
+		accum.opacitySum += cell.opacity;
+	}
+
+	result.cubeRecords.reserve(cubeMap.size());
+	for (const auto& [cubeCoord, accum] : cubeMap)
+	{
+		if (accum.mask == 0)
+		{
+			continue;
+		}
+
+		CLodVoxelCubeRecord record{};
+		record.cubeCoord = cubeCoord;
+		record.dominantBoneIndex = input.dominantBoneIndex;
+		record.occupancyMask = accum.mask;
+		record.opacitySum = accum.opacitySum;
+		result.cubeRecords.push_back(record);
+	}
+
+	std::sort(result.cubeRecords.begin(), result.cubeRecords.end(), [](const CLodVoxelCubeRecord& lhs, const CLodVoxelCubeRecord& rhs) {
+		return lhs.cubeCoord < rhs.cubeCoord;
+	});
+
+	result.descriptor.cubeCount = static_cast<uint32_t>(result.cubeRecords.size());
 	return result;
 }
 

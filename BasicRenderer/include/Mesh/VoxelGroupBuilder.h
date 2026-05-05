@@ -32,6 +32,23 @@ struct VoxelizeTrianglesInput
 // then casts rays for per-cell opacity sampling.
 VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input);
 
+struct PackVoxelGroupInput
+{
+	const VoxelGroupPayload* payload = nullptr;
+	float voxelError = 0.0f;
+	float opacityThreshold = 0.0f;
+	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+	uint32_t firstCube = 0;
+};
+
+struct PackedVoxelGroupBuildResult
+{
+	CLodVoxelGroupDescriptor descriptor{};
+	std::vector<CLodVoxelCubeRecord> cubeRecords;
+};
+
+PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& input);
+
 // Morton sorting: returns a permutation of [0, count) that places positions
 // in 3D Morton (Z-order) order within the given AABB.
 std::vector<uint32_t> MortonSort(
