@@ -183,6 +183,7 @@ private:
     DirectStorageManager() = default;
 
     struct Impl;
+    void RegisterActiveRequest(const DirectStorageAsyncRequestHandle& handle);
 
     std::unique_ptr<Impl> m_impl;
     bool m_initialized = false;

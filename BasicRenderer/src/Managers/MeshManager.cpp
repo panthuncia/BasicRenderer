@@ -1098,18 +1098,19 @@ void MeshManager::FinalizePendingCLodDirectStorageUploads(
 			m_clodPendingDirectStorageUploads.erase(m_clodPendingDirectStorageUploads.begin() + static_cast<std::ptrdiff_t>(uploadIndex));
 		};
 
-		if (pendingUpload.generation != currentGeneration) {
-			spdlog::info("CLod streaming: discarding stale DirectStorage upload for group {} (gen {} vs current {})",
+		const bool isStale = pendingUpload.generation != currentGeneration;
+		const DirectStorageAsyncRequestStatus uploadStatus = DirectStorageManager::GetInstance().PollRequest(pendingUpload.uploadHandle);
+		if (uploadStatus.state == DirectStorageAsyncRequestState::Pending) {
+			++uploadIndex;
+			continue;
+		}
+
+		if (isStale) {
+			spdlog::info("CLod streaming: discarding stale DirectStorage upload for group {} after completion (gen {} vs current {})",
 				pendingUpload.groupGlobalIndex,
 				pendingUpload.generation,
 				currentGeneration);
 			finishUpload(false);
-			continue;
-		}
-
-		const DirectStorageAsyncRequestStatus uploadStatus = DirectStorageManager::GetInstance().PollRequest(pendingUpload.uploadHandle);
-		if (uploadStatus.state == DirectStorageAsyncRequestState::Pending) {
-			++uploadIndex;
 			continue;
 		}
 

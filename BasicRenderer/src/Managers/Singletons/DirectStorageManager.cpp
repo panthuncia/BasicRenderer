@@ -1,5 +1,6 @@
 #include "Managers/Singletons/DirectStorageManager.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
@@ -85,9 +86,11 @@ struct DirectStorageManager::Impl {
     Microsoft::WRL::ComPtr<IDStorageQueue> systemMemoryQueue;
     Microsoft::WRL::ComPtr<IDStorageQueue> gpuQueue;
     mutable std::mutex fileCacheMutex;
+    mutable std::mutex activeRequestsMutex;
     std::mutex systemQueueMutex;
     std::mutex gpuQueueMutex;
     std::unordered_map<std::wstring, Microsoft::WRL::ComPtr<IDStorageFile>> fileCache;
+    std::vector<DirectStorageAsyncRequestHandle> activeRequests;
     bool hasQueue2 = false;
     bool hasQueue3 = false;
 #endif
@@ -105,9 +108,63 @@ struct DirectStorageAsyncRequestHandle::State {
 #if BASICRENDERER_HAS_DIRECTSTORAGE
     Microsoft::WRL::ComPtr<IDStorageStatusArray> statusArray;
     Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+    Microsoft::WRL::ComPtr<IDStorageFile> file;
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> destinationResources;
     ScopedWinHandle completionEvent;
 #endif
 };
+
+#if BASICRENDERER_HAS_DIRECTSTORAGE
+uint64_t GetDirectStorageFileSize(IDStorageFile* file) {
+    if (file == nullptr) {
+        return 0u;
+    }
+
+    BY_HANDLE_FILE_INFORMATION fileInfo{};
+    if (FAILED(file->GetFileInformation(&fileInfo))) {
+        return 0u;
+    }
+
+    return (static_cast<uint64_t>(fileInfo.nFileSizeHigh) << 32u) | static_cast<uint64_t>(fileInfo.nFileSizeLow);
+}
+
+bool IsFileRangeValid(uint64_t fileSize, uint64_t offset, uint32_t size) {
+    return size != 0u && offset <= fileSize && static_cast<uint64_t>(size) <= fileSize - offset;
+}
+
+Microsoft::WRL::ComPtr<ID3D12Resource> AddResourceRef(ID3D12Resource* resource) {
+    Microsoft::WRL::ComPtr<ID3D12Resource> ref;
+    ref = resource;
+    return ref;
+}
+
+uint32_t SubresourceMipIndex(const D3D12_RESOURCE_DESC& desc, uint32_t subresourceIndex) {
+    const uint32_t mipLevels = (std::max)(1u, static_cast<uint32_t>(desc.MipLevels));
+    return subresourceIndex % mipLevels;
+}
+
+bool IsTextureRegionValid(const D3D12_RESOURCE_DESC& desc, const DirectStorageTextureRegionCopy& region) {
+    if (desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER || region.width == 0u || region.height == 0u || region.depth == 0u) {
+        return false;
+    }
+
+    const uint32_t totalSubresources = static_cast<uint32_t>(desc.MipLevels) * static_cast<uint32_t>(desc.DepthOrArraySize);
+    if (totalSubresources == 0u || region.subresourceIndex >= totalSubresources) {
+        return false;
+    }
+
+    const uint32_t mipIndex = SubresourceMipIndex(desc, region.subresourceIndex);
+    const uint64_t mipWidth = (std::max)(uint64_t(1), desc.Width >> mipIndex);
+    const uint32_t mipHeight = (std::max)(1u, desc.Height >> mipIndex);
+    const uint16_t mipDepth = desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D
+        ? static_cast<uint16_t>((std::max)(1u, static_cast<uint32_t>(desc.DepthOrArraySize) >> mipIndex))
+        : 1u;
+
+    return static_cast<uint64_t>(region.width) <= mipWidth &&
+        region.height <= mipHeight &&
+        region.depth <= mipDepth;
+}
+#endif
 
 DirectStorageAsyncRequestHandle::DirectStorageAsyncRequestHandle(std::shared_ptr<State> state)
     : m_state(std::move(state)) {
@@ -234,6 +291,29 @@ void DirectStorageManager::Initialize() {
 }
 
 void DirectStorageManager::Cleanup() {
+#if BASICRENDERER_HAS_DIRECTSTORAGE
+    if (m_impl != nullptr) {
+        std::vector<DirectStorageAsyncRequestHandle> activeRequests;
+        {
+            std::scoped_lock lock(m_impl->activeRequestsMutex);
+            activeRequests = m_impl->activeRequests;
+        }
+
+        if (!activeRequests.empty()) {
+            std::string waitMessage;
+            WaitForRequests(activeRequests, &waitMessage);
+            if (!waitMessage.empty()) {
+                spdlog::debug("DirectStorageManager: cleanup wait reported '{}'", waitMessage);
+            }
+        }
+
+        {
+            std::scoped_lock lock(m_impl->activeRequestsMutex);
+            m_impl->activeRequests.clear();
+        }
+    }
+#endif
+
     m_impl.reset();
     m_initialized = false;
     m_available = false;
@@ -614,6 +694,13 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
         }
         file = it->second;
     }
+    const uint64_t fileSize = GetDirectStorageFileSize(file.Get());
+    if (fileSize == 0u) {
+        if (outMessage) {
+            *outMessage = "failed to query DirectStorage file size";
+        }
+        return {};
+    }
 
     auto nativeDevice = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
     if (nativeDevice == nullptr) {
@@ -660,6 +747,8 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
 
     std::vector<DSTORAGE_REQUEST> requests;
     requests.reserve(regions.size());
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> destinationResourceRefs;
+    destinationResourceRefs.reserve(regions.size());
 
     {
         std::scoped_lock queueLock(m_impl->gpuQueueMutex);
@@ -668,6 +757,12 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
             if (!region.destinationResource.IsValid() || region.sourceSizeBytes == 0 || region.uncompressedSizeBytes == 0) {
                 if (outMessage) {
                     *outMessage = "invalid DirectStorage buffer region request";
+                }
+                return {};
+            }
+            if (!IsFileRangeValid(fileSize, region.sourceOffset, region.sourceSizeBytes)) {
+                if (outMessage) {
+                    *outMessage = "DirectStorage buffer upload source range is out of bounds";
                 }
                 return {};
             }
@@ -681,6 +776,7 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
             }
 
             auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
+            destinationResourceRefs.push_back(AddResourceRef(nativeResource));
             const D3D12_RESOURCE_DESC resourceDesc = nativeResource->GetDesc();
             if (resourceDesc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) {
                 if (outMessage) {
@@ -744,13 +840,17 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadBufferRegions
     state->fenceValue = kFenceValue;
     state->statusArray = std::move(statusArray);
     state->fence = std::move(fence);
+    state->file = std::move(file);
+    state->destinationResources = std::move(destinationResourceRefs);
     state->completionEvent = std::move(completionEvent);
 
     if (outMessage) {
         *outMessage = state->pendingMessage;
     }
 
-    return DirectStorageAsyncRequestHandle(std::move(state));
+    DirectStorageAsyncRequestHandle handle(std::move(state));
+    RegisterActiveRequest(handle);
+    return handle;
 #endif
 }
 
@@ -828,6 +928,13 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
         }
         file = it->second;
     }
+    const uint64_t fileSize = GetDirectStorageFileSize(file.Get());
+    if (fileSize == 0u) {
+        if (outMessage) {
+            *outMessage = "failed to query DirectStorage file size";
+        }
+        return {};
+    }
 
     rhi::D3D12ResourceInfo resourceInfo{};
     if (!rhi::QueryNativeResource(destinationResource, rhi::RHI_IID_D3D12_RESOURCE, &resourceInfo, sizeof(resourceInfo)) || resourceInfo.resource == nullptr) {
@@ -838,6 +945,14 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
     }
 
     auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
+    Microsoft::WRL::ComPtr<ID3D12Resource> destinationResourceRef = AddResourceRef(nativeResource);
+    const D3D12_RESOURCE_DESC destinationDesc = nativeResource->GetDesc();
+    if (destinationDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) {
+        if (outMessage) {
+            *outMessage = "DirectStorage texture upload destination is not a texture resource";
+        }
+        return {};
+    }
 
     Microsoft::WRL::ComPtr<ID3D12Device> nativeDevice;
     const HRESULT getDeviceHr = nativeResource->GetDevice(IID_PPV_ARGS(nativeDevice.ReleaseAndGetAddressOf()));
@@ -890,6 +1005,24 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
         if (region.sourceSizeBytes == 0 || region.uncompressedSizeBytes == 0 || region.width == 0 || region.height == 0 || region.depth == 0) {
             if (outMessage) {
                 *outMessage = "invalid texture region request";
+            }
+            return {};
+        }
+        if (region.uncompressedSizeBytes != region.sourceSizeBytes) {
+            if (outMessage) {
+                *outMessage = "uncompressed texture region upload size does not match source size";
+            }
+            return {};
+        }
+        if (!IsFileRangeValid(fileSize, region.sourceOffset, region.sourceSizeBytes)) {
+            if (outMessage) {
+                *outMessage = "DirectStorage texture upload source range is out of bounds";
+            }
+            return {};
+        }
+        if (!IsTextureRegionValid(destinationDesc, region)) {
+            if (outMessage) {
+                *outMessage = "DirectStorage texture upload destination region is out of bounds";
             }
             return {};
         }
@@ -951,13 +1084,17 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureRegion
     state->fenceValue = kFenceValue;
     state->statusArray = std::move(statusArray);
     state->fence = std::move(fence);
+    state->file = std::move(file);
+    state->destinationResources.push_back(std::move(destinationResourceRef));
     state->completionEvent = std::move(completionEvent);
 
     if (outMessage) {
         *outMessage = state->pendingMessage;
     }
 
-    return DirectStorageAsyncRequestHandle(std::move(state));
+    DirectStorageAsyncRequestHandle handle(std::move(state));
+    RegisterActiveRequest(handle);
+    return handle;
 #endif
 }
 
@@ -1066,6 +1203,19 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
         }
         file = it->second;
     }
+    const uint64_t fileSize = GetDirectStorageFileSize(file.Get());
+    if (fileSize == 0u) {
+        if (outMessage) {
+            *outMessage = "failed to query DirectStorage file size";
+        }
+        return {};
+    }
+    if (!IsFileRangeValid(fileSize, range.sourceOffset, range.sourceSizeBytes)) {
+        if (outMessage) {
+            *outMessage = "DirectStorage texture range upload source range is out of bounds";
+        }
+        return {};
+    }
 
     rhi::D3D12ResourceInfo resourceInfo{};
     if (!rhi::QueryNativeResource(destinationResource, rhi::RHI_IID_D3D12_RESOURCE, &resourceInfo, sizeof(resourceInfo)) || resourceInfo.resource == nullptr) {
@@ -1076,7 +1226,15 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     }
 
     auto* nativeResource = static_cast<ID3D12Resource*>(resourceInfo.resource);
+    Microsoft::WRL::ComPtr<ID3D12Resource> destinationResourceRef = AddResourceRef(nativeResource);
     const D3D12_RESOURCE_DESC destinationDesc = nativeResource->GetDesc();
+    if (destinationDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) {
+        if (outMessage) {
+            *outMessage = "DirectStorage texture range upload destination is not a texture resource";
+        }
+        return {};
+    }
+
     const uint32_t totalSubresourceCount = static_cast<uint32_t>(destinationDesc.MipLevels) * static_cast<uint32_t>(destinationDesc.DepthOrArraySize);
     if (totalSubresourceCount == 0) {
         if (outMessage) {
@@ -1087,9 +1245,19 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
 
     const uint32_t firstSubresource = range.firstSubresource;
     const uint32_t subresourceCount = range.subresourceCount == 0 ? totalSubresourceCount : range.subresourceCount;
-    if (firstSubresource >= totalSubresourceCount || subresourceCount == 0 || firstSubresource + subresourceCount > totalSubresourceCount) {
+    if (firstSubresource >= totalSubresourceCount ||
+        subresourceCount == 0 ||
+        subresourceCount > totalSubresourceCount - firstSubresource) {
         if (outMessage) {
             *outMessage = "invalid destination texture subresource range";
+        }
+        return {};
+    }
+
+    const uint32_t uncompressedSizeBytes = range.uncompressedSizeBytes == 0 ? range.sourceSizeBytes : range.uncompressedSizeBytes;
+    if (uncompressedSizeBytes != range.sourceSizeBytes) {
+        if (outMessage) {
+            *outMessage = "uncompressed texture range upload size does not match source size";
         }
         return {};
     }
@@ -1139,7 +1307,7 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     request.Destination.MultipleSubresourcesRange.Resource = nativeResource;
     request.Destination.MultipleSubresourcesRange.FirstSubresource = firstSubresource;
     request.Destination.MultipleSubresourcesRange.NumSubresources = subresourceCount;
-    request.UncompressedSize = range.uncompressedSizeBytes == 0 ? range.sourceSizeBytes : range.uncompressedSizeBytes;
+    request.UncompressedSize = uncompressedSizeBytes;
     request.CancellationTag = reinterpret_cast<uint64_t>(this);
 
     constexpr uint64_t kFenceValue = 1;
@@ -1180,13 +1348,17 @@ DirectStorageAsyncRequestHandle DirectStorageManager::EnqueueUploadTextureSubres
     state->fenceValue = kFenceValue;
     state->statusArray = std::move(statusArray);
     state->fence = std::move(fence);
+    state->file = std::move(file);
+    state->destinationResources.push_back(std::move(destinationResourceRef));
     state->completionEvent = std::move(completionEvent);
 
     if (outMessage) {
         *outMessage = state->pendingMessage;
     }
 
-    return DirectStorageAsyncRequestHandle(std::move(state));
+    DirectStorageAsyncRequestHandle handle(std::move(state));
+    RegisterActiveRequest(handle);
+    return handle;
 #endif
 }
 
@@ -1389,4 +1561,27 @@ bool DirectStorageManager::HasPrimedFileHandle(const std::wstring& path) const {
 #endif
 }
 
+}
+
+void br::DirectStorageManager::RegisterActiveRequest(const br::DirectStorageAsyncRequestHandle& handle) {
+#if BASICRENDERER_HAS_DIRECTSTORAGE
+    if (m_impl == nullptr || !handle.IsValid()) {
+        return;
+    }
+
+    std::scoped_lock lock(m_impl->activeRequestsMutex);
+    m_impl->activeRequests.erase(
+        std::remove_if(
+            m_impl->activeRequests.begin(),
+            m_impl->activeRequests.end(),
+            [](const br::DirectStorageAsyncRequestHandle& active) {
+                return !active.m_state ||
+                    active.m_state->state.load(std::memory_order_acquire) == br::DirectStorageAsyncRequestState::Ready ||
+                    active.m_state->state.load(std::memory_order_acquire) == br::DirectStorageAsyncRequestState::Failed;
+            }),
+        m_impl->activeRequests.end());
+    m_impl->activeRequests.push_back(handle);
+#else
+    (void)handle;
+#endif
 }
