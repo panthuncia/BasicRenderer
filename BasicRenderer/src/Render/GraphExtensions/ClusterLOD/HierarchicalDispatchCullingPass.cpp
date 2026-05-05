@@ -1153,6 +1153,54 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
             0);
     }
 
+    if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
+        std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
+        const bool useHistoryDepth = m_isFirstPass;
+        for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
+            viewDepthSrvIndices[i].cameraBufferIndex = i;
+            viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
+        }
+
+        context.viewManager->ForEachView([&](uint64_t viewID) {
+            const auto* view = context.viewManager->Get(viewID);
+            if (!view) {
+                return;
+            }
+
+            const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
+            if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
+                return;
+            }
+
+            const auto linearDepthMap = useHistoryDepth
+                ? (view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr)
+                : view->gpu.linearDepthMap;
+            if (!linearDepthMap) {
+                return;
+            }
+
+            uint32_t slice = 0;
+            if (view->cameraInfo.depthBufferArrayIndex >= 0) {
+                slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
+            }
+
+            const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
+            if (maxSlices == 0) {
+                return;
+            }
+
+            slice = (std::min)(slice, maxSlices - 1);
+            viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
+            viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
+        });
+
+        BUFFER_UPLOAD(
+            viewDepthSrvIndices.data(),
+            static_cast<uint32_t>(viewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
+            rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
+            0);
+    }
+
     if (!m_isFirstPass) {
         return;
     }
@@ -1209,51 +1257,6 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
         sizeof(nodeGpuInputs),
         rg::runtime::UploadTarget::FromShared(m_occlusionNodeGpuInputsBuffer),
         0);
-
-    if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
-        std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
-        for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
-            viewDepthSrvIndices[i].cameraBufferIndex = i;
-            viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
-        }
-
-        context.viewManager->ForEachView([&](uint64_t viewID) {
-            const auto* view = context.viewManager->Get(viewID);
-            if (!view) {
-                return;
-            }
-
-            const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
-            if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
-                return;
-            }
-
-            const auto linearDepthMap = view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr;
-            if (!linearDepthMap) {
-                return;
-            }
-
-            uint32_t slice = 0;
-            if (view->cameraInfo.depthBufferArrayIndex >= 0) {
-                slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
-            }
-
-            const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
-            if (maxSlices == 0) {
-                return;
-            }
-
-            slice = (std::min)(slice, maxSlices - 1);
-            viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
-            viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
-        });
-
-        BUFFER_UPLOAD(
-            viewDepthSrvIndices.data(),
-            static_cast<uint32_t>(viewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
-            rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
-            0);
-    }
 
     if (IsCLodWorkGraphTelemetryEnabled()) {
         std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);

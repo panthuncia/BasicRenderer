@@ -306,7 +306,7 @@ inline constexpr uint32_t CLodVirtualShadowMaxPageTableResolution =
 inline constexpr uint32_t CLodVirtualShadowMinBackingResolution = 4096u;
 inline constexpr uint32_t CLodVirtualShadowMediumBackingResolution = 8192u;
 inline constexpr uint32_t CLodVirtualShadowMaxBackingResolution = 16384u;
-inline constexpr uint32_t CLodVirtualShadowDefaultBackingResolution = CLodVirtualShadowMaxBackingResolution;
+inline constexpr uint32_t CLodVirtualShadowDefaultBackingResolution = CLodVirtualShadowMediumBackingResolution;
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalAtlasPagesWide =
     CLodVirtualShadowDefaultBackingResolution / CLodVirtualShadowPhysicalPageSize;
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalAtlasPagesHigh =

@@ -187,8 +187,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DirectStorageManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
-    UpscalingManager::GetInstance().InitFFX(); // Needs device
-    FFXManager::GetInstance().InitFFX();
     SetSettings();
     RendererECSManager::GetInstance().Initialize();
     TrackedEntityToken::Hooks trackedEntityHooks{};
@@ -358,7 +356,9 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         statisticsService->Initialize();
     }
 
+    UpscalingManager::GetInstance().InitFFX(); // Needs device and must precede Setup for FSR queries.
     UpscalingManager::GetInstance().Setup();
+    FFXManager::GetInstance().InitFFX();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after UpscalingManager::Setup");
 
     CreateTextures();
@@ -1154,7 +1154,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<CLodCullingBackend>(CLodCullingBackendSettingName, CLodCullingBackend::PureCompute);
     settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
-    settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::PageJob);
+    settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::Reyes);
     settingsManager.registerSetting<CLodTransparencyMode>(CLodTransparencyModeSettingName, CLodTransparencyMode::AVBOIT);
     settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);
     settingsManager.registerSetting<float>(
@@ -1200,7 +1200,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
-    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
+    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, false);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
     settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName, CLodVirtualShadowDefaultBackingResolution);
     settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName, CLodVirtualShadowDefaultPhysicalPageCount);
@@ -2493,7 +2493,7 @@ void Renderer::CreateRenderGraph() {
                 m_managerInterface.GetMaterialManager()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        uint maxClusters = 1500000; // TODO: make this configurable based on scene content   
+        uint maxClusters = 2000000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
             std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");

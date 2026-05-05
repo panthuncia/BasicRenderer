@@ -672,6 +672,9 @@ void CLodExtension::InitializeCoreResources()
     m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
     m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
 
+    m_viewDepthSrvIndicesBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
+    m_viewDepthSrvIndicesBufferPhase2->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer Phase2"));
+
     m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
 
@@ -786,6 +789,7 @@ void CLodExtension::TagCoreResourceUsages()
     tagBufferUsage(m_occlusionReplayStateBuffer, "Cluster LOD visibility");
     tagBufferUsage(m_occlusionNodeGpuInputsBuffer, "Cluster LOD visibility");
     tagBufferUsage(m_viewDepthSrvIndicesBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_viewDepthSrvIndicesBufferPhase2, "Cluster LOD visibility");
     tagBufferUsage(m_rasterBucketsOffsetsBuffer, "Cluster LOD rasterization");
     tagBufferUsage(m_rasterBucketsBlockSumsBuffer, "Cluster LOD rasterization");
     tagBufferUsage(m_rasterBucketsScannedBlockSumsBuffer, "Cluster LOD rasterization");
@@ -839,6 +843,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_occlusionReplayStateBuffer);
     releaseBufferBacking(m_occlusionNodeGpuInputsBuffer);
     releaseBufferBacking(m_viewDepthSrvIndicesBuffer);
+    releaseBufferBacking(m_viewDepthSrvIndicesBufferPhase2);
     releaseBufferBacking(m_histogramIndirectCommand);
     releaseBufferBacking(m_rasterBucketsHistogramBuffer);
     releaseBufferBacking(m_rasterBucketsOffsetsBuffer);
@@ -1444,7 +1449,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_occlusionReplayBuffer,
                     m_occlusionReplayStateBuffer,
                     m_occlusionNodeGpuInputsBuffer,
-                    m_viewDepthSrvIndicesBuffer,
+                    isPhase1 ? m_viewDepthSrvIndicesBuffer : m_viewDepthSrvIndicesBufferPhase2,
                     m_viewRasterInfoBuffer,
                     traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
                     slabGroup,
@@ -1469,7 +1474,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_occlusionReplayBuffer,
                     m_occlusionReplayStateBuffer,
                     m_occlusionNodeGpuInputsBuffer,
-                    m_viewDepthSrvIndicesBuffer,
+                    isPhase1 ? m_viewDepthSrvIndicesBuffer : m_viewDepthSrvIndicesBufferPhase2,
                     m_viewRasterInfoBuffer,
                     traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
                     slabGroup,

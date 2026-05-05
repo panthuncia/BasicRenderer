@@ -695,22 +695,6 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         }
     }
 
-    if (!m_isFirstPass) {
-        return;
-    }
-
-    CLodReplayBufferState replayState{};
-    replayState.nodeWriteCount = 0;
-    replayState.meshletWriteCount = 0;
-    replayState.nodeDropped = 0;
-    replayState.meshletDropped = 0;
-    replayState.visibleClusterCombinedCount = 0;
-    BUFFER_UPLOAD(
-        &replayState,
-        sizeof(CLodReplayBufferState),
-        rg::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
-        0);
-
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
         std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
         const bool useHistoryDepth = m_isFirstPass;
@@ -758,6 +742,22 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
             rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
             0);
     }
+
+    if (!m_isFirstPass) {
+        return;
+    }
+
+    CLodReplayBufferState replayState{};
+    replayState.nodeWriteCount = 0;
+    replayState.meshletWriteCount = 0;
+    replayState.nodeDropped = 0;
+    replayState.meshletDropped = 0;
+    replayState.visibleClusterCombinedCount = 0;
+    BUFFER_UPLOAD(
+        &replayState,
+        sizeof(CLodReplayBufferState),
+        rg::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
+        0);
 
     CLodNodeGpuInput nodeGpuInputs[3] = {};
     CLodMultiNodeGpuInput multiNodeGpuInput{};
