@@ -17,6 +17,17 @@
 namespace shadercache {
 namespace {
 
+std::wstring GetCacheDirectory(BinaryFormat binaryFormat)
+{
+    switch (binaryFormat) {
+    case BinaryFormat::Spirv:
+        return L"shaders/spirv";
+    case BinaryFormat::Dxil:
+    default:
+        return L"shaders/dxil";
+    }
+}
+
 template<typename T>
 void WritePod(std::vector<std::byte>& out, const T& value)
 {
@@ -120,6 +131,7 @@ void WriteCacheData(std::vector<std::byte>& out, const CacheData& data)
 {
     WritePod(out, data.schemaVersion);
     WritePod(out, data.buildConfigHash);
+    WritePod(out, data.binaryFormat);
     WritePod(out, data.artifactKind);
     WritePod(out, data.resourceIDsHash);
 
@@ -132,7 +144,7 @@ void WriteCacheData(std::vector<std::byte>& out, const CacheData& data)
         WritePod(out, blob.kind);
         WriteString(out, blob.entryPoint);
         WriteString(out, blob.target);
-        WriteBytes(out, blob.dxil);
+        WriteBytes(out, blob.bytecode);
     }
 }
 
@@ -146,6 +158,9 @@ bool ReadCacheData(const std::vector<std::byte>& in, CacheData& out)
         return false;
     }
     if (!ReadPod(in, offset, out.buildConfigHash)) {
+        return false;
+    }
+    if (!ReadPod(in, offset, out.binaryFormat)) {
         return false;
     }
     if (!ReadPod(in, offset, out.artifactKind)) {
@@ -181,7 +196,7 @@ bool ReadCacheData(const std::vector<std::byte>& in, CacheData& out)
         if (!ReadString(in, offset, blob.target)) {
             return false;
         }
-        if (!ReadBytes(in, offset, blob.dxil)) {
+        if (!ReadBytes(in, offset, blob.bytecode)) {
             return false;
         }
         out.blobs.push_back(std::move(blob));
@@ -217,14 +232,13 @@ bool WriteFileBytes(const std::wstring& path, const std::vector<std::byte>& byte
     }
     return file.good();
 }
-
-std::mutex& GetMutexForKey(const std::wstring& fileName)
+std::mutex& GetMutexForKey(const std::wstring& cachePath)
 {
     static std::mutex tableMutex;
     static std::unordered_map<std::wstring, std::unique_ptr<std::mutex>> mutexTable;
 
     std::lock_guard<std::mutex> lock(tableMutex);
-    auto& mutexPtr = mutexTable[fileName];
+    auto& mutexPtr = mutexTable[cachePath];
     if (!mutexPtr) {
         mutexPtr = std::make_unique<std::mutex>();
     }
@@ -236,6 +250,7 @@ std::mutex& GetMutexForKey(const std::wstring& fileName)
 std::wstring BuildCacheFileName(const CacheKey& key, uint64_t buildConfigHash)
 {
     uint64_t seed = 0;
+    util::hash_combine_u64(seed, static_cast<uint8_t>(key.binaryFormat));
     util::hash_combine_u64(seed, static_cast<uint8_t>(key.artifactKind));
     util::hash_combine_u64(seed, buildConfigHash);
     util::hash_combine_u64(seed, key.identityHash);
@@ -249,7 +264,7 @@ std::wstring BuildCacheFileName(const CacheKey& key, uint64_t buildConfigHash)
 std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConfigHash)
 {
     const std::wstring fileName = BuildCacheFileName(key, expectedBuildConfigHash);
-    const std::wstring cachePath = GetCacheFilePath(fileName, L"shaders");
+    const std::wstring cachePath = GetCacheFilePath(fileName, GetCacheDirectory(key.binaryFormat));
     if (!std::filesystem::exists(cachePath)) {
         return std::nullopt;
     }
@@ -260,7 +275,7 @@ std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConf
             spdlog::warn("Shader cache file '{}' is invalid; treating as miss.", ws2s(cachePath));
             return std::nullopt;
         }
-        if (data.buildConfigHash != expectedBuildConfigHash || data.artifactKind != key.artifactKind) {
+        if (data.buildConfigHash != expectedBuildConfigHash || data.binaryFormat != key.binaryFormat || data.artifactKind != key.artifactKind) {
             return std::nullopt;
         }
         return data;
@@ -273,13 +288,13 @@ std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConf
 
 bool Save(const CacheKey& key, const CacheData& data)
 {
-    if (data.schemaVersion != kSchemaVersion || data.artifactKind != key.artifactKind) {
+    if (data.schemaVersion != kSchemaVersion || data.binaryFormat != key.binaryFormat || data.artifactKind != key.artifactKind) {
         return false;
     }
 
     const std::wstring fileName = BuildCacheFileName(key, data.buildConfigHash);
-    const std::wstring cachePath = GetCacheFilePath(fileName, L"shaders");
-    std::lock_guard<std::mutex> lock(GetMutexForKey(fileName));
+    const std::wstring cachePath = GetCacheFilePath(fileName, GetCacheDirectory(key.binaryFormat));
+    std::lock_guard<std::mutex> lock(GetMutexForKey(cachePath));
 
     std::vector<std::byte> bytes;
     WriteCacheData(bytes, data);

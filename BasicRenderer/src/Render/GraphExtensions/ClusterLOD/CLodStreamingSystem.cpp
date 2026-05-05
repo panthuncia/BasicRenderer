@@ -370,7 +370,6 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
     // which risks reading stale or zeroed streaming counters.
     if (m_streamingReadbackFenceHandle.IsValid() && !m_readbackStagingSlots.empty()) {
         uint32_t selectedSlot = UINT32_MAX;
-        uint64_t fv = 0;
         {
             std::lock_guard lock(m_streamingWorkerMutex);
             // Find a slot that the worker has already processed (inFlight == false).
@@ -384,9 +383,8 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
 
             if (selectedSlot != UINT32_MAX) {
                 m_readbackStagingCursor = (selectedSlot + 1u) % static_cast<uint32_t>(m_readbackStagingSlots.size());
-                fv = m_streamingReadbackFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1;
                 auto& slot = m_readbackStagingSlots[selectedSlot];
-                slot.fenceValue = fv;
+                slot.fenceValue = 0;
                 slot.inFlight = true;
             }
         }
@@ -409,13 +407,31 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                         slot.requestsStaging,
                         slot.usedGroupsCounterStaging,
                         slot.usedGroupsBufferStaging,
-                        m_streamingReadbackFenceHandle,
-                        fv))
-                    .At(RenderGraph::ExternalInsertPoint::After("CLodShadow::HierarchialCullingPass2"))
-                    .PreferQueue(QueueKind::Copy));
+                        [this, selectedSlot]() -> PassReturn {
+                            if (!m_streamingReadbackFenceHandle.IsValid()) {
+                                return {};
+                            }
 
-            // Wake the background worker so it can HostWait for the new fence value.
-            m_streamingWorkerCV.notify_one();
+                            const uint64_t fenceValue = m_streamingReadbackFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+                            {
+                                std::lock_guard lock(m_streamingWorkerMutex);
+                                if (selectedSlot >= m_readbackStagingSlots.size()) {
+                                    return {};
+                                }
+
+                                auto& armedSlot = m_readbackStagingSlots[selectedSlot];
+                                if (!armedSlot.inFlight) {
+                                    return {};
+                                }
+
+                                armedSlot.fenceValue = fenceValue;
+                            }
+
+                            m_streamingWorkerCV.notify_one();
+                            return { m_streamingReadbackFenceHandle, fenceValue };
+                        }))
+                    .At(RenderGraph::ExternalInsertPoint::After("CLodShadow::HierarchicalCullingPass2"))
+                    .PreferQueue(QueueKind::Copy));
         }
     }
 }
@@ -1430,7 +1446,7 @@ void CLodStreamingSystem::StreamingWorkerMain() {
             uint32_t totalUsedGroupsCount = 0;
 
             for (auto& slot : m_readbackStagingSlots) {
-                if (!slot.inFlight || slot.fenceValue > target) {
+                if (!slot.inFlight || slot.fenceValue == 0 || slot.fenceValue > target) {
                     continue;
                 }
 

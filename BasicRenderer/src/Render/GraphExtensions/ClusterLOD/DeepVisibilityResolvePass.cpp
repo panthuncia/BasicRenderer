@@ -51,6 +51,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::PerMaterialDataBuffer,
             Builtin::PerMaterialOpenPBRDataBuffer,
             Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Environment::InfoBuffer,
             Builtin::CameraBuffer,
@@ -76,6 +77,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             m_deepVisibilityNodesBuffer,
             m_deepVisibilityCounterBuffer,
             m_deepVisibilityOverflowCounterBuffer)
+        .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithUnorderedAccess(Builtin::Color::HDRColorTarget)
         .WithUnorderedAccess(Builtin::DebugVisualization)
         .WithUnorderedAccess(m_deepVisibilityStatsBuffer);

@@ -22,7 +22,7 @@ inline bool operator==(const CLodAsyncUploadInputs& a, const CLodAsyncUploadInpu
 }
 
 // CopyPass that drains the CLod UploadInstance on a dedicated async copy queue.
-class CLodAsyncUploadPass final : public CopyPass {
+class CLodAsyncUploadPass final : public CopyPass, public IHasImmediateModeCommands {
 public:
     explicit CLodAsyncUploadPass(CLodAsyncUploadInputs inputs) {
         SetInputs(std::move(inputs));

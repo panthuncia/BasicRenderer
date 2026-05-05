@@ -10,6 +10,7 @@
 #include <bit>
 #include <cmath>
 #include <array>
+#include <functional>
 #include <cstring>
 #include <mutex>
 #include <atomic>
@@ -1536,6 +1537,35 @@ namespace
 		return sphere;
 	}
 
+	uint32_t ComputeCLodTraversalDepth(const std::vector<ClusterLODNode>& nodes, uint32_t rootNodeIndex)
+	{
+		if (rootNodeIndex >= nodes.size()) {
+			return 0u;
+		}
+
+		std::function<uint32_t(uint32_t)> computeNodeDepth = [&](uint32_t nodeIndex) -> uint32_t {
+			if (nodeIndex >= nodes.size()) {
+				return 0u;
+			}
+
+			const ClusterLODNode& node = nodes[nodeIndex];
+			if (node.range.isGroup != 0u) {
+				return 1u;
+			}
+
+			const uint32_t childCount = node.range.countMinusOne + 1u;
+			uint32_t maxChildDepth = 0u;
+			for (uint32_t childIndex = 0; childIndex < childCount; ++childIndex)
+			{
+				maxChildDepth = std::max(maxChildDepth, computeNodeDepth(node.range.indexOrOffset + childIndex));
+			}
+
+			return 1u + maxChildDepth;
+		};
+
+		return computeNodeDepth(rootNodeIndex);
+	}
+
 	struct ClusterLODBuildState
 	{
 		std::vector<ClusterLODGroup> groups;
@@ -1555,6 +1585,7 @@ namespace
 		std::vector<uint32_t> lodLevelRoots;
 		uint32_t topRootNode = 0;
 		uint32_t maxDepth = 0;
+		uint32_t maxTraversalDepth = 0;
 		VoxelGroupMapping voxelGroupMapping;
 	};
 
@@ -1907,6 +1938,7 @@ namespace
 			root = BuildInternalNode(rootChildOffset, rootChildCount);
 
 			state.topRootNode = 0;
+			state.maxTraversalDepth = ComputeCLodTraversalDepth(state.nodes, state.topRootNode);
 		}
 	}
 }
@@ -2698,6 +2730,10 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	artifacts.prebuiltData.objectBoundingSphere = BuildObjectBoundingSphereFromRootNode(state.nodes, state.topRootNode);
 	artifacts.prebuiltData.groupChunks = std::move(state.groupChunks);
 	artifacts.prebuiltData.nodes = std::move(state.nodes);
+	artifacts.prebuiltData.lodNodeRanges = std::move(state.lodNodeRanges);
+	artifacts.prebuiltData.lodLevelRoots = std::move(state.lodLevelRoots);
+	artifacts.prebuiltData.maxDepth = state.maxDepth;
+	artifacts.prebuiltData.maxTraversalDepth = state.maxTraversalDepth;
 	artifacts.prebuiltData.voxelGroupMapping = std::move(state.voxelGroupMapping);
 
 	artifacts.cacheBuildData.groupPageBlobs = std::move(state.groupPageBlobs);

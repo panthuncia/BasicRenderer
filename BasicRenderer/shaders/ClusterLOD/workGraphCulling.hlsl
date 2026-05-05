@@ -6,6 +6,9 @@
 #include "include/occlusionCulling.hlsli"
 #include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
+#ifdef CLOD_COMPUTE_INCLUDE_ONLY
+#include "PerPassRootConstants/clodPureComputeCullingRootConstants.h"
+#endif
 #include "include/clodVirtualShadowClipmap.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
@@ -23,6 +26,10 @@
 
 #ifndef CLOD_WG_ENABLE_SW_NODE_OUTPUT
 #define CLOD_WG_ENABLE_SW_NODE_OUTPUT CLOD_WG_ENABLE_SW_CLASSIFICATION
+#endif
+
+#ifndef CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
+#define CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER 0
 #endif
 
 // Set to 1 to enable occlusion culling for VSM / shadow cameras (ortho).
@@ -89,6 +96,9 @@ static const uint WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES = 14;
 static const uint WG_COUNTER_CLUSTER_CULL_SURVIVING_LANES = 15;
 static const uint WG_COUNTER_CLUSTER_CULL_ZERO_SURVIVOR_WAVES = 16;
 static const uint WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES = 17;
+static const uint WG_COUNTER_CLUSTER_CULL_BUCKET_RECORDS_DISPATCHED = 100;
+static const uint WG_COUNTER_CLUSTER_CULL_DENSE_EXPANSION_BUCKETS = 101;
+static const uint WG_COUNTER_CLUSTER_CULL_DENSE_CLUSTERS_DISPATCHED = 102;
 
 static const uint WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES = 18;
 static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS = 19;
@@ -115,76 +125,74 @@ static const uint WG_COUNTER_PHASE2_REPLAY_MESHLET_BUCKET_RECORDS_EMITTED = 35;
 static const uint WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED = 36;
 static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 37;
 
-static const uint WG_COUNTER_TRAVERSE_SEGMENT_RECORDS = 38;
+static const uint WG_COUNTER_SEGMENT_EVALUATE_THREADS = 38;
+static const uint WG_COUNTER_SEGMENT_EVALUATE_SEGMENT_RECORDS = 39;
+static const uint WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS = 40;
+static const uint WG_COUNTER_SEGMENT_EVALUATE_REFINED_TRAVERSAL_THREADS = 41;
+static const uint WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS = 42;
+static const uint WG_COUNTER_SEGMENT_EVALUATE_COALESCED_LAUNCHES = 43;
+static const uint WG_COUNTER_SEGMENT_EVALUATE_COALESCED_INPUT_RECORDS = 44;
 
-static const uint WG_COUNTER_SEGMENT_EVALUATE_THREADS = 39;
-static const uint WG_COUNTER_SEGMENT_EVALUATE_SEGMENT_RECORDS = 40;
-static const uint WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS = 41;
-static const uint WG_COUNTER_SEGMENT_EVALUATE_REFINED_TRAVERSAL_THREADS = 42;
-static const uint WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS = 43;
-static const uint WG_COUNTER_SEGMENT_EVALUATE_COALESCED_LAUNCHES = 44;
-static const uint WG_COUNTER_SEGMENT_EVALUATE_COALESCED_INPUT_RECORDS = 45;
+static const uint WG_COUNTER_CLUSTER_CULL_MESHLET_ITERATIONS = 45;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM = 46;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2 = 47;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OCCLUSION = 48;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OUT_OF_RANGE = 49;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_PAGE_BOUNDS = 50;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES = 51;
 
-static const uint WG_COUNTER_CLUSTER_CULL_MESHLET_ITERATIONS = 46;
-static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM = 47;
-static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2 = 48;
-static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OCCLUSION = 49;
-static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OUT_OF_RANGE = 50;
-static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_PAGE_BOUNDS = 51;
-static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES = 52;
+static const uint WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED = 52;
+static const uint WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED = 53;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_CLIPMAP_MISSES = 54;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_HITS = 55;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_FRUSTUM = 56;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_LEFT = 57;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_RIGHT = 58;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_BOTTOM = 59;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_TOP = 60;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_NEAR = 61;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_FAR = 62;
+static const uint WG_COUNTER_OBJECT_CULL_INVALID_BOUNDS = 63;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES = 64;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES_CLIPPED = 65;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_COARSE_MIP_CHECKS = 66;
 
-static const uint WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED = 53;
-static const uint WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED = 54;
-static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_CLIPMAP_MISSES = 55;
-static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_HITS = 56;
-static const uint WG_COUNTER_OBJECT_CULL_REJECTED_FRUSTUM = 57;
-static const uint WG_COUNTER_OBJECT_CULL_REJECTED_LEFT = 58;
-static const uint WG_COUNTER_OBJECT_CULL_REJECTED_RIGHT = 59;
-static const uint WG_COUNTER_OBJECT_CULL_REJECTED_BOTTOM = 60;
-static const uint WG_COUNTER_OBJECT_CULL_REJECTED_TOP = 61;
-static const uint WG_COUNTER_OBJECT_CULL_REJECTED_NEAR = 62;
-static const uint WG_COUNTER_OBJECT_CULL_REJECTED_FAR = 63;
-static const uint WG_COUNTER_OBJECT_CULL_INVALID_BOUNDS = 64;
-static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES = 65;
-static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES_CLIPPED = 66;
-static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_COARSE_MIP_CHECKS = 67;
+static const uint WG_COUNTER_PAGEJOB_BUILD_CLUSTERS_PROCESSED = 67;
+static const uint WG_COUNTER_PAGEJOB_BUILD_PAGES_EMITTED = 68;
+static const uint WG_COUNTER_PAGEJOB_BUILD_FALLBACK_TO_HW = 69;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIANGLES_CLIPPED = 70;
+static const uint WG_COUNTER_PAGEJOB_RASTER_PIXELS_WRITTEN = 71;
+static const uint WG_COUNTER_PAGEJOB_RASTER_FLAG_WRITES = 72;
 
-static const uint WG_COUNTER_PAGEJOB_BUILD_CLUSTERS_PROCESSED = 68;
-static const uint WG_COUNTER_PAGEJOB_BUILD_PAGES_EMITTED = 69;
-static const uint WG_COUNTER_PAGEJOB_BUILD_FALLBACK_TO_HW = 70;
-static const uint WG_COUNTER_PAGEJOB_RASTER_TRIANGLES_CLIPPED = 71;
-static const uint WG_COUNTER_PAGEJOB_RASTER_PIXELS_WRITTEN = 72;
-static const uint WG_COUNTER_PAGEJOB_RASTER_FLAG_WRITES = 73;
+static const uint WG_COUNTER_CLASSIFY_CONTRIBUTING = 73;
+static const uint WG_COUNTER_CLASSIFY_ROUTED_HW = 74;
+static const uint WG_COUNTER_CLASSIFY_ROUTED_SW = 75;
+static const uint WG_COUNTER_CLASSIFY_ROUTED_PAGEJOB = 76;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_REYES_DISPLACEMENT = 77;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_ALPHA_TESTED = 78;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_NO_CLIPMAP_INDEX = 79;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_BELOW_THRESHOLD = 80;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_DISABLED = 81;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_ALREADY_SW = 82;
+static const uint WG_COUNTER_CLASSIFY_SW_DISABLED = 83;
 
-static const uint WG_COUNTER_CLASSIFY_CONTRIBUTING = 74;
-static const uint WG_COUNTER_CLASSIFY_ROUTED_HW = 75;
-static const uint WG_COUNTER_CLASSIFY_ROUTED_SW = 76;
-static const uint WG_COUNTER_CLASSIFY_ROUTED_PAGEJOB = 77;
-static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_REYES_DISPLACEMENT = 78;
-static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_ALPHA_TESTED = 79;
-static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_NO_CLIPMAP_INDEX = 80;
-static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_BELOW_THRESHOLD = 81;
-static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_DISABLED = 82;
-static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_ALREADY_SW = 83;
-static const uint WG_COUNTER_CLASSIFY_SW_DISABLED = 84;
+static const uint WG_COUNTER_PAGEJOB_BUILD_GROUPS_LAUNCHED = 84;
+static const uint WG_COUNTER_PAGEJOB_BUILD_NO_CLIPMAP = 85;
+static const uint WG_COUNTER_PAGEJOB_BUILD_PAGES_SCANNED = 86;
+static const uint WG_COUNTER_PAGEJOB_BUILD_ZERO_DIRTY_PAGES = 87;
+static const uint WG_COUNTER_PAGEJOB_RASTER_JOBS_LAUNCHED = 88;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TOTAL_TRIS = 89;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_DEPTH_REJECT = 90;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_BACKFACE_CULL = 91;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_AABB_EMPTY = 92;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_RASTERIZED = 93;
+static const uint WG_COUNTER_PAGEJOB_RASTER_PIXELS_TESTED = 94;
+static const uint WG_COUNTER_PAGEJOB_RASTER_JOBS_WITH_PIXELS = 95;
 
-static const uint WG_COUNTER_PAGEJOB_BUILD_GROUPS_LAUNCHED = 85;
-static const uint WG_COUNTER_PAGEJOB_BUILD_NO_CLIPMAP = 86;
-static const uint WG_COUNTER_PAGEJOB_BUILD_PAGES_SCANNED = 87;
-static const uint WG_COUNTER_PAGEJOB_BUILD_ZERO_DIRTY_PAGES = 88;
-static const uint WG_COUNTER_PAGEJOB_RASTER_JOBS_LAUNCHED = 89;
-static const uint WG_COUNTER_PAGEJOB_RASTER_TOTAL_TRIS = 90;
-static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_DEPTH_REJECT = 91;
-static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_BACKFACE_CULL = 92;
-static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_AABB_EMPTY = 93;
-static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_RASTERIZED = 94;
-static const uint WG_COUNTER_PAGEJOB_RASTER_PIXELS_TESTED = 95;
-static const uint WG_COUNTER_PAGEJOB_RASTER_JOBS_WITH_PIXELS = 96;
-
-static const uint WG_COUNTER_PAGEJOB_DBG_PHYS_DESCRIPTOR = 97;
-static const uint WG_COUNTER_PAGEJOB_DBG_ATLAS_WIDTH = 98;
-static const uint WG_COUNTER_PAGEJOB_DBG_ATLAS_HEIGHT = 99;
-static const uint WG_COUNTER_PAGEJOB_DBG_OOB_PIXELS = 100;
+static const uint WG_COUNTER_PAGEJOB_DBG_PHYS_DESCRIPTOR = 96;
+static const uint WG_COUNTER_PAGEJOB_DBG_ATLAS_WIDTH = 97;
+static const uint WG_COUNTER_PAGEJOB_DBG_ATLAS_HEIGHT = 98;
+static const uint WG_COUNTER_PAGEJOB_DBG_OOB_PIXELS = 99;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
@@ -232,7 +240,7 @@ bool CLodWorkGraphUseComputeSWRaster()
 
 bool CLodWorkGraphUseDedicatedComputePageJobBuffer()
 {
-#if CLOD_WG_ENABLE_SW_CLASSIFICATION
+#if CLOD_WG_ENABLE_SW_CLASSIFICATION && CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
     StructuredBuffer<uint4> pageJobDescriptorBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
     const uint2 descriptorPair = pageJobDescriptorBuffer[0].xy;
@@ -782,6 +790,9 @@ uint CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
     uint2 blockCount)
 {
     uint activeBlockCount = 0u;
+    const uint blockSoftCap = min(
+        max(1u, CLodPageJobMaxPagesPerCluster()),
+        kCLodVirtualShadowBlockMaxTrackedPerCluster);
     const uint totalBlockCount = blockCount.x * blockCount.y;
     [loop]
     for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
@@ -798,6 +809,10 @@ uint CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
                 vsmPayload))
         {
             activeBlockCount++;
+            if (activeBlockCount > blockSoftCap)
+            {
+                return 1u;
+            }
         }
     }
 
@@ -822,8 +837,47 @@ void CLodVirtualShadowEmitVisibleClusterBlocksForMeshlet(
     uint2 minBlockCoord,
     uint2 blockCount)
 {
-    uint emittedCount = 0u;
+    const uint blockSoftCap = min(
+        max(1u, CLodPageJobMaxPagesPerCluster()),
+        kCLodVirtualShadowBlockMaxTrackedPerCluster);
+    uint activeBlockCount = 0u;
     const uint totalBlockCount = blockCount.x * blockCount.y;
+    [loop]
+    for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
+    {
+        const uint2 blockCoord = uint2(blockLinearIndex % blockCount.x, blockLinearIndex / blockCount.x) + minBlockCoord;
+        uint vsmPayload = 0u;
+        if (CLodVirtualShadowBuildVisibleClusterBlockPayload(
+                shadowClipmapIndex,
+                clipmapInfo,
+                pageTable,
+                meshletMinPageCoord,
+                meshletMaxPageCoord,
+                blockCoord,
+                vsmPayload))
+        {
+            activeBlockCount++;
+            if (activeBlockCount > blockSoftCap)
+            {
+                if (maxWriteCount != 0u)
+                {
+                    CLodStoreVisibleClusterGloballyCoherent(
+                        visibleClusters,
+                        writeBase,
+                        viewId,
+                        instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        pageSlabDescriptorIndex,
+                        pageSlabByteOffset,
+                        shadowClipmapIndex);
+                }
+                return;
+            }
+        }
+    }
+
+    uint emittedCount = 0u;
     [loop]
     for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
     {
@@ -1235,7 +1289,32 @@ void WGTelemetryAddObjectCullPlaneReject(uint planeIndex)
     }
 }
 
+// Perspective views attenuate projected geometric error by distance.
+// Orthographic views keep a constant world-to-screen scale, so the projected
+// error reduces to the world-space error directly.
+float ProjectedGeometricError(
+    float3 worldCenter,
+    float worldRadius,
+    float errorMeshSpace,
+    float errorScale,
+    float3 cameraPos,
+    float zNear,
+    bool isOrtho)
+{
+    const float worldSpaceError = errorMeshSpace * errorScale;
+    if (isOrtho) {
+        return worldSpaceError;
+    }
+
+    // Conservative "distance to sphere surface"
+    float dist = length(worldCenter - cameraPos);
+    float denom = max(dist - worldRadius, zNear);
+
+    return worldSpaceError / denom;
+}
+
 // Node: ObjectCull (entry)
+#ifndef CLOD_COMPUTE_INCLUDE_ONLY
 [Shader("node")]
 [NodeID("ObjectCull")]
 [NodeLaunch("broadcasting")]
@@ -1339,30 +1418,6 @@ void WG_ObjectCull(
     outRecs.OutputComplete();
 }
 
-// Perspective views attenuate projected geometric error by distance.
-// Orthographic views keep a constant world-to-screen scale, so the projected
-// error reduces to the world-space error directly.
-float ProjectedGeometricError(
-    float3 worldCenter,
-    float worldRadius,
-    float errorMeshSpace,
-    float errorScale,
-    float3 cameraPos,
-    float zNear,
-    bool isOrtho)
-{
-    const float worldSpaceError = errorMeshSpace * errorScale;
-    if (isOrtho) {
-        return worldSpaceError;
-    }
-
-    // Conservative "distance to sphere surface"
-    float dist = length(worldCenter - cameraPos);
-    float denom = max(dist - worldRadius, zNear);
-
-    return worldSpaceError / denom;
-}
-
 // Node: TraverseNodes (recursive, BVH-only)
 [Shader("node")]
 [NodeID("TraverseNodes")]
@@ -1398,6 +1453,7 @@ void WG_TraverseNodes(
     uint emitTraverseCount = 0;
     TraverseNodeRecord childRecords[BVH_MAX_CHILDREN];
     MeshletBucketRecord bucketRecord = (MeshletBucketRecord)0;
+    uint emittedSegmentMeshletCount = 0;
     uint n64 = 0, n32 = 0, n16 = 0, n8 = 0, n4 = 0, n2 = 0, n1 = 0;
     bool emitBucket = false;
 
@@ -1549,6 +1605,7 @@ void WG_TraverseNodes(
 
                         if (emitBucket) {
                             WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
+                            emittedSegmentMeshletCount = seg.meshletCount;
 
                             const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + grp.pageMapBase, seg.pageIndex);
 
@@ -1789,7 +1846,6 @@ void WG_TraverseNodes(
             out1[i1] = r;
             offset += 1;
         }
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_SEGMENT_RECORDS, 1);
     }
 
     outNodes.OutputComplete();
@@ -1801,6 +1857,7 @@ void WG_TraverseNodes(
     out2.OutputComplete();
     out1.OutputComplete();
 }
+#endif
 #define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 32
 
 // SW raster batch accumulator (groupshared, per ClusterCull variant)
@@ -1825,13 +1882,25 @@ groupshared uint gs_pageJobBatchIndices[PAGEJOB_BATCH_ACCUM_CAPACITY];
 // Shared cluster-cull implementation called by each bucket-size variant.
 // FIXED_LOOP_COUNT is the bucket size (1, 2, 4, 8, 16, 32, or 64) - all active lanes
 // in a variant wave process the same number of iterations, minimizing WaveActiveMax divergence.
-void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputCount, uint FIXED_LOOP_COUNT, out uint swPendingOut, out uint pageJobPendingOut)
+void ClusterCullBody(
+    MeshletBucketRecord b,
+    bool hasBucket,
+    bool countReplayBucketRecord,
+    uint GI,
+    uint inputCount,
+    uint FIXED_LOOP_COUNT,
+    out uint swPendingOut,
+    out uint pageJobPendingOut)
 {
     // Telemetry (coalesced launch level)
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
     if (hasBucket) {
-        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS, UnpackMeshletCount(b.meshletIndexAndCount));
-        if (UnpackGroupSourceTag(b.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
+        const uint bucketMeshletCount = UnpackMeshletCount(b.meshletIndexAndCount);
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS, bucketMeshletCount);
+        if (countReplayBucketRecord) {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_BUCKET_RECORDS_DISPATCHED, 1);
+        }
+        if (countReplayBucketRecord && UnpackGroupSourceTag(b.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
             WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED, 1);
         }
     }
@@ -2660,6 +2729,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 const uint pjRank = GetLaneRankInGroup(pjMask, WaveGetLaneIndex());
 
                 uint pjBase = 0;
+#if CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
                 if (useDedicatedComputePageJobBuffer) {
                     StructuredBuffer<uint4> pageJobDescriptorBuffer =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
@@ -2695,7 +2765,9 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                             b.pageSlabByteOffset,
                             shadowClipmapIndex);
                     }
-                } else {
+                } else
+#endif
+                {
                     uint pjCombinedBase = 0;
                     if (WaveGetLaneIndex() == pjLeader) {
                         InterlockedAdd(replayState[0].visibleClusterCombinedCount, pjIterCount, pjCombinedBase);
@@ -2736,7 +2808,11 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 }
             }
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
+#if CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER
             pageJobPending += useDedicatedComputePageJobBuffer ? 0u : pjAvail;
+#else
+            pageJobPending += pjAvail;
+#endif
 #endif
         }
 #endif
@@ -2814,6 +2890,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 // ClusterCull variant entry points - one per bucket size.
 // Each variant processes a fixed number of meshlets per lane, eliminating wave divergence.
 
+#ifndef CLOD_COMPUTE_INCLUDE_ONLY
 [Shader("node")]
 [NodeID("ClusterCull1")]
 [NodeLaunch("coalescing")]
@@ -2831,7 +2908,7 @@ void WG_ClusterCull1(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 1, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 1, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2852,7 +2929,7 @@ void WG_ClusterCull2(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 2, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 2, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2873,12 +2950,13 @@ void WG_ClusterCull4(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 4, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 4, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 [Shader("node")]
+#endif
 [NodeID("ClusterCull8")]
 [NodeLaunch("coalescing")]
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
@@ -2894,7 +2972,7 @@ void WG_ClusterCull8(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 8, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 8, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2915,7 +2993,7 @@ void WG_ClusterCull16(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 16, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 16, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2936,7 +3014,7 @@ void WG_ClusterCull32(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 32, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 32, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
@@ -2957,7 +3035,7 @@ void WG_ClusterCull64(
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
     uint pageJobPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 64, swPending, pageJobPending);
+    ClusterCullBody(b, hasBucket, true, GI, inputCount, 64, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }

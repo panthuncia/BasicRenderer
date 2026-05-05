@@ -187,38 +187,137 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DirectStorageManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
-    UpscalingManager::GetInstance().InitFFX(); // Needs device
-    FFXManager::GetInstance().InitFFX();
     SetSettings();
     RendererECSManager::GetInstance().Initialize();
-    TrackedEntityToken::SetHooks({
-        .isRuntimeAlive = []() {
-            return RendererECSManager::GetInstance().IsAlive();
-        },
-        .destroyEntity = [](flecs::world& world, flecs::entity_t id) {
-            flecs::entity entity{ world, id };
-            if (entity.is_alive()) {
-                entity.destruct();
+    TrackedEntityToken::Hooks trackedEntityHooks{};
+    trackedEntityHooks.createEntity = [](flecs::entity existing) {
+            auto& ecsManager = RendererECSManager::GetInstance();
+            if (!ecsManager.IsAlive()) {
+                return TrackedEntityToken{};
             }
-        }
-        });
 
-    Resource::SetEntityHooks({
-        .createEntity = []() -> Resource::ECSEntityHandle {
-            auto& world = RendererECSManager::GetInstance().GetWorld();
-            auto entity = world.entity();
-            return { .world = &world, .id = entity.id() };
-        },
-        .destroyEntity = [](flecs::world& world, flecs::entity_t id) {
-			flecs::entity entity{ world, id };
-			if (entity.is_alive()) {
-				entity.destruct();
+            if (ecsManager.IsMainThread()) {
+                auto& world = ecsManager.GetWorld();
+                flecs::entity entity = existing;
+                if (!entity.is_alive()) {
+                    entity = world.entity();
+                }
+                return TrackedEntityToken(world, entity.id());
             }
-        },
-        .isRuntimeAlive = []() {
-            return RendererECSManager::GetInstance().IsAlive();
+
+            TrackedEntityToken token = TrackedEntityToken::CreateDeferred();
+            const flecs::entity_t existingId = existing.id();
+            auto deferredState = token.deferredState;
+            ecsManager.EnqueueDeferredWorldOperation([deferredState, existingId](flecs::world& world) mutable {
+                std::vector<std::function<void(flecs::entity)>> pendingOps;
+                bool destroyRequested = false;
+                flecs::entity entity = existingId != 0 ? flecs::entity{ world, existingId } : flecs::entity{};
+                if (!entity.is_alive()) {
+                    entity = world.entity();
+                }
+
+                TrackedEntityToken deferredToken;
+                deferredToken.deferredState = deferredState;
+
+                if (!deferredToken.Resolve(world, entity.id(), pendingOps, destroyRequested)) {
+                    deferredToken.MarkDestroyed();
+                    return;
+                }
+
+                for (auto& op : pendingOps) {
+                    op(entity);
+                }
+
+                if (destroyRequested && entity.is_alive()) {
+                    entity.destruct();
+                    deferredToken.MarkDestroyed();
+                }
+            });
+            return std::move(token);
+        };
+    trackedEntityHooks.isRuntimeAlive = []() {
+        return RendererECSManager::GetInstance().IsAlive();
+    };
+    trackedEntityHooks.isMainThread = []() {
+        return RendererECSManager::GetInstance().IsMainThread();
+    };
+    trackedEntityHooks.destroyEntity = [](flecs::world& world, flecs::entity_t id) {
+        flecs::entity entity{ world, id };
+        if (entity.is_alive()) {
+            entity.destruct();
         }
-        });
+    };
+    TrackedEntityToken::SetHooks(std::move(trackedEntityHooks));
+
+    Resource::ECSEntityHooks resourceEntityHooks{};
+    resourceEntityHooks.createEntity = []() -> Resource::ECSEntityHandle {
+		auto& ecsManager = RendererECSManager::GetInstance();
+		if (!ecsManager.IsAlive()) {
+			return {};
+		}
+
+		if (!ecsManager.IsMainThread()) {
+			auto handle = Resource::ECSEntityHandle::CreateDeferred();
+                auto deferredState = handle.deferredState;
+                ecsManager.EnqueueDeferredWorldOperation([deferredState](flecs::world& world) mutable {
+					flecs::entity entity = world.entity();
+                    Resource::ECSEntityHandle deferredHandle;
+                    deferredHandle.deferredState = deferredState;
+                    if (!deferredHandle.Resolve(world, entity.id())) {
+                        deferredHandle.MarkDestroyed();
+					}
+				});
+                return std::move(handle);
+        }
+
+        auto& world = RendererECSManager::GetInstance().GetWorld();
+        auto entity = world.entity();
+        Resource::ECSEntityHandle handle{};
+        handle.world = &world;
+        handle.id = entity.id();
+        return handle;
+    };
+    resourceEntityHooks.destroyEntity = [](const Resource::ECSEntityHandle& handle) {
+        auto& ecsManager = RendererECSManager::GetInstance();
+        if (!ecsManager.IsAlive()) {
+            return;
+        }
+
+        if (ecsManager.IsMainThread()) {
+            flecs::world* world = nullptr;
+            flecs::entity_t id = 0;
+            if (handle.TryGetResolved(world, id)) {
+                flecs::entity entity{ *world, id };
+                if (entity.is_alive()) {
+                    entity.destruct();
+                }
+            }
+            handle.MarkDestroyed();
+            return;
+        }
+
+        handle.RequestDestroy();
+            auto deferredState = handle.deferredState;
+            ecsManager.EnqueueDeferredWorldOperation([deferredState](flecs::world&) mutable {
+                Resource::ECSEntityHandle deferredHandle;
+                deferredHandle.deferredState = deferredState;
+				flecs::world* world = nullptr;
+				flecs::entity_t id = 0;
+                if (!deferredHandle.TryGetResolved(world, id)) {
+					return;
+				}
+
+				flecs::entity entity{ *world, id };
+				if (entity.is_alive()) {
+					entity.destruct();
+				}
+                deferredHandle.MarkDestroyed();
+			});
+	};
+    resourceEntityHooks.isRuntimeAlive = []() {
+        return RendererECSManager::GetInstance().IsAlive();
+    };
+    Resource::SetEntityHooks(std::move(resourceEntityHooks));
 
     if (!currentRenderGraph) {
 		currentRenderGraph = std::make_unique<RenderGraph>(DeviceManager::GetInstance().GetDevice());
@@ -246,18 +345,20 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after PSO and command signatures");
-    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
+    Menu::GetInstance().Initialize(hwnd, m_swapChain.Get());
     if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
-        readbackService->Initialize(m_readbackFence.Get());
+        readbackService->Initialize(m_readbackFence.Get(), m_copyReadbackFence.Get());
     }
     m_pReadbackManager = std::make_unique<br::ReadbackManager>();
     
-    m_pReadbackManager->Initialize(m_readbackFence.Get());
+    m_pReadbackManager->Initialize(m_legacyReadbackFence.Get());
     if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
         statisticsService->Initialize();
     }
 
+    UpscalingManager::GetInstance().InitFFX(); // Needs device and must precede Setup for FSR queries.
     UpscalingManager::GetInstance().Setup();
+    FFXManager::GetInstance().InitFFX();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after UpscalingManager::Setup");
 
     CreateTextures();
@@ -587,6 +688,7 @@ void Renderer::RunRenderResourceSyncStage() {
     auto& world = RendererECSManager::GetInstance().GetWorld();
 
     if (!m_renderSyncQueriesBuilt) {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::BuildQueries");
         m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo, Components::MeshInstances>()
             .with<Components::Active>()
             .build();
@@ -612,48 +714,96 @@ void Renderer::RunRenderResourceSyncStage() {
     std::vector<ObjectSyncItem> objectItems;
     std::vector<Material*> activeMaterials;
     std::unordered_set<uint32_t> activeMaterialIds;
-    m_renderSyncObjectQuery.run([&](flecs::iter& it) {
-        while (it.next()) {
-            auto matrices = it.field<Components::Matrix>(0);
-            auto objects = it.field<Components::RenderableObject>(1);
-            auto drawInfos = it.field<Components::ObjectDrawInfo>(2);
-            auto meshInstances = it.field<Components::MeshInstances>(3);
-            for (auto i : it) {
-                objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i], &meshInstances[i] });
+    {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::CollectObjectsAndMaterials");
+        m_renderSyncObjectQuery.run([&](flecs::iter& it) {
+            while (it.next()) {
+                auto matrices = it.field<Components::Matrix>(0);
+                auto objects = it.field<Components::RenderableObject>(1);
+                auto drawInfos = it.field<Components::ObjectDrawInfo>(2);
+                auto meshInstances = it.field<Components::MeshInstances>(3);
+                for (auto i : it) {
+                    objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i], &meshInstances[i] });
 
-                for (const auto& meshInstance : meshInstances[i].meshInstances) {
-                    if (!meshInstance) {
-                        continue;
-                    }
+                    for (const auto& meshInstance : meshInstances[i].meshInstances) {
+                        if (!meshInstance) {
+                            continue;
+                        }
 
-                    auto mesh = meshInstance->GetMesh();
-                    if (!mesh || !mesh->material) {
-                        continue;
-                    }
+                        auto mesh = meshInstance->GetMesh();
+                        if (!mesh || !mesh->material) {
+                            continue;
+                        }
 
-                    Material* material = mesh->material.get();
-                    if (!material) {
-                        continue;
-                    }
+                        Material* material = mesh->material.get();
+                        if (!material) {
+                            continue;
+                        }
 
-                    if (activeMaterialIds.insert(material->GetMaterialID()).second) {
-                        activeMaterials.push_back(material);
+                        if (activeMaterialIds.insert(material->GetMaterialID()).second) {
+                            activeMaterials.push_back(material);
+                        }
                     }
                 }
             }
-        }
-    });
+        });
+    }
 
     auto* textureFactory = m_managerInterface.GetTextureFactory();
     auto* materialManager = m_managerInterface.GetMaterialManager();
+    if (materialManager) {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::BeginTextureFeedbackFrame");
+        const uint64_t nextFrameIndex = m_totalFramesRendered + 1u;
+        materialManager->BeginTextureStreamingFeedbackFrame(nextFrameIndex);
+    }
     if (textureFactory && materialManager) {
-        for (Material* material : activeMaterials) {
-            if (!material) {
-                continue;
-            }
+        std::vector<DirectStorageAsyncRequestHandle> initialTextureUploadHandles;
+        std::unordered_set<uint32_t> queuedTextureIds;
+        queuedTextureIds.reserve(activeMaterials.size() * 4u);
 
-            material->EnsureTexturesUploaded(*textureFactory);
-            materialManager->UpdateMaterialDataBuffer(*material);
+        {
+            ZoneScopedN("Renderer::Update::RenderResourceSync::QueueInitialTextureUploads");
+            for (Material* material : activeMaterials) {
+                if (!material) {
+                    continue;
+                }
+
+                material->ForEachReferencedTexture([&](const std::shared_ptr<TextureAsset>& texture) {
+                    if (!texture) {
+                        return;
+                    }
+
+                    if (!queuedTextureIds.insert(texture->GetStreamingTextureID()).second) {
+                        return;
+                    }
+
+                    DirectStorageAsyncRequestHandle handle = texture->QueueInitialDirectStorageUploadIfNeeded();
+                    if (handle.IsValid()) {
+                        initialTextureUploadHandles.push_back(std::move(handle));
+                    }
+                });
+            }
+        }
+
+        if (!initialTextureUploadHandles.empty()) {
+            ZoneScopedN("Renderer::Update::RenderResourceSync::WaitInitialTextureUploads");
+            std::string directStorageWaitMessage;
+            if (!DirectStorageManager::GetInstance().WaitForRequests(initialTextureUploadHandles, &directStorageWaitMessage) &&
+                !directStorageWaitMessage.empty()) {
+                spdlog::debug("Renderer: batched DirectStorage material upload wait reported '{}'", directStorageWaitMessage);
+            }
+        }
+
+        {
+            ZoneScopedN("Renderer::Update::RenderResourceSync::UpdateMaterialTextures");
+            for (Material* material : activeMaterials) {
+                if (!material) {
+                    continue;
+                }
+
+                material->EnsureTexturesUploaded(*textureFactory);
+                materialManager->UpdateMaterialDataBuffer(*material);
+            }
         }
     }
 
@@ -665,28 +815,31 @@ void Renderer::RunRenderResourceSyncStage() {
     bool hasObjectDirtyRange = false;
     bool hasNormalMatrixDirtyRange = false;
 
-    for (const auto& item : objectItems) {
-        const size_t perObjectBegin = item.drawInfo->perObjectCBView->GetOffset();
-        const size_t perObjectEnd = perObjectBegin + sizeof(PerObjectCB);
-        const size_t normalMatrixBegin = item.drawInfo->normalMatrixView->GetOffset();
-        const size_t normalMatrixEnd = normalMatrixBegin + sizeof(DirectX::XMFLOAT4X4);
+    {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::ScanObjectDirtyRanges");
+        for (const auto& item : objectItems) {
+            const size_t perObjectBegin = item.drawInfo->perObjectCBView->GetOffset();
+            const size_t perObjectEnd = perObjectBegin + sizeof(PerObjectCB);
+            const size_t normalMatrixBegin = item.drawInfo->normalMatrixView->GetOffset();
+            const size_t normalMatrixEnd = normalMatrixBegin + sizeof(DirectX::XMFLOAT4X4);
 
-        if (!hasObjectDirtyRange) {
-            perObjectDirtyBegin = perObjectBegin;
-            perObjectDirtyEnd = perObjectEnd;
-            hasObjectDirtyRange = true;
-        } else {
-            perObjectDirtyBegin = std::min(perObjectDirtyBegin, perObjectBegin);
-            perObjectDirtyEnd = std::max(perObjectDirtyEnd, perObjectEnd);
-        }
+            if (!hasObjectDirtyRange) {
+                perObjectDirtyBegin = perObjectBegin;
+                perObjectDirtyEnd = perObjectEnd;
+                hasObjectDirtyRange = true;
+            } else {
+                perObjectDirtyBegin = std::min(perObjectDirtyBegin, perObjectBegin);
+                perObjectDirtyEnd = std::max(perObjectDirtyEnd, perObjectEnd);
+            }
 
-        if (!hasNormalMatrixDirtyRange) {
-            normalMatrixDirtyBegin = normalMatrixBegin;
-            normalMatrixDirtyEnd = normalMatrixEnd;
-            hasNormalMatrixDirtyRange = true;
-        } else {
-            normalMatrixDirtyBegin = std::min(normalMatrixDirtyBegin, normalMatrixBegin);
-            normalMatrixDirtyEnd = std::max(normalMatrixDirtyEnd, normalMatrixEnd);
+            if (!hasNormalMatrixDirtyRange) {
+                normalMatrixDirtyBegin = normalMatrixBegin;
+                normalMatrixDirtyEnd = normalMatrixEnd;
+                hasNormalMatrixDirtyRange = true;
+            } else {
+                normalMatrixDirtyBegin = std::min(normalMatrixDirtyBegin, normalMatrixBegin);
+                normalMatrixDirtyEnd = std::max(normalMatrixDirtyEnd, normalMatrixEnd);
+            }
         }
     }
 
@@ -695,114 +848,126 @@ void Renderer::RunRenderResourceSyncStage() {
     auto perObjectHandle = objectManager->BeginPerObjectBulkWrite();
     auto normalMatrixHandle = objectManager->BeginNormalMatrixBulkWrite();
 
-    TaskSchedulerManager::GetInstance().ParallelFor("ObjectSync", objectItems.size(),
-        [&objectItems, &perObjectHandle, &normalMatrixHandle](size_t idx) {
-            auto& item = objectItems[idx];
-            auto* worldMatrix = item.worldMatrix;
-            auto* object = item.object;
-            auto* drawInfo = item.drawInfo;
-            object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
-            object->perObjectCB.modelMatrix = worldMatrix->matrix;
+    {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::ObjectSync");
+        TaskSchedulerManager::GetInstance().ParallelFor("ObjectSync", objectItems.size(),
+            [&objectItems, &perObjectHandle, &normalMatrixHandle](size_t idx) {
+                auto& item = objectItems[idx];
+                auto* worldMatrix = item.worldMatrix;
+                auto* object = item.object;
+                auto* drawInfo = item.drawInfo;
+                object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
+                object->perObjectCB.modelMatrix = worldMatrix->matrix;
 
-            const XMVECTOR det = XMMatrixDeterminant(worldMatrix->matrix);
-            object->perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
+                const XMVECTOR det = XMMatrixDeterminant(worldMatrix->matrix);
+                object->perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
 
-            // Write per-object data directly into the scratch buffer (lock-free).
-            {
-                const size_t offset = drawInfo->perObjectCBView->GetOffset();
-                const size_t sz = sizeof(PerObjectCB);
-                std::memcpy(perObjectHandle.data + offset, &object->perObjectCB, sz);
-            }
+                // Write per-object data directly into the scratch buffer (lock-free).
+                {
+                    const size_t offset = drawInfo->perObjectCBView->GetOffset();
+                    const size_t sz = sizeof(PerObjectCB);
+                    std::memcpy(perObjectHandle.data + offset, &object->perObjectCB, sz);
+                }
 
-            const auto& modelMatrix = object->perObjectCB.modelMatrix;
-            const XMMATRIX upperLeft3x3 = XMMatrixSet(
-                XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
-                XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
-                XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
-                0.0f, 0.0f, 0.0f, 1.0f);
-            XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
+                const auto& modelMatrix = object->perObjectCB.modelMatrix;
+                const XMMATRIX upperLeft3x3 = XMMatrixSet(
+                    XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
+                    XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
+                    XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
+                    0.0f, 0.0f, 0.0f, 1.0f);
+                XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
 
-            // Write normal matrix directly into the scratch buffer (lock-free).
-            {
-                const size_t offset = drawInfo->normalMatrixView->GetOffset();
-                const size_t sz = sizeof(DirectX::XMFLOAT4X4);
-                DirectX::XMFLOAT4X4 stored;
-                XMStoreFloat4x4(&stored, normalMat);
-                std::memcpy(normalMatrixHandle.data + offset, &stored, sz);
-            }
-        });
+                // Write normal matrix directly into the scratch buffer (lock-free).
+                {
+                    const size_t offset = drawInfo->normalMatrixView->GetOffset();
+                    const size_t sz = sizeof(DirectX::XMFLOAT4X4);
+                    DirectX::XMFLOAT4X4 stored;
+                    XMStoreFloat4x4(&stored, normalMat);
+                    std::memcpy(normalMatrixHandle.data + offset, &stored, sz);
+                }
+            });
+    }
 
     // Register dirty ranges single-threaded.
     // Upload only the range actually written this frame. Uploading the entire
     // grown backing every frame scales badly on large scenes and can starve the frame.
-    if (hasObjectDirtyRange) {
-        objectManager->EndPerObjectBulkWrite(perObjectDirtyBegin, perObjectDirtyEnd - perObjectDirtyBegin);
-    }
-    if (hasNormalMatrixDirtyRange) {
-        objectManager->EndNormalMatrixBulkWrite(normalMatrixDirtyBegin, normalMatrixDirtyEnd - normalMatrixDirtyBegin);
-    }
-
-    m_renderSyncCameraQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Camera& camera, Components::RenderViewRef& renderView) {
-        const XMMATRIX cameraModel = RemoveScalingFromMatrix(worldMatrix.matrix);
-        const XMMATRIX view = XMMatrixInverse(nullptr, cameraModel);
-        DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
-        camera.info.prevJitteredProjection = camera.info.jitteredProjection;
-        camera.info.prevUnjitteredProjection = camera.info.unjitteredProjection;
-        if (m_jitter && entity.has<Components::PrimaryCamera>()) {
-            const auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
-            camera.jitterPixelSpace = jitterPixelSpace;
-            const auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-            const DirectX::XMFLOAT2 jitterNDC = {
-                (2.0f * jitterPixelSpace.x / renderRes.x),
-                (-2.0f * jitterPixelSpace.y / renderRes.y)
-            };
-            camera.jitterNDC = jitterNDC;
-            const auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
-            projection = XMMatrixMultiply(projection, jitterMatrix);
+    {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::CommitObjectBulkWrites");
+        if (hasObjectDirtyRange) {
+            objectManager->EndPerObjectBulkWrite(perObjectDirtyBegin, perObjectDirtyEnd - perObjectDirtyBegin);
         }
+        if (hasNormalMatrixDirtyRange) {
+            objectManager->EndNormalMatrixBulkWrite(normalMatrixDirtyBegin, normalMatrixDirtyEnd - normalMatrixDirtyBegin);
+        }
+    }
 
-        camera.info.jitteredProjection = projection;
-        camera.info.prevView = camera.info.view;
-        camera.info.view = view;
-        camera.info.viewInverse = cameraModel;
-        camera.info.viewProjection = XMMatrixMultiply(camera.info.view, projection);
-        camera.info.projectionInverse = XMMatrixInverse(nullptr, projection);
+    {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::CameraSync");
+        m_renderSyncCameraQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Camera& camera, Components::RenderViewRef& renderView) {
+            const XMMATRIX cameraModel = RemoveScalingFromMatrix(worldMatrix.matrix);
+            const XMMATRIX view = XMMatrixInverse(nullptr, cameraModel);
+            DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
+            camera.info.prevJitteredProjection = camera.info.jitteredProjection;
+            camera.info.prevUnjitteredProjection = camera.info.unjitteredProjection;
+            if (m_jitter && entity.has<Components::PrimaryCamera>()) {
+                const auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
+                camera.jitterPixelSpace = jitterPixelSpace;
+                const auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+                const DirectX::XMFLOAT2 jitterNDC = {
+                    (2.0f * jitterPixelSpace.x / renderRes.x),
+                    (-2.0f * jitterPixelSpace.y / renderRes.y)
+                };
+                camera.jitterNDC = jitterNDC;
+                const auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
+                projection = XMMatrixMultiply(projection, jitterMatrix);
+            }
 
-        const auto pos = GetGlobalPositionFromMatrix(worldMatrix.matrix);
-        camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
+            camera.info.jitteredProjection = projection;
+            camera.info.prevView = camera.info.view;
+            camera.info.view = view;
+            camera.info.viewInverse = cameraModel;
+            camera.info.viewProjection = XMMatrixMultiply(camera.info.view, projection);
+            camera.info.projectionInverse = XMMatrixInverse(nullptr, projection);
 
-        m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
-    });
+            const auto pos = GetGlobalPositionFromMatrix(worldMatrix.matrix);
+            camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
 
-    m_renderSyncLightQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Light& light) {
-        const XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-        light.lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, worldMatrix.matrix));
-        light.lightInfo.posWorldSpace = XMVectorSet(
-            XMVectorGetX(worldMatrix.matrix.r[3]),
-            XMVectorGetY(worldMatrix.matrix.r[3]),
-            XMVectorGetZ(worldMatrix.matrix.r[3]),
-            1.0f);
-        switch (light.lightInfo.type) {
-        case Components::LightType::Spot:
-            light.lightInfo.boundingSphere = ComputeConeBoundingSphere(light.lightInfo.posWorldSpace, light.lightInfo.dirWorldSpace, light.lightInfo.maxRange, acos(light.lightInfo.outerConeAngle));
-            break;
-        case Components::LightType::Point:
-            light.lightInfo.boundingSphere = {{
+            m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
+        });
+    }
+
+    {
+        ZoneScopedN("Renderer::Update::RenderResourceSync::LightSync");
+        m_renderSyncLightQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Light& light) {
+            const XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+            light.lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, worldMatrix.matrix));
+            light.lightInfo.posWorldSpace = XMVectorSet(
                 XMVectorGetX(worldMatrix.matrix.r[3]),
                 XMVectorGetY(worldMatrix.matrix.r[3]),
                 XMVectorGetZ(worldMatrix.matrix.r[3]),
-                light.lightInfo.maxRange }};
-            break;
-        default:
-            break;
-        }
+                1.0f);
+            switch (light.lightInfo.type) {
+            case Components::LightType::Spot:
+                light.lightInfo.boundingSphere = ComputeConeBoundingSphere(light.lightInfo.posWorldSpace, light.lightInfo.dirWorldSpace, light.lightInfo.maxRange, acos(light.lightInfo.outerConeAngle));
+                break;
+            case Components::LightType::Point:
+                light.lightInfo.boundingSphere = {{
+                    XMVectorGetX(worldMatrix.matrix.r[3]),
+                    XMVectorGetY(worldMatrix.matrix.r[3]),
+                    XMVectorGetZ(worldMatrix.matrix.r[3]),
+                    light.lightInfo.maxRange }};
+                break;
+            default:
+                break;
+            }
 
-        if (light.lightInfo.shadowCaster && entity.has<Components::LightViewInfo>()) {
-            const Components::LightViewInfo& viewInfo = entity.get<Components::LightViewInfo>();
-            m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
-            m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
-        }
-    });
+            if (light.lightInfo.shadowCaster && entity.has<Components::LightViewInfo>()) {
+                const Components::LightViewInfo& viewInfo = entity.get<Components::LightViewInfo>();
+                m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
+                m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
+            }
+        });
+    }
 
 }
 
@@ -987,6 +1152,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableGTAO", m_gtaoEnabled);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
+    settingsManager.registerSetting<CLodCullingBackend>(CLodCullingBackendSettingName, CLodCullingBackend::PureCompute);
     settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
     settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::PageJob);
     settingsManager.registerSetting<CLodTransparencyMode>(CLodTransparencyModeSettingName, CLodTransparencyMode::AVBOIT);
@@ -1013,10 +1179,14 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
 	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
+    settingsManager.registerSetting<bool>("renderGraphVramDumpEnabled", false);
+    settingsManager.registerSetting<bool>("renderGraphDisableCaching", false);
+    settingsManager.registerSetting<bool>("renderGraphQueueSyncTraceEnabled", false);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
+    settingsManager.registerSetting<bool>("autoAliasBuildDebugData", false);
     settingsManager.registerSetting<bool>("queueSchedulingEnableLogging", false);
     settingsManager.registerSetting<float>("queueSchedulingWidthScale", 0.0f); // Disable multi-queue scheduling
     settingsManager.registerSetting<float>("queueSchedulingPenaltyBias", 0.0f);
@@ -1107,6 +1277,10 @@ void Renderer::SetSettings() {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
 		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<CLodCullingBackend>(CLodCullingBackendSettingName, [this](const CLodCullingBackend& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
         m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableSceneRenderOverlap", [this](const bool& newValue) {
                 SetSceneRenderOverlapEnabled(newValue);
                 }));
@@ -1195,14 +1369,9 @@ void Renderer::SetSettings() {
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<uint8_t>("numDirectionalLightCascades", [](const uint8_t& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
-		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
-        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(newValue, 0.1f, maxShadowDistance, maxShadowDistance));
-        }));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [](const float& newValue) {
-		auto& settingsManager = SettingsManager::GetInstance();
-		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
-		auto maxShadowDistance = std::max(newValue, 1.0f);
-        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1f, maxShadowDistance, maxShadowDistance));
+        const float zNear = 0.1f;
+        const float zFar = settingsManager.getSettingGetter<float>("maxShadowDistance")();
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(newValue, zNear, zFar, zFar));
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
         ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
@@ -1374,6 +1543,8 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     result = device.CreateTimeline(m_frameFence);
     result = device.CreateTimeline(m_readbackFence);
+    result = device.CreateTimeline(m_copyReadbackFence);
+    result = device.CreateTimeline(m_legacyReadbackFence);
 }
 
 void Renderer::CreateTextures() {
@@ -1613,6 +1784,8 @@ void Renderer::Update(float elapsedSeconds) {
     runCapturedStage("WaitForFrame", [&]() {
         ZoneScopedN("Renderer::Update::WaitForFrame");
         WaitForFrame(m_frameIndex);
+        DeletionManager::GetInstance().ProcessDeletions();
+        RendererECSManager::GetInstance().FlushDeferredWorldOperations();
         });
 
     auto& resourceManager = ResourceManager::GetInstance();
@@ -1860,11 +2033,14 @@ void Renderer::Render() {
         orgSettings.collectPipelineStatistics = sm.getSettingGetter<bool>("collectPipelineStatistics")();
         orgSettings.useAsyncCompute           = sm.getSettingGetter<bool>("useAsyncCompute")();
         orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
+		orgSettings.renderGraphVramDumpEnabled = sm.getSettingGetter<bool>("renderGraphVramDumpEnabled")();
         orgSettings.renderGraphBatchTraceEnabled = sm.getSettingGetter<bool>("renderGraphBatchTraceEnabled")();
+        orgSettings.readOnlyUniformTransitionElisionEnabled = true;
         orgSettings.autoAliasMode             = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
         orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
         orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
         orgSettings.autoAliasLogExclusionReasons = sm.getSettingGetter<bool>("autoAliasLogExclusionReasons")();
+        orgSettings.autoAliasBuildDebugData   = sm.getSettingGetter<bool>("autoAliasBuildDebugData")();
         orgSettings.queueSchedulingEnableLogging = sm.getSettingGetter<bool>("queueSchedulingEnableLogging")();
         orgSettings.queueSchedulingWidthScale = sm.getSettingGetter<float>("queueSchedulingWidthScale")();
         orgSettings.queueSchedulingPenaltyBias = sm.getSettingGetter<float>("queueSchedulingPenaltyBias")();
@@ -1997,11 +2173,6 @@ void Renderer::Render() {
             m_pReadbackManager->ProcessReadbackRequests(); // Save images to disk if requested
         }
     });
-
-    runCapturedStage("DeletionProcessing", [&]() {
-        DeletionManager::GetInstance().ProcessDeletions();
-    });
-
     PublishFrameTaskGraphCapture();
     FrameMark;
 }
@@ -2024,42 +2195,12 @@ void Renderer::AdvanceFrameIndex() {
     m_totalFramesRendered += 1;
 }
 
-void Renderer::FlushCommandQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-    auto flushQueue = [&](rhi::Queue queue, const char* debugName) {
-        rhi::TimelinePtr flushFence;
-        auto result = device.CreateTimeline(flushFence, 0, debugName);
-        if (result != rhi::Result::Ok || !flushFence) {
-            throw std::runtime_error("Failed to create queue flush timeline");
-        }
-
-        queue.Signal({ flushFence->GetHandle(), 1 });
-        flushFence->HostWait(1);
-    };
-
-    auto& deviceManager = DeviceManager::GetInstance();
-    flushQueue(deviceManager.GetGraphicsQueue(), "RendererFlushGraphics");
-    flushQueue(deviceManager.GetComputeQueue(), "RendererFlushCompute");
-    flushQueue(deviceManager.GetCopyQueue(), "RendererFlushCopy");
-
-    if (currentRenderGraph) {
-        auto& registry = currentRenderGraph->GetQueueRegistry();
-        for (size_t i = 0; i < registry.SlotCount(); ++i) {
-            auto slot = static_cast<QueueSlotIndex>(static_cast<uint8_t>(i));
-            auto queue = registry.GetQueue(slot);
-            auto& fence = registry.GetFence(slot);
-            const uint64_t fenceValue = registry.GetNextFenceValue(slot);
-            queue.Signal({ fence.GetHandle(), fenceValue });
-            fence.HostWait(fenceValue);
-        }
-    }
-}
-
 void Renderer::StallPipeline() {
     for (uint8_t i = 0; i < m_numFramesInFlight; ++i) {
         WaitForFrame(i);
     }
-    FlushCommandQueue();
+    auto device = DeviceManager::GetInstance().GetDevice();
+    device.WaitIdle();
 }
 
 void Renderer::Cleanup() {
@@ -2122,12 +2263,14 @@ void Renderer::Cleanup() {
     m_warnedNullScene = false;
     m_warnedMissingPrimaryCamera = false;
     m_readbackFence.Reset();
+	m_legacyReadbackFence.Reset();
 	spdlog::info("Cleaning up singletons");
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();
     PSOManager::GetInstance().Cleanup();
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
+    RendererECSManager::GetInstance().FlushDeferredWorldOperations();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
     RendererECSManager::GetInstance().Cleanup();
@@ -2346,10 +2489,11 @@ void Renderer::CreateRenderGraph() {
         currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(
             m_managerInterface.GetTextureFactory(),
             currentRenderGraph->GetUploadService(),
-            m_pReadbackManager.get()));
+                m_pReadbackManager.get(),
+                m_managerInterface.GetMaterialManager()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        uint maxClusters = 1000000; // TODO: make this configurable based on scene content   
+        uint maxClusters = 2000000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
             std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");

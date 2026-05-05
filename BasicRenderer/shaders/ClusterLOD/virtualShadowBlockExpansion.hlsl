@@ -437,16 +437,12 @@ void CLodVirtualShadowBlockEmitCSMain(uint3 dtid : SV_DispatchThreadID, uint GI 
     }
 
     RWByteAddressBuffer expandedClusters = ResourceDescriptorHeap[CLOD_VSM_BLOCK_EXPAND_EXPANDED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<CLodVirtualShadowBlockMeta> expandedBlockMeta = ResourceDescriptorHeap[CLOD_VSM_BLOCK_EXPAND_EXPANDED_BLOCK_META_DESCRIPTOR_INDEX];
 
     if (overflowedBlockTracking)
     {
         if (GI == 0u)
         {
             CLodStoreVisibleClusterPackedWordsRW(expandedClusters, gs_outputBaseIndex, packedCluster);
-            CLodVirtualShadowBlockMeta fallbackMeta = (CLodVirtualShadowBlockMeta)0;
-            fallbackMeta.packedActiveRectAndFlags = CLodVirtualShadowPackBlockActiveRect(uint2(0u, 0u), uint2(0u, 0u), true);
-            expandedBlockMeta[gs_outputBaseIndex] = fallbackMeta;
         }
         return;
     }
@@ -457,7 +453,6 @@ void CLodVirtualShadowBlockEmitCSMain(uint3 dtid : SV_DispatchThreadID, uint GI 
     }
 
     CLodStoreVisibleClusterPackedWordsRW(expandedClusters, gs_outputBaseIndex + GI, packedCluster);
-    expandedBlockMeta[gs_outputBaseIndex + GI] = VsmLoadTrackedBlockMeta(GI);
 }
 
 [shader("compute")]

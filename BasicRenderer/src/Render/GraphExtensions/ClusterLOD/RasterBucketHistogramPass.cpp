@@ -59,9 +59,10 @@ void RasterBucketHistogramPass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
-            Builtin::Material::TextureGroup)
+            Builtin::Material::TextureGroup,
+            Builtin::Material::TextureStreamingMetadataBuffer)
         .WithIndirectArguments(m_histogramIndirectCommand)
-        .WithUnorderedAccess(m_histogramBuffer);
+    		.WithUnorderedAccess(m_histogramBuffer, Builtin::Material::TextureStreamingFeedbackBuffer);
     if (m_reyesOwnershipBitsetBuffer) {
         builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
     }

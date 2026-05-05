@@ -88,6 +88,7 @@ struct MeshBindingKeyHasher {
 enum class BufferBacking {
     FileSpan,
     DataUri,
+    Fallback,
 };
 
 struct BufferSource {
@@ -373,6 +374,20 @@ std::vector<uint8_t> DecodeDataUri(const std::string& uri) {
     return DecodeBase64(payload);
 }
 
+bool DocumentUsesMeshoptCompression(const json& gltf) {
+    if (!gltf.contains("extensionsUsed") || !gltf["extensionsUsed"].is_array()) {
+        return false;
+    }
+
+    for (const auto& extension : gltf["extensionsUsed"]) {
+        if (extension.is_string() && extension.get<std::string>() == "EXT_meshopt_compression") {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 std::vector<BufferSource> BuildBufferSources(const json& gltf, const std::filesystem::path& sourcePath) {
     std::vector<BufferSource> bufferSources;
     if (!gltf.contains("buffers") || !gltf["buffers"].is_array()) {
@@ -380,6 +395,12 @@ std::vector<BufferSource> BuildBufferSources(const json& gltf, const std::filesy
     }
 
     const auto binaryChunk = GetGlbBinaryChunkSpan(sourcePath);
+    std::string extension = sourcePath.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+        });
+    const bool isGlb = extension == ".glb";
+    const bool hasMeshoptCompression = DocumentUsesMeshoptCompression(gltf);
     const auto& buffers = gltf["buffers"];
     bufferSources.resize(buffers.size());
 
@@ -403,6 +424,16 @@ std::vector<BufferSource> BuildBufferSources(const json& gltf, const std::filesy
             }
         }
         else {
+            if (!isGlb) {
+                if (hasMeshoptCompression) {
+                    source.backing = BufferBacking::Fallback;
+                    source.fileLength = buffer.value<uint64_t>("byteLength", 0);
+                    bufferSources[bufferIndex] = std::move(source);
+                    continue;
+                }
+
+                throw std::runtime_error("glTF buffer has no URI and source is not a GLB: " + sourcePath.string());
+            }
             if (!binaryChunk.has_value()) {
                 throw std::runtime_error("glTF buffer has no URI and source is not a GLB: " + sourcePath.string());
             }
@@ -432,6 +463,12 @@ std::vector<uint8_t> ReadBufferSlice(const BufferSource& source, uint64_t offset
         return std::vector<uint8_t>(
             source.inlineBytes.begin() + static_cast<std::ptrdiff_t>(offset),
             source.inlineBytes.begin() + static_cast<std::ptrdiff_t>(offset + size));
+    }
+
+    if (source.backing == BufferBacking::Fallback) {
+        throw std::runtime_error(
+            "Attempted to read a URI-less fallback glTF buffer directly. "
+            "This buffer is reserved for EXT_meshopt_compression data and should not be read by GlTFLoader.");
     }
 
     if (offset > source.fileLength || size > source.fileLength - offset) {
@@ -939,7 +976,7 @@ std::shared_ptr<TextureAsset> LoadTexture(
         cachedTexture->Meta().isProcessingCacheArtifact = true;
         cachedTexture->Meta().filePath = cacheProbeMeta.filePath;
         cachedTexture->Meta().preferSRGB = preferSRGB;
-        cachedTexture->Meta().processing = cacheProbeMeta.processing;
+        cachedTexture->SetProcessingSettings(cacheProbeMeta.processing);
         cache.textureCache[cacheKey] = cachedTexture;
 
         {

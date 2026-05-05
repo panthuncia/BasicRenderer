@@ -173,15 +173,18 @@ void ReadbackManager::Cleanup() {
 
 void ReadbackManager::ReadbackPass::RecordImmediateCommands(ImmediateExecutionContext& context) {
     std::vector<ReadbackInfo> readbacks;
+    uint64_t fenceValue = 0;
     {
         std::scoped_lock lock(m_owner.m_mutex);
         if (m_owner.m_queuedReadbacks.empty()) {
             m_hasWork = false;
+            m_pendingFenceValue = 0;
             return;
         }
 
-        m_fenceValue++;
+        fenceValue = m_owner.AcquireNextFenceValue();
         m_hasWork = true;
+        m_pendingFenceValue = fenceValue;
         readbacks = m_owner.m_queuedReadbacks;
     }
 
@@ -192,10 +195,10 @@ void ReadbackManager::ReadbackPass::RecordImmediateCommands(ImmediateExecutionCo
         }
 
         if (readback.cubemap) {
-            m_owner.SaveCubemapToDDS(context.device, commandList, readback.texture, readback.outputFile, m_fenceValue);
+            m_owner.SaveCubemapToDDS(context.device, commandList, readback.texture, readback.outputFile, fenceValue);
         }
         else {
-            m_owner.SaveTextureToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, m_fenceValue);
+            m_owner.SaveTextureToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, fenceValue);
         }
     }
 }
@@ -209,7 +212,14 @@ PassReturn ReadbackManager::ReadbackPass::Execute(PassExecutionContext& context)
 
     m_owner.ClearReadbacks();
     m_hasWork = false;
-    return { m_readbackFence, m_fenceValue };
+    const uint64_t fenceValue = m_pendingFenceValue;
+    m_pendingFenceValue = 0;
+    spdlog::debug(
+        "ReadbackManager::ReadbackPass returning external fence timeline(idx={}, gen={}) value={}",
+        m_readbackFence.GetHandle().index,
+        m_readbackFence.GetHandle().generation,
+        fenceValue);
+    return { m_readbackFence, fenceValue };
 }
 
 void ReadbackManager::SaveCubemapToDDS(

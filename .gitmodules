@@ -13,3 +13,6 @@
 [submodule "GPU-Reshape"]
 	path = GPU-Reshape
 	url = git@github.com:panthuncia/GPU-Reshape.git
+[submodule "volk"]
+	path = volk
+	url = https://github.com/zeux/volk.git

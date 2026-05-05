@@ -119,6 +119,10 @@ struct ClusterLODPrebuiltData
 	std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
 	ClusterLODCacheSource cacheSource;
 	std::vector<ClusterLODNode> nodes;
+	std::vector<ClusterLODNodeRangeAlloc> lodNodeRanges;
+	std::vector<uint32_t> lodLevelRoots;
+	uint32_t maxDepth = 0;
+	uint32_t maxTraversalDepth = 0;
 	VoxelGroupMapping voxelGroupMapping;
 };
 

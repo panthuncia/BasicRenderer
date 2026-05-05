@@ -133,6 +133,22 @@ public:
 		return m_clodNodes;
 	}
 
+	const std::vector<ClusterLODNodeRangeAlloc>& GetCLodLodNodeRanges() const {
+		return m_clodLodNodeRanges;
+	}
+
+	const std::vector<uint32_t>& GetCLodLodLevelRoots() const {
+		return m_clodLodLevelRoots;
+	}
+
+	uint32_t GetCLodMaxDepth() const {
+		return m_clodMaxDepth;
+	}
+
+	uint32_t GetCLodMaxTraversalDepth() const {
+		return m_clodMaxTraversalDepth;
+	}
+
 	const BufferView* GetCLodGroupsView() const {
 		return m_clusterLODGroupsView.get();
 	}
@@ -350,6 +366,7 @@ private:
 	std::vector<uint32_t>            m_clodLodLevelRoots;        // node index per depth (== 1+depth)
 	uint32_t                         m_clodTopRootNode = 0;      // always 0
 	uint32_t                         m_clodMaxDepth = 0;
+	uint32_t                         m_clodMaxTraversalDepth = 0;
 	VoxelGroupMapping                m_voxelGroupMapping;        // Per-group voxel payloads (empty when no voxel groups exist)
 	std::optional<ClusterLODPrebuiltData> m_prebuiltClusterLOD;
 

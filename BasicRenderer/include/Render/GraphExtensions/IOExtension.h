@@ -3,6 +3,7 @@
 #include "Render/RenderGraph/RenderGraph.h"
 
 #include "Factories/TextureFactory.h"
+#include "Managers/MaterialManager.h"
 #include "Managers/ReadbackManager.h"
 #include "Render/Runtime/IUploadService.h"
 
@@ -18,10 +19,12 @@ class RenderGraphIOExtension final : public RenderGraph::IRenderGraphExtension {
 public:
 	RenderGraphIOExtension(TextureFactory* textureFactory,
 		rg::runtime::IUploadService* uploadService,
-		br::ReadbackManager* readbackManager)
+		br::ReadbackManager* readbackManager,
+		MaterialManager* materialManager)
 		: m_textureFactory(textureFactory),
 		m_uploadService(uploadService),
-		m_readbackManager(readbackManager) {
+		m_readbackManager(readbackManager),
+		m_materialManager(materialManager) {
 	}
 
 	void OnRegistryReset(ResourceRegistry* reg) override {
@@ -68,7 +71,8 @@ public:
 			if (auto bc7Readback = m_textureFactory->GetBC7CompressionReadbackPass()) {
 				outPasses.push_back(
 					RenderGraph::ExternalPassDesc::Copy("Builtin::BC7CompressionReadback", bc7Readback)
-						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/4)));
+						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/4))
+						.PinToQueue(static_cast<QueueSlotIndex>(2)));
 			}
 		}
 
@@ -77,7 +81,8 @@ public:
 			if (auto rb = m_readbackManager->GetReadbackPass()) {
 				outPasses.push_back(
 					RenderGraph::ExternalPassDesc::Render("Builtin::Readbacks", rb)
-						.At(RenderGraph::ExternalInsertPoint::End(/*prio*/0)));
+						.At(RenderGraph::ExternalInsertPoint::End(/*prio*/0))
+						.PinToQueue(static_cast<QueueSlotIndex>(0)));
 			}
 		}
 	}
@@ -96,10 +101,15 @@ public:
 						.At(RenderGraph::ExternalInsertPoint::After("Builtin::Uploads")));
 			}
 		}
+
+		if (m_materialManager) {
+			m_materialManager->RequestTextureStreamingFeedbackReadback(rg.GetReadbackService());
+		}
 	}
 
 private:
 	TextureFactory* m_textureFactory = nullptr; // non-owning
 	rg::runtime::IUploadService* m_uploadService = nullptr; // non-owning
 	br::ReadbackManager* m_readbackManager = nullptr; // non-owning
+	MaterialManager* m_materialManager = nullptr; // non-owning
 };

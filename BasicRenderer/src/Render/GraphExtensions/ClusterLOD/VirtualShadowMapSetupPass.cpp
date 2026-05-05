@@ -26,6 +26,9 @@ std::array<int64_t, CLodVirtualShadowMaxSupportedClipmapCount> g_previousClipmap
 bool g_previousClipmapInfosValid = false;
 DirectX::XMFLOAT3 g_previousDirectionalLightDirection{};
 bool g_previousDirectionalLightDirectionValid = false;
+DirectX::XMUINT2 g_previousRenderResolution{};
+bool g_previousRenderResolutionValid = false;
+uint32_t g_pendingRenderResolutionResetFrames = 0u;
 
 uint32_t GetVirtualShadowVirtualResolution()
 {
@@ -177,8 +180,24 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 {
     const bool disableVirtualShadowPageCaching =
         SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableVirtualShadowPageCachingSettingName)();
-    const bool forceResetResources = m_forceResetResources || disableVirtualShadowPageCaching;
+    auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
+    const bool renderResolutionChanged =
+        updateContext != nullptr &&
+        g_previousRenderResolutionValid &&
+        (g_previousRenderResolution.x != updateContext->renderResolution.x ||
+            g_previousRenderResolution.y != updateContext->renderResolution.y);
+    if (renderResolutionChanged) {
+        // Virtual shadow page marking samples the primary linear-depth texture
+        // before the current frame repopulates it, so a resolution change needs
+        // one reset for the resize frame and one more once the new-size depth is valid.
+        g_pendingRenderResolutionResetFrames = 2u;
+    }
+    const bool renderResolutionResetPending = g_pendingRenderResolutionResetFrames > 0u;
+    const bool forceResetResources = m_forceResetResources || disableVirtualShadowPageCaching || renderResolutionResetPending;
     m_forceResetResources = false;
+    if (renderResolutionResetPending) {
+        --g_pendingRenderResolutionResetFrames;
+    }
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = GetVirtualShadowResolutionConfig();
     const uint32_t virtualShadowResolution = virtualShadowConfig.virtualResolution;
     const uint32_t virtualShadowPageTableResolution = virtualShadowConfig.pageTableResolution;
@@ -201,7 +220,6 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     bool currentDirectionalLightDirectionValid = false;
     uint32_t activeClipmapCount = 0u;
 
-    auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
     if (updateContext && updateContext->viewManager) {
         bool foundPrimaryCamera = false;
         updateContext->viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewId) {
@@ -351,6 +369,10 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     g_previousClipmapInfosValid = true;
     g_previousDirectionalLightDirection = currentDirectionalLightDirection;
     g_previousDirectionalLightDirectionValid = currentDirectionalLightDirectionValid;
+    if (updateContext) {
+        g_previousRenderResolution = updateContext->renderResolution;
+        g_previousRenderResolutionValid = true;
+    }
 
     runtimeState.clipmapCount = activeClipmapCount;
     runtimeState.supportedClipmapCount = CLodVirtualShadowMaxSupportedClipmapCount;

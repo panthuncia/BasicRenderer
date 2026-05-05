@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "Interfaces/IResourceProvider.h"
@@ -9,7 +10,12 @@
 
 class Buffer;
 class CLodStreamingSystem;
+class CLodAlphaVariant;
+class CLodShadowVariant;
+class CLodVisibilityVariant;
 class PixelBuffer;
+class ResourceGroup;
+struct CLodVariantTraits;
 
 class CLodExtension final : public RenderGraph::IRenderGraphExtension, public IResourceProvider {
 public:
@@ -25,6 +31,10 @@ public:
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
+    friend class CLodAlphaVariant;
+    friend class CLodShadowVariant;
+    friend class CLodVisibilityVariant;
+
     bool IsReyesTessellationDisabled() const;
     void RefreshShadowConfiguredSettings();
     uint32_t GetVisibleClusterCapacity() const;
@@ -43,6 +53,18 @@ private:
     void ReleaseShadowResourceBackings();
     void EnsureReyesResourcesInitialized();
     void SyncReyesResourceEntities(bool enabled);
+    void AppendPhaseReyesStructuralPasses(
+        const CLodVariantTraits& traits,
+        const std::shared_ptr<ResourceGroup>& slabGroup,
+        const std::shared_ptr<Buffer>& reyesOwnershipBitsetBuffer,
+        uint32_t reyesSplitQueueCapacity,
+        uint32_t reyesDiceQueueCapacity,
+        uint32_t reyesRasterWorkCapacity,
+        uint32_t phaseIndex,
+        bool uploadTessellationTable,
+        bool preserveDiceCountForPhase2Replay,
+        std::vector<RenderGraph::ExternalPassDesc>& outPasses,
+        std::string& shadowClearDirtyBitsAfterPassName);
 
     CLodExtensionType m_type;
     uint32_t m_maxVisibleClusters = 0u;
@@ -65,6 +87,7 @@ private:
     std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
     std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
+    std::shared_ptr<Buffer> m_viewDepthSrvIndicesBufferPhase2;
 
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
@@ -213,9 +236,7 @@ private:
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBufferPhase2;
     std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBuffer;
-    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBuffer;
     std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBufferSw;
-    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBufferSw;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;

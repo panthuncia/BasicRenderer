@@ -136,9 +136,10 @@ namespace AssimpLoader {
         const std::wstring cachePath = TextureProcessingManager::GetInstance().GetExistingCachePathForFile(cacheProbeMeta);
         if (!cachePath.empty()) {
             auto cachedTexture = LoadTextureFromFile(cachePath, sampler, preferSRGB);
+            cachedTexture->Meta().filePath = cacheProbeMeta.filePath;
             cachedTexture->Meta().isProcessingCacheArtifact = true;
             cachedTexture->Meta().preferSRGB = preferSRGB;
-            cachedTexture->Meta().processing = processingSettings;
+            cachedTexture->SetProcessingSettings(processingSettings);
             spdlog::info("AssimpLoader: texture processing cache hit for '{}' -> '{}'", cacheProbeMeta.filePath, ws2s(cachePath));
             return cachedTexture;
         }

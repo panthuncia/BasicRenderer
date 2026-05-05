@@ -3,23 +3,14 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
+#include "FidelityFX/FfxBackendAdapters.h"
+#include "ThirdParty/FFX/ffx_api_loader.h"
 #include "ThirdParty/FFX/host/ffx_sssr.h"
-#include "ThirdParty/FFX/host/backends/dx12/ffx_dx12.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
-#include "rhi_interop_dx12.h"
 #include "Render/RenderContext.h"
 
 extern ffxFunctions ffxModule;
-
-FfxResource getFFXResource(Resource* resource, const wchar_t* name, FfxResourceStates state) {
-    auto desc = ffxGetResourceDescriptionDX12(rhi::dx12::get_resource(resource->GetAPIResource()), FFX_RESOURCE_USAGE_READ_ONLY);
-    auto ffxResource = ffxGetResourceDX12(rhi::dx12::get_resource(resource->GetAPIResource()), desc, name, state);
-    if (ffxResource.resource == nullptr) {
-        spdlog::error("Failed to get FFX resource for resource");
-    }
-    return ffxResource;
-}
 
 bool FFXManager::InitFFX() {
     m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
@@ -27,20 +18,12 @@ bool FFXManager::InitFFX() {
     auto outputRes = m_getOutputRes();
     auto renderRes = m_getRenderRes();
 
-    auto device = ffxGetDeviceDX12(rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice()));
-    auto scratchMemorySize = ffxGetScratchMemorySizeDX12(10);
-
-    // Why can't FFX allocate this itself?
-    m_pScratchMemory = malloc(scratchMemorySize);
-
-    if (!m_pScratchMemory) {
-        spdlog::error("Failed to allocate scratch memory for FFX SSRR");
+    const rhi::Device device = DeviceManager::GetInstance().GetDevice();
+    const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+    if (!fidelityfx_backend::host::CreateBackendInterface(m_backendInterface, m_pScratchMemory, backend, device, 1)) {
+        spdlog::error("FFXManager::InitFFX failed to create backend interface for backend {}", static_cast<uint32_t>(backend));
         return false;
-	}
-
-    memset(m_pScratchMemory, 0, scratchMemorySize);
-
-    ffxGetInterfaceDX12(&m_backendInterface, device, m_pScratchMemory, scratchMemorySize, 1);
+    }
 
 	FfxSssrContextDescription sssrDesc{};
 	sssrDesc.backendInterface = m_backendInterface;
@@ -72,16 +55,18 @@ void FFXManager::EvaluateSSSR(rhi::CommandList& commandList,
     PixelBuffer* pBRDFLUT,
     PixelBuffer* pReflectionsTarget) {
 
+    const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+
 	FfxSssrDispatchDescription sssrDesc{};
-	sssrDesc.brdfTexture = getFFXResource(pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.color = getFFXResource(pHDRTarget, L"HDRColor", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.depth = getFFXResource(pDepthTexture, L"Depth", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.environmentMap = getFFXResource(pEnvironmentCubemap, L"EnvironmentMap", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.materialParameters = getFFXResource(pMetallicRoughness, L"MaterialParameters", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.motionVectors = getFFXResource(pMotionVectors, L"MotionVectors", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.normal = getFFXResource(pNormals, L"Normals", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.brdfTexture = getFFXResource(pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.output = getFFXResource(pReflectionsTarget, L"Reflections", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.brdfTexture = fidelityfx_backend::host::GetResource(backend, pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.color = fidelityfx_backend::host::GetResource(backend, pHDRTarget, L"HDRColor", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.depth = fidelityfx_backend::host::GetResource(backend, pDepthTexture, L"Depth", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.environmentMap = fidelityfx_backend::host::GetResource(backend, pEnvironmentCubemap, L"EnvironmentMap", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.materialParameters = fidelityfx_backend::host::GetResource(backend, pMetallicRoughness, L"MaterialParameters", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.motionVectors = fidelityfx_backend::host::GetResource(backend, pMotionVectors, L"MotionVectors", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.normal = fidelityfx_backend::host::GetResource(backend, pNormals, L"Normals", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.brdfTexture = fidelityfx_backend::host::GetResource(backend, pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
+    sssrDesc.output = fidelityfx_backend::host::GetResource(backend, pReflectionsTarget, L"Reflections", FFX_RESOURCE_STATE_COMMON);
 
     auto invViewProjection = DirectX::XMMatrixInverse(nullptr, currentCamera->info.viewProjection);
     auto prevViewProjection = DirectX::XMMatrixMultiply(currentCamera->info.prevView, currentCamera->info.prevJitteredProjection);
@@ -92,7 +77,11 @@ void FFXManager::EvaluateSSSR(rhi::CommandList& commandList,
 	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.view), currentCamera->info.view);
 	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invView), currentCamera->info.viewInverse);
     DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.prevViewProjection), prevViewProjection);
-    sssrDesc.commandList = rhi::dx12::get_cmd_list(commandList);
+    sssrDesc.commandList = fidelityfx_backend::host::GetCommandList(backend, commandList);
+    if (sssrDesc.commandList == nullptr) {
+        spdlog::warn("FFXManager::EvaluateSSSR skipped dispatch because no command list adapter is available for backend {}", static_cast<uint32_t>(backend));
+        return;
+    }
     auto renderSize = m_getRenderRes();
     sssrDesc.renderSize = { renderSize.x, renderSize.y };
 	sssrDesc.motionVectorScale = { -0.5f, 0.5f };

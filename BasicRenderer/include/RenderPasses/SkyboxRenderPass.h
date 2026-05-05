@@ -12,7 +12,7 @@ public:
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override {
         builder->WithShaderResource(Builtin::Environment::CurrentCubemap, Builtin::Environment::InfoBuffer)
-            .WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap, Builtin::CameraBuffer)
+            .WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }), Builtin::CameraBuffer)
             .WithUnorderedAccess(Builtin::Color::HDRColorTarget, Builtin::GBuffer::MotionVectors);
 		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }

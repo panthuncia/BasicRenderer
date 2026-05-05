@@ -36,7 +36,6 @@ public:
 			Builtin::GBuffer::Emissive,
 			Builtin::GBuffer::Fuzz,
 			Builtin::GBuffer::MetallicRoughness,
-			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
 			Builtin::OpenPBR::FuzzLTC,
 			Builtin::OpenPBR::IdealMetalEnergyComplement,
@@ -44,6 +43,7 @@ public:
 			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
 			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
 			Builtin::Noise::BlueNoise2D)
+			.WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget,
 				Builtin::DebugVisualization);
 

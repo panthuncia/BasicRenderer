@@ -5,6 +5,25 @@
 #include "include/outputTypes.hlsli"
 #include "include/debugPayload.hlsli"
 
+float3 MaterialSelectedMipDebugColor(uint selectedMipLevel, uint selectedMipMaxLevel)
+{
+    const float t = selectedMipMaxLevel > 0u ? saturate((float)selectedMipLevel / (float)selectedMipMaxLevel) : 0.0f;
+    if (t < 0.25f)
+    {
+        return lerp(float3(0.10f, 0.20f, 0.95f), float3(0.10f, 0.80f, 1.00f), t / 0.25f);
+    }
+    if (t < 0.50f)
+    {
+        return lerp(float3(0.10f, 0.80f, 1.00f), float3(0.15f, 0.90f, 0.20f), (t - 0.25f) / 0.25f);
+    }
+    if (t < 0.75f)
+    {
+        return lerp(float3(0.15f, 0.90f, 0.20f), float3(0.98f, 0.80f, 0.15f), (t - 0.50f) / 0.25f);
+    }
+
+    return lerp(float3(0.98f, 0.80f, 0.15f), float3(0.95f, 0.20f, 0.15f), (t - 0.75f) / 0.25f);
+}
+
 float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
@@ -75,6 +94,9 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
             break;
         case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:
             color = HashToColor(UnpackDebugUint(payload));
+            break;
+        case OUTPUT_MATERIAL_SELECTED_MIP:
+            color = MaterialSelectedMipDebugColor(payload.x, max(payload.x, payload.y));
             break;
     }
 

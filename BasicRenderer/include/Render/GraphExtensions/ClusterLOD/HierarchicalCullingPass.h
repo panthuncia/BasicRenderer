@@ -8,6 +8,7 @@
 #include <rhi.h>
 
 #include "BuiltinRenderPasses.h"
+#include "Managers/Singletons/PSOManager.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderPhase.h"
@@ -19,29 +20,35 @@ class Buffer;
 class PixelBuffer;
 class ResourceGroup;
 
-enum class HierarchialCullingWorkGraphMode : uint8_t {
+enum class HierarchicalCullingWorkGraphMode : uint8_t {
     HardwareOnly,
     SoftwareRasterCompute,
     SoftwareRasterWorkGraph,
 };
 
-struct HierarchialCullingPassInputs {
+enum class HierarchicalCullingBackend : uint8_t {
+    WorkGraph,
+    PureCompute,
+};
+
+struct HierarchicalCullingPassInputs {
     bool isFirstPass;
     unsigned int maxVisibleClusters;
-    HierarchialCullingWorkGraphMode workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+    HierarchicalCullingBackend backend = HierarchicalCullingBackend::WorkGraph;
+    HierarchicalCullingWorkGraphMode workGraphMode = HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph;
     RenderPhase renderPhase;
     bool clodOnlyWorkloads = false;
     bool useShadowCascadeViews = false;
     CLodRasterOutputKind rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
 
-    RG_DEFINE_PASS_INPUTS(HierarchialCullingPassInputs, &HierarchialCullingPassInputs::isFirstPass, &HierarchialCullingPassInputs::maxVisibleClusters, &HierarchialCullingPassInputs::workGraphMode, &HierarchialCullingPassInputs::renderPhase, &HierarchialCullingPassInputs::clodOnlyWorkloads, &HierarchialCullingPassInputs::useShadowCascadeViews, &HierarchialCullingPassInputs::rasterOutputKind);
+    RG_DEFINE_PASS_INPUTS(HierarchicalCullingPassInputs, &HierarchicalCullingPassInputs::isFirstPass, &HierarchicalCullingPassInputs::maxVisibleClusters, &HierarchicalCullingPassInputs::backend, &HierarchicalCullingPassInputs::workGraphMode, &HierarchicalCullingPassInputs::renderPhase, &HierarchicalCullingPassInputs::clodOnlyWorkloads, &HierarchicalCullingPassInputs::useShadowCascadeViews, &HierarchicalCullingPassInputs::rasterOutputKind);
 };
 
-class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
+class HierarchicalCullingPass : public ComputePass, public IDynamicDeclaredResources {
 public:
-    HierarchialCullingPass(
+    HierarchicalCullingPass(
         std::string stablePassIdentifier,
-        HierarchialCullingPassInputs inputs,
+        HierarchicalCullingPassInputs inputs,
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,
         std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
@@ -63,7 +70,7 @@ public:
         std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer = nullptr,
         std::shared_ptr<PixelBuffer> shadowPageTableTexture = nullptr,
         std::shared_ptr<PixelBuffer> shadowPhysicalPagesTexture = nullptr);
-    ~HierarchialCullingPass();
+    ~HierarchicalCullingPass();
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -121,10 +128,12 @@ private:
     std::shared_ptr<Buffer> m_phase1VisibleClustersCounterBuffer; // Phase 2 only: Phase 1's HW counter for write offset
     std::shared_ptr<Buffer> m_swWriteBaseCounterBuffer; // Phase 2 only: Phase 1's SW counter for top-down write offset
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
+    std::vector<uint64_t> m_declaredDrawSetResourceIds;
+    std::vector<uint64_t> m_declaredVisibilityBufferIds;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;
-    HierarchialCullingWorkGraphMode m_workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+    HierarchicalCullingWorkGraphMode m_workGraphMode = HierarchicalCullingWorkGraphMode::SoftwareRasterWorkGraph;
     CLodRasterOutputKind m_rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
     RenderPhase m_renderPhase;
     bool m_clodOnlyWorkloads = false;

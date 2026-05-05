@@ -51,8 +51,6 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     Phase2ReplayTraverseRecordsConsumed,
     Phase2ReplayClusterBucketRecordsConsumed,
 
-    TraverseNodesSegmentRecordsEmitted,
-
     SegmentEvaluateThreads,
     SegmentEvaluateSegmentRecords,
     SegmentEvaluateEmitBucketThreads,
@@ -124,6 +122,11 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     PageJobDbgAtlasWidth,
     PageJobDbgAtlasHeight,
     PageJobDbgOobPixels,
+
+    // Keep these appended at the end to match workGraphCulling.hlsl.
+    ClusterCullBucketRecordsDispatched,
+    ClusterCullDenseExpansionBuckets,
+    ClusterCullDenseClustersDispatched,
 
     Count
 };

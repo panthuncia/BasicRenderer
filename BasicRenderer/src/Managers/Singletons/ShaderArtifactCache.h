@@ -10,7 +10,12 @@
 
 namespace shadercache {
 
-inline constexpr uint32_t kSchemaVersion = 1;
+inline constexpr uint32_t kSchemaVersion = 2;
+
+enum class BinaryFormat : uint8_t {
+    Dxil = 1,
+    Spirv = 2,
+};
 
 enum class ArtifactKind : uint8_t {
     Bundle = 1,
@@ -27,6 +32,7 @@ enum class BlobKind : uint8_t {
 };
 
 struct CacheKey {
+    BinaryFormat binaryFormat = BinaryFormat::Dxil;
     ArtifactKind artifactKind = ArtifactKind::Bundle;
     uint64_t identityHash = 0;
 };
@@ -35,12 +41,13 @@ struct CachedShaderBlob {
     BlobKind kind = BlobKind::Vertex;
     std::string entryPoint;
     std::string target;
-    std::vector<std::byte> dxil;
+    std::vector<std::byte> bytecode;
 };
 
 struct CacheData {
     uint32_t schemaVersion = kSchemaVersion;
     uint64_t buildConfigHash = 0;
+    BinaryFormat binaryFormat = BinaryFormat::Dxil;
     ArtifactKind artifactKind = ArtifactKind::Bundle;
     std::vector<CachedShaderBlob> blobs;
     PipelineResources resourceDescriptorSlots;

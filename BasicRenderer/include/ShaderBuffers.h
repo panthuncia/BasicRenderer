@@ -190,7 +190,14 @@ struct PerMaterialCB {
 	unsigned int opacityUvSetIndex;
 
 	unsigned int openPBRMaterialDataIndex;
-	unsigned int perMaterialPad1[3];
+    unsigned int baseColorStreamingTextureID;
+    unsigned int normalStreamingTextureID;
+    unsigned int metallicStreamingTextureID;
+    unsigned int roughnessStreamingTextureID;
+    unsigned int emissiveStreamingTextureID;
+    unsigned int aoStreamingTextureID;
+    unsigned int heightStreamingTextureID;
+    unsigned int opacityStreamingTextureID;
 };
 
 struct PerMaterialEvalCB {
@@ -245,10 +252,14 @@ struct PerMaterialEvalCB {
     unsigned int aoUvSetIndex;
     unsigned int heightUvSetIndex;
     unsigned int opacityUvSetIndex;
-    unsigned int perMaterialEvalPad0;
-    unsigned int perMaterialEvalPad1;
-    unsigned int perMaterialEvalPad2;
-    unsigned int perMaterialEvalPad3;
+    unsigned int baseColorStreamingTextureID;
+    unsigned int normalStreamingTextureID;
+    unsigned int metallicStreamingTextureID;
+    unsigned int roughnessStreamingTextureID;
+    unsigned int emissiveStreamingTextureID;
+    unsigned int aoStreamingTextureID;
+    unsigned int heightStreamingTextureID;
+    unsigned int opacityStreamingTextureID;
 };
 
 struct PerMaterialOpenPBRCB {
@@ -333,8 +344,27 @@ struct PerMaterialOpenPBRCB {
 
     unsigned int fuzzWeightUvSetIndex;
     unsigned int fuzzRoughnessUvSetIndex;
-    unsigned int openPBRTexturePad0;
-    unsigned int openPBRTexturePad1;
+    unsigned int coatColorStreamingTextureID;
+    unsigned int coatWeightStreamingTextureID;
+    unsigned int coatRoughnessStreamingTextureID;
+    unsigned int fuzzColorStreamingTextureID;
+    unsigned int fuzzWeightStreamingTextureID;
+    unsigned int fuzzRoughnessStreamingTextureID;
+};
+
+struct TextureStreamingGPUInfo {
+    unsigned int flags;
+    unsigned int totalMipCount;
+    unsigned int residentTopMip;
+    unsigned int residentMipCount;
+
+    unsigned int fullWidth;
+    unsigned int fullHeight;
+
+    unsigned int requestedTopMip;
+    unsigned int pendingTopMip;
+    unsigned int bindingRevisionLo;
+    unsigned int bindingRevisionHi;
 };
 
 struct LightInfo {
@@ -460,7 +490,18 @@ struct CLodMeshMetadata
     uint groupChunkTableBase;
     uint groupChunkTableCount;
     uint pageMapBase; // global offset into GroupPageMap buffer for this mesh
+    uint lodLevelInfoBase;
+    uint lodLevelCount;
+    uint maxDepth;
     uint pad0;
+};
+
+struct CLodHierarchyLevelInfo
+{
+    uint32_t rootNode = 0;
+    uint32_t nodeRangeOffset = 0;
+    uint32_t nodeRangeCount = 0;
+    uint32_t pad0 = 0;
 };
 
 // GPU-visible page table entry - maps a virtual page ID to a slab + byte offset.
@@ -509,6 +550,15 @@ struct CLodNodeGpuInput {
     uint32_t numRecords = 0;
     uint64_t recordsAddress = 0;
     uint64_t recordStride = 0;
+};
+
+struct CLodDenseClusterWorkRecord {
+    uint32_t instanceIndex = 0;
+    uint32_t viewId = 0;
+    uint32_t groupIdPacked = 0;
+    uint32_t localMeshletIndex = 0;
+    uint32_t pageSlabDescriptorIndex = 0;
+    uint32_t pageSlabByteOffset = 0;
 };
 
 struct CLodMultiNodeGpuInput {
@@ -655,6 +705,13 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants, includ
     UintRootConstant17,
     UintRootConstant18,
     UintRootConstant19,
+    UintRootConstant20,
+    UintRootConstant21,
+    UintRootConstant22,
+    UintRootConstant23,
+    UintRootConstant24,
+    UintRootConstant25,
+    UintRootConstant26,
 	NumMiscUintRootConstants
 };
 

@@ -305,7 +305,14 @@ struct MaterialInfo {
     uint opacityUvSetIndex;
 
     uint openPBRMaterialDataIndex;
-    uint3 perMaterialPad1;
+    uint baseColorStreamingTextureID;
+    uint normalStreamingTextureID;
+    uint metallicStreamingTextureID;
+    uint roughnessStreamingTextureID;
+    uint emissiveStreamingTextureID;
+    uint aoStreamingTextureID;
+    uint heightStreamingTextureID;
+    uint opacityStreamingTextureID;
 };
 
 struct MaterialEvalInfo {
@@ -361,10 +368,14 @@ struct MaterialEvalInfo {
     uint heightUvSetIndex;
     uint opacityUvSetIndex;
 
-    uint perMaterialEvalPad0;
-    uint perMaterialEvalPad1;
-    uint perMaterialEvalPad2;
-    uint perMaterialEvalPad3;
+    uint baseColorStreamingTextureID;
+    uint normalStreamingTextureID;
+    uint metallicStreamingTextureID;
+    uint roughnessStreamingTextureID;
+    uint emissiveStreamingTextureID;
+    uint aoStreamingTextureID;
+    uint heightStreamingTextureID;
+    uint opacityStreamingTextureID;
 };
 
 struct OpenPBRMaterialInfo {
@@ -449,8 +460,27 @@ struct OpenPBRMaterialInfo {
 
     uint fuzzWeightUvSetIndex;
     uint fuzzRoughnessUvSetIndex;
-    uint openPBRTexturePad0;
-    uint openPBRTexturePad1;
+    uint coatColorStreamingTextureID;
+    uint coatWeightStreamingTextureID;
+    uint coatRoughnessStreamingTextureID;
+    uint fuzzColorStreamingTextureID;
+    uint fuzzWeightStreamingTextureID;
+    uint fuzzRoughnessStreamingTextureID;
+};
+
+struct TextureStreamingGPUInfo {
+    uint flags;
+    uint totalMipCount;
+    uint residentTopMip;
+    uint residentMipCount;
+
+    uint fullWidth;
+    uint fullHeight;
+
+    uint requestedTopMip;
+    uint pendingTopMip;
+    uint bindingRevisionLo;
+    uint bindingRevisionHi;
 };
 
 struct SingleMatrix {
@@ -583,6 +613,8 @@ struct FragmentInfo {
     uint heightMapIndex;
     uint heightMapSamplerIndex;
     uint materialFlags;
+    uint selectedMaterialMipLevel;
+    uint selectedMaterialMipMaxLevel;
 };
 
 struct EnvironmentInfo {
@@ -607,6 +639,8 @@ struct LPMConstants
     float4x4 inputToOutputMatrix;
 };
 
+static const uint MATERIAL_DEBUG_INVALID_MIP_LEVEL = 0xffffffffu;
+
 struct MaterialInputs
 {
     float3 albedo;
@@ -623,6 +657,8 @@ struct MaterialInputs
     float opacity;
     float ambientOcclusion;
     uint openPBRMaterialDataIndex;
+    uint selectedMaterialMipLevel;
+    uint selectedMaterialMipMaxLevel;
 };
 
 struct SkinningInstanceGPUInfo

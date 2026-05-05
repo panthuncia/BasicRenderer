@@ -9,6 +9,13 @@
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
+#if __has_include(<imgui_impl_vulkan.h>) && __has_include(<vulkan/vulkan.h>)
+#define BASICRENDERER_HAS_IMGUI_VULKAN 1
+#include <imgui_impl_vulkan.h>
+#include <rhi_interop_vulkan.h>
+#else
+#define BASICRENDERER_HAS_IMGUI_VULKAN 0
+#endif
 #include <implot.h>
 #include <functional>
 #include <spdlog/spdlog.h>
@@ -148,101 +155,33 @@ static void BuildIdToMemInfoIndex(
     }
 }
 
-static void BuildFrameGraphSnapshotFromBatches(
-    ui::FrameGraphSnapshot& out,
-    const std::vector<RenderGraph::PassBatch>& batches,
-    const PerResourceMemIndex& memIndex)
-{
-    out.batches.clear();
-    out.batches.reserve(batches.size());
-
-    std::unordered_set<uint64_t> uniqueIds;
-    uniqueIds.reserve(2048);
-
-    std::unordered_map<std::string, uint64_t> catSum;
-    catSum.reserve(64);
-
-    for (int bi = 0; bi < (int)batches.size(); ++bi) {
-        const auto& b = batches[bi];
-
-        uniqueIds.clear();
-
-        auto scanTransitions = [&](const std::vector<ResourceTransition>& v) {
-            for (auto& t : v) {
-                if (!t.pResource) continue;
-                uniqueIds.insert(t.pResource->GetGlobalResourceID());
-            }
-            };
-
-        for (size_t phaseIndex = 0; phaseIndex < static_cast<size_t>(RenderGraph::BatchTransitionPhase::Count); ++phaseIndex) {
-            const auto phase = static_cast<RenderGraph::BatchTransitionPhase>(phaseIndex);
-            for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
-                const auto queue = static_cast<QueueKind>(queueIndex);
-                scanTransitions(b.Transitions(queue, phase));
-            }
-        }
-
-        for (auto id : b.allResources) uniqueIds.insert(id);
-        for (auto id : b.internallyTransitionedResources) uniqueIds.insert(id);
-
-        uint64_t footprint = 0;
-        catSum.clear();
-
-        uint64_t missingBytes = 0;
-
-        for (uint64_t id : uniqueIds) {
-            auto it = memIndex.find(id);
-            if (it == memIndex.end()) {
-                // ?
-                continue;
-            }
-
-            footprint += it->second.bytes;
-            catSum[it->second.category] += it->second.bytes;
-        }
-
-        ui::FrameGraphBatchRow row{};
-        row.label = "Batch " + std::to_string(bi);
-        row.footprintBytes = footprint;
-        row.hasEndTransitions = b.HasTransitions(QueueKind::Graphics, RenderGraph::BatchTransitionPhase::AfterPasses);
-
-        size_t totalPassCount = 0;
-        for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
-            totalPassCount += b.Passes(static_cast<QueueKind>(queueIndex)).size();
-        }
-        row.passNames.reserve(totalPassCount);
-        //for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
-        //    const auto queue = static_cast<QueueKind>(queueIndex);
-        //    for (const auto& queuedPass : b.Passes(queue)) {
-        //        std::visit(
-        //            [&](const auto* pass) {
-        //                row.passNames.push_back(pass->name);
-        //            },
-        //            queuedPass);
-        //    }
-        //}
-
-        row.categories.reserve(catSum.size());
-        for (auto& [label, bytes] : catSum) {
-            row.categories.push_back({ label, bytes });
-        }
-        std::sort(row.categories.begin(), row.categories.end(),
-            [](auto const& a, auto const& b) { return a.bytes > b.bytes; });
-
-        out.batches.push_back(std::move(row));
-    }
-}
-
-
 class Menu {
 public:
     static Menu& GetInstance();
 
-    void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
+    void Initialize(HWND hwnd, rhi::Swapchain swapChain);
     void Render(const RenderContext& context, rhi::CommandList commandList);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
+        if (m_imguiBackend == rhi::Backend::D3D12) {
+            ImGui_ImplDX12_Shutdown();
+        }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        if (m_imguiBackend == rhi::Backend::Vulkan) {
+            ImGui_ImplVulkan_Shutdown();
+        }
+#endif
+        if (m_imguiWin32Initialized) {
+            ImGui_ImplWin32_Shutdown();
+        }
+        m_imguiBackend = rhi::Backend::Null;
+        m_imguiWin32Initialized = false;
+        g_pd3dSrvDescHeap.Reset();
+        imguiHeapGpuStart_ = 0;
+        imguiHeapIncrementSize_ = 0;
+        imguiHeapNextSlot_ = 1;
+        imguiHeapFreeSlots_ = {};
 		m_settingSubscriptions.clear();
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
@@ -279,9 +218,15 @@ public:
         imguiHeapFreeSlots_.push(index);
     }
     ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) const {
+		if (m_imguiBackend != rhi::Backend::D3D12) {
+            return static_cast<ImTextureID>(0);
+		}
         return static_cast<ImTextureID>(imguiHeapGpuStart_ + static_cast<uint64_t>(index) * imguiHeapIncrementSize_);
     }
     rhi::DescriptorHeapHandle GetImGuiHeapHandle() const {
+		if (!g_pd3dSrvDescHeap) {
+			return {};
+		}
         return g_pd3dSrvDescHeap->GetHandle();
     }
 
@@ -293,12 +238,17 @@ private:
     uint32_t imguiHeapNextSlot_ = 1; // slot 0 = font atlas
     std::queue<uint32_t> imguiHeapFreeSlots_;
     std::mutex imguiHeapMutex_;
+    rhi::Backend m_imguiBackend = rhi::Backend::Null;
+    bool m_imguiWin32Initialized = false;
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    VkFormat m_imguiVkColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkPipelineRenderingCreateInfoKHR m_imguiVkRenderingInfo{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+#endif
 
     Menu() { 
         ImGui::CreateContext();
 		ImPlot::CreateContext();
     };
-	IDXGISwapChain3* m_pSwapChain = nullptr;
 
     struct SceneExplorerPendingEdit {
         bool hasPosition = false;
@@ -517,6 +467,10 @@ private:
 	std::function<bool()> getMeshletCullingEnabled;
 	std::function<void(bool)> setMeshletCullingEnabled;
 
+    CLodCullingBackend m_clodCullingBackend = CLodCullingBackend::WorkGraph;
+    std::function<CLodCullingBackend()> getCLodCullingBackend;
+    std::function<void(CLodCullingBackend)> setCLodCullingBackend;
+
     CLodSoftwareRasterMode m_clodSoftwareRasterMode = CLodSoftwareRasterMode::Disabled;
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
@@ -613,10 +567,6 @@ private:
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<void(uint8_t)> setNumDirectionalLightCascades;
 
-    float m_maxShadowDistance = 0.0f;
-    std::function<float()> getMaxShadowDistance;
-    std::function<void(float)> setMaxShadowDistance;
-
     float m_directionalShadowVerticalExtent = 0.0f;
     std::function<float()> getDirectionalShadowVerticalExtent;
     std::function<void(float)> setDirectionalShadowVerticalExtent;
@@ -703,6 +653,7 @@ private:
     bool m_autoAliasLogExclusionReasons = false;
     std::function<bool()> getAutoAliasLogExclusionReasons;
     std::function<void(bool)> setAutoAliasLogExclusionReasons;
+    std::function<void(bool)> setAutoAliasBuildDebugData;
 
     uint32_t m_autoAliasPoolRetireIdleFrames = 120;
     std::function<uint32_t()> getAutoAliasPoolRetireIdleFrames;
@@ -729,27 +680,79 @@ inline bool Menu::HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return static_cast<bool>(ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam));
 }
 
-inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
-	m_pSwapChain = swapChain;
+inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
 
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX12_Init(rhi::dx12::get_device(device), 
-        numFramesInFlight,
-        DXGI_FORMAT_R8G8B8A8_UNORM, 
-        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get()),
-        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetCPUDescriptorHandleForHeapStart(),
-        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart());
+    m_imguiWin32Initialized = true;
 
-    // Cache GPU start and increment size for user-texture descriptor allocation.
-    imguiHeapGpuStart_ = rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart().ptr;
-    imguiHeapIncrementSize_ = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::CbvSrvUav);
+    if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::D3D12) {
+		auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
+		if (!rhi::IsOk(result) || !g_pd3dSrvDescHeap) {
+			throw std::runtime_error("Menu::Initialize failed to create ImGui descriptor heap for DX12 backend");
+		}
+
+        ImGui_ImplDX12_Init(rhi::dx12::get_device(device), 
+            numFramesInFlight,
+            DXGI_FORMAT_R8G8B8A8_UNORM, 
+            rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get()),
+            rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetCPUDescriptorHandleForHeapStart(),
+            rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart());
+
+        // Cache GPU start and increment size for user-texture descriptor allocation.
+        imguiHeapGpuStart_ = rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart().ptr;
+        imguiHeapIncrementSize_ = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::CbvSrvUav);
+        m_imguiBackend = rhi::Backend::D3D12;
+    } else if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        ImGui_ImplVulkan_InitInfo initInfo{};
+        initInfo.ApiVersion = VK_API_VERSION_1_3;
+        initInfo.Instance = rhi::vulkan::get_instance(device);
+        initInfo.PhysicalDevice = rhi::vulkan::get_physical_device(device);
+        initInfo.Device = rhi::vulkan::get_device(device);
+        initInfo.QueueFamily = rhi::vulkan::get_queue_family_index(DeviceManager::GetInstance().GetGraphicsQueue());
+        initInfo.Queue = rhi::vulkan::get_queue(DeviceManager::GetInstance().GetGraphicsQueue());
+        initInfo.MinImageCount = numFramesInFlight;
+        initInfo.ImageCount = numFramesInFlight;
+        initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        initInfo.DescriptorPoolSize = kImGuiHeapCapacity;
+        initInfo.UseDynamicRendering = true;
+        m_imguiVkColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+        m_imguiVkRenderingInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+        m_imguiVkRenderingInfo.colorAttachmentCount = 1;
+        m_imguiVkRenderingInfo.pColorAttachmentFormats = &m_imguiVkColorFormat;
+        initInfo.PipelineRenderingCreateInfo = m_imguiVkRenderingInfo;
+        initInfo.CheckVkResultFn = [](VkResult result) {
+            if (result != VK_SUCCESS) {
+                spdlog::error("ImGui Vulkan backend returned VkResult {}", static_cast<int>(result));
+            }
+        };
+
+        if (!initInfo.Instance || !initInfo.PhysicalDevice || !initInfo.Device || !initInfo.Queue) {
+            throw std::runtime_error("Menu::Initialize failed to query Vulkan native handles for ImGui");
+        }
+
+        if (!ImGui_ImplVulkan_Init(&initInfo)) {
+            throw std::runtime_error("Menu::Initialize failed to initialize ImGui Vulkan backend");
+        }
+        if (!ImGui_ImplVulkan_CreateFontsTexture()) {
+            throw std::runtime_error("Menu::Initialize failed to create ImGui Vulkan font texture");
+        }
+
+        m_imguiBackend = rhi::Backend::Vulkan;
+#else
+        (void)swapChain;
+        spdlog::warn("Menu::Initialize: Vulkan renderer backend was selected, but imgui_impl_vulkan.h is not available in this build environment.");
+#endif
+    } else {
+        (void)swapChain;
+        spdlog::warn("Menu::Initialize: Vulkan renderer backend is not available in this workspace's ImGui integration. UI rendering will stay disabled until a Vulkan ImGui backend is added.");
+    }
 
     ImGui_ImplWin32_EnableDpiAwareness();
 
@@ -829,6 +832,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	setMeshletCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletCulling");
 	meshletCulling = getMeshletCullingEnabled();
 	observerSetting(meshletCulling, "enableMeshletCulling");
+
+    getCLodCullingBackend = settingsManager.getSettingGetter<CLodCullingBackend>(CLodCullingBackendSettingName);
+    setCLodCullingBackend = settingsManager.getSettingSetter<CLodCullingBackend>(CLodCullingBackendSettingName);
+    m_clodCullingBackend = getCLodCullingBackend();
+    observerSetting(m_clodCullingBackend, CLodCullingBackendSettingName);
 
     getCLodSoftwareRasterMode = settingsManager.getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
@@ -950,11 +958,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_numDirectionalLightCascades = getNumDirectionalLightCascades();
     observerSetting(m_numDirectionalLightCascades, "numDirectionalLightCascades");
 
-    getMaxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance");
-    setMaxShadowDistance = settingsManager.getSettingSetter<float>("maxShadowDistance");
-    m_maxShadowDistance = getMaxShadowDistance();
-    observerSetting(m_maxShadowDistance, "maxShadowDistance");
-
     getDirectionalShadowVerticalExtent = settingsManager.getSettingGetter<float>("directionalShadowVerticalExtent");
     setDirectionalShadowVerticalExtent = settingsManager.getSettingSetter<float>("directionalShadowVerticalExtent");
     m_directionalShadowVerticalExtent = getDirectionalShadowVerticalExtent();
@@ -1059,6 +1062,8 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_autoAliasLogExclusionReasons = getAutoAliasLogExclusionReasons();
     observerSetting(m_autoAliasLogExclusionReasons, "autoAliasLogExclusionReasons");
 
+    setAutoAliasBuildDebugData = settingsManager.getSettingSetter<bool>("autoAliasBuildDebugData");
+
     getAutoAliasPoolRetireIdleFrames = settingsManager.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames");
     setAutoAliasPoolRetireIdleFrames = settingsManager.getSettingSetter<uint32_t>("autoAliasPoolRetireIdleFrames");
     m_autoAliasPoolRetireIdleFrames = getAutoAliasPoolRetireIdleFrames();
@@ -1156,26 +1161,27 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 }
 
 static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, int passKind) {
-    auto checkRequirements = [&](const auto& requirements) {
-        for (const auto& req : requirements) {
+    auto checkRequirements = [&](const auto& resources) {
+        bool found = false;
+        ForEachFrameRequirement(resources, [&](const auto& req) {
             if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
-                return true;
+                found = true;
             }
-        }
-        return false;
+        });
+        return found;
     };
     switch (passKind) {
     case 1: { // Compute
         auto& pr = *reinterpret_cast<const RenderGraph::ComputePassAndResources*>(passAndRes);
-        return checkRequirements(pr.resources.frameResourceRequirements);
+        return checkRequirements(pr.resources);
     }
     case 2: { // Copy
         auto& pr = *reinterpret_cast<const RenderGraph::CopyPassAndResources*>(passAndRes);
-        return checkRequirements(pr.resources.frameResourceRequirements);
+        return checkRequirements(pr.resources);
     }
     default: { // Render (0)
         auto& pr = *reinterpret_cast<const RenderGraph::RenderPassAndResources*>(passAndRes);
-        return checkRequirements(pr.resources.frameResourceRequirements);
+        return checkRequirements(pr.resources);
     }
     }
 }
@@ -1183,7 +1189,14 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
 inline void Menu::Render(const RenderContext& context, rhi::CommandList commandList) {
     m_sceneOverlapStatus = context.sceneOverlapStatus;
 
-	ImGui_ImplDX12_NewFrame();
+    if (m_imguiBackend == rhi::Backend::D3D12) {
+        ImGui_ImplDX12_NewFrame();
+    }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    else if (m_imguiBackend == rhi::Backend::Vulkan) {
+        ImGui_ImplVulkan_NewFrame();
+    }
+#endif
 	ImGui_ImplWin32_NewFrame();
 
 	ImGui::NewFrame();
@@ -1193,6 +1206,24 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     static bool showFrameTaskGraph = false;
     static bool showAutoAliasPlanner = false;
     static bool showGpuInstrumentation = false;
+    static bool showMaterialTextureStreaming = false;
+
+    const auto formatBytes = [](uint64_t bytes) {
+        const double value = static_cast<double>(bytes);
+        const double KiB = 1024.0;
+        const double MiB = KiB * 1024.0;
+        const double GiB = MiB * 1024.0;
+        const auto [divisor, suffix] =
+            (value >= GiB) ? std::pair{ GiB, "GB" } :
+            (value >= MiB) ? std::pair{ MiB, "MB" } :
+            (value >= KiB) ? std::pair{ KiB, "KB" } :
+            std::pair{ 1.0, "B" };
+        return std::format("{:.2f} {}", value / divisor, suffix);
+    };
+    const std::optional<MaterialTextureStreamingStats> materialTextureStreamingStats =
+        context.materialManager
+        ? std::optional<MaterialTextureStreamingStats>(context.materialManager->GetMaterialTextureStreamingStats())
+        : std::nullopt;
 
     const float fps = ImGui::GetIO().Framerate;
     const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
@@ -1216,7 +1247,16 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 		ImGui::Render();
 
-        commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+        if (m_imguiBackend == rhi::Backend::Null) {
+            return;
+        }
+
+        if (m_imguiBackend == rhi::Backend::D3D12) {
+            if (!g_pd3dSrvDescHeap) {
+                return;
+            }
+            commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+        }
 
 		rhi::PassBeginInfo beginInfo{};
 		rhi::ColorAttachment attchment{};
@@ -1228,7 +1268,14 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 		commandList.BeginPass(beginInfo);
 
-		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+        if (m_imguiBackend == rhi::Backend::D3D12) {
+            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+        }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        else if (m_imguiBackend == rhi::Backend::Vulkan) {
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), rhi::vulkan::get_cmd_list(commandList));
+        }
+#endif
         return;
     }
 
@@ -1266,6 +1313,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
+        int clodCullingBackendIndex = static_cast<int>(m_clodCullingBackend);
+        if (ImGui::Combo("CLod Culling Backend", &clodCullingBackendIndex, CLodCullingBackendNames, CLodCullingBackendCount)) {
+            clodCullingBackendIndex = std::clamp(clodCullingBackendIndex, 0, CLodCullingBackendCount - 1);
+            m_clodCullingBackend = static_cast<CLodCullingBackend>(clodCullingBackendIndex);
+            setCLodCullingBackend(m_clodCullingBackend);
+        }
         int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
         if (ImGui::Combo("Visibility/Alpha SW Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
@@ -1468,10 +1521,6 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional,
             m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees,
             m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional);
-        if (ImGui::SliderFloat("Directional Shadow Distance", &m_maxShadowDistance, 1.0f, 1000.0f, "%.1f")) {
-            m_maxShadowDistance = std::max(m_maxShadowDistance, 1.0f);
-            setMaxShadowDistance(m_maxShadowDistance);
-        }
         if (ImGui::SliderFloat("Directional Shadow Vertical Extent", &m_directionalShadowVerticalExtent, 1.0f, 1000.0f, "%.1f")) {
             m_directionalShadowVerticalExtent = std::max(m_directionalShadowVerticalExtent, 1.0f);
             setDirectionalShadowVerticalExtent(m_directionalShadowVerticalExtent);
@@ -1539,7 +1588,11 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
         ImGui::Checkbox("CPU frame task graph", &showFrameTaskGraph);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
+        if (setAutoAliasBuildDebugData) {
+            setAutoAliasBuildDebugData(showAutoAliasPlanner);
+        }
         ImGui::Checkbox("GPU instrumentation", &showGpuInstrumentation);
+        ImGui::Checkbox("Material texture streaming", &showMaterialTextureStreaming);
         std::string memoryString = "Memory usage: unavailable";
         const double KiB = 1024.0;
         const double MiB = KiB * 1024.0;
@@ -1581,12 +1634,10 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         PerResourceMemIndex memIndex;
         BuildMemorySnapshotFromRecords(snap, memoryRecords, &memIndex);
 
-        static std::unordered_map<uint64_t, MemInfo> s_idToMem;
-		BuildIdToMemInfoIndex(s_idToMem, memoryRecords);
 		ui::FrameGraphSnapshot fgSnap;
-
-        const auto& batches = m_renderGraph->GetBatches();
-        BuildFrameGraphSnapshotFromBatches(fgSnap, batches, memIndex);
+        if (m_renderGraph) {
+            m_renderGraph->BuildMemoryIntrospectionFrameGraphSnapshot(fgSnap, memoryRecords);
+        }
 
 
         ImGui::Begin("Memory Introspection", nullptr);
@@ -1598,6 +1649,55 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         g_memWidget.Draw(&open, &snap, &fgSnap);
 		ImGui::End();
 	}
+
+    if (showMaterialTextureStreaming) {
+        ImGui::Begin("Material Texture Streaming", &showMaterialTextureStreaming);
+        if (materialTextureStreamingStats.has_value()) {
+            const auto& stats = *materialTextureStreamingStats;
+            ImGui::Text("Active material textures: %u", stats.uniqueMaterialTextureCount);
+            ImGui::Text(
+                "Streamable / enabled: %u / %u",
+                stats.uniqueStreamableTextureCount,
+                stats.uniqueStreamingEnabledTextureCount);
+            ImGui::Text(
+                "Full-res resident: %u total, %u streamable",
+                stats.fullResolutionResidentTextureCount,
+                stats.streamableFullResolutionResidentTextureCount);
+            ImGui::Text("Pending reloads: %u", stats.pendingReloadTextureCount);
+            ImGui::Text("Resident bytes: %s", formatBytes(stats.totalResidentBytes).c_str());
+            ImGui::Text("Streamable resident bytes: %s", formatBytes(stats.streamableResidentBytes).c_str());
+
+            if (!stats.residentTopMipHistogram.empty()) {
+                std::vector<float> histogramValues;
+                histogramValues.reserve(stats.residentTopMipHistogram.size());
+                for (uint32_t count : stats.residentTopMipHistogram) {
+                    histogramValues.push_back(static_cast<float>(count));
+                }
+
+                ImGui::SeparatorText("Resident top mip histogram");
+                ImGui::PlotHistogram(
+                    "##MaterialTextureResidentTopMipHistogram",
+                    histogramValues.data(),
+                    static_cast<int>(histogramValues.size()),
+                    0,
+                    nullptr,
+                    0.0f,
+                    *std::max_element(histogramValues.begin(), histogramValues.end()) + 1.0f,
+                    ImVec2(420.0f, 180.0f));
+
+                for (size_t mip = 0; mip < stats.residentTopMipHistogram.size(); ++mip) {
+                    ImGui::Text("Top mip %zu: %u", mip, stats.residentTopMipHistogram[mip]);
+                }
+            }
+            else {
+                ImGui::TextUnformatted("No active material textures tracked.");
+            }
+        }
+        else {
+            ImGui::TextUnformatted("MaterialManager unavailable.");
+        }
+        ImGui::End();
+    }
 
     {
 		ImGui::Begin("Scene Graph", nullptr);
@@ -1611,34 +1711,38 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
-        RGInspectorOptions opts;
-        opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
-        opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
-        opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
-        opts.imguiHeapHandle = GetImGuiHeapHandle();
-        RGInspector::Show(m_renderGraph->GetBatches(),
-            m_renderGraph->GetQueueRegistry(),
-            PassUsesResourceAdapter,
-            [this](uint64_t resourceId) -> std::string {
-                if (!m_renderGraph) return {};
-                auto resource = m_renderGraph->GetResourceByID(resourceId);
-                if (!resource) return {};
-                return resource->GetName();
-            },
-            [this](uint64_t resourceId) -> Resource* {
-                if (!m_renderGraph) return nullptr;
-                auto resource = m_renderGraph->GetResourceByID(resourceId);
-                return resource ? resource.get() : nullptr;
-            },
-            [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
-                if (!m_renderGraph) {
-                    return;
-                }
-                if (auto* readbackService = m_renderGraph->GetReadbackService()) {
-                    readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
-                }
-            },
-            opts);
+        if (m_imguiBackend == rhi::Backend::D3D12 && g_pd3dSrvDescHeap) {
+            RGInspectorOptions opts;
+            opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
+            opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
+            opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
+            opts.imguiHeapHandle = GetImGuiHeapHandle();
+            RGInspector::Show(m_renderGraph->GetBatches(),
+                m_renderGraph->GetQueueRegistry(),
+                PassUsesResourceAdapter,
+                [this](uint64_t resourceId) -> std::string {
+                    if (!m_renderGraph) return {};
+                    auto resource = m_renderGraph->GetResourceByID(resourceId);
+                    if (!resource) return {};
+                    return resource->GetName();
+                },
+                [this](uint64_t resourceId) -> Resource* {
+                    if (!m_renderGraph) return nullptr;
+                    auto resource = m_renderGraph->GetResourceByID(resourceId);
+                    return resource ? resource.get() : nullptr;
+                },
+                [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
+                    if (!m_renderGraph) {
+                        return;
+                    }
+                    if (auto* readbackService = m_renderGraph->GetReadbackService()) {
+                        readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
+                    }
+                },
+                opts);
+        } else {
+            ImGui::TextUnformatted("Texture preview integration currently requires the DX12 ImGui backend.");
+        }
         ImGui::End();
 
     }
@@ -1663,7 +1767,16 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 	// Rendering
 	ImGui::Render();
 
-    commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+    if (m_imguiBackend == rhi::Backend::Null) {
+        return;
+    }
+
+    if (m_imguiBackend == rhi::Backend::D3D12) {
+        if (!g_pd3dSrvDescHeap) {
+            return;
+        }
+        commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+    }
 
 	rhi::PassBeginInfo beginInfo{};
 	rhi::ColorAttachment attchment{};
@@ -1675,7 +1788,14 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 	commandList.BeginPass(beginInfo);
 
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+    if (m_imguiBackend == rhi::Backend::D3D12) {
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+    }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    else if (m_imguiBackend == rhi::Backend::Vulkan) {
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), rhi::vulkan::get_cmd_list(commandList));
+    }
+#endif
 
 }
 
@@ -2411,7 +2531,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodOpaque::HierarchialCullingPass2",
+                "CLodOpaque::HierarchicalCullingPass2",
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2443,18 +2563,28 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
                 const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
                 const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+                const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
+                const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+                const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
+                    ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
+                    : "bucketed";
 
                 spdlog::info(
-                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node={}, meshlet={})",
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
                     visibleWrites,
+                    bucketDispatchRecords,
+                    denseExpansionBuckets,
+                    denseClustersDispatched,
                     replayNodeInput,
                     replayMeshletInput);
                 });
@@ -2466,7 +2596,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLodOpaque::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchicalCullingPass2",
                     clodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -2486,7 +2616,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLodOpaque::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchicalCullingPass2",
                     clodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -2538,7 +2668,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodShadow::HierarchialCullingPass1",
+                "CLodShadow::HierarchicalCullingPass1",
                 shadowClodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2570,18 +2700,28 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
                 const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
                 const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+                const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
+                const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+                const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
+                    ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
+                    : "bucketed";
 
                 spdlog::info(
-                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node={}, meshlet={})",
+                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
                     visibleWrites,
+                    bucketDispatchRecords,
+                    denseExpansionBuckets,
+                    denseClustersDispatched,
                     replayNodeInput,
                     replayMeshletInput);
                 });
@@ -2593,7 +2733,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLodShadow::HierarchialCullingPass1",
+                    "CLodShadow::HierarchicalCullingPass1",
                     shadowClodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -2613,7 +2753,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLodShadow::HierarchialCullingPass1",
+                    "CLodShadow::HierarchicalCullingPass1",
                     shadowClodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -3093,6 +3233,20 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
                 counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
 
+            const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
+            const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+            const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
+            const bool denseDispatchActive = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u);
+            const char* clusterDispatchMode = denseDispatchActive
+                ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense per-cluster")
+                : "bucketed";
+            ImGui::Text(
+                "ClusterCull dispatch mode: %s | bucket records=%u | dense expansion buckets=%u | dense clusters=%u",
+                clusterDispatchMode,
+                bucketDispatchRecords,
+                denseExpansionBuckets,
+                denseClustersDispatched);
+
             const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
             const uint32_t clusterSurvivingLanes = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
             drawUtilizationRow("ClusterCull surviving lanes", clusterSurvivingLanes, clusterActiveLanes);
@@ -3182,7 +3336,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 rejectionRow("Frustum cull", rejFrustum, totalRejected);
                 rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
                 rejectionRow("Occlusion cull", rejOccl, totalRejected);
-                rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
+                rejectionRow(
+                    denseDispatchActive ? "Inactive iterations / tail lanes" : "WaveActiveMax padding (inactive iterations)",
+                    rejOOR,
+                    totalRejected);
                 rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
                 rejectionRow("Clean shadow pages", rejCleanPages, totalRejected);
                 ImGui::Text("  Shadow clipmap misses: %u", shadowClipmapMisses);
@@ -3344,11 +3501,20 @@ inline void Menu::DrawCLodTelemetryWindow() {
             runtimeState.maxPhysicalPages,
             runtimeState.maxAllocationRequests,
             runtimeState.directionalLodBias);
-        ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u",
+        const uint32_t allocatablePhysicalPages = std::min(
+            stats.freePhysicalPageCount + stats.reusablePhysicalPageCount,
+            runtimeState.maxPhysicalPages);
+        const uint32_t unbackedAllocationRequests =
+            stats.allocationRequestCount > allocatablePhysicalPages
+            ? stats.allocationRequestCount - allocatablePhysicalPages
+            : 0u;
+        ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u allocatable=%u unbacked=%u",
             stats.allocationRequestCount,
             stats.allocationDispatchGroupCount,
             stats.freePhysicalPageCount,
-            stats.reusablePhysicalPageCount);
+            stats.reusablePhysicalPageCount,
+            allocatablePhysicalPages,
+            unbackedAllocationRequests);
         ImGui::Text(
             "Controller: requestAllocation=%.1f%% targetBias=%.2f smoothedBias=%.2f recoveryStableFrames=%u",
             stats.currentAllocationPercentage * 100.0f,
@@ -4669,6 +4835,17 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
         ImGui::BulletText("Pooled: %.2f MB", pooledMB);
         ImGui::BulletText("Saved: %.2f MB (%.1f%%)", savedMB, savedPct);
 
+        if (snapshot.planCacheHits > 0 || snapshot.planCacheMisses > 0 || !snapshot.primaryPlanCacheMissReason.empty()) {
+            ImGui::Text("Planner cache");
+            ImGui::BulletText(
+                "Hits: %llu | Misses: %llu",
+                static_cast<unsigned long long>(snapshot.planCacheHits),
+                static_cast<unsigned long long>(snapshot.planCacheMisses));
+            if (!snapshot.primaryPlanCacheMissReason.empty()) {
+                ImGui::BulletText("Primary miss reason: %s", snapshot.primaryPlanCacheMissReason.c_str());
+            }
+        }
+
         if (!snapshot.poolDebug.empty()) {
             ImGui::Separator();
             ImGui::TextUnformatted("Pool byte overlap view");
@@ -4811,6 +4988,49 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
                 ImGui::BulletText("%s (%llu)",
                     snapshot.exclusionReasons[i].reason.c_str(),
                     static_cast<unsigned long long>(snapshot.exclusionReasons[i].count));
+            }
+        }
+
+        if (!snapshot.excludedResources.empty()) {
+            ImGui::Separator();
+            uint64_t excludedBytes = 0;
+            for (const auto& excludedResource : snapshot.excludedResources) {
+                excludedBytes += excludedResource.sizeBytes;
+            }
+
+            ImGui::Text(
+                "Non-aliasable resources: %llu | Total bytes: %s",
+                static_cast<unsigned long long>(snapshot.excludedResources.size()),
+                formatBytes(excludedBytes).c_str());
+            ImGui::TextDisabled("Sorted by memory size (largest first)");
+
+            constexpr ImGuiTableFlags excludedTableFlags =
+                ImGuiTableFlags_Borders |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingStretchProp |
+                ImGuiTableFlags_ScrollY;
+            const float listHeight = std::min(320.0f, 22.0f * static_cast<float>(snapshot.excludedResources.size()) + 28.0f);
+            if (ImGui::BeginTable("##AutoAliasExcludedResources", 3, excludedTableFlags, ImVec2(0.0f, std::max(140.0f, listHeight)))) {
+                ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+                ImGui::TableSetupColumn("Reason", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+                ImGui::TableHeadersRow();
+                ImGui::TableSetupScrollFreeze(0, 1);
+
+                for (const auto& excludedResource : snapshot.excludedResources) {
+                    ImGui::TableNextRow();
+
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(excludedResource.resourceName.c_str());
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextUnformatted(formatBytes(excludedResource.sizeBytes).c_str());
+
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::TextWrapped("%s", excludedResource.reason.c_str());
+                }
+
+                ImGui::EndTable();
             }
         }
     }

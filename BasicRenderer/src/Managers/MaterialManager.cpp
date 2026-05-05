@@ -1,17 +1,56 @@
 #include "Managers/MaterialManager.h"
 #include "../generated/BuiltinResources.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RasterBucketFlags.h"
+#include "Render/Runtime/IReadbackService.h"
 
+#include <cstring>
 #include <limits>
 #include <unordered_set>
 
 namespace {
+	constexpr uint32_t kTextureStreamingFlagEligible = 1u << 0;
+	constexpr uint32_t kTextureStreamingFlagEnabled = 1u << 1;
+	constexpr uint32_t kTextureStreamingFeedbackUnused = 0xffffffffu;
+	constexpr uint64_t kTextureStreamingIdleFramesBeforeCoarsen = 180u;
+	constexpr std::string_view kTextureStreamingFeedbackReadbackAnchorPass = "MenuRenderPass";
+
+	uint64_t ComputeTextureResidentBytes(const TextureDescription& desc) {
+		uint64_t totalBytes = 0;
+		for (const ImageDimensions& dims : desc.imageDimensions) {
+			totalBytes += dims.slicePitch;
+		}
+		return totalBytes;
+	}
+
+	TextureStreamingGPUInfo BuildTextureStreamingGPUInfo(const TextureAsset& texture) {
+		const TextureStreamingState& state = texture.GetStreamingState();
+		TextureStreamingGPUInfo info = {};
+		if (state.eligible) {
+			info.flags |= kTextureStreamingFlagEligible;
+		}
+		if (state.enabled) {
+			info.flags |= kTextureStreamingFlagEnabled;
+		}
+		info.totalMipCount = state.residency.totalMipCount;
+		info.residentTopMip = state.residency.residentTopMip;
+		info.residentMipCount = state.residency.residentMipCount;
+		info.fullWidth = texture.GetFullMip0Width();
+		info.fullHeight = texture.GetFullMip0Height();
+		info.requestedTopMip = state.requestedTopMip;
+		info.pendingTopMip = state.pendingTopMip;
+		info.bindingRevisionLo = static_cast<uint32_t>(state.bindingRevision & 0xffffffffull);
+		info.bindingRevisionHi = static_cast<uint32_t>(state.bindingRevision >> 32u);
+		return info;
+	}
+
 	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(const Material& material) {
 		const OpenPBRMaterialParameters& materialParameters = material.GetOpenPBRMaterial();
 		const OpenPBRTextureBindings& textures = material.GetOpenPBRTextures();
 		constexpr uint32_t kInvalidDescriptor = std::numeric_limits<uint32_t>::max();
+		constexpr uint32_t kInvalidStreamingTextureID = 0u;
 		PerMaterialOpenPBRCB result = {};
 		result.baseWeight = materialParameters.baseWeight;
 		result.baseColor = materialParameters.baseColor;
@@ -57,10 +96,12 @@ namespace {
 			uint32_t& textureIndex,
 			uint32_t& samplerIndex,
 			DirectX::XMUINT4& channels,
-			uint32_t& uvSetIndex) {
+			uint32_t& uvSetIndex,
+			uint32_t& streamingTextureID) {
 			textureIndex = kInvalidDescriptor;
 			samplerIndex = kInvalidDescriptor;
 			uvSetIndex = binding.uvSetIndex;
+			streamingTextureID = kInvalidStreamingTextureID;
 			channels = DirectX::XMUINT4(0u, 1u, 2u, 3u);
 
 			if (binding.texture == nullptr) {
@@ -69,6 +110,7 @@ namespace {
 
 			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
 			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			streamingTextureID = binding.texture->GetStreamingTextureID();
 			if (binding.channels.size() > 0u) channels.x = binding.channels[0];
 			if (binding.channels.size() > 1u) channels.y = binding.channels[1];
 			if (binding.channels.size() > 2u) channels.z = binding.channels[2];
@@ -79,11 +121,13 @@ namespace {
 			uint32_t& textureIndex,
 			uint32_t& samplerIndex,
 			uint32_t& channel,
-			uint32_t& uvSetIndex) {
+			uint32_t& uvSetIndex,
+			uint32_t& streamingTextureID) {
 			textureIndex = kInvalidDescriptor;
 			samplerIndex = kInvalidDescriptor;
 			channel = 0u;
 			uvSetIndex = binding.uvSetIndex;
+			streamingTextureID = kInvalidStreamingTextureID;
 
 			if (binding.texture == nullptr) {
 				return;
@@ -91,6 +135,7 @@ namespace {
 
 			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
 			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			streamingTextureID = binding.texture->GetStreamingTextureID();
 			if (!binding.channels.empty()) {
 				channel = binding.channels[0];
 			}
@@ -100,32 +145,38 @@ namespace {
 			result.coatColorTextureIndex,
 			result.coatColorSamplerIndex,
 			result.coatColorChannels,
-			result.coatColorUvSetIndex);
+			result.coatColorUvSetIndex,
+			result.coatColorStreamingTextureID);
 		initializeScalarTextureMetadata(textures.coatWeight,
 			result.coatWeightTextureIndex,
 			result.coatWeightSamplerIndex,
 			result.coatWeightChannel,
-			result.coatWeightUvSetIndex);
+			result.coatWeightUvSetIndex,
+			result.coatWeightStreamingTextureID);
 		initializeScalarTextureMetadata(textures.coatRoughness,
 			result.coatRoughnessTextureIndex,
 			result.coatRoughnessSamplerIndex,
 			result.coatRoughnessChannel,
-			result.coatRoughnessUvSetIndex);
+			result.coatRoughnessUvSetIndex,
+			result.coatRoughnessStreamingTextureID);
 		initializeColorTextureMetadata(textures.fuzzColor,
 			result.fuzzColorTextureIndex,
 			result.fuzzColorSamplerIndex,
 			result.fuzzColorChannels,
-			result.fuzzColorUvSetIndex);
+			result.fuzzColorUvSetIndex,
+			result.fuzzColorStreamingTextureID);
 		initializeScalarTextureMetadata(textures.fuzzWeight,
 			result.fuzzWeightTextureIndex,
 			result.fuzzWeightSamplerIndex,
 			result.fuzzWeightChannel,
-			result.fuzzWeightUvSetIndex);
+			result.fuzzWeightUvSetIndex,
+			result.fuzzWeightStreamingTextureID);
 		initializeScalarTextureMetadata(textures.fuzzRoughness,
 			result.fuzzRoughnessTextureIndex,
 			result.fuzzRoughnessSamplerIndex,
 			result.fuzzRoughnessChannel,
-			result.fuzzRoughnessUvSetIndex);
+			result.fuzzRoughnessUvSetIndex,
+			result.fuzzRoughnessStreamingTextureID);
 		return result;
 	}
 
@@ -173,6 +224,14 @@ namespace {
 		result.aoUvSetIndex = base.aoUvSetIndex;
 		result.heightUvSetIndex = base.heightUvSetIndex;
 		result.opacityUvSetIndex = base.opacityUvSetIndex;
+		result.baseColorStreamingTextureID = base.baseColorStreamingTextureID;
+		result.normalStreamingTextureID = base.normalStreamingTextureID;
+		result.metallicStreamingTextureID = base.metallicStreamingTextureID;
+		result.roughnessStreamingTextureID = base.roughnessStreamingTextureID;
+		result.emissiveStreamingTextureID = base.emissiveStreamingTextureID;
+		result.aoStreamingTextureID = base.aoStreamingTextureID;
+		result.heightStreamingTextureID = base.heightStreamingTextureID;
+		result.opacityStreamingTextureID = base.opacityStreamingTextureID;
 		return result;
 	}
 
@@ -204,9 +263,15 @@ MaterialManager::MaterialManager() {
 	m_perMaterialDataBuffer = DynamicStructuredBuffer<PerMaterialCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialDataBuffer", true);
 	m_perMaterialEvalDataBuffer = DynamicStructuredBuffer<PerMaterialEvalCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialEvalDataBuffer", true);
 	m_perMaterialOpenPBRDataBuffer = DynamicStructuredBuffer<PerMaterialOpenPBRCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialOpenPBRDataBuffer", true);
+	m_textureStreamingMetadataBuffer = DynamicStructuredBuffer<TextureStreamingGPUInfo>::CreateShared(m_textureStreamingMetadataCapacity, "Builtin::Material::TextureStreamingMetadataBuffer", true);
+	m_textureStreamingFeedbackBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(m_textureStreamingMetadataCapacity, "Builtin::Material::TextureStreamingFeedbackBuffer", true);
 	rg::memory::SetResourceUsageHint(*m_perMaterialDataBuffer, "Material buffers");
 	rg::memory::SetResourceUsageHint(*m_perMaterialEvalDataBuffer, "Material buffers");
 	rg::memory::SetResourceUsageHint(*m_perMaterialOpenPBRDataBuffer, "Material buffers");
+	rg::memory::SetResourceUsageHint(*m_textureStreamingMetadataBuffer, "Material buffers");
+	rg::memory::SetResourceUsageHint(*m_textureStreamingFeedbackBuffer, "Material buffers");
+	m_textureStreamingMetadataBuffer->UpdateAt(0u, TextureStreamingGPUInfo{});
+	m_textureStreamingFeedbackBuffer->UpdateAt(0u, kTextureStreamingFeedbackUnused);
 
 	// Visibility buffer resources
     m_materialPixelCountBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(m_compileFlagsSlotsUsed, "VisUtil::MaterialPixelCountBuffer", true);
@@ -236,7 +301,188 @@ MaterialManager::MaterialManager() {
 	m_resources[Builtin::PerMaterialDataBuffer] = m_perMaterialDataBuffer;
 	m_resources["Builtin::PerMaterialEvalDataBuffer"] = m_perMaterialEvalDataBuffer;
 	m_resources[Builtin::PerMaterialOpenPBRDataBuffer] = m_perMaterialOpenPBRDataBuffer;
+	m_resources[Builtin::Material::TextureStreamingMetadataBuffer] = m_textureStreamingMetadataBuffer;
+	m_resources[Builtin::Material::TextureStreamingFeedbackBuffer] = m_textureStreamingFeedbackBuffer;
 	m_resolvers[Builtin::Material::TextureGroup] = std::make_shared<ResourceGroupResolver>(m_activeMaterialTextureGroup);
+}
+
+void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
+	std::vector<std::pair<uint32_t, uint32_t>> pendingFeedback;
+	{
+		std::lock_guard lock(m_textureStreamingFeedbackMutex);
+		pendingFeedback.swap(m_pendingTextureStreamingFeedback);
+	}
+
+	std::vector<uint32_t> expiredTextureIDs;
+	for (const auto& [streamingTextureID, requestedTopMip] : pendingFeedback) {
+		auto it = m_streamingTexturesByID.find(streamingTextureID);
+		if (it == m_streamingTexturesByID.end()) {
+			continue;
+		}
+
+		auto texture = it->second.lock();
+		if (!texture) {
+			expiredTextureIDs.push_back(streamingTextureID);
+			continue;
+		}
+
+		if (!texture->IsMipStreamingEnabled()) {
+			continue;
+		}
+
+		texture->ApplyStreamingSystemRequest(requestedTopMip, frameIndex);
+	}
+
+	for (uint32_t streamingTextureID : expiredTextureIDs) {
+		m_streamingTexturesByID.erase(streamingTextureID);
+	}
+
+	for (auto it = m_streamingTexturesByID.begin(); it != m_streamingTexturesByID.end();) {
+		auto texture = it->second.lock();
+		if (!texture) {
+			it = m_streamingTexturesByID.erase(it);
+			continue;
+		}
+
+		if (!texture->IsMipStreamingEnabled()) {
+			++it;
+			continue;
+		}
+
+		const TextureStreamingState& state = texture->GetStreamingState();
+		if (state.lastSeenFrame == 0u || frameIndex <= state.lastSeenFrame + kTextureStreamingIdleFramesBeforeCoarsen) {
+			++it;
+			continue;
+		}
+
+		const uint32_t coarsenedTopMip = (std::min)(
+			state.residency.totalMipCount - 1u,
+			(std::max)(state.requestedTopMip, state.residency.residentTopMip + 1u));
+		if (coarsenedTopMip != state.requestedTopMip) {
+			texture->ApplyStreamingSystemRequest(coarsenedTopMip, frameIndex);
+		}
+
+		++it;
+	}
+
+	m_activeTextureStreamingFeedbackIDs.clear();
+	m_activeTextureStreamingFeedbackIDSet.clear();
+}
+void MaterialManager::RequestTextureStreamingFeedbackReadback(rg::runtime::IReadbackService* readbackService) {
+	if (!readbackService || !m_textureStreamingFeedbackBuffer || m_activeTextureStreamingFeedbackIDs.empty()) {
+		return;
+	}
+
+	std::vector<uint32_t> activeStreamingTextureIDs = m_activeTextureStreamingFeedbackIDs;
+	readbackService->RequestReadbackCapture(
+		std::string(kTextureStreamingFeedbackReadbackAnchorPass),
+		m_textureStreamingFeedbackBuffer.get(),
+		RangeSpec{},
+		[this, activeStreamingTextureIDs = std::move(activeStreamingTextureIDs)](ReadbackCaptureResult&& result) {
+			if (result.desc.kind != ReadbackResourceKind::Buffer || result.data.empty()) {
+				return;
+			}
+
+			TaskSchedulerManager::GetInstance().RunBackgroundTask(
+				"MaterialManager::DecodeTextureStreamingFeedback",
+				[this,
+				 activeStreamingTextureIDs = std::move(activeStreamingTextureIDs),
+				 resultData = std::move(result.data)]() mutable {
+					std::vector<std::pair<uint32_t, uint32_t>> decodedFeedback;
+					decodedFeedback.reserve(activeStreamingTextureIDs.size());
+					const size_t wordCount = resultData.size() / sizeof(uint32_t);
+					for (uint32_t streamingTextureID : activeStreamingTextureIDs) {
+						if (streamingTextureID >= wordCount) {
+							continue;
+						}
+
+						uint32_t requestedTopMip = kTextureStreamingFeedbackUnused;
+						std::memcpy(
+							&requestedTopMip,
+							resultData.data() + static_cast<size_t>(streamingTextureID) * sizeof(uint32_t),
+							sizeof(uint32_t));
+						if (requestedTopMip == kTextureStreamingFeedbackUnused) {
+							continue;
+						}
+
+						decodedFeedback.emplace_back(streamingTextureID, requestedTopMip);
+					}
+
+					if (decodedFeedback.empty()) {
+						return;
+					}
+
+					std::lock_guard lock(m_textureStreamingFeedbackMutex);
+					m_pendingTextureStreamingFeedback.insert(
+						m_pendingTextureStreamingFeedback.end(),
+						decodedFeedback.begin(),
+						decodedFeedback.end());
+				});
+		},
+		QueueKind::Copy);
+}
+
+MaterialTextureStreamingStats MaterialManager::GetMaterialTextureStreamingStats() const {
+	MaterialTextureStreamingStats stats{};
+	std::unordered_set<uint64_t> seenImageResourceIDs;
+
+	for (const auto& [_, textures] : m_trackedMaterialTextures) {
+		for (const auto& textureResource : textures) {
+			if (!textureResource) {
+				continue;
+			}
+
+			auto image = std::dynamic_pointer_cast<PixelBuffer>(textureResource);
+			if (!image) {
+				continue;
+			}
+
+			const uint64_t imageResourceID = image->GetGlobalResourceID();
+			if (!seenImageResourceIDs.insert(imageResourceID).second) {
+				continue;
+			}
+
+			stats.uniqueMaterialTextureCount++;
+			stats.totalResidentBytes += ComputeTextureResidentBytes(image->GetDescription());
+
+			uint32_t residentTopMip = 0u;
+			auto textureIt = m_materialTextureAssetsByImageResourceID.find(imageResourceID);
+			if (textureIt != m_materialTextureAssetsByImageResourceID.end()) {
+				auto texture = textureIt->second.lock();
+				if (!texture) {
+					continue;
+				}
+
+				const TextureStreamingState& streamingState = texture->GetStreamingState();
+				residentTopMip = streamingState.residency.residentTopMip;
+				if (streamingState.eligible) {
+					stats.uniqueStreamableTextureCount++;
+					stats.streamableResidentBytes += ComputeTextureResidentBytes(image->GetDescription());
+					if (streamingState.enabled) {
+						stats.uniqueStreamingEnabledTextureCount++;
+					}
+					if (streamingState.residency.residentTopMip == 0u) {
+						stats.streamableFullResolutionResidentTextureCount++;
+					}
+					if (streamingState.requestedTopMip != streamingState.residency.residentTopMip ||
+						streamingState.pendingTopMip != streamingState.residency.residentTopMip) {
+						stats.pendingReloadTextureCount++;
+					}
+				}
+			}
+
+			if (residentTopMip == 0u) {
+				stats.fullResolutionResidentTextureCount++;
+			}
+
+			if (stats.residentTopMipHistogram.size() <= residentTopMip) {
+				stats.residentTopMipHistogram.resize(static_cast<size_t>(residentTopMip) + 1u, 0u);
+			}
+			stats.residentTopMipHistogram[residentTopMip]++;
+		}
+	}
+
+	return stats;
 }
 
 void MaterialManager::IncrementMaterialUsageCount(Material& material) {
@@ -261,7 +507,55 @@ void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
 	m_perMaterialDataBuffer->UpdateAt(materialSlot, material.GetData());
 	m_perMaterialEvalDataBuffer->UpdateAt(materialSlot, BuildMaterialEvalData(material));
 	m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, BuildOpenPBRMaterialData(material));
+	UpdateTextureStreamingMetadata(material);
 	RefreshMaterialTextureUsage(material);
+}
+
+void MaterialManager::UpdateTextureStreamingMetadata(const Material& material) {
+	std::unordered_set<uint32_t> updatedStreamingTextureIDs;
+	material.ForEachReferencedTexture([&](const std::shared_ptr<TextureAsset>& texture) {
+		if (!texture) {
+			return;
+		}
+
+		const uint32_t streamingTextureID = texture->GetStreamingTextureID();
+		if (streamingTextureID == 0u || !updatedStreamingTextureIDs.insert(streamingTextureID).second) {
+			return;
+		}
+
+		UpdateTextureStreamingMetadata(texture);
+	});
+}
+
+void MaterialManager::UpdateTextureStreamingMetadata(const std::shared_ptr<TextureAsset>& texture) {
+	if (!texture) {
+		return;
+	}
+
+	const uint32_t streamingTextureID = texture->GetStreamingTextureID();
+	if (streamingTextureID == 0u) {
+		return;
+	}
+
+	if (streamingTextureID >= m_textureStreamingMetadataCapacity) {
+		uint32_t newCapacity = m_textureStreamingMetadataCapacity;
+		while (streamingTextureID >= newCapacity) {
+			newCapacity *= 2u;
+		}
+		m_textureStreamingMetadataBuffer->Resize(newCapacity);
+		m_textureStreamingFeedbackBuffer->Resize(newCapacity);
+		m_textureStreamingMetadataCapacity = newCapacity;
+	}
+
+	m_textureStreamingMetadataBuffer->UpdateAt(streamingTextureID, BuildTextureStreamingGPUInfo(*texture));
+	m_textureStreamingFeedbackBuffer->UpdateAt(streamingTextureID, kTextureStreamingFeedbackUnused);
+	if (auto image = texture->ImagePtr()) {
+		m_materialTextureAssetsByImageResourceID[image->GetGlobalResourceID()] = texture;
+	}
+	m_streamingTexturesByID[streamingTextureID] = texture;
+	if (m_activeTextureStreamingFeedbackIDSet.insert(streamingTextureID).second) {
+		m_activeTextureStreamingFeedbackIDs.push_back(streamingTextureID);
+	}
 }
 
 void MaterialManager::DecrementMaterialUsageCount(const Material& material) {

@@ -80,6 +80,8 @@ struct Builtin {
   };
   struct Material {
     inline static constexpr std::string_view TextureGroup = "Builtin::Material::TextureGroup";
+    inline static constexpr std::string_view TextureStreamingFeedbackBuffer = "Builtin::Material::TextureStreamingFeedbackBuffer";
+    inline static constexpr std::string_view TextureStreamingMetadataBuffer = "Builtin::Material::TextureStreamingMetadataBuffer";
   };
   struct MeshResources {
     inline static constexpr std::string_view MeshletBounds = "Builtin::MeshResources::MeshletBounds";

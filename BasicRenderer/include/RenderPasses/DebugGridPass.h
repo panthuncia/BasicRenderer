@@ -53,7 +53,7 @@ public:
     {
         builder
             ->WithShaderResource(Builtin::CameraBuffer,
-                Builtin::PrimaryCamera::LinearDepthMap)
+                Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
             // Needs UAV, since compute will read-modify-write (manual blend)
             .WithUnorderedAccess(Builtin::PostProcessing::UpscaledHDR);
 		builder->WithConstantBuffer(Builtin::PerFrameBuffer);

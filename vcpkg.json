@@ -6,7 +6,7 @@
     "directxtex",
     {
       "name": "imgui",
-      "features": [ "dx12-binding", "win32-binding" ]
+      "features": [ "dx12-binding", "vulkan-binding", "win32-binding" ]
     },
     "directx-headers",
     "directx12-agility",

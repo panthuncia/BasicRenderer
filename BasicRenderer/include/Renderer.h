@@ -112,6 +112,8 @@ private:
     UINT64 m_currentFrameFenceValue = 1; // Start at 1, waiting on 0 is meaningless
 
 	rhi::TimelinePtr m_readbackFence;
+    rhi::TimelinePtr m_copyReadbackFence;
+	rhi::TimelinePtr m_legacyReadbackFence;
 
     InputManager inputManager;
     MovementState movementState;
@@ -177,7 +179,6 @@ private:
     void SignalFence(rhi::Queue commandQueue, uint8_t currentFrameIndex);
     void AdvanceFrameIndex();
     void CheckDebugMessages();
-    void FlushCommandQueue();
     void CreateRTVs();
     void RunGameUpdateStage(float elapsedSeconds);
     void RunAnimationUpdateStage(float elapsedSeconds);

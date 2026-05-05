@@ -191,6 +191,10 @@ namespace CLodCache {
 			WritePod(out, cacheSource.buildConfigHash);
 			WriteString(out, ws2s(cacheSource.containerFileName));
 			WriteVectorPod(out, prebuiltData.nodes);
+			WriteVectorPod(out, prebuiltData.lodNodeRanges);
+			WriteVectorPod(out, prebuiltData.lodLevelRoots);
+			WritePod(out, prebuiltData.maxDepth);
+			WritePod(out, prebuiltData.maxTraversalDepth);
 
 			// --- Voxel group mapping ---
 			const auto& vgm = prebuiltData.voxelGroupMapping;
@@ -237,6 +241,10 @@ namespace CLodCache {
 			if (!ReadString(blob, offset, containerFileName)) return false;
 			out.prebuiltData.cacheSource.containerFileName = s2ws(containerFileName);
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.nodes)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.lodNodeRanges)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.lodLevelRoots)) return false;
+			if (!ReadPod(blob, offset, out.prebuiltData.maxDepth)) return false;
+			if (!ReadPod(blob, offset, out.prebuiltData.maxTraversalDepth)) return false;
 
 			// --- Voxel group mapping ---
 			uint32_t payloadCount = 0;

@@ -19,11 +19,23 @@
 
 namespace {
     // Bump this whenever the shader compiler argument set changes in a way that affects
-    // the generated DXIL container, especially debug payload availability.
-    constexpr uint64_t kShaderCompilerArgumentFingerprint = 2u;
+    // the generated shader bytecode container, especially debug payload availability.
+    constexpr uint64_t kShaderCompilerArgumentFingerprint = 3u;
 }
 
 namespace {
+
+shadercache::BinaryFormat GetActiveShaderBinaryFormat()
+{
+    return DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan
+        ? shadercache::BinaryFormat::Spirv
+        : shadercache::BinaryFormat::Dxil;
+}
+
+bool IsSpirvFormat(shadercache::BinaryFormat binaryFormat)
+{
+    return binaryFormat == shadercache::BinaryFormat::Spirv;
+}
 
 constexpr std::wstring_view kValidationSkipEntryPoints[] = {
     L"ClusterLODBucketMSMain",
@@ -129,11 +141,11 @@ uint64_t BuildLibraryIdentityHash(
     util::hash_combine_u64(seed, HashStringStable(ws2s(info.target)));
     return seed;
 }
-
-uint64_t ComputeShaderCacheBuildConfigHash()
+uint64_t ComputeShaderCacheBuildConfigHash(shadercache::BinaryFormat binaryFormat)
 {
     uint64_t seed = 0;
     util::hash_combine_u64(seed, shadercache::kSchemaVersion);
+    util::hash_combine_u64(seed, static_cast<uint8_t>(binaryFormat));
     util::hash_combine_u64(seed, kBRSLPreprocessVersion);
     util::hash_combine_u64(seed, kShaderCompilerArgumentFingerprint);
 #if WRITE_DEBUG_FILES
@@ -242,7 +254,7 @@ void AppendBundleBlob(
         .kind = kind,
         .entryPoint = ws2s(entryPoint),
         .target = ws2s(target),
-        .dxil = CopyBlobBytes(blob),
+        .bytecode = CopyBlobBytes(blob),
     });
 }
 
@@ -262,7 +274,7 @@ std::optional<ShaderBundle> TryLoadShaderBundleFromCache(
 
     for (const shadercache::CachedShaderBlob& blob : cacheData->blobs) {
         Microsoft::WRL::ComPtr<ID3DBlob> reconstructedBlob;
-        if (!CreateBlobFromBytes(utils, blob.dxil, reconstructedBlob)) {
+        if (!CreateBlobFromBytes(utils, blob.bytecode, reconstructedBlob)) {
             spdlog::warn("Shader cache blob reconstruction failed; treating as miss.");
             return std::nullopt;
         }
@@ -310,7 +322,7 @@ std::optional<ShaderLibraryBundle> TryLoadShaderLibraryFromCache(
     ShaderLibraryBundle bundle;
     bundle.resourceDescriptorSlots = cacheData->resourceDescriptorSlots;
     bundle.resourceIDsHash = cacheData->resourceIDsHash;
-    if (!CreateBlobFromBytes(utils, cacheData->blobs.front().dxil, bundle.libraryBlob)) {
+    if (!CreateBlobFromBytes(utils, cacheData->blobs.front().bytecode, bundle.libraryBlob)) {
         spdlog::warn("Shader library cache blob reconstruction failed; treating as miss.");
         return std::nullopt;
     }
@@ -322,6 +334,7 @@ shadercache::CacheData BuildBundleCacheData(const ShaderInfoBundle& info, const 
 {
     shadercache::CacheData cacheData;
     cacheData.buildConfigHash = buildConfigHash;
+    cacheData.binaryFormat = GetActiveShaderBinaryFormat();
     cacheData.artifactKind = shadercache::ArtifactKind::Bundle;
     cacheData.resourceDescriptorSlots = bundle.resourceDescriptorSlots;
     cacheData.resourceIDsHash = bundle.resourceIDsHash;
@@ -338,6 +351,7 @@ shadercache::CacheData BuildLibraryCacheData(const ShaderLibraryInfo& info, cons
 {
     shadercache::CacheData cacheData;
     cacheData.buildConfigHash = buildConfigHash;
+    cacheData.binaryFormat = GetActiveShaderBinaryFormat();
     cacheData.artifactKind = shadercache::ArtifactKind::Library;
     cacheData.resourceDescriptorSlots = bundle.resourceDescriptorSlots;
     cacheData.resourceIDsHash = bundle.resourceIDsHash;
@@ -2018,8 +2032,10 @@ ShaderLibraryBundle PSOManager::CompileShaderLibrary(const ShaderLibraryInfo& li
 
     std::string debug_shader_string((const char*)dxcPreprocessBuff.Ptr, dxcPreprocessBuff.Size);
 
-    const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash();
+    const shadercache::BinaryFormat binaryFormat = GetActiveShaderBinaryFormat();
+    const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash(binaryFormat);
     const shadercache::CacheKey cacheKey{
+        .binaryFormat = binaryFormat,
         .artifactKind = shadercache::ArtifactKind::Library,
         .identityHash = BuildLibraryIdentityHash(libraryInfo, dxcPreprocessBuff),
     };
@@ -2095,8 +2111,10 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     PreprocessShaderSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer);
     PreprocessShaderSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer);
 
-    const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash();
+    const shadercache::BinaryFormat binaryFormat = GetActiveShaderBinaryFormat();
+    const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash(binaryFormat);
     const shadercache::CacheKey cacheKey{
+        .binaryFormat = binaryFormat,
         .artifactKind = shadercache::ArtifactKind::Bundle,
         .identityHash = BuildBundleIdentityHash(
             info,
@@ -2264,6 +2282,7 @@ void PSOManager::CompileShader(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
+    opts.emitSpirv = IsSpirvFormat(GetActiveShaderBinaryFormat());
 #if WRITE_DEBUG_FILES
     opts.enableDebugInfo = true;
 #endif
@@ -2294,6 +2313,7 @@ void PSOManager::CompileShader(
 }
 
 void PSOManager::LoadSource(const std::filesystem::path& path, PSOManager::SourceData& sd) {
+        bool emitSpirv = false;
     UINT32 codePage = CP_UTF8;
     ThrowIfFailed(pUtils->LoadFile(
         path.c_str(), &codePage, &sd.blob
@@ -2329,6 +2349,12 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
         args.push_back(L"-E"); args.push_back(opts.entryPoint.c_str());
     }
     args.push_back(L"-T"); args.push_back(opts.target.c_str());
+
+    if (opts.emitSpirv) {
+        args.push_back(L"-spirv");
+        args.push_back(L"-fvk-use-dx-layout");
+        args.push_back(L"-fspv-target-env=vulkan1.3");
+    }
 
     if (opts.warningsAsErrors)
         args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS);

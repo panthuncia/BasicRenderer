@@ -181,6 +181,7 @@ private:
         std::wstring entryPoint;
         std::wstring target;
         std::vector<DxcDefine> defines;
+        bool emitSpirv = false;
         bool enableDebugInfo = false;
         bool warningsAsErrors = true;
     };

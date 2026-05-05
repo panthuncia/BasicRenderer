@@ -40,7 +40,6 @@ public:
         std::shared_ptr<Buffer> expandedOffsetsBuffer,
         std::shared_ptr<Buffer> expandedWriteCursorBuffer,
         std::shared_ptr<Buffer> expandedVisibleClustersBuffer,
-        std::shared_ptr<Buffer> expandedBlockMetaBuffer,
         std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
         std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
         uint32_t expandedRecordCapacity,
@@ -55,7 +54,6 @@ public:
         , m_expandedOffsetsBuffer(std::move(expandedOffsetsBuffer))
         , m_expandedWriteCursorBuffer(std::move(expandedWriteCursorBuffer))
         , m_expandedVisibleClustersBuffer(std::move(expandedVisibleClustersBuffer))
-        , m_expandedBlockMetaBuffer(std::move(expandedBlockMetaBuffer))
         , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
         , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
         , m_expandedRecordCapacity(expandedRecordCapacity)
@@ -127,8 +125,7 @@ public:
             builder->WithShaderResource(m_expandedOffsetsBuffer)
                 .WithUnorderedAccess(
                     m_expandedWriteCursorBuffer,
-                    m_expandedVisibleClustersBuffer,
-                    m_expandedBlockMetaBuffer);
+                    m_expandedVisibleClustersBuffer);
         }
 
         if (m_slabResourceGroup) {
@@ -220,7 +217,6 @@ public:
             misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_OFFSETS_DESCRIPTOR_INDEX] = m_expandedOffsetsBuffer->GetSRVInfo(0).slot.index;
             misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_expandedWriteCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_expandedVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_BLOCK_META_DESCRIPTOR_INDEX] = m_expandedBlockMetaBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         }
 
         const auto apiResource = m_sourceIndirectArgsBuffer->GetAPIResource();
@@ -261,7 +257,6 @@ private:
     std::shared_ptr<Buffer> m_expandedOffsetsBuffer;
     std::shared_ptr<Buffer> m_expandedWriteCursorBuffer;
     std::shared_ptr<Buffer> m_expandedVisibleClustersBuffer;
-    std::shared_ptr<Buffer> m_expandedBlockMetaBuffer;
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
     std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
     uint32_t m_expandedRecordCapacity = 0u;

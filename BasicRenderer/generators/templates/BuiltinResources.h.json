@@ -3,7 +3,9 @@
     "Backbuffer": {},
     "LastFrameLinearDepthMaps": {},
     "Material": {
-      "TextureGroup": {}
+      "TextureGroup": {},
+      "TextureStreamingMetadataBuffer": {},
+      "TextureStreamingFeedbackBuffer": {}
     },
     "PerMaterialDataBuffer": {},
     "PerMaterialOpenPBRDataBuffer": {},

@@ -195,7 +195,7 @@ private:
         bool m_declaredResourcesChanged = true;
     };
 
-    class BC7CompressionCopyPass : public RenderPass, public IDynamicDeclaredResources {
+    class BC7CompressionCopyPass : public RenderPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
     public:
         void Setup() override;
 
@@ -218,7 +218,7 @@ private:
         bool m_declaredResourcesChanged = true;
     };
 
-    class BC7CompressionReadbackPass : public CopyPass, public IDynamicDeclaredResources {
+    class BC7CompressionReadbackPass : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
     public:
         void Setup() override;
 

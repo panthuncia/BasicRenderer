@@ -15,6 +15,17 @@ struct CLodMeshMetadata
     uint groupChunkTableBase;
     uint groupChunkTableCount;
     uint pageMapBase; // global offset into GroupPageMap buffer for this mesh
+    uint lodLevelInfoBase;
+    uint lodLevelCount;
+    uint maxDepth;
+    uint pad0;
+};
+
+struct CLodHierarchyLevelInfo
+{
+    uint rootNode;
+    uint nodeRangeOffset;
+    uint nodeRangeCount;
     uint pad0;
 };
 
@@ -196,6 +207,16 @@ struct CLodNodeGpuInput
     uint numRecords;
     uint64_t recordsAddress;
     uint64_t recordStride;
+};
+
+struct CLodDenseClusterWorkRecord
+{
+    uint instanceIndex;
+    uint viewId;
+    uint groupIdPacked;
+    uint localMeshletIndex;
+    uint pageSlabDescriptorIndex;
+    uint pageSlabByteOffset;
 };
 
 struct CLodMultiNodeGpuInput

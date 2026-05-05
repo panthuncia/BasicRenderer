@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 
 #include "Materials/Material.h"
 #include "Interfaces/IResourceProvider.h"
@@ -8,6 +9,22 @@
 #include "Resources/ResourceGroup.h"
 #include "Render/IndirectCommand.h"
 #include "Render/RasterBucketFlags.h"
+
+namespace rg::runtime {
+class IReadbackService;
+}
+
+struct MaterialTextureStreamingStats {
+	uint32_t uniqueMaterialTextureCount = 0;
+	uint32_t uniqueStreamableTextureCount = 0;
+	uint32_t uniqueStreamingEnabledTextureCount = 0;
+	uint32_t fullResolutionResidentTextureCount = 0;
+	uint32_t streamableFullResolutionResidentTextureCount = 0;
+	uint32_t pendingReloadTextureCount = 0;
+	uint64_t totalResidentBytes = 0;
+	uint64_t streamableResidentBytes = 0;
+	std::vector<uint32_t> residentTopMipHistogram = {};
+};
 
 // Manages buffers for per-material-compile-flag work (e.g., visibility buffer per-material)
 class MaterialManager : public IResourceProvider {
@@ -22,6 +39,9 @@ public:
 
 	void IncrementMaterialUsageCount(Material& material);
 	void DecrementMaterialUsageCount(const Material& material);
+	void BeginTextureStreamingFeedbackFrame(uint64_t frameIndex);
+	void RequestTextureStreamingFeedbackReadback(rg::runtime::IReadbackService* readbackService);
+	MaterialTextureStreamingStats GetMaterialTextureStreamingStats() const;
 
 	void UpdateMaterialDataBuffer(Material& material);
 	void UpdateOpenPBRMaterialDataBuffer(unsigned int materialSlot, const PerMaterialOpenPBRCB& data) {
@@ -58,6 +78,8 @@ private:
 	void UpdateMaterialTextureUsage(const Material& material, int delta);
 	void RefreshMaterialTextureUsage(const Material& material);
 	void UpdateTrackedMaterialTextureRefs(const std::vector<std::shared_ptr<Resource>>& textures, int delta);
+	void UpdateTextureStreamingMetadata(const Material& material);
+	void UpdateTextureStreamingMetadata(const std::shared_ptr<TextureAsset>& texture);
 
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
@@ -100,4 +122,13 @@ private:
 	std::shared_ptr<DynamicStructuredBuffer<PerMaterialCB>> m_perMaterialDataBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<PerMaterialEvalCB>> m_perMaterialEvalDataBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<PerMaterialOpenPBRCB>> m_perMaterialOpenPBRDataBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<TextureStreamingGPUInfo>> m_textureStreamingMetadataBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_textureStreamingFeedbackBuffer;
+	std::unordered_map<uint64_t, std::weak_ptr<TextureAsset>> m_materialTextureAssetsByImageResourceID;
+	std::unordered_map<uint32_t, std::weak_ptr<TextureAsset>> m_streamingTexturesByID;
+	std::vector<uint32_t> m_activeTextureStreamingFeedbackIDs;
+	std::unordered_set<uint32_t> m_activeTextureStreamingFeedbackIDSet;
+	std::mutex m_textureStreamingFeedbackMutex;
+	std::vector<std::pair<uint32_t, uint32_t>> m_pendingTextureStreamingFeedback;
+	uint32_t m_textureStreamingMetadataCapacity = 1u;
 };

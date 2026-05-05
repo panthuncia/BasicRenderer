@@ -374,14 +374,25 @@ namespace detail {
         const std::wstring& filePath,
         std::shared_ptr<Sampler> sampler,
         bool allowRTV,
-        bool allowUAV)
+        bool allowUAV,
+        std::string* outFailureReason = nullptr)
     {
+        if (outFailureReason) {
+            outFailureReason->clear();
+        }
+
         if (!DirectStorageManager::GetInstance().CanServiceQueue(br::DirectStorageQueueKind::Gpu)) {
+            if (outFailureReason) {
+                *outFailureReason = "DirectStorage GPU queue unavailable";
+            }
             return {};
         }
 
         br::processed_texture_cache::FileHeader header{};
         if (!ReadProcessedTextureCacheHeader(filePath, header)) {
+            if (outFailureReason) {
+                *outFailureReason = "failed to read conditioned texture cache header";
+            }
             return {};
         }
 
@@ -398,6 +409,9 @@ namespace detail {
         if (header.baseWidth == 0 || header.baseHeight == 0 || header.mipLevels == 0 ||
             header.subresourceCount == 0 || header.totalArraySlices == 0 ||
             header.dataSizeBytes > static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())) {
+            if (outFailureReason) {
+                *outFailureReason = "conditioned texture cache header has invalid dimensions or payload size";
+            }
             return {};
         }
 
@@ -410,6 +424,9 @@ namespace detail {
                 size_t rowPitch = 0;
                 size_t slicePitch = 0;
                 if (FAILED(DirectX::ComputePitch(dxgiFormat, mipWidth, mipHeight, rowPitch, slicePitch))) {
+                    if (outFailureReason) {
+                        *outFailureReason = "failed to compute conditioned texture cache subresource pitch";
+                    }
                     return {};
                 }
 
@@ -423,10 +440,20 @@ namespace detail {
         }
 
         if (desc.imageDimensions.size() != header.subresourceCount) {
+            if (outFailureReason) {
+                *outFailureReason = "conditioned texture cache subresource count did not match reconstructed dimensions";
+            }
             return {};
         }
 
         auto pixelBuffer = PixelBuffer::CreateShared(desc);
+        if (!pixelBuffer) {
+            if (outFailureReason) {
+                *outFailureReason = "failed to create resident texture resource for conditioned cache upload";
+            }
+            return {};
+        }
+
         std::string directStorageMessage;
         if (!DirectStorageManager::GetInstance().UploadTextureSubresourcesFromFile(
                 filePath,
@@ -434,6 +461,11 @@ namespace detail {
                 header.dataOffset,
                 static_cast<uint32_t>(header.dataSizeBytes),
                 &directStorageMessage)) {
+            if (outFailureReason) {
+                *outFailureReason = directStorageMessage.empty()
+                    ? "DirectStorage upload of conditioned texture cache failed"
+                    : directStorageMessage;
+            }
             if (!directStorageMessage.empty()) {
                 spdlog::debug("TryLoadProcessedTextureCacheToVRAM: DirectStorage fallback for '{}' because {}", ws2s(filePath), directStorageMessage);
             }
@@ -444,26 +476,15 @@ namespace detail {
             sampler = Sampler::GetDefaultSampler();
         }
 
-        const std::filesystem::path conditionedPath(filePath);
-        const std::filesystem::path ddsFallbackPath = conditionedPath.parent_path() / conditionedPath.stem().replace_extension(L".dds");
-        std::error_code ec;
-        const bool hasDdsFallback = std::filesystem::exists(ddsFallbackPath, ec) && !ec;
-
         TextureFileMeta meta{};
         meta.filePath = ws2s(filePath);
-        meta.fileType = hasDdsFallback ? ImageFiletype::DDS : ImageFiletype::UNKNOWN;
-        meta.loader = hasDdsFallback ? ImageLoader::DirectXTex : ImageLoader{};
+        meta.fileType = ImageFiletype::UNKNOWN;
+        meta.loader = ImageLoader{};
         meta.preferSRGB = rhi::helpers::IsSRGB(desc.format);
         meta.isProcessingCacheArtifact = true;
 
-        std::shared_ptr<TextureAsset> texture;
-        if (hasDdsFallback) {
-            texture = TextureAsset::CreateShared(desc, ws2s(ddsFallbackPath.wstring()), sampler, std::move(meta));
-            texture->AdoptUploadedImage(pixelBuffer);
-        }
-        else {
-            texture = TextureAsset::CreateShared(desc, pixelBuffer, sampler, std::move(meta));
-        }
+        auto texture = TextureAsset::CreateShared(desc, ws2s(filePath), sampler, std::move(meta));
+        texture->AdoptUploadedImage(pixelBuffer);
         texture->RecordLoadPath(TextureLoadPathTelemetry::DirectStorageGpuDirect, "conditioned texture cache uploaded directly into GPU texture through DirectStorage");
         texture->RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, "processing cache residency established through DirectStorage GPU queue");
         return texture;
@@ -678,6 +699,13 @@ LoadTextureFromMemory(const void* bytes,
     if (!bytes || !byteCount)
         throw std::runtime_error("LoadTextureFromMemory: null/empty buffer");
 
+    auto finalizeTexture = [](std::shared_ptr<TextureAsset> texture, const char* detail) {
+        if (texture) {
+            texture->RecordLoadPath(TextureLoadPathTelemetry::InMemoryContainer, detail);
+        }
+        return texture;
+    };
+
     DirectX::TexMetadata meta{};
     ImageFiletype kind{};
     if (!detail::ProbeImageContainer(bytes, byteCount, kind, meta, flags)) {
@@ -694,7 +722,7 @@ LoadTextureFromMemory(const void* bytes,
         if (FAILED(hr)) throw std::runtime_error("Failed to load DDS from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
         auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
-        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
+        return finalizeTexture(CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV), "texture decoded from in-memory DDS container");
     }
     case ImageFiletype::HDR: {
         hr = DirectX::LoadFromHDRMemory(
@@ -702,7 +730,7 @@ LoadTextureFromMemory(const void* bytes,
         if (FAILED(hr)) throw std::runtime_error("Failed to load HDR from memory");
         // HDR stays in float formats; do not force sRGB
         auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
-        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
+        return finalizeTexture(CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV), "texture decoded from in-memory HDR container");
     }
     case ImageFiletype::TGA: {
         hr = DirectX::LoadFromTGAMemory(
@@ -710,7 +738,7 @@ LoadTextureFromMemory(const void* bytes,
         if (FAILED(hr)) throw std::runtime_error("Failed to load TGA from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
         auto decoded = DecodedFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
-        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
+        return finalizeTexture(CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV), "texture decoded from in-memory TGA container");
     }
     case ImageFiletype::WIC: {
         // WIC: let caller preference drive sRGB/linear
@@ -740,11 +768,11 @@ LoadTextureFromMemory(const void* bytes,
             }
 
             auto decoded = DecodedFromDXT(convertedImg, convertedImg.GetMetadata(), "", ImageFiletype::WIC, convertedFormat);
-            return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
+            return finalizeTexture(CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV), "texture decoded from in-memory WIC container");
         }
 
         auto decoded = DecodedFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
-        return CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV);
+        return finalizeTexture(CreateTextureFromDecoded(std::move(decoded), sampler, allowRTV, allowUAV), "texture decoded from in-memory WIC container");
     }
     }
 
@@ -765,8 +793,9 @@ LoadTextureFromFile(const std::wstring& filePath,
     localFlags.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
 
     if (detail::IsProcessedTextureCachePath(filePath)) {
+        std::string processedCacheFailureReason;
         if (!detail::kForceCpuTextureLoadPath) {
-            if (auto conditionedTexture = detail::TryLoadProcessedTextureCacheToVRAM(filePath, sampler, allowRTV, allowUAV)) {
+            if (auto conditionedTexture = detail::TryLoadProcessedTextureCacheToVRAM(filePath, sampler, allowRTV, allowUAV, &processedCacheFailureReason)) {
                 conditionedTexture->Meta().preferSRGB = preferSRGB;
                 return conditionedTexture;
             }
@@ -775,7 +804,19 @@ LoadTextureFromFile(const std::wstring& filePath,
         std::filesystem::path ddsFallbackPath = std::filesystem::path(filePath).replace_extension(L".dds");
         std::error_code ec;
         if (std::filesystem::exists(ddsFallbackPath, ec) && !ec) {
+            spdlog::info(
+                "LoadTextureFromFile: conditioned cache '{}' fell back to sibling DDS '{}' because {}",
+                ws2s(filePath),
+                ws2s(ddsFallbackPath.wstring()),
+                processedCacheFailureReason.empty() ? std::string("conditioned cache GPU-direct path was unavailable") : processedCacheFailureReason);
             return LoadTextureFromFile(ddsFallbackPath.wstring(), sampler, preferSRGB, localFlags, allowRTV, allowUAV);
+        }
+
+        if (!processedCacheFailureReason.empty()) {
+            spdlog::info(
+                "LoadTextureFromFile: conditioned cache '{}' will use CPU decode because {}",
+                ws2s(filePath),
+                processedCacheFailureReason);
         }
     }
 

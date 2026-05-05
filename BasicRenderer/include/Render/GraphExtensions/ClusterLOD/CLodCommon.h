@@ -26,6 +26,7 @@ inline constexpr const char* CLodPageJobMaxPagesPerClusterSettingName = "clodPag
 inline constexpr const char* CLodPageJobRecordCapacitySettingName = "clodPageJobRecordCapacity";
 inline constexpr const char* CLodPageJobForceAllSettingName = "clodPageJobForceAll";
 inline constexpr const char* CLodWorkGraphComputePageJobDescriptorBufferId = "CLod::WorkGraphComputePageJobDescriptors";
+inline constexpr const char* CLodLevelInfosBufferId = "Builtin::CLod::LevelInfos";
 inline constexpr const char* CLodDirectionalVirtualShadowMaxBackingResolutionSettingName = "clodDirectionalVirtualShadowMaxBackingResolution";
 inline constexpr const char* CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName = "clodDirectionalVirtualShadowMaxPhysicalPages";
 inline constexpr const char* CLodDirectionalVirtualShadowLodBiasSettingName = "clodDirectionalVirtualShadowLodBias";
@@ -47,6 +48,11 @@ enum class CLodSoftwareRasterMode : uint8_t {
     Disabled,
     Compute,
     WorkGraph,
+};
+
+enum class CLodCullingBackend : uint8_t {
+    WorkGraph,
+    PureCompute,
 };
 
 enum class CLodVSMRasterMode : uint8_t {
@@ -71,12 +77,18 @@ enum class CLodTransparencyMode : uint8_t {
 };
 
 inline constexpr const char* CLodSoftwareRasterModeSettingName = "clodSoftwareRasterMode";
+inline constexpr const char* CLodCullingBackendSettingName = "clodCullingBackend";
 inline constexpr const char* CLodSoftwareRasterModeNames[] = {
     "Disabled",
     "Compute",
     "Work Graph",
 };
 inline constexpr int CLodSoftwareRasterModeCount = static_cast<int>(sizeof(CLodSoftwareRasterModeNames) / sizeof(CLodSoftwareRasterModeNames[0]));
+inline constexpr const char* CLodCullingBackendNames[] = {
+    "Work Graph",
+    "Pure Compute",
+};
+inline constexpr int CLodCullingBackendCount = static_cast<int>(sizeof(CLodCullingBackendNames) / sizeof(CLodCullingBackendNames[0]));
 inline constexpr const char* CLodVSMRasterModeNames[] = {
     "Hardware Only",
     "Standard",
@@ -556,8 +568,14 @@ inline uint32_t CLodVirtualShadowGetConfiguredMaxBackingResolution()
 
 inline uint32_t CLodVirtualShadowGetConfiguredMaxPhysicalPageCapacity()
 {
-    return CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(
-        CLodVirtualShadowGetConfiguredMaxBackingResolution());
+    auto& settingsManager = SettingsManager::GetInstance();
+    const uint32_t configuredBackingResolution = CLodVirtualShadowSanitizeBackingResolution(
+        settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName)());
+    const uint32_t configuredMaxPhysicalPages =
+        settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName)();
+    return CLodVirtualShadowSanitizePhysicalPageCount(
+        configuredMaxPhysicalPages,
+        CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(configuredBackingResolution));
 }
 
 inline uint32_t CLodVirtualShadowGetConfiguredComputeClusterCapacity(uint32_t maxVisibleClusters)
@@ -1084,6 +1102,7 @@ inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;  
 inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSizeBytes;
 inline constexpr uint32_t CLodNodeReplayStrideBytes = 12u;   // sizeof(TraverseNodeRecord): 3 uints
 inline constexpr uint32_t CLodMeshletReplayStrideBytes = 24u; // sizeof(MeshletBucketRecord): 6 uints
+inline constexpr uint32_t CLodDenseClusterWorkStrideBytes = 24u; // sizeof(CLodDenseClusterWorkRecord): 6 uints
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;

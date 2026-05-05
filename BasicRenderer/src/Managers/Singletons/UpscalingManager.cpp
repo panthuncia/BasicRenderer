@@ -4,7 +4,7 @@
 #include <flecs.h>
 #include <rhi.h>
 
-#include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
+#include "FidelityFX/FfxBackendAdapters.h"
 #include "slHooks.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -62,22 +62,13 @@ namespace {
     }
 }
 
-static ID3D12Device* dx12_device() { return rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice()); }
-static IDXGIFactory7* dx12_factory() { return rhi::dx12::get_factory(DeviceManager::GetInstance().GetDevice()); }
-static IDXGIAdapter4* dx12_adapter() { return rhi::dx12::get_adapter(DeviceManager::GetInstance().GetDevice()); }
-
 ffxFunctions ffxModule;
 
-FfxApiResource getFFXResource(Resource* resource, const wchar_t* name, FfxApiResourceState state) {
-	//auto desc = ffx::ApiGetResourceDescriptionDX12(resource->GetAPIResource(), FFX_API_RESOURCE_USAGE_READ_ONLY);
-	auto ffxResource = ffxApiGetResourceDX12(rhi::dx12::get_resource(resource->GetAPIResource()), state);
-    if (ffxResource.resource == nullptr) {
-        spdlog::error("Failed to get FFX resource for resource");
-	}
-    return ffxResource;
-}
+bool CheckDLSSSupport(rhi::Device dev, rhi::Backend backend) {
+    if (backend != rhi::Backend::D3D12) {
+        return false;
+    }
 
-bool CheckDLSSSupport(rhi::Device dev) {
     IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
     if (!ad) {
         return false;
@@ -121,6 +112,7 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
 
 void UpscalingManager::InitializeAdapter()
 {
+    const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
     if (!IsStreamlineEnabledSetting()) {
         m_dlssSupported = false;
         if (m_upscalingMode == UpscalingMode::DLSS) {
@@ -130,8 +122,17 @@ void UpscalingManager::InitializeAdapter()
         return;
     }
 
+    if (backend != rhi::Backend::D3D12) {
+        m_dlssSupported = false;
+        if (m_upscalingMode == UpscalingMode::DLSS) {
+            m_upscalingMode = UpscalingMode::None;
+        }
+        spdlog::warn("UpscalingManager::InitializeAdapter disabled DLSS because Streamline Vulkan integration is not available in this workspace.");
+        return;
+    }
+
     auto dev = DeviceManager::GetInstance().GetDevice();
-	m_dlssSupported = CheckDLSSSupport(dev); // TODO: Query from RHI
+	m_dlssSupported = CheckDLSSSupport(dev, backend); // TODO: Query from RHI
 }
 
 void UpscalingManager::ProxyDevice() { // TODO: RHI now handles this internally
@@ -151,25 +152,28 @@ void UpscalingManager::ProxyDevice() { // TODO: RHI now handles this internally
 bool UpscalingManager::InitFFX() {
     m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
     m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
+	const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
     auto outputRes = m_getOutputRes();
     auto renderRes = m_getRenderRes();
-	auto module = LoadLibrary(L"amd_fidelityfx_dx12.dll");
+	const wchar_t* moduleName = backend == rhi::Backend::Vulkan ? L"amd_fidelityfx_vk.dll" : L"amd_fidelityfx_dx12.dll";
+	auto module = LoadLibrary(moduleName);
     if (module) {
         ffxLoadFunctions(&ffxModule, module);
-
-        ffx::CreateBackendDX12Desc backendDesc{};
-        backendDesc.device = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
 
         ffx::CreateContextDescUpscale createUpscaling;
         createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
         createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
         createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
 
-        ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+        if (!fidelityfx_backend::api::CreateUpscaleContext(m_fsrUpscalingContext, backend, DeviceManager::GetInstance().GetDevice(), createUpscaling)) {
+            spdlog::error("UpscalingManager::InitFFX failed to create context for backend {}", static_cast<uint32_t>(backend));
+            return false;
+        }
 		m_fsrIntialized = true;
 
 		return true;
     }
+	spdlog::error("UpscalingManager::InitFFX failed to load {}", ws2s(moduleName));
 	return false;
 }
 
@@ -220,6 +224,15 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 }
 
 bool UpscalingManager::InitSL() {
+    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
+        m_dlssSupported = false;
+        if (m_upscalingMode == UpscalingMode::DLSS) {
+            m_upscalingMode = UpscalingMode::None;
+        }
+        spdlog::warn("UpscalingManager::InitSL skipped because Streamline Vulkan integration is not available in this workspace.");
+        return false;
+    }
+
     if (!IsStreamlineEnabledSetting()) {
         m_dlssSupported = false;
         if (m_upscalingMode == UpscalingMode::DLSS) {
@@ -302,6 +315,11 @@ void UpscalingManager::Setup() {
 }
 
 void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
+        spdlog::warn("UpscalingManager::EvaluateDLSS called on unsupported backend {}; skipping.", static_cast<uint32_t>(DeviceManager::GetInstance().GetBackend()));
+        return;
+    }
+
     sl::FrameToken* frameToken = nullptr;
     const uint32_t streamlineFrameIndex = static_cast<uint32_t>(frameNumber);
     if (SL_FAILED(result, slGetNewFrameToken(frameToken, &streamlineFrameIndex)) || frameToken == nullptr)
@@ -394,13 +412,18 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 
 void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     ffx::DispatchDescUpscale dispatchUpscale{};
+    const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
 
-    dispatchUpscale.commandList = rhi::dx12::get_cmd_list(commandList);
+    dispatchUpscale.commandList = fidelityfx_backend::api::GetCommandList(backend, commandList);
+    if (dispatchUpscale.commandList == nullptr) {
+        spdlog::warn("UpscalingManager::EvaluateFSR3 skipped dispatch because no command list adapter is available for backend {}", static_cast<uint32_t>(backend));
+        return;
+    }
 
-    dispatchUpscale.color = getFFXResource(pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
-	dispatchUpscale.depth = getFFXResource(pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
-	dispatchUpscale.motionVectors = getFFXResource(pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMMON);
-	dispatchUpscale.output = getFFXResource(pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.color = fidelityfx_backend::api::GetResource(backend, pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.depth = fidelityfx_backend::api::GetResource(backend, pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.motionVectors = fidelityfx_backend::api::GetResource(backend, pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.output = fidelityfx_backend::api::GetResource(backend, pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_COMMON);
     //dispatchUpscale.reactive;
     //dispatchUpscale.transparencyAndComposition;
 

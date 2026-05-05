@@ -290,6 +290,11 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
                 payload = PackDebugFloat3(float3(mv * 0.5 + 0.5, 0.5));
                 break;
             }
+            case OUTPUT_MATERIAL_SELECTED_MIP:
+                if (fragmentInfo.selectedMaterialMipLevel != MATERIAL_DEBUG_INVALID_MIP_LEVEL) {
+                    payload = PackDebugUint2(fragmentInfo.selectedMaterialMipLevel, fragmentInfo.selectedMaterialMipMaxLevel);
+                }
+                break;
         }
         if (payload.x != DEBUG_SENTINEL) {
             WriteDebugPixel(debugVisTex, pixel, payload);

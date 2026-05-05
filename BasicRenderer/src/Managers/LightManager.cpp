@@ -32,8 +32,6 @@ LightManager::LightManager() {
 	rg::memory::SetResourceUsageHint(*m_directionalViewInfo, "Lighting buffers");
 
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
-	getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	getDirectionalVirtualShadowSourceAngleDegrees = SettingsManager::GetInstance().getSettingGetter<float>(
 		CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
@@ -248,19 +246,22 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 	auto& camera = m_currentCamera.get<Components::Camera>();
 	auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 	auto posFloats = GetGlobalPositionFromMatrix(matrix);
+	const std::vector<float> directionalClipFarPlanes = calculateCascadeSplits(
+		numCascades,
+		camera.zNear,
+		camera.zFar,
+		camera.zFar);
 
 	// Virtual shadow clip levels are nested around the primary camera.
 	const float clipVerticalExtent = std::max(
-		std::max(
-			SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
-			getMaxShadowDistance()),
+		SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
 		1.0f);
 	auto cascades = setupDirectionalClipmaps(numCascades, info.dirWorldSpace,
 		DirectX::XMLoadFloat3(&posFloats), 
 		GetForwardFromMatrix(matrix),
 		GetUpFromMatrix(matrix),
 		camera.zNear, camera.fov, camera.aspect,
-		getDirectionalLightCascadeSplits(),
+		directionalClipFarPlanes,
 		clipVerticalExtent);
 
 	// Collect the frustum planes from each cascade.
@@ -437,12 +438,15 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		auto& camera = m_currentCamera.get<Components::Camera>();
 		auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
+		const std::vector<float> directionalClipFarPlanes = calculateCascadeSplits(
+			numCascades,
+			camera.zNear,
+			camera.zFar,
+			camera.zFar);
 		const float clipVerticalExtent = std::max(
-			std::max(
-				SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
-				getMaxShadowDistance()),
+			SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
 			1.0f);
-		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits(), clipVerticalExtent);
+		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, directionalClipFarPlanes, clipVerticalExtent);
 		PublishDirectionalShadowDebug(cascades);
 		viewInfo.virtualShadowUnwrappedPageOffsetX.resize(numCascades);
 		viewInfo.virtualShadowUnwrappedPageOffsetY.resize(numCascades);
