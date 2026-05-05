@@ -78,6 +78,7 @@ namespace
 	bool TriangleAABBOverlap(const Float3& v0, const Float3& v1, const Float3& v2,
 		const Float3& boxCenter, const Float3& boxHalfSize)
 	{
+		constexpr float kOverlapEpsilon = 1.0e-6f;
 		const Float3 a = v0 - boxCenter;
 		const Float3 b = v1 - boxCenter;
 		const Float3 c = v2 - boxCenter;
@@ -98,21 +99,21 @@ namespace
 				float r = boxHalfSize.x * std::abs(axis.x) +
 					boxHalfSize.y * std::abs(axis.y) +
 					boxHalfSize.z * std::abs(axis.z);
-				if (triMin > r || triMax < -r)
+				if (triMin > r + kOverlapEpsilon || triMax < -r - kOverlapEpsilon)
 					return false;
 			}
 		}
 
-		if (std::min({ a.x, b.x, c.x }) > boxHalfSize.x || std::max({ a.x, b.x, c.x }) < -boxHalfSize.x) return false;
-		if (std::min({ a.y, b.y, c.y }) > boxHalfSize.y || std::max({ a.y, b.y, c.y }) < -boxHalfSize.y) return false;
-		if (std::min({ a.z, b.z, c.z }) > boxHalfSize.z || std::max({ a.z, b.z, c.z }) < -boxHalfSize.z) return false;
+		if (std::min({ a.x, b.x, c.x }) > boxHalfSize.x + kOverlapEpsilon || std::max({ a.x, b.x, c.x }) < -boxHalfSize.x - kOverlapEpsilon) return false;
+		if (std::min({ a.y, b.y, c.y }) > boxHalfSize.y + kOverlapEpsilon || std::max({ a.y, b.y, c.y }) < -boxHalfSize.y - kOverlapEpsilon) return false;
+		if (std::min({ a.z, b.z, c.z }) > boxHalfSize.z + kOverlapEpsilon || std::max({ a.z, b.z, c.z }) < -boxHalfSize.z - kOverlapEpsilon) return false;
 
 		Float3 triNormal = edges[0].cross(edges[1]);
 		float d = triNormal.dot(a);
 		float r = boxHalfSize.x * std::abs(triNormal.x) +
 			boxHalfSize.y * std::abs(triNormal.y) +
 			boxHalfSize.z * std::abs(triNormal.z);
-		if (d > r || d < -r)
+		if (d > r + kOverlapEpsilon || d < -r - kOverlapEpsilon)
 			return false;
 
 		return true;
@@ -280,12 +281,12 @@ namespace
 				std::max({ v0.z, v1.z, v2.z })
 			};
 
-			const uint32_t cxMin = ToCellCoord(triMin.x, aabbMin.x, invCellSize.x, resolution);
-			const uint32_t cyMin = ToCellCoord(triMin.y, aabbMin.y, invCellSize.y, resolution);
-			const uint32_t czMin = ToCellCoord(triMin.z, aabbMin.z, invCellSize.z, resolution);
-			const uint32_t cxMax = ToCellCoord(triMax.x, aabbMin.x, invCellSize.x, resolution);
-			const uint32_t cyMax = ToCellCoord(triMax.y, aabbMin.y, invCellSize.y, resolution);
-			const uint32_t czMax = ToCellCoord(triMax.z, aabbMin.z, invCellSize.z, resolution);
+			const uint32_t cxMin = ToCellCoord(triMin.x - halfCell.x, aabbMin.x, invCellSize.x, resolution);
+			const uint32_t cyMin = ToCellCoord(triMin.y - halfCell.y, aabbMin.y, invCellSize.y, resolution);
+			const uint32_t czMin = ToCellCoord(triMin.z - halfCell.z, aabbMin.z, invCellSize.z, resolution);
+			const uint32_t cxMax = ToCellCoord(triMax.x + halfCell.x, aabbMin.x, invCellSize.x, resolution);
+			const uint32_t cyMax = ToCellCoord(triMax.y + halfCell.y, aabbMin.y, invCellSize.y, resolution);
+			const uint32_t czMax = ToCellCoord(triMax.z + halfCell.z, aabbMin.z, invCellSize.z, resolution);
 
 			for (uint32_t cz = czMin; cz <= czMax; ++cz)
 			{

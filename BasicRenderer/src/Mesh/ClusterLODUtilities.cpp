@@ -1607,10 +1607,19 @@ namespace
 		uint32_t analyzedGroups = 0;
 		uint32_t validGroups = 0;
 		uint32_t autoCandidateGroups = 0;
+		uint32_t acceptedSeedGroups = 0;
+		uint32_t forcedParentGroups = 0;
 		uint32_t forcedGroups = 0;
 		uint32_t generatedPayloads = 0;
 		uint32_t generatedCubes = 0;
 		uint32_t failedBuilds = 0;
+	};
+
+	struct VoxelFallbackGroupBuildInput
+	{
+		VoxelFallbackGroupAnalysis analysis{};
+		std::vector<uint32_t> triangleIndices;
+		bool autoWouldFitBudget = false;
 	};
 
 	DirectX::XMFLOAT3 ReadGroupVertexPosition(const std::vector<std::byte>& vertices, size_t vertexStrideBytes, uint32_t vertexIndex)
@@ -1804,11 +1813,15 @@ namespace
 		state.voxelGroupMapping.groupToPackedDescriptorIndex.assign(state.groups.size(), -1);
 
 		VoxelFallbackBuildStats stats{};
-		const bool forceVoxel = settings.voxelFallbackMode == ClusterLODVoxelFallbackMode::VoxelOnly;
+		const bool forceAllVoxels = settings.voxelFallbackMode == ClusterLODVoxelFallbackMode::VoxelOnly;
+		const bool autoMode = settings.voxelFallbackMode == ClusterLODVoxelFallbackMode::Auto;
+		std::vector<VoxelFallbackGroupBuildInput> groupInputs(state.groups.size());
+		uint32_t maxDepth = 0;
 
 		for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
 		{
 			stats.analyzedGroups++;
+			maxDepth = std::max(maxDepth, static_cast<uint32_t>(std::max(state.groups[groupIndex].depth, 0)));
 			if (groupIndex >= state.groupVertexChunks.size() || groupIndex >= state.groupMeshletVertexChunks.size() ||
 				groupIndex >= state.groupMeshletChunks.size() || groupIndex >= state.groupMeshletTriangleChunks.size())
 			{
@@ -1816,40 +1829,57 @@ namespace
 				continue;
 			}
 
-			ClusterLODGroup& group = state.groups[groupIndex];
-			std::vector<uint32_t> triangleIndices = BuildGroupTriangleIndices(
+			const ClusterLODGroup& group = state.groups[groupIndex];
+			VoxelFallbackGroupBuildInput& buildInput = groupInputs[groupIndex];
+			buildInput.triangleIndices = BuildGroupTriangleIndices(
 				state.groupMeshletChunks[groupIndex],
 				state.groupMeshletVertexChunks[groupIndex],
 				state.groupMeshletTriangleChunks[groupIndex]);
 
-			VoxelFallbackGroupAnalysis analysis = AnalyzeVoxelFallbackGroup(
+			buildInput.analysis = AnalyzeVoxelFallbackGroup(
 				group,
 				state.groupVertexChunks[groupIndex],
 				vertexStrideBytes,
-				triangleIndices,
+				buildInput.triangleIndices,
 				settings);
 
-			if (!analysis.valid)
+			if (!buildInput.analysis.valid)
 			{
 				stats.failedBuilds++;
 				continue;
 			}
 
 			stats.validGroups++;
-			const bool autoWouldFitBudget = analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < group.bounds.error;
-			if (autoWouldFitBudget)
+			buildInput.autoWouldFitBudget = buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < group.bounds.error;
+			if (buildInput.autoWouldFitBudget)
 			{
 				stats.autoCandidateGroups++;
 			}
+		}
 
-			if (!forceVoxel)
+		auto buildVoxelGroup = [&](uint32_t groupIndex, bool requireBudgetFit) -> bool
+		{
+			if (groupIndex >= groupInputs.size())
 			{
-				continue;
+				return false;
+			}
+
+			VoxelFallbackGroupBuildInput& buildInput = groupInputs[groupIndex];
+			if (!buildInput.analysis.valid)
+			{
+				stats.failedBuilds++;
+				return false;
+			}
+
+			ClusterLODGroup& group = state.groups[groupIndex];
+			if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+			{
+				return true;
 			}
 
 			VoxelGroupPayload payload{};
-			uint32_t resolution = analysis.targetResolution;
-			float voxelError = analysis.targetVoxelWidth;
+			uint32_t resolution = buildInput.analysis.targetResolution;
+			float voxelError = buildInput.analysis.targetVoxelWidth;
 			bool payloadFitsBudget = false;
 			const uint32_t retryCount = std::max(1u, settings.voxelFallbackMaxRetryCount + 1u);
 			for (uint32_t attempt = 0; attempt < retryCount; ++attempt)
@@ -1857,23 +1887,23 @@ namespace
 				VoxelizeTrianglesInput voxelInput{};
 				voxelInput.vertices = &state.groupVertexChunks[groupIndex];
 				voxelInput.vertexStrideBytes = vertexStrideBytes;
-				voxelInput.triangleIndices = &triangleIndices;
-				voxelInput.aabbMin = analysis.aabbMin;
-				voxelInput.aabbMax = analysis.aabbMax;
+				voxelInput.triangleIndices = &buildInput.triangleIndices;
+				voxelInput.aabbMin = buildInput.analysis.aabbMin;
+				voxelInput.aabbMax = buildInput.analysis.aabbMax;
 				voxelInput.resolution = resolution;
 				voxelInput.raysPerCell = settings.voxelRaysPerCell;
 				payload = VoxelizeTriangles(voxelInput);
 
-				if (!payload.activeCells.empty() && static_cast<float>(payload.activeCells.size()) <= analysis.voxelBudget)
+				if (!payload.activeCells.empty() && static_cast<float>(payload.activeCells.size()) <= buildInput.analysis.voxelBudget)
 				{
 					payloadFitsBudget = true;
 					break;
 				}
 
 				voxelError *= std::max(1.01f, settings.voxelFallbackGrowthFactor);
-				const float extentX = analysis.aabbMax.x - analysis.aabbMin.x;
-				const float extentY = analysis.aabbMax.y - analysis.aabbMin.y;
-				const float extentZ = analysis.aabbMax.z - analysis.aabbMin.z;
+				const float extentX = buildInput.analysis.aabbMax.x - buildInput.analysis.aabbMin.x;
+				const float extentY = buildInput.analysis.aabbMax.y - buildInput.analysis.aabbMin.y;
+				const float extentZ = buildInput.analysis.aabbMax.z - buildInput.analysis.aabbMin.z;
 				const float longestExtent = std::max({ extentX, extentY, extentZ });
 				resolution = std::clamp(
 					static_cast<uint32_t>(std::ceil(longestExtent / std::max(voxelError, 1.0e-8f))),
@@ -1881,10 +1911,10 @@ namespace
 					std::max(std::max(2u, settings.voxelMinResolution), settings.voxelGridBaseResolution));
 			}
 
-			if (payload.activeCells.empty() || (!payloadFitsBudget && !forceVoxel))
+			if (payload.activeCells.empty() || (requireBudgetFit && !payloadFitsBudget))
 			{
 				stats.failedBuilds++;
-				continue;
+				return false;
 			}
 
 			const uint32_t payloadIndex = static_cast<uint32_t>(state.voxelGroupMapping.payloads.size());
@@ -1901,7 +1931,7 @@ namespace
 			if (packed.cubeRecords.empty())
 			{
 				stats.failedBuilds++;
-				continue;
+				return false;
 			}
 
 			state.voxelGroupMapping.groupToPayloadIndex[groupIndex] = static_cast<int32_t>(payloadIndex);
@@ -1915,9 +1945,62 @@ namespace
 
 			group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
 			group.bounds.error = std::max(group.bounds.error, voxelError);
-			stats.forcedGroups++;
 			stats.generatedPayloads++;
 			stats.generatedCubes += static_cast<uint32_t>(packed.cubeRecords.size());
+			return true;
+		};
+
+		for (uint32_t depth = 0; depth <= maxDepth; ++depth)
+		{
+			for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
+			{
+				ClusterLODGroup& group = state.groups[groupIndex];
+				if (static_cast<uint32_t>(std::max(group.depth, 0)) != depth || (group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+				{
+					continue;
+				}
+
+				bool hasVoxelizedChild = false;
+				for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+				{
+					const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+					if (segment.refinedGroup < 0)
+					{
+						continue;
+					}
+
+					const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
+					if (childGroupIndex < state.groups.size() && (state.groups[childGroupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+					{
+						hasVoxelizedChild = true;
+						break;
+					}
+				}
+
+				const bool terminalGroup = group.segmentCount == group.terminalSegmentCount;
+				const bool acceptSeed = autoMode && terminalGroup && groupInputs[groupIndex].autoWouldFitBudget;
+				if (forceAllVoxels)
+				{
+					if (buildVoxelGroup(groupIndex, false))
+					{
+						stats.forcedGroups++;
+					}
+				}
+				else if (hasVoxelizedChild)
+				{
+					if (buildVoxelGroup(groupIndex, false))
+					{
+						stats.forcedParentGroups++;
+					}
+				}
+				else if (acceptSeed)
+				{
+					if (buildVoxelGroup(groupIndex, true))
+					{
+						stats.acceptedSeedGroups++;
+					}
+				}
+			}
 		}
 
 		for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
@@ -1945,12 +2028,26 @@ namespace
 			}
 		}
 
+		uint32_t voxelGroups = 0;
+		for (const ClusterLODGroup& group : state.groups)
+		{
+			if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+			{
+				voxelGroups++;
+			}
+		}
+		const uint32_t triangleGroups = static_cast<uint32_t>(state.groups.size()) - voxelGroups;
+
 		spdlog::info(
-			"ClusterLOD voxel fallback: analyzed={} valid={} auto_candidates={} forced={} payloads={} cubes={} failed={}",
+			"ClusterLOD voxel fallback: analyzed={} valid={} auto_candidates={} accepted_seeds={} forced_parents={} forced={} voxel_groups={} triangle_groups={} payloads={} cubes={} failed={}",
 			stats.analyzedGroups,
 			stats.validGroups,
 			stats.autoCandidateGroups,
+			stats.acceptedSeedGroups,
+			stats.forcedParentGroups,
 			stats.forcedGroups,
+			voxelGroups,
+			triangleGroups,
 			stats.generatedPayloads,
 			stats.generatedCubes,
 			stats.failedBuilds);
