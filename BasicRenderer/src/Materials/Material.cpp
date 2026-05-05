@@ -142,7 +142,7 @@ void Material::SetHeightmap(std::shared_ptr<TextureAsset> heightmap) {
     if (!image) {
         return;
     }
-    if (!heightmap->IsUsingFallbackImage()) {
+    if (!heightmap->IsUsingFallbackImage() && heightmap->HasUsableImage()) {
         image->SetName("HeightMap");
         rg::memory::SetResourceUsageHint(*image, "Material textures");
     }
@@ -276,7 +276,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     ensureOpenPBRTexture(m_openPBRTextures.fuzzRoughness.texture);
 
     auto annotateMaterialTexture = [](const std::shared_ptr<TextureAsset>& texture, const char* name) {
-        if (!texture || texture->IsUsingFallbackImage()) {
+        if (!texture || texture->IsUsingFallbackImage() || !texture->HasUsableImage()) {
             return;
         }
 
@@ -355,7 +355,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
             annotateMaterialTexture(m_roughnessTexture, "RoughnessTexture");
         }
     }
-    if (m_metallicTexture == m_roughnessTexture && m_metallicTexture != nullptr && !m_roughnessTexture->IsUsingFallbackImage()) {
+    if (m_metallicTexture == m_roughnessTexture && m_metallicTexture != nullptr && !m_roughnessTexture->IsUsingFallbackImage() && m_roughnessTexture->HasUsableImage()) {
         if (auto image = m_roughnessTexture->ImagePtr()) {
             image->SetName("MetallicRoughnessTexture");
         }
@@ -385,7 +385,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     }
 
     auto nameOpenPBRTexture = [](std::shared_ptr<TextureAsset> const& texture, const char* name) {
-        if (texture != nullptr && !texture->IsUsingFallbackImage()) {
+        if (texture != nullptr && !texture->IsUsingFallbackImage() && texture->HasUsableImage()) {
             auto image = texture->ImagePtr();
             if (!image) {
                 return;

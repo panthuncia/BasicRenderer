@@ -1297,6 +1297,9 @@ void TextureAsset::NoteTextureSeen(uint64_t frameIndex) {
 
 void TextureAsset::AdoptUploadedImage(std::shared_ptr<PixelBuffer> image) {
 	const uint32_t residentTopMip = GetDesiredResidentTopMip();
+	if (image && !image->HasValidBackingResource()) {
+		image.reset();
+	}
 	m_image = std::move(image);
 	if (m_image) {
 		m_desc = m_image->GetDescription();
@@ -1307,7 +1310,7 @@ void TextureAsset::AdoptUploadedImage(std::shared_ptr<PixelBuffer> image) {
 	SetResidentMipWindow(residentTopMip, CalcMipCountFromDescription(m_desc));
 	SetPendingTopMip(residentTopMip);
 	BumpBindingRevision();
-	if (!m_name.empty() && m_image) {
+	if (!m_name.empty() && HasUsableImage()) {
 		m_image->SetName(m_name);
 	}
 }
@@ -1378,7 +1381,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		m_streamingState.enabled &&
 		HasStreamingSourceData() &&
 		m_streamingState.pendingTopMip != m_streamingState.residency.residentTopMip;
-	if (m_hasUploadedFinalImage && !needsStreamingReload) {
+	if (m_hasUploadedFinalImage && !needsStreamingReload && HasUsableImage()) {
 		return;
 	}
 
@@ -1388,7 +1391,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		isParticipatingMaterialTexture &&
 		DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu);
 	auto ensureProcessingPlaceholder = [&](const std::string& detail) {
-		if (m_image || !m_meta.processing.allowAsyncPlaceholder) {
+		if (HasUsableImage() || !m_meta.processing.allowAsyncPlaceholder) {
 			return false;
 		}
 
@@ -1443,7 +1446,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					uploadedImage = m_directStorageReloadHandle->uploadedImage;
 				}
 				m_directStorageReloadHandle.reset();
-				if (!uploadedImage) {
+				if (!uploadedImage || !uploadedImage->HasValidBackingResource()) {
 					return false;
 				}
 
@@ -1633,7 +1636,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					conditionedCachePath = m_processingHandle->conditionedCachePath;
 				}
 
-				if (uploadedImage) {
+				if (uploadedImage && uploadedImage->HasValidBackingResource()) {
 					m_desc = uploadedImage->GetDescription();
 					m_meta.isProcessingCacheArtifact = loadedFromCache;
 					if (!promoteStreamingSourceToProcessedCachePath(conditionedCachePath)) {
@@ -1772,7 +1775,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		m_hasUploadedPlaceholder = false;
 	}
 
-	if (!m_image) {
+	if (!HasUsableImage()) {
 		if (tryAdvanceAsyncDirectStorageReload("texture uploaded asynchronously from file-backed DDS through DirectStorage GPU queue without preprocessing")) {
 			ensureProcessingPlaceholder("DirectStorage texture upload pending; fallback texture uploaded");
 			return;
