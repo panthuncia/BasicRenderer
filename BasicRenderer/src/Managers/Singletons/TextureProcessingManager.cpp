@@ -650,13 +650,13 @@ std::shared_ptr<TextureSourceData> FinalizeTextureSourceDataOnCpu(
 		throw std::runtime_error("TextureProcessingManager: DirectXTex Compress failed");
 	}
 
-	const auto compressionElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-		std::chrono::steady_clock::now() - compressionStart).count();
-	spdlog::info(
-		"TextureProcessingManager: CPU finalize complete semantic={} targetFormat={} elapsedMs={}",
-		TextureSemanticToString(meta.processing.semantic),
-		static_cast<uint32_t>(targetFormat),
-		compressionElapsedMs);
+	//const auto compressionElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+	//	std::chrono::steady_clock::now() - compressionStart).count();
+	//spdlog::info(
+	//	"TextureProcessingManager: CPU finalize complete semantic={} targetFormat={} elapsedMs={}",
+	//	TextureSemanticToString(meta.processing.semantic),
+	//	static_cast<uint32_t>(targetFormat),
+	//	compressionElapsedMs);
 
 	return BuildSourceDataFromScratchImage(compressedImage);
 }

@@ -253,6 +253,7 @@ public:
     uint32_t GetStreamingTextureID() const { return m_streamingState.streamingTextureID; }
     bool IsMipStreamingEligible() const { return m_streamingState.eligible; }
     bool IsMipStreamingEnabled() const { return m_streamingState.enabled; }
+    bool IsUsingFallbackImage() const { return m_hasUploadedPlaceholder && !m_hasUploadedFinalImage; }
     uint64_t GetBindingRevision() const { return m_streamingState.bindingRevision; }
     uint64_t GetStreamingStateRevision() const { return m_streamingState.stateRevision; }
     uint32_t GetFullMip0Width() const { return m_sourceFullWidth != 0u ? m_sourceFullWidth : GetWidth(); }

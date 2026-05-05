@@ -498,8 +498,7 @@ std::shared_ptr<PixelBuffer> CreatePlaceholderTexture(
 	auto bytes = std::make_shared<std::vector<uint8_t>>(std::begin(rgba), std::end(rgba));
 	return factory.CreateAlwaysResidentPixelBuffer(
 		desc,
-		TextureFactory::TextureInitialData::FromBytes({ bytes }),
-		"TextureProcessingPlaceholder");
+		TextureFactory::TextureInitialData::FromBytes({ bytes }));
 }
 
 std::shared_ptr<TextureSourceData> BuildSourceDataFromDDSFilePath(const std::string& path, bool preferSRGB) {
@@ -1326,7 +1325,7 @@ DirectStorageAsyncRequestHandle TextureAsset::QueueInitialDirectStorageUploadIfN
 			 state == TextureDirectStorageReloadJobState::CreatingResource ||
 			 state == TextureDirectStorageReloadJobState::Uploading ||
 			 state == TextureDirectStorageReloadJobState::Ready)) {
-			return m_directStorageReloadHandle->requestHandle;
+			return {};
 		}
 
 		if (state == TextureDirectStorageReloadJobState::Queued ||
@@ -1370,7 +1369,7 @@ DirectStorageAsyncRequestHandle TextureAsset::QueueInitialDirectStorageUploadIfN
 			desiredResidentTopMip,
 			m_desc.hasRTV,
 			m_desc.hasUAV);
-	return m_directStorageReloadHandle ? m_directStorageReloadHandle->requestHandle : DirectStorageAsyncRequestHandle{};
+	return {};
 }
 
 void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
@@ -1395,9 +1394,6 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 
 		m_image = CreatePlaceholderTexture(factory, m_meta.processing);
 		m_desc = m_image->GetDescription();
-		if (!m_name.empty()) {
-			m_image->SetName(m_name + "[placeholder]");
-		}
 		RefreshStreamingStateFromDescription();
 		RecordUploadPath(TextureUploadPathTelemetry::AsyncProcessingPlaceholder, detail);
 		m_hasUploadedPlaceholder = true;
@@ -1480,36 +1476,6 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				m_desc.hasRTV,
 				m_desc.hasUAV);
 		return m_directStorageReloadHandle != nullptr;
-	};
-
-	auto tryDirectStorageReload = [&](const std::string& detail) -> bool {
-		auto* filePath = std::get_if<std::string>(&m_initialStorage);
-		if (filePath == nullptr || filePath->empty()) {
-			return false;
-		}
-
-		auto uploadedImage = IsConditionedCacheFilePath(*filePath)
-			? TryUploadConditionedCacheFilePathDirectToVRAM(
-				*filePath,
-				desiredResidentTopMip,
-				m_desc.hasRTV,
-				m_desc.hasUAV)
-			: TryUploadDDSFilePathDirectToVRAM(
-				*filePath,
-				m_meta.preferSRGB,
-				desiredResidentTopMip,
-				m_desc.hasRTV,
-				m_desc.hasUAV);
-		if (!uploadedImage) {
-			return false;
-		}
-
-		AdoptUploadedImage(std::move(uploadedImage));
-		RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, detail);
-		if (!m_initialDataString.empty()) {
-			m_initialStorage = m_initialDataString;
-		}
-		return true;
 	};
 
 	auto promoteStreamingSourceToProcessedCachePath = [&](const std::string& cachePath) {
@@ -1604,7 +1570,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					return;
 				}
 			}
-			else if (tryDirectStorageReload("texture residency reloaded from file-backed DDS through DirectStorage GPU queue")) {
+			else if (tryAdvanceAsyncDirectStorageReload("texture residency uploaded asynchronously from file-backed DDS through DirectStorage GPU queue")) {
+				ensureProcessingPlaceholder("DirectStorage texture upload pending; fallback texture uploaded");
 				return;
 			}
 			if (useConditionedCacheResidency && m_meta.isProcessingCacheArtifact) {
@@ -1746,10 +1713,14 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					std::scoped_lock lock(m_processingHandle->mutex);
 					processingError = m_processingHandle->error;
 				}
-				if (!useConditionedCacheResidency && tryDirectStorageReload(
+				if (!useConditionedCacheResidency && tryAdvanceAsyncDirectStorageReload(
 						processingError.empty()
-							? "async processing failed; residency restored from file-backed DDS through DirectStorage GPU queue"
-							: "async processing failed ('" + processingError + "'); residency restored from file-backed DDS through DirectStorage GPU queue")) {
+							? "async processing failed; residency restored asynchronously from file-backed DDS through DirectStorage GPU queue"
+							: "async processing failed ('" + processingError + "'); residency restored asynchronously from file-backed DDS through DirectStorage GPU queue")) {
+					ensureProcessingPlaceholder(
+						processingError.empty()
+							? "async processing failed; DirectStorage fallback upload pending"
+							: "async processing failed ('" + processingError + "'); DirectStorage fallback upload pending");
 					return;
 				}
 				if (useConditionedCacheResidency) {
@@ -1787,11 +1758,27 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		return;
 	}
 
+	if (m_hasUploadedPlaceholder && sourceData) {
+		m_image.reset();
+		m_hasUploadedPlaceholder = false;
+	}
+
+	if (m_hasUploadedPlaceholder && m_directStorageReloadHandle) {
+		if (tryAdvanceAsyncDirectStorageReload("fallback texture kept resident while DirectStorage upload advances asynchronously")) {
+			return;
+		}
+
+		m_image.reset();
+		m_hasUploadedPlaceholder = false;
+	}
+
 	if (!m_image) {
-		if (tryDirectStorageReload("texture uploaded from file-backed DDS through DirectStorage GPU queue without preprocessing")) {
+		if (tryAdvanceAsyncDirectStorageReload("texture uploaded asynchronously from file-backed DDS through DirectStorage GPU queue without preprocessing")) {
+			ensureProcessingPlaceholder("DirectStorage texture upload pending; fallback texture uploaded");
 			return;
 		}
 		if (!sourceData && m_reloadHandle) {
+			ensureProcessingPlaceholder("async reload source build pending; fallback texture uploaded");
 			return;
 		}
 		const auto immediateSourceData = sourceData ? sourceData : BuildSourceData();

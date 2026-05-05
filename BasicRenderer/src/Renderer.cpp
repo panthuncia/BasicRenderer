@@ -1154,7 +1154,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<CLodCullingBackend>(CLodCullingBackendSettingName, CLodCullingBackend::PureCompute);
     settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
-    settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::Reyes);
+    settingsManager.registerSetting<CLodVSMRasterMode>(CLodVSMRasterModeSettingName, CLodVSMRasterMode::PageJob);
     settingsManager.registerSetting<CLodTransparencyMode>(CLodTransparencyModeSettingName, CLodTransparencyMode::AVBOIT);
     settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);
     settingsManager.registerSetting<float>(
@@ -1200,7 +1200,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
-    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, false);
+    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
     settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName, CLodVirtualShadowDefaultBackingResolution);
     settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName, CLodVirtualShadowDefaultPhysicalPageCount);
