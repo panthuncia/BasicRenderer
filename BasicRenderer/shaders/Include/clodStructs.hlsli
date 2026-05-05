@@ -18,7 +18,14 @@ struct CLodMeshMetadata
     uint lodLevelInfoBase;
     uint lodLevelCount;
     uint maxDepth;
+    uint voxelDescriptorIndexBase;
+    uint voxelDescriptorIndexCount;
+    uint voxelGroupDescriptorBase;
+    uint voxelGroupDescriptorCount;
+    uint voxelCubeRecordBase;
+    uint voxelCubeRecordCount;
     uint pad0;
+    uint pad1;
 };
 
 struct CLodHierarchyLevelInfo
@@ -166,6 +173,10 @@ struct ClusterLODGroup
     int parentGroupId; // mesh-local group index of the parent group (-1 for root)
 };
 
+static const uint CLOD_NODE_INTERNAL = 0u;
+static const uint CLOD_NODE_VOXEL_GROUP_LEAF = 1u;
+static const uint CLOD_NODE_SEGMENT_LEAF = 2u;
+
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
 static const uint CLOD_VOXEL_STATIC_BONE_INDEX = 0xFFFFFFFFu;
@@ -188,6 +199,35 @@ struct CLodVoxelCubeRecord
     float opacitySum;
     uint reserved;
 };
+
+bool CLodTryLoadVoxelGroupDescriptor(
+    CLodMeshMetadata metadata,
+    uint localGroupId,
+    out CLodVoxelGroupDescriptor descriptor)
+{
+    descriptor = (CLodVoxelGroupDescriptor)0;
+    if (localGroupId >= metadata.voxelDescriptorIndexCount || metadata.voxelGroupDescriptorCount == 0u)
+    {
+        return false;
+    }
+
+    StructuredBuffer<int> descriptorIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::VoxelDescriptorIndices)];
+    const int localDescriptorIndex = descriptorIndices[metadata.voxelDescriptorIndexBase + localGroupId];
+    if (localDescriptorIndex < 0 || (uint)localDescriptorIndex >= metadata.voxelGroupDescriptorCount)
+    {
+        return false;
+    }
+
+    StructuredBuffer<CLodVoxelGroupDescriptor> descriptors = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::VoxelGroupDescriptors)];
+    descriptor = descriptors[metadata.voxelGroupDescriptorBase + (uint)localDescriptorIndex];
+    return descriptor.cubeCount > 0u;
+}
+
+CLodVoxelCubeRecord CLodLoadVoxelCube(CLodMeshMetadata metadata, CLodVoxelGroupDescriptor descriptor, uint localCubeIndex)
+{
+    StructuredBuffer<CLodVoxelCubeRecord> cubes = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::VoxelCubeRecords)];
+    return cubes[metadata.voxelCubeRecordBase + descriptor.firstCube + localCubeIndex];
+}
 
 // Replay buffer: single physical buffer split into two regions.
 // Node region stores TraverseNodeRecord (12 bytes), meshlet region stores MeshletBucketRecord (24 bytes).

@@ -2066,24 +2066,31 @@ namespace
 
 		const uint32_t lodLevelCount = state.maxDepth + 1;
 
-		// Collect segments (not groups) by depth for segment-leaf BVH.
-		struct SegmentLeafInfo { uint32_t segGlobalIndex; uint32_t ownerGroupId; };
-		std::vector<std::vector<SegmentLeafInfo>> segmentsByDepth(lodLevelCount);
+		// Collect traversal leaves by depth. Voxelized groups become a single
+		// group leaf; mesh groups keep their segment leaves.
+		struct TraversalLeafInfo { uint32_t nodeKind; uint32_t indexOrOffset; uint32_t ownerGroupId; };
+		std::vector<std::vector<TraversalLeafInfo>> leavesByDepth(lodLevelCount);
 		for (uint32_t groupID = 0; groupID < uint32_t(state.groups.size()); ++groupID)
 		{
 			const ClusterLODGroup& grp = state.groups[groupID];
 			const uint32_t d = uint32_t(grp.depth);
+			if ((grp.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+			{
+				leavesByDepth[d].push_back({ 1u, groupID, groupID });
+				continue;
+			}
+
 			for (uint32_t s = 0; s < grp.segmentCount; ++s)
 			{
-				segmentsByDepth[d].push_back({ grp.firstSegment + s, groupID });
+				leavesByDepth[d].push_back({ 2u, grp.firstSegment + s, groupID });
 			}
 		}
 
 		for (uint32_t d = 0; d < lodLevelCount; ++d)
 		{
-			if (segmentsByDepth[d].empty())
+			if (leavesByDepth[d].empty())
 			{
-				throw std::runtime_error("Cluster LOD: missing segments for an intermediate depth; compact depths or handle gaps.");
+				throw std::runtime_error("Cluster LOD: missing traversal leaves for an intermediate depth; compact depths or handle gaps.");
 			}
 		}
 
@@ -2132,7 +2139,7 @@ namespace
 
 		for (uint32_t depth = 0; depth < lodLevelCount; ++depth)
 		{
-			const uint32_t leafCount = uint32_t(segmentsByDepth[depth].size());
+			const uint32_t leafCount = uint32_t(leavesByDepth[depth].size());
 
 			uint32_t nodeCount = leafCount;
 			uint32_t iterCount = leafCount;
@@ -2155,8 +2162,8 @@ namespace
 
 		for (uint32_t depth = 0; depth < lodLevelCount; ++depth)
 		{
-			const auto& segLeaves = segmentsByDepth[depth];
-			const uint32_t leafCount = uint32_t(segLeaves.size());
+			const auto& leaves = leavesByDepth[depth];
+			const uint32_t leafCount = uint32_t(leaves.size());
 			const ClusterLODNodeRangeAlloc& range = state.lodNodeRanges[depth];
 
 			uint32_t writeOffset = range.offset;
@@ -2164,22 +2171,20 @@ namespace
 
 			for (uint32_t i = 0; i < leafCount; ++i)
 			{
-				const SegmentLeafInfo& info = segLeaves[i];
-				const ClusterLODGroupSegment& seg = state.segments[info.segGlobalIndex];
+				const TraversalLeafInfo& info = leaves[i];
 				const ClusterLODGroup& grp = state.groups[info.ownerGroupId];
-				const BoundingSphere& segBounds = state.segmentBounds[info.segGlobalIndex];
 
 				ClusterLODNode& node = (leafCount == 1) ? state.nodes[1 + depth] : state.nodes[writeOffset++];
 
 				node = {};
-				node.range.isGroup = 2;  // segment-leaf
-				node.range.indexOrOffset = info.segGlobalIndex;
-				node.range.countMinusOne = (seg.meshletCount > 0) ? (seg.meshletCount - 1) : 0;
+				node.range.isGroup = info.nodeKind;
+				node.range.indexOrOffset = info.indexOrOffset;
+				node.range.countMinusOne = 0;
 				node.range.ownerGroupId = info.ownerGroupId;
 
-				if (false) { // Testing
-					node.traversalMetric.cullingSphere = segBounds.sphere;
-				} else {
+				if (info.nodeKind == 2u)
+				{
+					const BoundingSphere& segBounds = state.segmentBounds[info.indexOrOffset];
 					// Expand the BVH leaf bounding sphere to enclose the owning
 					// group's bounding sphere for conservative frustum culling.
 					// TraverseNodes uses the actual group sphere for LOD checks.
@@ -2210,6 +2215,14 @@ namespace
 					cr *= (1.0f + 1e-5f);
 
 					node.traversalMetric.cullingSphere = DirectX::XMFLOAT4(cx, cy, cz, cr);
+				}
+				else
+				{
+					node.traversalMetric.cullingSphere = DirectX::XMFLOAT4(
+						grp.bounds.center[0],
+						grp.bounds.center[1],
+						grp.bounds.center[2],
+						grp.bounds.radius * (1.0f + 1e-5f));
 				}
 				node.traversalMetric.lodBoundingSphere = DirectX::XMFLOAT4(
 					grp.bounds.center[0],

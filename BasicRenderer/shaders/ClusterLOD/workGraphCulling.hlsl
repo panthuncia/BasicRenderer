@@ -55,7 +55,7 @@ struct Meshlet
 
 struct ClusterLODNodeRange
 {
-    uint isLeaf; // 0=internal node, 1=leaf node
+    uint isLeaf; // 0=internal node, 1=voxel group leaf, 2=segment leaf
     uint indexOrOffset; // segment-leaf: mesh-local segment index
                          // internal: childOffset (relative to lodNodesBase)
     uint countMinusOne; // internal: childCountMinusOne; leaf: unused
@@ -1498,7 +1498,7 @@ void WG_TraverseNodes(
 
         const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + UnpackNodeId(rec.nodeIdPacked)];
 
-        if (node.range.isLeaf == 0) {
+        if (node.range.isLeaf == CLOD_NODE_INTERNAL) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
         }
         else {
@@ -1531,7 +1531,7 @@ void WG_TraverseNodes(
             // For internal nodes, the BVH node sphere and propagated max
             // error provide a conservative bound.
 
-            if (node.range.isLeaf != 0) {
+            if (node.range.isLeaf != CLOD_NODE_INTERNAL) {
                 // Segment-leaf: LOD check + inlined SegmentEvaluate.
                 const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
                 const ClusterLODGroup grp = groups[groupGlobalIndex];
@@ -1565,12 +1565,6 @@ void WG_TraverseNodes(
                     else
                     {
 
-                        // Inlined SegmentEvaluate
-                        StructuredBuffer<ClusterLODGroupSegment> segments =
-                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
-                        const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
-                        const ClusterLODGroupSegment seg = segments[segGlobalIndex];
-
                         // Used-groups tracking: mark the owning group as touched for streaming protection
                         {
                             RWStructuredBuffer<uint> usedGroupsCounter =
@@ -1583,6 +1577,22 @@ void WG_TraverseNodes(
                                 usedGroupsBuffer[usedSlot] = groupGlobalIndex;
                             }
                         }
+
+                        if (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF || ((grp.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u))
+                        {
+                            CLodVoxelGroupDescriptor voxelDescriptor;
+                            if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+                            {
+                                const CLodVoxelCubeRecord firstCube = CLodLoadVoxelCube(clodMeshMetadata, voxelDescriptor, 0u);
+                            }
+                        }
+                        else
+                        {
+                        // Inlined SegmentEvaluate
+                        StructuredBuffer<ClusterLODGroupSegment> segments =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+                        const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
+                        const ClusterLODGroupSegment seg = segments[segGlobalIndex];
 
                         // LOD condition 1 already confirmed by nodeWantsTraversal.
                         bool shouldEmit = (seg.meshletCount != 0);
@@ -1637,6 +1647,7 @@ void WG_TraverseNodes(
                             else if (tail > 2)  { n4++;  }
                             else if (tail > 1)  { n2++;  }
                             else if (tail > 0)  { n1 = 1; }
+                        }
                         }
                     }
                 }
@@ -1740,7 +1751,7 @@ void WG_TraverseNodes(
                                 // LOD pre-filter for internal children only.
                                 // Leaf children use the group sphere for LOD (different from node sphere),
                                 // so we skip the LOD check here and let the leaf thread handle it.
-                                if (child.range.isLeaf == 0) {
+                                if (child.range.isLeaf == CLOD_NODE_INTERNAL) {
                                     const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                                     const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
                                     const float childEOD = ProjectedGeometricError(

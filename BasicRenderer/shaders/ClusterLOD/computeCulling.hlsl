@@ -230,7 +230,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
 
     const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + UnpackNodeId(rec.nodeIdPacked)];
 
-    if (node.range.isLeaf == 0) {
+    if (node.range.isLeaf == CLOD_NODE_INTERNAL) {
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
     }
     else {
@@ -258,7 +258,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         return;
     }
 
-    if (node.range.isLeaf != 0) {
+    if (node.range.isLeaf != CLOD_NODE_INTERNAL) {
         const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
         const ClusterLODGroup grp = groups[groupGlobalIndex];
 
@@ -286,11 +286,6 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         }
 #endif
 
-        StructuredBuffer<ClusterLODGroupSegment> segments =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
-        const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
-        const ClusterLODGroupSegment seg = segments[segGlobalIndex];
-
         {
             RWStructuredBuffer<uint> usedGroupsCounter =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
@@ -302,6 +297,21 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
                 usedGroupsBuffer[usedSlot] = groupGlobalIndex;
             }
         }
+
+        if (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF || ((grp.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u))
+        {
+            CLodVoxelGroupDescriptor voxelDescriptor;
+            if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+            {
+                const CLodVoxelCubeRecord firstCube = CLodLoadVoxelCube(clodMeshMetadata, voxelDescriptor, 0u);
+            }
+            return;
+        }
+
+        StructuredBuffer<ClusterLODGroupSegment> segments =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+        const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
+        const ClusterLODGroupSegment seg = segments[segGlobalIndex];
 
         bool shouldEmit = (seg.meshletCount != 0);
         {
@@ -557,7 +567,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
             continue;
         }
 
-        if (child.range.isLeaf == 0) {
+        if (child.range.isLeaf == CLOD_NODE_INTERNAL) {
             const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
             const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
             const float childEOD = ProjectedGeometricError(

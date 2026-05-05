@@ -32,6 +32,7 @@
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdGeom/pointInstancer.h>
+#include <pxr/usd/usdGeom/xformCache.h>
 #include <pxr/usd/usdSkel/skeleton.h>
 #include <pxr/usd/usdSkel/animation.h>
 #include <pxr/usd/usdSkel/bindingAPI.h>
@@ -124,6 +125,113 @@ namespace USDLoader {
 		}
 
 		return UsdTimeCode::Default();
+	}
+
+	struct PointInstancerPrototypeRenderable {
+		std::vector<std::shared_ptr<Mesh>> meshes;
+		GfMatrix4d localTransform = GfMatrix4d(1.0);
+		std::string name;
+	};
+
+	static void SetEntityTransformFromUsdMatrix(
+		flecs::entity entity,
+		const GfMatrix4d& matrix,
+		double metersPerUnit)
+	{
+		const GfTransform transform(matrix);
+		const GfVec3d translation = transform.GetTranslation();
+		const GfQuaternion rotation = transform.GetRotation().GetQuaternion();
+		const GfVec3d scale = transform.GetScale();
+
+		entity.set<Components::Position>({
+			DirectX::XMFLOAT3(
+				static_cast<float>(translation[0] * metersPerUnit),
+				static_cast<float>(translation[1] * metersPerUnit),
+				static_cast<float>(translation[2] * metersPerUnit))
+			});
+		entity.set<Components::Rotation>({
+			DirectX::XMFLOAT4(
+				static_cast<float>(rotation.GetImaginary()[0]),
+				static_cast<float>(rotation.GetImaginary()[1]),
+				static_cast<float>(rotation.GetImaginary()[2]),
+				static_cast<float>(rotation.GetReal()))
+			});
+		entity.set<Components::Scale>({
+			DirectX::XMFLOAT3(
+				static_cast<float>(scale[0]),
+				static_cast<float>(scale[1]),
+				static_cast<float>(scale[2]))
+			});
+	}
+
+	static void ApplyPointInstancerPScaleFallback(
+		const UsdGeomPointInstancer& pointInstancer,
+		const UsdTimeCode& timeCode,
+		const std::vector<bool>& mask,
+		VtArray<GfMatrix4d>* instanceTransforms)
+	{
+		if (instanceTransforms == nullptr || instanceTransforms->empty()) {
+			return;
+		}
+
+		VtVec3fArray nativeScales;
+		if (pointInstancer.GetScalesAttr().Get(&nativeScales, timeCode) && !nativeScales.empty()) {
+			return;
+		}
+
+		UsdGeomPrimvarsAPI primvarsAPI(pointInstancer.GetPrim());
+		UsdGeomPrimvar pscalePrimvar = primvarsAPI.FindPrimvarWithInheritance(TfToken("pscale"));
+		if (!pscalePrimvar) {
+			return;
+		}
+
+		VtFloatArray pscaleValues;
+		if (!pscalePrimvar.ComputeFlattened(&pscaleValues, timeCode) || pscaleValues.empty()) {
+			spdlog::warn(
+				"PointInstancer '{}' authored primvars:pscale but it could not be flattened at geometry sample time {}; ignoring fallback scaling.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				timeCode.IsDefault() ? -1.0 : timeCode.GetValue());
+			return;
+		}
+
+		std::vector<float> resolvedPscale;
+		resolvedPscale.reserve(instanceTransforms->size());
+		if (pscaleValues.size() == 1) {
+			resolvedPscale.assign(instanceTransforms->size(), pscaleValues[0]);
+		}
+		else if (!mask.empty() && pscaleValues.size() == mask.size()) {
+			for (size_t valueIndex = 0; valueIndex < mask.size(); ++valueIndex) {
+				if (mask[valueIndex]) {
+					resolvedPscale.push_back(pscaleValues[valueIndex]);
+				}
+			}
+		}
+		else if (pscaleValues.size() == instanceTransforms->size()) {
+			resolvedPscale.assign(pscaleValues.begin(), pscaleValues.end());
+		}
+		else {
+			spdlog::warn(
+				"PointInstancer '{}' primvars:pscale count {} does not match masked instance count {}; ignoring fallback scaling.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				pscaleValues.size(),
+				instanceTransforms->size());
+			return;
+		}
+
+		if (resolvedPscale.size() != instanceTransforms->size()) {
+			spdlog::warn(
+				"PointInstancer '{}' resolved primvars:pscale count {} does not match instance transform count {}; ignoring fallback scaling.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				resolvedPscale.size(),
+				instanceTransforms->size());
+			return;
+		}
+
+		for (size_t instanceIndex = 0; instanceIndex < instanceTransforms->size(); ++instanceIndex) {
+			GfMatrix4d scaleMatrix(1.0);
+			scaleMatrix.SetScale(GfVec3d(resolvedPscale[instanceIndex]));
+			(*instanceTransforms)[instanceIndex] = scaleMatrix * (*instanceTransforms)[instanceIndex];
+		}
 	}
 
 	static std::vector<uint32_t> SwizzleToIndices(const std::string& swizzle) {
@@ -1411,11 +1519,14 @@ namespace USDLoader {
 			prototypeRootsToSkip.insert(prototypeTarget.GetString());
 		}
 
-		const UsdTimeCode timeCode = UsdTimeCode::Default();
+		const UsdTimeCode timeCode = GetUsdGeometrySampleTime(stage);
 
 		VtIntArray protoIndices;
 		if (!pointInstancer.GetProtoIndicesAttr().Get(&protoIndices, timeCode)) {
-			spdlog::warn("PointInstancer '{}' has no readable protoIndices at default time.", pointInstancer.GetPrim().GetPath().GetString());
+			spdlog::warn(
+				"PointInstancer '{}' has no readable protoIndices at geometry sample time {}.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				timeCode.IsDefault() ? -1.0 : timeCode.GetValue());
 			return;
 		}
 
@@ -1435,6 +1546,8 @@ namespace USDLoader {
 			spdlog::warn("PointInstancer '{}' failed to compute instance transforms.", pointInstancer.GetPrim().GetPath().GetString());
 			return;
 		}
+
+		ApplyPointInstancerPScaleFallback(pointInstancer, timeCode, mask, &instanceTransforms);
 
 		const size_t emittedCount = std::min(instanceTransforms.size(), protoIndices.size());
 		if (instanceTransforms.size() != protoIndices.size()) {
@@ -1456,8 +1569,9 @@ namespace USDLoader {
 			return;
 		}
 
-		std::vector<std::vector<std::shared_ptr<Mesh>>> meshesByPrototype;
-		meshesByPrototype.resize(prototypeTargets.size());
+		UsdGeomXformCache xformCache(timeCode);
+		std::vector<std::vector<PointInstancerPrototypeRenderable>> renderablesByPrototype;
+		renderablesByPrototype.resize(prototypeTargets.size());
 
 		for (size_t prototypeIndex = 0; prototypeIndex < prototypeTargets.size(); ++prototypeIndex) {
 			const auto& prototypeTarget = prototypeTargets[prototypeIndex];
@@ -1469,16 +1583,33 @@ namespace USDLoader {
 				continue;
 			}
 
-			for (const auto& prototypePrim : UsdPrimRange(prototypeRoot)) {
+			const GfMatrix4d prototypeRootWorldInverse = xformCache.GetLocalToWorldTransform(prototypeRoot).GetInverse();
+			std::function<void(const UsdPrim&)> gatherPrototypeRenderables = [&](const UsdPrim& prototypePrim) {
+				if (prototypePrim.IsA<UsdGeomImageable>()) {
+					UsdGeomImageable imageable(prototypePrim);
+					if (imageable.ComputeVisibility(timeCode) == UsdGeomTokens->invisible) {
+						return;
+					}
+				}
+
 				std::vector<std::shared_ptr<Mesh>> prototypePrimMeshes;
 				ProcessMeshAndAnimations(prototypePrim, prototypePrimMeshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
 				if (!prototypePrimMeshes.empty()) {
-					auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
-					prototypeMeshes.insert(prototypeMeshes.end(), prototypePrimMeshes.begin(), prototypePrimMeshes.end());
+					PointInstancerPrototypeRenderable renderable;
+					renderable.meshes = std::move(prototypePrimMeshes);
+					renderable.localTransform = xformCache.GetLocalToWorldTransform(prototypePrim) * prototypeRootWorldInverse;
+					renderable.name = prototypePrim.GetName().GetString();
+					renderablesByPrototype[prototypeIndex].push_back(std::move(renderable));
 				}
-			}
 
-			if (meshesByPrototype[prototypeIndex].empty()) {
+				for (const auto& childPrim : prototypePrim.GetFilteredChildren(UsdTraverseInstanceProxies())) {
+					gatherPrototypeRenderables(childPrim);
+				}
+			};
+
+			gatherPrototypeRenderables(prototypeRoot);
+
+			if (renderablesByPrototype[prototypeIndex].empty()) {
 				spdlog::warn("PointInstancer '{}' prototype '{}' resolved no renderable meshes.",
 					pointInstancer.GetPrim().GetPath().GetString(),
 					prototypeTarget.GetString());
@@ -1489,7 +1620,7 @@ namespace USDLoader {
 
 		for (size_t instanceIndex = 0; instanceIndex < emittedCount; ++instanceIndex) {
 			const int prototypeIndex = protoIndices[instanceIndex];
-			if (prototypeIndex < 0 || static_cast<size_t>(prototypeIndex) >= meshesByPrototype.size()) {
+			if (prototypeIndex < 0 || static_cast<size_t>(prototypeIndex) >= renderablesByPrototype.size()) {
 				spdlog::warn("PointInstancer '{}' has out-of-range proto index {} at instance {}.",
 					pointInstancer.GetPrim().GetPath().GetString(),
 					prototypeIndex,
@@ -1497,40 +1628,22 @@ namespace USDLoader {
 				continue;
 			}
 
-			auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
-			if (prototypeMeshes.empty()) {
+			auto& prototypeRenderables = renderablesByPrototype[prototypeIndex];
+			if (prototypeRenderables.empty()) {
 				continue;
 			}
 
-			const GfTransform instanceTransform(instanceTransforms[instanceIndex]);
-			const GfVec3d translation = instanceTransform.GetTranslation();
-			const GfQuaternion rotation = instanceTransform.GetRotation().GetQuaternion();
-			const GfVec3d scale = instanceTransform.GetScale();
-
-			auto instanceEntity = scene->CreateRenderableEntityECS(
-				prototypeMeshes,
-				s2ws(baseName + "_instance_" + std::to_string(instanceIndex)));
-
-			instanceEntity.set<Components::Position>({
-				DirectX::XMFLOAT3(
-					static_cast<float>(translation[0] * metersPerUnit),
-					static_cast<float>(translation[1] * metersPerUnit),
-					static_cast<float>(translation[2] * metersPerUnit))
-				});
-			instanceEntity.set<Components::Rotation>({
-				DirectX::XMFLOAT4(
-					static_cast<float>(rotation.GetImaginary()[0]),
-					static_cast<float>(rotation.GetImaginary()[1]),
-					static_cast<float>(rotation.GetImaginary()[2]),
-					static_cast<float>(rotation.GetReal()))
-				});
-			instanceEntity.set<Components::Scale>({
-				DirectX::XMFLOAT3(
-					static_cast<float>(scale[0]),
-					static_cast<float>(scale[1]),
-					static_cast<float>(scale[2]))
-				});
+			auto instanceEntity = scene->CreateNodeECS(s2ws(baseName + "_instance_" + std::to_string(instanceIndex)));
+			SetEntityTransformFromUsdMatrix(instanceEntity, instanceTransforms[instanceIndex], metersPerUnit);
 			instanceEntity.child_of(instancerEntity);
+
+			for (const auto& prototypeRenderable : prototypeRenderables) {
+				auto renderableEntity = scene->CreateRenderableEntityECS(
+					prototypeRenderable.meshes,
+					s2ws(prototypeRenderable.name.empty() ? baseName : prototypeRenderable.name));
+				SetEntityTransformFromUsdMatrix(renderableEntity, prototypeRenderable.localTransform, metersPerUnit);
+				renderableEntity.child_of(instanceEntity);
+			}
 		}
 	}
 
