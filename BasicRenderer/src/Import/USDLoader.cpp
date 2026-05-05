@@ -1300,6 +1300,13 @@ namespace USDLoader {
 		const auto& topo = skelQuery.GetTopology();
 		pxr::VtArray<pxr::GfMatrix4d> bindXforms;
 		skel.GetBindTransformsAttr().Get(&bindXforms);
+		if (bindXforms.size() < rawJointOrder.size()) {
+			spdlog::warn(
+				"Skeleton '{}' bind transform count ({}) is smaller than joint count ({}); missing joints will use identity rest transforms.",
+				skel.GetPrim().GetPath().GetString(),
+				bindXforms.size(),
+				rawJointOrder.size());
+		}
 
 		std::vector<XMMATRIX>        invBindMats;
 		std::vector<flecs::entity>   jointNodes;
@@ -1307,11 +1314,16 @@ namespace USDLoader {
 		jointNodes.reserve(rawJointOrder.size());
 
 		for (size_t i = 0; i < rawJointOrder.size(); ++i) {
-			auto& m = bindXforms[i];
+			const GfMatrix4d bindMatrix = i < bindXforms.size() ? bindXforms[i] : GfMatrix4d(1.0);
+			GfMatrix4d localBindMatrix = bindMatrix;
+			auto parentIdx = topo.GetParent(i);
+			if (parentIdx > -1 && static_cast<size_t>(parentIdx) < bindXforms.size()) {
+				localBindMatrix = bindMatrix * bindXforms[parentIdx].GetInverse();
+			}
 			// Convert GfMatrix4d to XMMATRIX
 
 			// Extract translation and scale from the matrix
-			auto transform = GfTransform(m);
+			auto transform = GfTransform(bindMatrix);
 			auto translation = transform.GetTranslation() * metersPerUnit;
 			auto rotation = transform.GetRotation().GetQuaternion();
 			auto& scale = transform.GetScale();
@@ -1337,8 +1349,8 @@ namespace USDLoader {
 				boneNode.add<AnimationController>();
 				boneNode.set<Components::AnimationName>({ jn });
 			}
+			SetEntityTransformFromUsdMatrix(boneNode, localBindMatrix, metersPerUnit);
 			jointNodes.push_back(boneNode);
-			auto parentIdx = topo.GetParent(i);
 			if (parentIdx > -1) {
 				boneNode.child_of(jointNodes[parentIdx]);
 			}
