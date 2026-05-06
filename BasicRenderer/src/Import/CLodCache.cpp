@@ -206,6 +206,7 @@ namespace CLodCache {
 				WritePod(out, payload.resolution);
 				WritePod(out, payload.aabbMin);
 				WritePod(out, payload.aabbMax);
+				WritePod(out, payload.voxelWidth);
 				WriteVectorPod(out, payload.activeCells);
 			}
 			WriteVectorPod(out, vgm.groupToPayloadIndex);
@@ -261,6 +262,7 @@ namespace CLodCache {
 				if (!ReadPod(blob, offset, payload.resolution)) return false;
 				if (!ReadPod(blob, offset, payload.aabbMin)) return false;
 				if (!ReadPod(blob, offset, payload.aabbMax)) return false;
+				if (!ReadPod(blob, offset, payload.voxelWidth)) return false;
 				if (!ReadVectorPod(blob, offset, payload.activeCells)) return false;
 			}
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.groupToPayloadIndex)) return false;

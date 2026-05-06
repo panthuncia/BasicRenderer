@@ -347,7 +347,7 @@ namespace
 		size_t vertexStrideBytes,
 		const std::vector<uint32_t>& triangleIndices,
 		const Float3& aabbMin,
-		const Float3& aabbMax,
+		float voxelWidth,
 		uint32_t resolution)
 	{
 		const uint32_t triangleCount = static_cast<uint32_t>(triangleIndices.size() / 3);
@@ -355,11 +355,10 @@ namespace
 		if (triangleCount == 0 || resolution == 0)
 			return cellTriMap;
 
-		const Float3 extent = aabbMax - aabbMin;
 		const Float3 cellSize = {
-			extent.x / static_cast<float>(resolution),
-			extent.y / static_cast<float>(resolution),
-			extent.z / static_cast<float>(resolution)
+			voxelWidth,
+			voxelWidth,
+			voxelWidth
 		};
 
 		if (cellSize.x <= 0.0f || cellSize.y <= 0.0f || cellSize.z <= 0.0f)
@@ -511,6 +510,9 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 	if (input.resolution < 2)
 		return result;
 
+	if (!(input.voxelWidth > 0.0f) || !std::isfinite(input.voxelWidth))
+		return result;
+
 	const Float3 aabbMin = ToFloat3(input.aabbMin);
 	const Float3 aabbMax = ToFloat3(input.aabbMax);
 
@@ -524,12 +526,16 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 
 	result.resolution = input.resolution;
 	result.aabbMin = input.aabbMin;
-	result.aabbMax = input.aabbMax;
+	result.aabbMax = DirectX::XMFLOAT3(
+		input.aabbMin.x + input.voxelWidth * static_cast<float>(input.resolution),
+		input.aabbMin.y + input.voxelWidth * static_cast<float>(input.resolution),
+		input.aabbMin.z + input.voxelWidth * static_cast<float>(input.resolution));
+	result.voxelWidth = input.voxelWidth;
 
 	auto cellTriMap = RasterizeTrianglesToGrid(
 		*input.vertices, input.vertexStrideBytes,
 		*input.triangleIndices,
-		aabbMin, aabbMax,
+		aabbMin, input.voxelWidth,
 		input.resolution);
 
 	if (cellTriMap.empty())
@@ -537,11 +543,10 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 
 	const std::vector<Ray> rays = GenerateCellRays(input.raysPerCell, input.resolution * 2654435761u);
 
-	const Float3 extent = aabbMax - aabbMin;
 	const Float3 cellSize = {
-		extent.x / static_cast<float>(input.resolution),
-		extent.y / static_cast<float>(input.resolution),
-		extent.z / static_cast<float>(input.resolution)
+		input.voxelWidth,
+		input.voxelWidth,
+		input.voxelWidth
 	};
 
 	result.activeCells.reserve(cellTriMap.size());
@@ -605,14 +610,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 	}
 
 	const VoxelGroupPayload& payload = *input.payload;
-	const DirectX::XMFLOAT3 extent{
-		payload.aabbMax.x - payload.aabbMin.x,
-		payload.aabbMax.y - payload.aabbMin.y,
-		payload.aabbMax.z - payload.aabbMin.z };
-	const float longestExtent = std::max({ extent.x, extent.y, extent.z });
-	const float voxelWidth = payload.resolution > 0u
-		? longestExtent / static_cast<float>(payload.resolution)
-		: 0.0f;
+	const float voxelWidth = payload.voxelWidth;
 
 	result.descriptor.aabbMinAndVoxelWidth = DirectX::XMFLOAT4(
 		payload.aabbMin.x,

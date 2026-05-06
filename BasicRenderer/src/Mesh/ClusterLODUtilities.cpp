@@ -1815,11 +1815,9 @@ namespace
 		}
 
 		const uint32_t minResolution = std::max(2u, settings.voxelMinResolution);
-		const uint32_t maxResolution = std::max(minResolution, settings.voxelGridBaseResolution);
-		const uint32_t targetResolution = std::clamp(
-			static_cast<uint32_t>(std::ceil(longestExtent / std::max(targetVoxelWidth, 1.0e-8f))),
+		const uint32_t targetResolution = std::max(
 			minResolution,
-			maxResolution);
+			static_cast<uint32_t>(std::ceil(longestExtent / std::max(targetVoxelWidth, 1.0e-8f))));
 
 		analysis.valid = targetResolution >= minResolution;
 		analysis.aabbMin = aabbMin;
@@ -2043,6 +2041,7 @@ namespace
 				voxelInput.triangleIndices = &buildInput.voxelTriangleIndices;
 				voxelInput.aabbMin = buildInput.analysis.aabbMin;
 				voxelInput.aabbMax = buildInput.analysis.aabbMax;
+				voxelInput.voxelWidth = voxelError;
 				voxelInput.resolution = resolution;
 				voxelInput.raysPerCell = settings.voxelRaysPerCell;
 				payload = VoxelizeTriangles(voxelInput);
@@ -2058,10 +2057,9 @@ namespace
 				const float extentY = buildInput.analysis.aabbMax.y - buildInput.analysis.aabbMin.y;
 				const float extentZ = buildInput.analysis.aabbMax.z - buildInput.analysis.aabbMin.z;
 				const float longestExtent = std::max({ extentX, extentY, extentZ });
-				resolution = std::clamp(
-					static_cast<uint32_t>(std::ceil(longestExtent / std::max(voxelError, 1.0e-8f))),
+				resolution = std::max(
 					std::max(2u, settings.voxelMinResolution),
-					std::max(std::max(2u, settings.voxelMinResolution), settings.voxelGridBaseResolution));
+					static_cast<uint32_t>(std::ceil(longestExtent / std::max(voxelError, 1.0e-8f))));
 			}
 
 			if (payload.activeCells.empty() || (requireBudgetFit && !payloadFitsBudget))
@@ -2189,7 +2187,20 @@ namespace
 					(state.groups[childGroupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u &&
 					(group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u)
 				{
-					throw std::runtime_error("Cluster LOD voxel fallback: voxelized child has a non-voxel parent");
+					const bool parentAnalysisValid = groupIndex < groupInputs.size() && groupInputs[groupIndex].analysis.valid;
+					const bool childAnalysisValid = childGroupIndex < groupInputs.size() && groupInputs[childGroupIndex].analysis.valid;
+					throw std::runtime_error(std::format(
+						"Cluster LOD voxel fallback: voxelized child has a non-voxel parent (parent_group={} parent_depth={} parent_analysis_valid={} parent_segments={} parent_terminal_segments={} child_group={} child_depth={} child_analysis_valid={} child_segments={} child_terminal_segments={})",
+						groupIndex,
+						group.depth,
+						parentAnalysisValid,
+						group.segmentCount,
+						group.terminalSegmentCount,
+						childGroupIndex,
+						state.groups[childGroupIndex].depth,
+						childAnalysisValid,
+						state.groups[childGroupIndex].segmentCount,
+						state.groups[childGroupIndex].terminalSegmentCount));
 				}
 			}
 		}

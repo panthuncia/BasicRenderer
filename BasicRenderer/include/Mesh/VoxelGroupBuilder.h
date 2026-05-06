@@ -21,6 +21,7 @@ struct VoxelizeTrianglesInput
 	// World-space AABB of the geometry to voxelize.
 	DirectX::XMFLOAT3 aabbMin{};
 	DirectX::XMFLOAT3 aabbMax{};
+	float voxelWidth = 0.0f;
 
 	// Resolution (cells per axis) for the output voxel grid.
 	uint32_t resolution = 32;

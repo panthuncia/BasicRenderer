@@ -102,6 +102,7 @@ struct VoxelGroupPayload
 	uint32_t resolution = 0;
 	DirectX::XMFLOAT3 aabbMin{};
 	DirectX::XMFLOAT3 aabbMax{};
+	float voxelWidth = 0.0f;
 	std::vector<VoxelCell> activeCells;
 };
 
