@@ -108,6 +108,9 @@ HierarchicalCullingPass::HierarchicalCullingPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
     std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
+    std::shared_ptr<Buffer> voxelRasterWorkBuffer,
+    std::shared_ptr<Buffer> voxelRasterWorkCounterBuffer,
+    uint32_t voxelRasterWorkCapacity,
     std::shared_ptr<Buffer> pageJobVisibleClustersBuffer,
     std::shared_ptr<Buffer> pageJobVisibleClustersCounterBuffer,
     std::shared_ptr<Buffer> histogramIndirectCommand,
@@ -131,6 +134,8 @@ HierarchicalCullingPass::HierarchicalCullingPass(
     m_isFirstPass = inputs.isFirstPass;
     m_workGraphComputePageJobDescriptorResourceId =
         std::string(CLodWorkGraphComputePageJobDescriptorBufferId) + "." + std::move(stablePassIdentifier);
+    m_voxelRasterQueueDescriptorResourceId =
+        std::string(CLodVoxelRasterQueueDescriptorBufferId) + "." + m_workGraphComputePageJobDescriptorResourceId;
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -154,6 +159,17 @@ HierarchicalCullingPass::HierarchicalCullingPass(
     m_visibleClustersBuffer = std::move(visibleClustersBuffer);
     m_visibleClustersCounterBuffer = std::move(visibleClustersCounterBuffer);
     m_swVisibleClustersCounterBuffer = std::move(swVisibleClustersCounterBuffer);
+    m_voxelRasterWorkBuffer = std::move(voxelRasterWorkBuffer);
+    m_voxelRasterWorkCounterBuffer = std::move(voxelRasterWorkCounterBuffer);
+    m_voxelRasterWorkCapacity = voxelRasterWorkCapacity;
+    m_voxelRasterQueueDescriptorsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodVoxelRasterQueueDescriptors),
+        false,
+        false,
+        false,
+        false);
+    m_voxelRasterQueueDescriptorsBuffer->SetName("CLod Voxel Raster Queue Descriptors");
     m_pageJobVisibleClustersBuffer = std::move(pageJobVisibleClustersBuffer);
     m_pageJobVisibleClustersCounterBuffer = std::move(pageJobVisibleClustersCounterBuffer);
     m_workGraphComputePageJobDescriptorsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
@@ -206,6 +222,8 @@ void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_visibleClustersCounterBuffer,
             m_histogramIndirectCommand,
             m_workGraphTelemetryBuffer,
+            m_voxelRasterWorkBuffer,
+            m_voxelRasterWorkCounterBuffer,
             m_occlusionReplayBuffer,
             m_occlusionReplayStateBuffer,
             m_occlusionNodeGpuInputsBuffer)
@@ -243,7 +261,8 @@ void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
             Builtin::PerMaterialDataBuffer,
             Builtin::Material::TextureGroup,
             Builtin::Material::TextureStreamingMetadataBuffer,
-            m_workGraphComputePageJobDescriptorResourceId.c_str())
+            m_workGraphComputePageJobDescriptorResourceId.c_str(),
+            m_voxelRasterQueueDescriptorResourceId.c_str())
     		.WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 
@@ -347,6 +366,36 @@ PassReturn HierarchicalCullingPass::Execute(PassExecutionContext& executionConte
 
         rhi::BarrierBatch clearBarrierBatch{};
         clearBarrierBatch.buffers = { &pageJobCounterBarrier };
+        commandList.Barriers(clearBarrierBatch);
+    }
+
+    if (m_voxelRasterWorkCounterBuffer) {
+        BindResourceDescriptorIndices(commandList, m_clearPipelineState.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_clearPipelineState.GetAPIPipelineState().GetHandle());
+
+        uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] =
+            m_voxelRasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = 1u;
+        commandList.PushConstants(
+            rhi::ShaderStage::Compute,
+            0,
+            MiscUintRootSignatureIndex,
+            0,
+            NumMiscUintRootConstants,
+            clearRootConstants);
+        commandList.Dispatch(1u, 1u, 1u);
+
+        rhi::BufferBarrier voxelCounterBarrier{};
+        voxelCounterBarrier.buffer = m_voxelRasterWorkCounterBuffer->GetAPIResource().GetHandle();
+        voxelCounterBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        voxelCounterBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        voxelCounterBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+        voxelCounterBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+
+        rhi::BarrierBatch clearBarrierBatch{};
+        clearBarrierBatch.buffers = { &voxelCounterBarrier };
         commandList.Barriers(clearBarrierBatch);
     }
 
@@ -610,6 +659,16 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
     }
 
+    CLodVoxelRasterQueueDescriptors voxelQueueDescriptors{};
+    voxelQueueDescriptors.workRecordsUAVDescriptorIndex = m_voxelRasterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    voxelQueueDescriptors.workRecordCounterUAVDescriptorIndex = m_voxelRasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    voxelQueueDescriptors.workRecordCapacity = m_voxelRasterWorkCapacity;
+    BUFFER_UPLOAD(
+        &voxelQueueDescriptors,
+        sizeof(CLodVoxelRasterQueueDescriptors),
+        rg::runtime::UploadTarget::FromShared(m_voxelRasterQueueDescriptorsBuffer),
+        0);
+
     CLodWorkGraphComputePageJobDescriptors pageJobDescriptors{};
     if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
         pageJobDescriptors.visibleClustersUAVDescriptorIndex = m_pageJobVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -830,12 +889,19 @@ std::shared_ptr<Resource> HierarchicalCullingPass::ProvideResource(ResourceIdent
         return m_workGraphComputePageJobDescriptorsBuffer;
     }
 
+    if (key == m_voxelRasterQueueDescriptorResourceId) {
+        return m_voxelRasterQueueDescriptorsBuffer;
+    }
+
     return nullptr;
 }
 
 std::vector<ResourceIdentifier> HierarchicalCullingPass::GetSupportedKeys()
 {
-    return { ResourceIdentifier{ m_workGraphComputePageJobDescriptorResourceId } };
+    return {
+        ResourceIdentifier{ m_workGraphComputePageJobDescriptorResourceId },
+        ResourceIdentifier{ m_voxelRasterQueueDescriptorResourceId }
+    };
 }
 
 void HierarchicalCullingPass::Cleanup() {
@@ -855,6 +921,10 @@ void HierarchicalCullingPass::CreatePipelines(
         m_workGraphComputePageJobDescriptorResourceId.begin(),
         m_workGraphComputePageJobDescriptorResourceId.end());
     std::wstring pageJobDescriptorResourceIdDefine = L"\"" + pageJobDescriptorResourceIdWide + L"\"";
+    std::wstring voxelQueueDescriptorResourceIdWide(
+        m_voxelRasterQueueDescriptorResourceId.begin(),
+        m_voxelRasterQueueDescriptorResourceId.end());
+    std::wstring voxelQueueDescriptorResourceIdDefine = L"\"" + voxelQueueDescriptorResourceIdWide + L"\"";
     constexpr bool enableComputePageJobDescriptorBuffer = true;
     std::vector<DxcDefine> defines = {
         { L"CLOD_WG_ENABLE_SW_CLASSIFICATION", UsesSWClassification(m_workGraphMode) ? L"1" : L"0" },
@@ -862,6 +932,7 @@ void HierarchicalCullingPass::CreatePipelines(
         { L"CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW", UsesVirtualShadowOutput(m_rasterOutputKind) ? L"1" : L"0" },
         { L"CLOD_WG_ENABLE_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER", enableComputePageJobDescriptorBuffer ? L"1" : L"0" },
         { L"CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID", pageJobDescriptorResourceIdDefine.c_str() },
+        { L"CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID", voxelQueueDescriptorResourceIdDefine.c_str() },
     };
     auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo, defines);
     m_pipelineResources = compiled.resourceDescriptorSlots;

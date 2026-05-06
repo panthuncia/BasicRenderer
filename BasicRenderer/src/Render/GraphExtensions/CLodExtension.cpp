@@ -68,6 +68,7 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapMarkPagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapResolveMarkedBlocksPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapSetupPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VoxelSoftwareRasterizationPass.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RenderPhase.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
@@ -750,6 +751,16 @@ void CLodExtension::InitializeCoreResources()
     m_swVisibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
     m_swVisibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase2"));
 
+    m_voxelRasterWorkCapacity = CLodVoxelRasterWorkCapacity(m_visibleClusterCapacity);
+    m_voxelRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_voxelRasterWorkCapacity, sizeof(CLodVoxelRasterWorkRecord), true, false, false, true);
+    m_voxelRasterWorkBuffer->SetName(MakeVariantResourceName(traits, "Voxel Raster Work Buffer"));
+
+    m_voxelRasterWorkCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_voxelRasterWorkCounterBuffer->SetName(MakeVariantResourceName(traits, "Voxel Raster Work Counter Buffer"));
+
+    m_voxelRasterIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVoxelRasterDispatchCommand), true, false, false, true);
+    m_voxelRasterIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Voxel Raster Indirect Args Buffer"));
+
     m_sortedToUnsortedMappingBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_visibleClusterCapacity, sizeof(uint32_t), true, false, false, true);
     m_sortedToUnsortedMappingBuffer->SetName(MakeVariantResourceName(traits, "Sorted-to-Unsorted Mapping Buffer"));
 
@@ -813,6 +824,9 @@ void CLodExtension::TagCoreResourceUsages()
     tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2Sw, "Cluster LOD rasterization");
     tagBufferUsage(m_swVisibleClustersCounterBuffer, "Cluster LOD visibility");
     tagBufferUsage(m_swVisibleClustersCounterBufferPhase2, "Cluster LOD visibility");
+    tagBufferUsage(m_voxelRasterWorkBuffer, "Cluster LOD voxel rasterization");
+    tagBufferUsage(m_voxelRasterWorkCounterBuffer, "Cluster LOD voxel rasterization");
+    tagBufferUsage(m_voxelRasterIndirectArgsBuffer, "Cluster LOD voxel rasterization");
     tagBufferUsage(m_sortedToUnsortedMappingBuffer, "Cluster LOD visibility");
     tagBufferUsage(m_viewRasterInfoBuffer, "Cluster LOD rasterization");
 }
@@ -908,6 +922,9 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_reyesTelemetryBufferPhase2);
     releaseBufferBacking(m_swVisibleClustersCounterBuffer);
     releaseBufferBacking(m_swVisibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_voxelRasterWorkBuffer);
+    releaseBufferBacking(m_voxelRasterWorkCounterBuffer);
+    releaseBufferBacking(m_voxelRasterIndirectArgsBuffer);
     releaseBufferBacking(m_sortedToUnsortedMappingBuffer);
     releaseBufferBacking(m_viewRasterInfoBuffer);
     releaseBufferBacking(m_shadowPageMetadataBuffer);
@@ -1442,6 +1459,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClustersBuffer,
                     visibleClustersCounterBuffer,
                     swVisibleClustersCounterBuffer,
+                    m_voxelRasterWorkBuffer,
+                    m_voxelRasterWorkCounterBuffer,
+                    m_voxelRasterWorkCapacity,
                     traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? swPageJobVisibleClustersBuffer : nullptr,
                     traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? swPageJobVisibleClustersCounterBuffer : nullptr,
                     m_histogramIndirectCommand,
@@ -1467,6 +1487,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClustersBuffer,
                     visibleClustersCounterBuffer,
                     swVisibleClustersCounterBuffer,
+                    m_voxelRasterWorkBuffer,
+                    m_voxelRasterWorkCounterBuffer,
+                    m_voxelRasterWorkCapacity,
                     traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? swPageJobVisibleClustersBuffer : nullptr,
                     traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? swPageJobVisibleClustersCounterBuffer : nullptr,
                     m_histogramIndirectCommand,
@@ -1818,6 +1841,21 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         appendFixedRasterPass(
             phaseIndex,
             phaseIndex == 2u || traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow);
+
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "VoxelSoftwareRasterizePass" + std::to_string(phaseIndex)),
+                std::make_shared<VoxelSoftwareRasterizationPass>(
+                    m_visibleClustersBuffer,
+                    m_voxelRasterWorkBuffer,
+                    m_voxelRasterWorkCounterBuffer,
+                    m_voxelRasterIndirectArgsBuffer,
+                    m_viewRasterInfoBuffer,
+                    traits.rasterOutputKind,
+                    m_shadowPageTableTexture,
+                    m_shadowPhysicalPagesTexture,
+                    m_shadowClipmapInfoBuffer,
+                    m_voxelRasterWorkCapacity)));
 
         if (useComputeSWRaster) {
             appendComputeSoftwareRasterPasses(phaseIndex, reyesOwnershipBitsetBuffer);

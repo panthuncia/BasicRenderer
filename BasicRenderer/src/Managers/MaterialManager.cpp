@@ -304,6 +304,10 @@ MaterialManager::MaterialManager() {
 	m_resources[Builtin::Material::TextureStreamingMetadataBuffer] = m_textureStreamingMetadataBuffer;
 	m_resources[Builtin::Material::TextureStreamingFeedbackBuffer] = m_textureStreamingFeedbackBuffer;
 	m_resolvers[Builtin::Material::TextureGroup] = std::make_shared<ResourceGroupResolver>(m_activeMaterialTextureGroup);
+
+	// Reserve built-in material bins up front so render-graph material evaluation buffers are
+	// fully sized before passes/materialization/upload steps touch them.
+	GetCompileFlagsSlot(MaterialCompileFlags::MaterialCompileVoxel);
 }
 
 void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {

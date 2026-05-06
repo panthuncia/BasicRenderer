@@ -311,7 +311,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
             if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
             {
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                const CLodVoxelCubeRecord firstCube = CLodLoadVoxelCube(clodMeshMetadata, voxelDescriptor, 0u);
+                CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
             }
             else
             {

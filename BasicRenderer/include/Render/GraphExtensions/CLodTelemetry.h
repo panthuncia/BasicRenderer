@@ -131,6 +131,8 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     TraverseNodesVoxelRejectedByErrorRecords,
     TraverseNodesVoxelDescriptorHits,
     TraverseNodesVoxelDescriptorMisses,
+    TraverseNodesVoxelRasterWorkRecords,
+    TraverseNodesVoxelRasterWorkDropped,
 
     Count
 };

@@ -159,6 +159,10 @@ private:
 
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBufferPhase2;
+    std::shared_ptr<Buffer> m_voxelRasterWorkBuffer;
+    std::shared_ptr<Buffer> m_voxelRasterWorkCounterBuffer;
+    std::shared_ptr<Buffer> m_voxelRasterIndirectArgsBuffer;
+    uint32_t m_voxelRasterWorkCapacity = 0u;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;

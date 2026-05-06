@@ -212,6 +212,7 @@ namespace CLodCache {
 			WriteVectorPod(out, vgm.groupToPackedDescriptorIndex);
 			WriteVectorPod(out, vgm.packedGroupDescriptors);
 			WriteVectorPod(out, vgm.packedCubeRecords);
+			WriteVectorPod(out, vgm.packedAttributeSamples);
 
 			return out;
 		}
@@ -266,6 +267,7 @@ namespace CLodCache {
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.groupToPackedDescriptorIndex)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedGroupDescriptors)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedCubeRecords)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedAttributeSamples)) return false;
 
 			return offset == blob.size();
 		}

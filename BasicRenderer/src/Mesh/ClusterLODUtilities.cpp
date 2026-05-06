@@ -1942,6 +1942,10 @@ namespace
 				state.voxelGroupMapping.packedCubeRecords.end(),
 				packed.cubeRecords.begin(),
 				packed.cubeRecords.end());
+			state.voxelGroupMapping.packedAttributeSamples.insert(
+				state.voxelGroupMapping.packedAttributeSamples.end(),
+				packed.attributeSamples.begin(),
+				packed.attributeSamples.end());
 
 			const float triangleError = group.bounds.error;
 			const bool terminalErrorSentinel = triangleError >= std::numeric_limits<float>::max() * 0.5f;

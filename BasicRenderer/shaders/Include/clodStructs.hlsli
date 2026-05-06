@@ -24,8 +24,8 @@ struct CLodMeshMetadata
     uint voxelGroupDescriptorCount;
     uint voxelCubeRecordBase;
     uint voxelCubeRecordCount;
-    uint pad0;
-    uint pad1;
+    uint voxelAttributeSampleBase;
+    uint voxelAttributeSampleCount;
 };
 
 struct CLodHierarchyLevelInfo
@@ -197,7 +197,35 @@ struct CLodVoxelCubeRecord
     uint dominantBoneIndex;
     uint2 occupancyMask;
     float opacitySum;
-    uint reserved;
+    uint firstAttribute;
+};
+
+struct CLodVoxelAttributeSample
+{
+    float4 normalAndOpacity;
+};
+
+struct CLodVoxelRasterQueueDescriptors
+{
+    uint workRecordsUAVDescriptorIndex;
+    uint workRecordCounterUAVDescriptorIndex;
+    uint workRecordCapacity;
+    uint pad0;
+};
+
+struct CLodVoxelRasterWorkRecord
+{
+    uint visibleClusterIndex;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+struct CLodVoxelRasterDispatchCommand
+{
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
 };
 
 bool CLodTryLoadVoxelGroupDescriptor(
@@ -227,6 +255,12 @@ CLodVoxelCubeRecord CLodLoadVoxelCube(CLodMeshMetadata metadata, CLodVoxelGroupD
 {
     StructuredBuffer<CLodVoxelCubeRecord> cubes = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::VoxelCubeRecords)];
     return cubes[metadata.voxelCubeRecordBase + descriptor.firstCube + localCubeIndex];
+}
+
+CLodVoxelAttributeSample CLodLoadVoxelAttributeSample(CLodMeshMetadata metadata, CLodVoxelCubeRecord cube, uint localCellIndex)
+{
+    StructuredBuffer<CLodVoxelAttributeSample> samples = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::VoxelAttributeSamples)];
+    return samples[metadata.voxelAttributeSampleBase + cube.firstAttribute + localCellIndex];
 }
 
 // Replay buffer: single physical buffer split into two regions.

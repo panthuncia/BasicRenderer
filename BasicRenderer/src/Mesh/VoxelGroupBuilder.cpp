@@ -51,6 +51,10 @@ namespace
 
 	Float3 ToFloat3(const DirectX::XMFLOAT3& v) { return { v.x, v.y, v.z }; }
 	DirectX::XMFLOAT3 ToXM(const Float3& v) { return { v.x, v.y, v.z }; }
+	Float3 TriangleNormal(const Float3& a, const Float3& b, const Float3& c)
+	{
+		return (b - a).cross(c - a).normalized();
+	}
 
 	// Cell-key packing (supports resolutions up to 65535)
 	uint64_t PackCell(uint32_t cx, uint32_t cy, uint32_t cz)
@@ -455,11 +459,24 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 			cellMin, cellMax,
 			rays);
 
+		Float3 normalSum(0.0f, 0.0f, 0.0f);
+		for (uint32_t triIndex : triIndices)
+		{
+			const uint32_t i0 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 0u];
+			const uint32_t i1 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 1u];
+			const uint32_t i2 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 2u];
+			const Float3 p0 = ReadPosition(*input.vertices, input.vertexStrideBytes, i0);
+			const Float3 p1 = ReadPosition(*input.vertices, input.vertexStrideBytes, i1);
+			const Float3 p2 = ReadPosition(*input.vertices, input.vertexStrideBytes, i2);
+			normalSum = normalSum + TriangleNormal(p0, p1, p2);
+		}
+
 		VoxelCell vc{};
 		vc.x = cx;
 		vc.y = cy;
 		vc.z = cz;
 		vc.opacity = opacity;
+		vc.normal = ToXM(normalSum.normalized());
 
 		result.activeCells.push_back(vc);
 	}
@@ -503,6 +520,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 	{
 		uint64_t mask = 0;
 		float opacitySum = 0.0f;
+		std::array<CLodVoxelAttributeSample, 64> attributes{};
 	};
 
 	std::unordered_map<uint32_t, CubeAccum> cubeMap;
@@ -527,6 +545,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		CubeAccum& accum = cubeMap[cubeCoord];
 		accum.mask |= (uint64_t{ 1 } << localBit);
 		accum.opacitySum += cell.opacity;
+		accum.attributes[localBit].normalAndOpacity = DirectX::XMFLOAT4(cell.normal.x, cell.normal.y, cell.normal.z, cell.opacity);
 	}
 
 	result.cubeRecords.reserve(cubeMap.size());
@@ -542,6 +561,8 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		record.dominantBoneIndex = input.dominantBoneIndex;
 		record.occupancyMask = accum.mask;
 		record.opacitySum = accum.opacitySum;
+		record.firstAttribute = static_cast<uint32_t>(result.attributeSamples.size());
+		result.attributeSamples.insert(result.attributeSamples.end(), accum.attributes.begin(), accum.attributes.end());
 		result.cubeRecords.push_back(record);
 	}
 

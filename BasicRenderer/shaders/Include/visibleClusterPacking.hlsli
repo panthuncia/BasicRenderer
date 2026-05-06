@@ -30,6 +30,7 @@ static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_OVERFLOW_SHIFT =
     CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_Y_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_LOCAL_PAGE_BITS;
 static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_HAS_BLOCK_DATA_SHIFT =
     CLOD_PACKED_VISIBLE_CLUSTER_VSM_OVERFLOW_SHIFT + 1u;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VOXEL_FLAG = 0x80000000u;
 
 uint4 CLodLoadVisibleClusterPacked(ByteAddressBuffer buffer, uint clusterIndex)
 {
@@ -112,6 +113,16 @@ uint CLodVisibleClusterPageSlabByteOffset(uint4 packedCluster)
 uint CLodVisibleClusterVsmPayload(uint4 packedCluster)
 {
     return packedCluster.w;
+}
+
+bool CLodVisibleClusterIsVoxelCube(uint4 packedCluster)
+{
+    return (packedCluster.w & CLOD_PACKED_VISIBLE_CLUSTER_VOXEL_FLAG) != 0u;
+}
+
+uint CLodVisibleClusterMarkVoxelPayload(uint vsmPayload)
+{
+    return vsmPayload | CLOD_PACKED_VISIBLE_CLUSTER_VOXEL_FLAG;
 }
 
 uint CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(uint shadowClipmapIndex)

@@ -190,6 +190,37 @@ struct CLodWorkGraphComputePageJobDescriptors
 
 static_assert(sizeof(CLodWorkGraphComputePageJobDescriptors) == 16u, "CLodWorkGraphComputePageJobDescriptors size must match HLSL");
 
+inline constexpr const char* CLodVoxelRasterQueueDescriptorBufferId = "CLod::VoxelRasterQueueDescriptors";
+
+struct CLodVoxelRasterQueueDescriptors
+{
+    uint32_t workRecordsUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t workRecordCounterUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t workRecordCapacity = 0u;
+    uint32_t pad0 = 0u;
+};
+
+static_assert(sizeof(CLodVoxelRasterQueueDescriptors) == 16u, "CLodVoxelRasterQueueDescriptors size must match HLSL");
+
+struct CLodVoxelRasterWorkRecord
+{
+    uint32_t visibleClusterIndex = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+    uint32_t pad2 = 0u;
+};
+
+static_assert(sizeof(CLodVoxelRasterWorkRecord) == 16u, "CLodVoxelRasterWorkRecord size must match HLSL");
+
+struct CLodVoxelRasterDispatchCommand
+{
+    uint32_t dispatchX = 0u;
+    uint32_t dispatchY = 0u;
+    uint32_t dispatchZ = 0u;
+};
+
+static_assert(sizeof(CLodVoxelRasterDispatchCommand) == 12u, "CLodVoxelRasterDispatchCommand size must match HLSL");
+
 struct CLodViewRasterInfo
 {
     uint32_t visibilityUAVDescriptorIndex = 0xFFFFFFFFu;
@@ -1103,6 +1134,7 @@ inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSi
 inline constexpr uint32_t CLodNodeReplayStrideBytes = 12u;   // sizeof(TraverseNodeRecord): 3 uints
 inline constexpr uint32_t CLodMeshletReplayStrideBytes = 24u; // sizeof(MeshletBucketRecord): 6 uints
 inline constexpr uint32_t CLodDenseClusterWorkStrideBytes = 24u; // sizeof(CLodDenseClusterWorkRecord): 6 uints
+inline constexpr uint32_t CLodVoxelRasterThreadsPerGroup = 64u;
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;
@@ -1121,6 +1153,11 @@ inline uint32_t CLodRoundUpCapacity(uint32_t required)
         capacity *= 2u;
     }
     return capacity;
+}
+
+inline uint32_t CLodVoxelRasterWorkCapacity(uint32_t maxVisibleClusters)
+{
+    return std::max(1u, maxVisibleClusters * 16u);
 }
 
 inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(

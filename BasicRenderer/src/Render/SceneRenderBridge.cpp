@@ -200,6 +200,7 @@ void SyncRenderableDerivedState(flecs::entity dst, const Components::MeshInstanc
         if (matrix) {
             renderable.perObjectCB.modelMatrix = matrix->matrix;
             renderable.perObjectCB.prevModelMatrix = matrix->matrix;
+            renderable.perObjectCB.modelInverseMatrix = DirectX::XMMatrixInverse(nullptr, matrix->matrix);
         }
         dst.set<Components::RenderableObject>(renderable);
     }

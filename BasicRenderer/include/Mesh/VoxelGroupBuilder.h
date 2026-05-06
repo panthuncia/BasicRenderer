@@ -45,6 +45,7 @@ struct PackedVoxelGroupBuildResult
 {
 	CLodVoxelGroupDescriptor descriptor{};
 	std::vector<CLodVoxelCubeRecord> cubeRecords;
+	std::vector<CLodVoxelAttributeSample> attributeSamples;
 };
 
 PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& input);

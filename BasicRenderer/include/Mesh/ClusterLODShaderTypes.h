@@ -153,6 +153,12 @@ struct CLodVoxelCubeRecord
 	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
 	uint64_t occupancyMask = 0;
 	float opacitySum = 0.0f;
-	uint32_t reserved = 0;
+	uint32_t firstAttribute = 0; // first of 64 CLodVoxelAttributeSample records for this cube
 };
 static_assert(sizeof(CLodVoxelCubeRecord) == 24, "CLodVoxelCubeRecord must be 24 bytes");
+
+struct CLodVoxelAttributeSample
+{
+	DirectX::XMFLOAT4 normalAndOpacity = { 0.0f, 0.0f, 1.0f, 0.0f };
+};
+static_assert(sizeof(CLodVoxelAttributeSample) == 16, "CLodVoxelAttributeSample must be 16 bytes");

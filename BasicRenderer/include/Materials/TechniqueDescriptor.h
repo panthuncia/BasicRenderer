@@ -25,6 +25,7 @@ enum MaterialCompileFlags : uint64_t {
 	MaterialCompileOpenPBRFuzzColorTexture = 1ull << 15,
 	MaterialCompileOpenPBRFuzzWeightTexture = 1ull << 16,
 	MaterialCompileOpenPBRFuzzRoughnessTexture = 1ull << 17,
+	MaterialCompileVoxel = 1ull << 18,
 };
 
 // |= operator for MaterialCompileFlags

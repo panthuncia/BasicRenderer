@@ -20,6 +20,10 @@
 #define CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID "CLod::WorkGraphComputePageJobDescriptors"
 #endif
 
+#ifndef CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID
+#define CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID "CLod::VoxelRasterQueueDescriptors"
+#endif
+
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION
 #define CLOD_WG_ENABLE_SW_CLASSIFICATION 1
 #endif
@@ -103,6 +107,8 @@ static const uint WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS = 103;
 static const uint WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS = 104;
 static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS = 105;
 static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES = 106;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS = 107;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED = 108;
 
 static const uint WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES = 18;
 static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS = 19;
@@ -976,6 +982,98 @@ void WGTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
+void CLodAppendVoxelRasterCubeWork(
+    uint instanceIndex,
+    uint viewId,
+    uint localGroupId,
+    CLodVoxelGroupDescriptor voxelDescriptor)
+{
+    if (voxelDescriptor.cubeCount == 0u)
+    {
+        return;
+    }
+
+    StructuredBuffer<CLodVoxelRasterQueueDescriptors> queueDescriptorBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID)];
+    const CLodVoxelRasterQueueDescriptors queueDescriptors = queueDescriptorBuffer[0];
+    if (queueDescriptors.workRecordsUAVDescriptorIndex == 0xFFFFFFFFu ||
+        queueDescriptors.workRecordCounterUAVDescriptorIndex == 0xFFFFFFFFu ||
+        queueDescriptors.workRecordCapacity == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<CLodVoxelRasterWorkRecord> workRecords =
+        ResourceDescriptorHeap[queueDescriptors.workRecordsUAVDescriptorIndex];
+    RWStructuredBuffer<uint> workRecordCounter =
+        ResourceDescriptorHeap[queueDescriptors.workRecordCounterUAVDescriptorIndex];
+    globallycoherent RWByteAddressBuffer visibleClusters =
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> visibleClusterCounter =
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState =
+        ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
+
+    const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
+    uint combinedBase = 0u;
+    InterlockedAdd(replayState[0].visibleClusterCombinedCount, voxelDescriptor.cubeCount, combinedBase);
+    const uint visibleWritableCount =
+        (combinedBase < visibleClusterCapacity)
+            ? min(voxelDescriptor.cubeCount, visibleClusterCapacity - combinedBase)
+            : 0u;
+    if (combinedBase + voxelDescriptor.cubeCount > visibleClusterCapacity)
+    {
+        InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+    }
+
+    uint visibleBase = 0u;
+    if (visibleWritableCount != 0u)
+    {
+        InterlockedAdd(visibleClusterCounter[0], visibleWritableCount, visibleBase);
+    }
+
+    uint baseSlot = 0u;
+    InterlockedAdd(workRecordCounter[0], visibleWritableCount, baseSlot);
+    const uint writableCount =
+        (baseSlot < queueDescriptors.workRecordCapacity)
+            ? min(visibleWritableCount, queueDescriptors.workRecordCapacity - baseSlot)
+            : 0u;
+    if (baseSlot + visibleWritableCount > queueDescriptors.workRecordCapacity)
+    {
+        InterlockedMin(workRecordCounter[0], queueDescriptors.workRecordCapacity);
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, visibleWritableCount - writableCount);
+    }
+    if (visibleWritableCount < voxelDescriptor.cubeCount)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, voxelDescriptor.cubeCount - visibleWritableCount);
+    }
+    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS, writableCount);
+
+    for (uint cubeIndex = 0u; cubeIndex < writableCount; ++cubeIndex)
+    {
+        const uint visibleClusterIndex = phase1HWBase + visibleBase + cubeIndex;
+        CLodStoreVisibleClusterWithVsmPayloadGloballyCoherent(
+            visibleClusters,
+            visibleClusterIndex,
+            viewId,
+            instanceIndex,
+            cubeIndex,
+            localGroupId,
+            0u,
+            0u,
+            CLodVisibleClusterMarkVoxelPayload(CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX)));
+
+        CLodVoxelRasterWorkRecord record;
+        record.visibleClusterIndex = visibleClusterIndex;
+        record.pad0 = 0u;
+        record.pad1 = 0u;
+        record.pad2 = 0u;
+        workRecords[baseSlot + cubeIndex] = record;
+    }
+}
+
 void ReplayReserveNodeSlotsWave(
     RWStructuredBuffer<CLodReplayBufferState> replayState,
     uint capacity,
@@ -1595,7 +1693,7 @@ void WG_TraverseNodes(
                             if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
                             {
                                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                                const CLodVoxelCubeRecord firstCube = CLodLoadVoxelCube(clodMeshMetadata, voxelDescriptor, 0u);
+                                CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
                             }
                             else
                             {

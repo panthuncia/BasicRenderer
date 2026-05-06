@@ -2,6 +2,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Materials/TechniqueDescriptor.h"
 
 class MaterialUAVResetPass : public ComputePass {
 public:
@@ -35,6 +36,7 @@ public:
         cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
         BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
 
+        context.materialManager->GetCompileFlagsSlot(MaterialCompileFlags::MaterialCompileVoxel);
         auto numMaterials = context.materialManager->GetCompileFlagsSlotsUsed();
         // Push: UintRootConstant0 = MaterialCount SRV descriptor index, UintRootConstant1 = MaterialPixelCountBuffer UAV index
         unsigned int rc[NumMiscUintRootConstants] = {};

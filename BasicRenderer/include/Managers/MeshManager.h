@@ -164,6 +164,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_clodVoxelDescriptorIndices;
 	std::shared_ptr<DynamicBuffer> m_clodVoxelGroupDescriptors;
 	std::shared_ptr<DynamicBuffer> m_clodVoxelCubeRecords;
+	std::shared_ptr<DynamicBuffer> m_clodVoxelAttributeSamples;
 	std::shared_ptr<DynamicBuffer> m_clodGroupPageMap;
 	uint64_t m_activeMeshletCount = 0;
 
@@ -187,6 +188,7 @@ private:
 		std::unique_ptr<BufferView> ownedVoxelDescriptorIndicesView;
 		std::unique_ptr<BufferView> ownedVoxelGroupDescriptorsView;
 		std::unique_ptr<BufferView> ownedVoxelCubeRecordsView;
+		std::unique_ptr<BufferView> ownedVoxelAttributeSamplesView;
 		std::vector<ClusterLODGroupChunk> baselineGroupChunks;
 		std::vector<uint8_t> groupResidentFlags;
 		std::vector<ResidentGroupAllocations> residentGroupAllocations;

@@ -42,6 +42,7 @@ MeshManager::MeshManager() {
 	m_clodVoxelDescriptorIndices = DynamicBuffer::CreateShared(sizeof(int32_t), 10000, "clodVoxelDescriptorIndices");
 	m_clodVoxelGroupDescriptors = DynamicBuffer::CreateShared(sizeof(CLodVoxelGroupDescriptor), 10000, "clodVoxelGroupDescriptors");
 	m_clodVoxelCubeRecords = DynamicBuffer::CreateShared(sizeof(CLodVoxelCubeRecord), 10000, "clodVoxelCubeRecords");
+	m_clodVoxelAttributeSamples = DynamicBuffer::CreateShared(sizeof(CLodVoxelAttributeSample), 10000, "clodVoxelAttributeSamples");
 	m_clodGroupPageMap = DynamicBuffer::CreateShared(sizeof(GroupPageMapEntry), 10000, "clodGroupPageMap");
 
 	m_postSkinningVertices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
@@ -72,6 +73,7 @@ MeshManager::MeshManager() {
 	rg::memory::SetResourceUsageHint(*m_clodVoxelDescriptorIndices, "Cluster LOD voxel data");
 	rg::memory::SetResourceUsageHint(*m_clodVoxelGroupDescriptors, "Cluster LOD voxel data");
 	rg::memory::SetResourceUsageHint(*m_clodVoxelCubeRecords, "Cluster LOD voxel data");
+	rg::memory::SetResourceUsageHint(*m_clodVoxelAttributeSamples, "Cluster LOD voxel data");
 	rg::memory::SetResourceUsageHint(*m_clodGroupPageMap, "Cluster LOD streaming");
 
 
@@ -94,6 +96,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::CLod::VoxelDescriptorIndices] = m_clodVoxelDescriptorIndices;
 	m_resources[Builtin::CLod::VoxelGroupDescriptors] = m_clodVoxelGroupDescriptors;
 	m_resources[Builtin::CLod::VoxelCubeRecords] = m_clodVoxelCubeRecords;
+	m_resources[Builtin::CLod::VoxelAttributeSamples] = m_clodVoxelAttributeSamples;
 	m_resources[Builtin::CLod::GroupPageMap] = m_clodGroupPageMap;
 
 	// Page pool
@@ -444,9 +447,11 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		std::unique_ptr<BufferView> voxelDescriptorIndicesView = nullptr;
 		std::unique_ptr<BufferView> voxelGroupDescriptorsView = nullptr;
 		std::unique_ptr<BufferView> voxelCubeRecordsView = nullptr;
+		std::unique_ptr<BufferView> voxelAttributeSamplesView = nullptr;
 		uint32_t voxelDescriptorIndexBase = 0u;
 		uint32_t voxelGroupDescriptorBase = 0u;
 		uint32_t voxelCubeRecordBase = 0u;
+		uint32_t voxelAttributeSampleBase = 0u;
 		if (!voxelMapping.groupToPackedDescriptorIndex.empty()) {
 			voxelDescriptorIndicesView = m_clodVoxelDescriptorIndices->AddData(
 				voxelMapping.groupToPackedDescriptorIndex.data(),
@@ -472,6 +477,15 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 				sizeof(CLodVoxelCubeRecord));
 			if (voxelCubeRecordsView) {
 				voxelCubeRecordBase = static_cast<uint32_t>(voxelCubeRecordsView->GetOffset() / sizeof(CLodVoxelCubeRecord));
+			}
+		}
+		if (!voxelMapping.packedAttributeSamples.empty()) {
+			voxelAttributeSamplesView = m_clodVoxelAttributeSamples->AddData(
+				voxelMapping.packedAttributeSamples.data(),
+				voxelMapping.packedAttributeSamples.size() * sizeof(CLodVoxelAttributeSample),
+				sizeof(CLodVoxelAttributeSample));
+			if (voxelAttributeSamplesView) {
+				voxelAttributeSampleBase = static_cast<uint32_t>(voxelAttributeSamplesView->GetOffset() / sizeof(CLodVoxelAttributeSample));
 			}
 		}
 
@@ -551,6 +565,8 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		clodMeshMetadata.voxelGroupDescriptorCount = static_cast<uint32_t>(voxelMapping.packedGroupDescriptors.size());
 		clodMeshMetadata.voxelCubeRecordBase = voxelCubeRecordBase;
 		clodMeshMetadata.voxelCubeRecordCount = static_cast<uint32_t>(voxelMapping.packedCubeRecords.size());
+		clodMeshMetadata.voxelAttributeSampleBase = voxelAttributeSampleBase;
+		clodMeshMetadata.voxelAttributeSampleCount = static_cast<uint32_t>(voxelMapping.packedAttributeSamples.size());
 		sharedState->ownedMeshMetadataView = m_clodMeshMetadata->AddData(&clodMeshMetadata, sizeof(CLodMeshMetadata), sizeof(CLodMeshMetadata));
 		if (sharedState->ownedMeshMetadataView != nullptr) {
 			sharedState->clodMeshMetadataIndex = static_cast<uint32_t>(sharedState->ownedMeshMetadataView->GetOffset() / sizeof(CLodMeshMetadata));
@@ -563,6 +579,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		sharedState->ownedVoxelDescriptorIndicesView = std::move(voxelDescriptorIndicesView);
 		sharedState->ownedVoxelGroupDescriptorsView = std::move(voxelGroupDescriptorsView);
 		sharedState->ownedVoxelCubeRecordsView = std::move(voxelCubeRecordsView);
+		sharedState->ownedVoxelAttributeSamplesView = std::move(voxelAttributeSamplesView);
 		sharedState->baselineGroupChunks = std::move(baselineGroupChunks);
 		sharedState->groupResidentFlags = std::move(groupResidentFlags);
 		sharedState->ownedPageMapView = std::move(pageMapView);
@@ -736,6 +753,10 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 					if (sharedMeshState->ownedVoxelCubeRecordsView != nullptr) {
 						m_clodVoxelCubeRecords->Deallocate(sharedMeshState->ownedVoxelCubeRecordsView.get());
 						sharedMeshState->ownedVoxelCubeRecordsView = nullptr;
+					}
+					if (sharedMeshState->ownedVoxelAttributeSamplesView != nullptr) {
+						m_clodVoxelAttributeSamples->Deallocate(sharedMeshState->ownedVoxelAttributeSamplesView.get());
+						sharedMeshState->ownedVoxelAttributeSamplesView = nullptr;
 					}
 					m_clodSharedStreamingStateByMesh.erase(mesh->GetMesh().get());
 					m_clodSharedStreamingRangesDirty = true;

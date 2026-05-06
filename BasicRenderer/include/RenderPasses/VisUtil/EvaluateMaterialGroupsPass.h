@@ -97,6 +97,11 @@ public:
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,
             Builtin::CLod::MeshMetadata,
+            Builtin::CLod::VoxelDescriptorIndices,
+            Builtin::CLod::VoxelGroupDescriptors,
+            Builtin::CLod::VoxelCubeRecords,
+            Builtin::CLod::VoxelAttributeSamples,
+            Builtin::SkeletonResources::InverseSkinMatrices,
             Builtin::PerMaterialOpenPBRDataBuffer)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,

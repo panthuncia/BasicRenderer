@@ -28,6 +28,7 @@ struct Builtin {
     inline static constexpr std::string_view StreamingTouchedGroups = "Builtin::CLod::StreamingTouchedGroups";
     inline static constexpr std::string_view StreamingTouchedGroupsBits = "Builtin::CLod::StreamingTouchedGroupsBits";
     inline static constexpr std::string_view StreamingTouchedGroupsCounter = "Builtin::CLod::StreamingTouchedGroupsCounter";
+    inline static constexpr std::string_view VoxelAttributeSamples = "Builtin::CLod::VoxelAttributeSamples";
     inline static constexpr std::string_view VoxelCubeRecords = "Builtin::CLod::VoxelCubeRecords";
     inline static constexpr std::string_view VoxelDescriptorIndices = "Builtin::CLod::VoxelDescriptorIndices";
     inline static constexpr std::string_view VoxelGroupDescriptors = "Builtin::CLod::VoxelGroupDescriptors";
@@ -145,6 +146,7 @@ struct Builtin {
   struct SkeletonResources {
     inline static constexpr std::string_view BoneTransforms = "Builtin::SkeletonResources::BoneTransforms";
     inline static constexpr std::string_view InverseBindMatrices = "Builtin::SkeletonResources::InverseBindMatrices";
+    inline static constexpr std::string_view InverseSkinMatrices = "Builtin::SkeletonResources::InverseSkinMatrices";
     inline static constexpr std::string_view SkinningInstanceInfo = "Builtin::SkeletonResources::SkinningInstanceInfo";
   };
 };

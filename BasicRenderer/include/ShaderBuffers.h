@@ -96,6 +96,7 @@ static constexpr unsigned int OBJECT_FLAG_REVERSE_WINDING = 1u << 0;
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
     DirectX::XMMATRIX prevModelMatrix;
+    DirectX::XMMATRIX modelInverseMatrix;
     unsigned int normalMatrixBufferIndex;
     unsigned int objectFlags;
     unsigned int pad[2];
@@ -472,8 +473,8 @@ struct VisibleClusterInfo {
 struct SkinningInstanceGPUInfo {
     uint32_t transformOffsetMatrices = 0;
     uint32_t invBindOffsetMatrices = 0;
+    uint32_t inverseSkinOffsetMatrices = 0;
     uint32_t boneCount = 0;
-    uint32_t _pad = 0;
 };
 
 struct MeshInstanceClodOffsets
@@ -499,8 +500,8 @@ struct CLodMeshMetadata
     uint voxelGroupDescriptorCount;
     uint voxelCubeRecordBase;
     uint voxelCubeRecordCount;
-    uint pad0;
-    uint pad1;
+    uint voxelAttributeSampleBase;
+    uint voxelAttributeSampleCount;
 };
 
 struct CLodHierarchyLevelInfo

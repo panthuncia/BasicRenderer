@@ -93,6 +93,7 @@ struct VoxelCell
 	uint32_t y = 0;
 	uint32_t z = 0;
 	float    opacity = 0.0f;
+	DirectX::XMFLOAT3 normal = { 0.0f, 0.0f, 1.0f };
 };
 
 struct VoxelGroupPayload
@@ -110,6 +111,7 @@ struct VoxelGroupMapping
 	std::vector<int32_t> groupToPackedDescriptorIndex;
 	std::vector<CLodVoxelGroupDescriptor> packedGroupDescriptors;
 	std::vector<CLodVoxelCubeRecord> packedCubeRecords;
+	std::vector<CLodVoxelAttributeSample> packedAttributeSamples;
 };
 
 // Prebuilt / Cache payload types

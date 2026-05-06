@@ -490,6 +490,7 @@ struct SingleMatrix {
 struct PerObjectBuffer {
     row_major matrix model;
     row_major matrix prevModel;
+    row_major matrix modelInverse;
     uint normalMatrixBufferIndex;
     uint objectFlags;
     uint pad[2];
@@ -665,8 +666,8 @@ struct SkinningInstanceGPUInfo
 {
     uint transformOffsetMatrices;
     uint invBindOffsetMatrices;
+    uint inverseSkinOffsetMatrices;
     uint boneCount;
-    uint pad[1];
 };
 
 // TODO: packing?

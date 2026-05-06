@@ -45,6 +45,7 @@ namespace Components {
         RenderableObject() {
             perObjectCB.modelMatrix = DirectX::XMMatrixIdentity();
             perObjectCB.prevModelMatrix = DirectX::XMMatrixIdentity();
+            perObjectCB.modelInverseMatrix = DirectX::XMMatrixIdentity();
             perObjectCB.normalMatrixBufferIndex = 0;
             perObjectCB.objectFlags = 0;
             perObjectCB.pad[0] = 0;

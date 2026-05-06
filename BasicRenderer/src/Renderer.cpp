@@ -858,6 +858,7 @@ void Renderer::RunRenderResourceSyncStage() {
                 auto* drawInfo = item.drawInfo;
                 object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
                 object->perObjectCB.modelMatrix = worldMatrix->matrix;
+                object->perObjectCB.modelInverseMatrix = XMMatrixInverse(nullptr, worldMatrix->matrix);
 
                 const XMVECTOR det = XMMatrixDeterminant(worldMatrix->matrix);
                 object->perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;

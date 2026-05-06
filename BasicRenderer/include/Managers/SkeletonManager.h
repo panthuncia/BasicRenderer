@@ -50,6 +50,7 @@ private:
 
     struct InstanceRecord {
         std::unique_ptr<BufferView> transformsView;
+        std::unique_ptr<BufferView> inverseSkinView;
         uint32_t boneCount = 0;
         uint32_t refCount = 0;
 
@@ -60,6 +61,7 @@ private:
 
         uint32_t transformOffsetMatrices = 0;
         uint32_t invBindOffsetMatrices = 0;
+        uint32_t inverseSkinOffsetMatrices = 0;
     };
 
 private:
@@ -68,6 +70,7 @@ private:
     // Global packed buffers
     std::shared_ptr<DynamicBuffer> m_inverseBindMatrices;  // float4x4[]
     std::shared_ptr<DynamicBuffer> m_boneTransforms;       // float4x4[]
+    std::shared_ptr<DynamicBuffer> m_inverseSkinMatrices;  // float4x4[]
     std::shared_ptr<DynamicStructuredBuffer<SkinningInstanceGPUInfo>> m_instanceInfo; // slot -> offsets/count
 
     // Resource provider map

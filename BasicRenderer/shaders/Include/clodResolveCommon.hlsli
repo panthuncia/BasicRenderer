@@ -805,6 +805,139 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     return d;
 }
 
+uint3 CLodDecodeVoxelCubeCoord(uint packedCoord)
+{
+    return uint3(packedCoord & 0x3FFu, (packedCoord >> 10u) & 0x3FFu, (packedCoord >> 20u) & 0x3FFu);
+}
+
+MaterialInputs BuildVoxelMaterialInputs(MaterialInfo materialInfo, float3 normalWS, float opacity)
+{
+    MaterialInputs inputs = (MaterialInputs)0;
+    inputs.albedo = materialInfo.baseColorFactor.rgb;
+    inputs.normalWS = normalWS;
+    inputs.emissive = materialInfo.emissiveFactor.rgb;
+    inputs.coatColor = float3(1.0f, 1.0f, 1.0f);
+    inputs.metallic = materialInfo.metallicFactor;
+    inputs.roughness = materialInfo.roughnessFactor;
+    inputs.coatWeight = 0.0f;
+    inputs.coatRoughness = 1.0f;
+    inputs.fuzzColor = float3(1.0f, 1.0f, 1.0f);
+    inputs.fuzzWeight = 0.0f;
+    inputs.fuzzRoughness = 1.0f;
+    inputs.opacity = opacity;
+    inputs.ambientOcclusion = materialInfo.ambientStrength;
+    inputs.openPBRMaterialDataIndex = materialInfo.openPBRMaterialDataIndex;
+    inputs.selectedMaterialMipLevel = MATERIAL_DEBUG_INVALID_MIP_LEVEL;
+    inputs.selectedMaterialMipMaxLevel = MATERIAL_DEBUG_INVALID_MIP_LEVEL;
+    return inputs;
+}
+
+bool ResolveClodVoxelCommonSampleFromPackedCluster(
+    uint4 packedCluster,
+    uint visibleClusterIndex,
+    uint primID,
+    float linearDepth,
+    uint2 pixel,
+    Camera cam,
+    out ClodResolvedCommonSample sample)
+{
+    sample = (ClodResolvedCommonSample)0;
+
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    StructuredBuffer<CLodMeshMetadata> metadataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
+
+    const uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
+    const uint localGroupId = CLodVisibleClusterGroupID(packedCluster);
+    const uint localCubeIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+
+    const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[instanceIndex];
+    const PerObjectBuffer obj = perObjectBuffer[instanceData.perObjectBufferIndex];
+    const PerMeshBuffer mesh = perMeshBuffer[instanceData.perMeshBufferIndex];
+    const MeshInstanceClodOffsets offsets = meshInstanceClodOffsets[instanceIndex];
+    const CLodMeshMetadata metadata = metadataBuffer[offsets.clodMeshMetadataIndex];
+
+    CLodVoxelGroupDescriptor descriptor;
+    if (!CLodTryLoadVoxelGroupDescriptor(metadata, localGroupId, descriptor) || localCubeIndex >= descriptor.cubeCount)
+    {
+        return false;
+    }
+
+    const CLodVoxelCubeRecord cube = CLodLoadVoxelCube(metadata, descriptor, localCubeIndex);
+    const uint3 cubeCoord = CLodDecodeVoxelCubeCoord(cube.cubeCoord);
+    const float voxelWidth = descriptor.aabbMinAndVoxelWidth.w;
+    if (voxelWidth <= 0.0f)
+    {
+        return false;
+    }
+    const float3 cubeMinObject = descriptor.aabbMinAndVoxelWidth.xyz + float3(cubeCoord) * (voxelWidth * 4.0f);
+
+    float4x4 skinMatrix = IdentitySkinMatrix();
+    float4x4 inverseSkinMatrix = IdentitySkinMatrix();
+    if (cube.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
+    {
+        skinMatrix = LoadBoneSkinMatrix(instanceData.skinningInstanceSlot, cube.dominantBoneIndex);
+        inverseSkinMatrix = LoadBoneInverseSkinMatrix(instanceData.skinningInstanceSlot, cube.dominantBoneIndex);
+    }
+    const row_major matrix localToWorld = mul(skinMatrix, obj.model);
+    const row_major matrix worldToLocal = mul(obj.modelInverse, inverseSkinMatrix);
+
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    const float2 winSize = float2(perFrame.screenResX, perFrame.screenResY);
+    const float2 pixelUv = (float2(pixel) + 0.5f) / winSize;
+    const float2 ndc = float2(pixelUv.x * 2.0f - 1.0f, 1.0f - pixelUv.y * 2.0f);
+    float4 viewNear = mul(float4(ndc, 0.0f, 1.0f), cam.projectionInverse);
+    viewNear.xyz /= max(viewNear.w, 1e-6f);
+    float4 worldNear = mul(float4(viewNear.xyz, 1.0f), cam.viewInverse);
+    const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1e-6f);
+    const float3 rayOriginWS = cam.positionWorldSpace.xyz;
+    const float3 rayDirWS = normalize(worldPoint - rayOriginWS);
+    const float3 rayDirVS = mul(float4(rayDirWS, 0.0f), cam.view).xyz;
+    const float rayT = linearDepth / max(-rayDirVS.z, 1e-6f);
+    const float3 worldPosition = rayOriginWS + rayDirWS * rayT;
+    const float3 objectPosition = mul(float4(worldPosition, 1.0f), worldToLocal).xyz;
+
+    uint cellIndex = primID;
+    if (cellIndex >= 64u)
+    {
+        const int3 cell = clamp(int3(floor((objectPosition - cubeMinObject) / voxelWidth)), int3(0, 0, 0), int3(3, 3, 3));
+        cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
+    }
+
+    CLodVoxelAttributeSample attributeSample = CLodLoadVoxelAttributeSample(metadata, cube, cellIndex);
+    float3 normalOS = normalize(attributeSample.normalAndOpacity.xyz);
+    normalOS = normalize(mul(normalOS, (float3x3)skinMatrix));
+    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    const float3 normalWS = normalize(mul(normalOS, (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex]));
+
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[mesh.materialDataIndex];
+
+    sample.linearDepth = linearDepth;
+    sample.clusterIndex = visibleClusterIndex;
+    sample.meshletTriangleIndex = cellIndex;
+    sample.meshletIndex = localCubeIndex;
+    sample.positionWS = worldPosition;
+    sample.positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
+    sample.normalWSBase = normalWS;
+    sample.normalOS = normalOS;
+    sample.vertexColor = float3(1.0f, 1.0f, 1.0f);
+    sample.dpdxWS = 0.0f.xxx;
+    sample.dpdyWS = 0.0f.xxx;
+    sample.motionVector = float2(0.0f, 0.0f);
+#if defined(VISUTIL_USE_COMPACT_MATERIAL_EVAL)
+    sample.materialInfo = (MaterialInfo)0;
+#else
+    sample.materialInfo = materialInfo;
+#endif
+    sample.materialFlags = 0u;
+    sample.materialInputs = BuildVoxelMaterialInputs(materialInfo, normalWS, saturate(attributeSample.normalAndOpacity.w));
+    return true;
+}
+
 uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d)
 {
     uint triOffset = d.triangleStreamBase + d.triangleByteOffset + triLocalIndex * 3u;
@@ -934,6 +1067,20 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
             microTrianglePatchDomain1,
             microTrianglePatchDomain2);
         isReyesPatch = true;
+    }
+
+    ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    const uint4 packedVisibleCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
+    if (CLodVisibleClusterIsVoxelCube(packedVisibleCluster))
+    {
+        return ResolveClodVoxelCommonSampleFromPackedCluster(
+            packedVisibleCluster,
+            clusterIndex,
+            meshletTriangleIndex,
+            depth,
+            pixel,
+            cam,
+            sample);
     }
 
     MeshletResolveData md = LoadMeshletResolveData_Wave(clusterIndex);
