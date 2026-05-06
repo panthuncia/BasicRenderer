@@ -174,7 +174,7 @@ struct ClusterLODBuilderSettings
 	float simplifyTangentWeight = 0.01f;
 	float simplifyTangentSignWeight = 0.5f;
 
-	bool enableVoxelFallback = false;
+	bool enableVoxelFallback = true;
 	ClusterLODVoxelFallbackMode voxelFallbackMode = ClusterLODVoxelFallbackMode::Auto;
 	uint32_t voxelGridBaseResolution = 32u;
 	uint32_t voxelMinResolution = 2u;

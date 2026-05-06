@@ -423,6 +423,24 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodTopRootNode = 0;
 	m_perMeshBufferData.boundingSphere = data.objectBoundingSphere;
 	m_voxelGroupMapping = data.voxelGroupMapping;
+	{
+		uint32_t voxelGroupCount = 0;
+		for (const ClusterLODGroup& group : m_clodGroups) {
+			if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u) {
+				voxelGroupCount++;
+			}
+		}
+		if (voxelGroupCount != 0u || !m_voxelGroupMapping.packedGroupDescriptors.empty()) {
+			spdlog::info(
+				"ClusterLOD runtime adoption: groups={} voxel_groups={} voxel_descriptors={} voxel_cubes={} nodes={} cache_hash=0x{:016X}",
+				m_clodGroups.size(),
+				voxelGroupCount,
+				m_voxelGroupMapping.packedGroupDescriptors.size(),
+				m_voxelGroupMapping.packedCubeRecords.size(),
+				m_clodNodes.size(),
+				data.cacheSource.buildConfigHash);
+		}
+	}
 
 	m_clodMaxDepth = data.maxDepth;
 	m_clodMaxTraversalDepth = data.maxTraversalDepth;

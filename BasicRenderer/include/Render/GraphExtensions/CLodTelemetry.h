@@ -127,6 +127,10 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     ClusterCullBucketRecordsDispatched,
     ClusterCullDenseExpansionBuckets,
     ClusterCullDenseClustersDispatched,
+    TraverseNodesVoxelLeafRecords,
+    TraverseNodesVoxelRejectedByErrorRecords,
+    TraverseNodesVoxelDescriptorHits,
+    TraverseNodesVoxelDescriptorMisses,
 
     Count
 };

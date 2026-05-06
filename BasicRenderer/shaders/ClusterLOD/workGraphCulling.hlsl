@@ -99,6 +99,10 @@ static const uint WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES = 17;
 static const uint WG_COUNTER_CLUSTER_CULL_BUCKET_RECORDS_DISPATCHED = 100;
 static const uint WG_COUNTER_CLUSTER_CULL_DENSE_EXPANSION_BUCKETS = 101;
 static const uint WG_COUNTER_CLUSTER_CULL_DENSE_CLUSTERS_DISPATCHED = 102;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS = 103;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS = 104;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS = 105;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES = 106;
 
 static const uint WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES = 18;
 static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS = 19;
@@ -1535,6 +1539,10 @@ void WG_TraverseNodes(
                 // Segment-leaf: LOD check + inlined SegmentEvaluate.
                 const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
                 const ClusterLODGroup grp = groups[groupGlobalIndex];
+                const bool isVoxelLeaf = (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF) || ((grp.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u);
+                if (isVoxelLeaf) {
+                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS, 1);
+                }
 
                 const float3 grpWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                 const float grpWorldRadius = grp.bounds.centerAndRadius.w * lodUniformScale;
@@ -1547,6 +1555,9 @@ void WG_TraverseNodes(
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
+                    if (isVoxelLeaf) {
+                        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS, 1);
+                    }
                 }
                 else {
                     bool nodeTouchesDirtyPages = true;
@@ -1578,12 +1589,17 @@ void WG_TraverseNodes(
                             }
                         }
 
-                        if (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF || ((grp.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u))
+                        if (isVoxelLeaf)
                         {
                             CLodVoxelGroupDescriptor voxelDescriptor;
                             if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
                             {
+                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
                                 const CLodVoxelCubeRecord firstCube = CLodLoadVoxelCube(clodMeshMetadata, voxelDescriptor, 0u);
+                            }
+                            else
+                            {
+                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
                             }
                         }
                         else

@@ -1943,8 +1943,21 @@ namespace
 				packed.cubeRecords.begin(),
 				packed.cubeRecords.end());
 
+			const float triangleError = group.bounds.error;
+			const bool terminalErrorSentinel = triangleError >= std::numeric_limits<float>::max() * 0.5f;
 			group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
-			group.bounds.error = std::max(group.bounds.error, voxelError);
+			group.bounds.error = terminalErrorSentinel ? triangleError : voxelError;
+			spdlog::info(
+				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_error={} final_error={} terminal_sentinel={} terminal_segments={}/{} forced_budget_fit={}",
+				groupIndex,
+				group.depth,
+				triangleError,
+				voxelError,
+				group.bounds.error,
+				terminalErrorSentinel,
+				group.terminalSegmentCount,
+				group.segmentCount,
+				requireBudgetFit);
 			stats.generatedPayloads++;
 			stats.generatedCubes += static_cast<uint32_t>(packed.cubeRecords.size());
 			return true;
@@ -2416,6 +2429,88 @@ namespace
 
 			state.topRootNode = 0;
 			state.maxTraversalDepth = ComputeCLodTraversalDepth(state.nodes, state.topRootNode);
+
+			uint32_t internalNodes = 0;
+			uint32_t voxelLeafNodes = 0;
+			uint32_t segmentLeafNodes = 0;
+			for (const ClusterLODNode& node : state.nodes)
+			{
+				switch (node.range.isGroup)
+				{
+				case 0u: ++internalNodes; break;
+				case 1u: ++voxelLeafNodes; break;
+				case 2u: ++segmentLeafNodes; break;
+				default: break;
+				}
+			}
+
+			spdlog::info(
+				"ClusterLOD traversal hierarchy: nodes={} levels={} top_root={} max_depth={} max_traversal_depth={} internal_nodes={} voxel_leaf_nodes={} segment_leaf_nodes={}",
+				state.nodes.size(),
+				lodLevelCount,
+				state.topRootNode,
+				state.maxDepth,
+				state.maxTraversalDepth,
+				internalNodes,
+				voxelLeafNodes,
+				segmentLeafNodes);
+
+			const ClusterLODNode& topRoot = state.nodes[state.topRootNode];
+			const uint32_t topRootChildCount = topRoot.range.countMinusOne + 1u;
+			spdlog::info(
+				"ClusterLOD traversal top root: child_offset={} child_count={} max_error={} lod_radius={}",
+				topRoot.range.indexOrOffset,
+				topRootChildCount,
+				topRoot.traversalMetric.maxQuadricError,
+				topRoot.traversalMetric.lodBoundingSphere.w);
+			for (uint32_t childIndex = 0; childIndex < topRootChildCount; ++childIndex)
+			{
+				const uint32_t childNodeId = topRoot.range.indexOrOffset + childIndex;
+				const ClusterLODNode& childNode = state.nodes[childNodeId];
+				spdlog::info(
+					"ClusterLOD traversal top root child: index={} node_id={} kind={} child_count={} max_error={} lod_radius={} owner_group={}",
+					childIndex,
+					childNodeId,
+					childNode.range.isGroup,
+					(childNode.range.isGroup == 0u) ? (childNode.range.countMinusOne + 1u) : 0u,
+					childNode.traversalMetric.maxQuadricError,
+					childNode.traversalMetric.lodBoundingSphere.w,
+					(childNode.range.isGroup == 0u) ? -1 : static_cast<int32_t>(childNode.range.ownerGroupId));
+			}
+
+			for (uint32_t depth = 0; depth < lodLevelCount; ++depth)
+			{
+				const uint32_t nodeId = state.lodLevelRoots[depth];
+				const ClusterLODNode& depthRoot = state.nodes[nodeId];
+				const uint32_t nodeKind = depthRoot.range.isGroup;
+				const uint32_t childCount = (nodeKind == 0u) ? (depthRoot.range.countMinusOne + 1u) : 0u;
+				int32_t ownerGroupId = -1;
+				float ownerGroupError = -1.0f;
+				uint32_t ownerGroupFlags = 0u;
+				uint32_t ownerGroupSegments = 0u;
+
+				if (nodeKind != 0u && depthRoot.range.ownerGroupId < state.groups.size())
+				{
+					ownerGroupId = static_cast<int32_t>(depthRoot.range.ownerGroupId);
+					const ClusterLODGroup& ownerGroup = state.groups[depthRoot.range.ownerGroupId];
+					ownerGroupError = ownerGroup.bounds.error;
+					ownerGroupFlags = ownerGroup.flags;
+					ownerGroupSegments = ownerGroup.segmentCount;
+				}
+
+				spdlog::info(
+					"ClusterLOD traversal depth root: depth={} node_id={} kind={} child_count={} max_error={} lod_radius={} owner_group={} owner_error={} owner_flags=0x{:X} owner_segments={}",
+					depth,
+					nodeId,
+					nodeKind,
+					childCount,
+					depthRoot.traversalMetric.maxQuadricError,
+					depthRoot.traversalMetric.lodBoundingSphere.w,
+					ownerGroupId,
+					ownerGroupError,
+					ownerGroupFlags,
+					ownerGroupSegments);
+			}
 		}
 	}
 }

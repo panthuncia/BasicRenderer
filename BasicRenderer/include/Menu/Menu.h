@@ -2568,16 +2568,24 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const uint32_t voxelLeaves = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelLeafRecords);
+                const uint32_t voxelRejected = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRejectedByErrorRecords);
+                const uint32_t voxelHits = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorHits);
+                const uint32_t voxelMisses = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses);
                 const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
                     ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
                     : "bucketed";
 
                 spdlog::info(
-                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    voxelLeaves,
+                    voxelRejected,
+                    voxelHits,
+                    voxelMisses,
                     clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
@@ -2705,16 +2713,24 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const uint32_t voxelLeaves = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelLeafRecords);
+                const uint32_t voxelRejected = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRejectedByErrorRecords);
+                const uint32_t voxelHits = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorHits);
+                const uint32_t voxelMisses = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses);
                 const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
                     ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
                     : "bucketed";
 
                 spdlog::info(
-                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
+                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    voxelLeaves,
+                    voxelRejected,
+                    voxelHits,
+                    voxelMisses,
                     clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
@@ -3256,6 +3272,12 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 counter(CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords),
                 counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
                 counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
+
+            ImGui::Text("Voxel leaves: reached=%u rejectedByError=%u descriptorHit=%u descriptorMiss=%u",
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelLeafRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRejectedByErrorRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorHits),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses));
 
             const uint32_t traverseCoalescedLaunches = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedLaunches);
             const uint32_t traverseCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputRecords);

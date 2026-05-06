@@ -15,6 +15,21 @@ namespace CLodCacheLoader {
 namespace {
 	constexpr const char* kFullMeshSubsetSentinel = "__clod_full_mesh__";
 
+	const char* ToVoxelFallbackModeString(ClusterLODVoxelFallbackMode mode)
+	{
+		switch (mode)
+		{
+		case ClusterLODVoxelFallbackMode::Auto:
+			return "auto";
+		case ClusterLODVoxelFallbackMode::MeshOnly:
+			return "mesh-only";
+		case ClusterLODVoxelFallbackMode::VoxelOnly:
+			return "voxel-only";
+		default:
+			return "unknown";
+		}
+	}
+
 		std::mutex& GetCacheSaveMutexForIdentity(const MeshCacheIdentity& identity)
 		{
 			static std::mutex cacheMutexTableGuard;
@@ -43,6 +58,28 @@ namespace {
 		key.subsetName = NormalizeSubsetName(identity.subsetName);
 		return key;
 	}
+
+	void LogBuildConfigOnce(uint64_t buildHash)
+	{
+		static std::once_flag logOnce;
+		std::call_once(logOnce, [buildHash]() {
+			const ClusterLODBuilderSettings effectiveSettings = ApplyClusterLODBuilderEnvironmentOverrides({});
+			spdlog::info(
+				"CLod cache build config: hash=0x{:016X} voxel_enabled={} voxel_mode='{}' voxel_grid={} voxel_rays={} voxel_scale={} voxel_opacity_threshold={} env_mode='{}' env_grid='{}' env_rays='{}' env_scale='{}' env_opacity_threshold='{}'",
+				buildHash,
+				effectiveSettings.enableVoxelFallback,
+				ToVoxelFallbackModeString(effectiveSettings.voxelFallbackMode),
+				effectiveSettings.voxelGridBaseResolution,
+				effectiveSettings.voxelRaysPerCell,
+				effectiveSettings.voxelFallbackScalingFactor,
+				effectiveSettings.voxelFallbackOpacityThreshold,
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_MODE"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_GRID"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_RAYS"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_SCALE"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD"));
+		});
+	}
 }
 
 MeshCacheIdentity BuildIdentity(
@@ -64,6 +101,7 @@ std::optional<ClusterLODPrebuiltData> TryLoadPrebuilt(const MeshCacheIdentity& i
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	LogBuildConfigOnce(buildHash);
 	spdlog::debug("CLodCacheLoader::TryLoadPrebuilt  src='{}' prim='{}' subset='{}' hash=0x{:X}",
 		identity.sourceIdentifier, identity.primPath, identity.subsetName, buildHash);
 	auto cached = CLodCache::TryLoad(cacheKey, buildHash);
@@ -80,6 +118,7 @@ bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltDat
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	LogBuildConfigOnce(buildHash);
 	return CLodCache::Save(cacheKey, buildHash, prebuiltData, payload);
 }
 
@@ -87,6 +126,7 @@ bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltDat
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	LogBuildConfigOnce(buildHash);
 	return CLodCache::Save(cacheKey, buildHash, prebuiltData, payload, outSavedPrebuiltData);
 }
 
