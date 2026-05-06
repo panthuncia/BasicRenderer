@@ -584,6 +584,7 @@ namespace
 		std::vector<ClusterLODGroupSegment> segments;
 		std::vector<BoundingSphere> segmentBounds;
 		std::vector<std::byte> vertexChunk;
+		std::vector<std::byte> skinningChunk;
 		std::vector<std::vector<std::byte>> pageBlobs;
 		ClusterLODGroupChunk groupChunk{};
 	};
@@ -832,6 +833,7 @@ namespace
 		{
 			constexpr size_t JointByteOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
 			groupSkinningInfluences.resize(groupLocalToGlobal.size(), PackedSkinningInfluences{});
+			output.skinningChunk.reserve(groupLocalToGlobal.size() * skinningVertexStrideBytes);
 
 			for (size_t groupVertexIndex = 0; groupVertexIndex < groupLocalToGlobal.size(); ++groupVertexIndex)
 			{
@@ -842,6 +844,10 @@ namespace
 				}
 
 				const size_t sourceByteOffset = static_cast<size_t>(globalVertexIndex) * skinningVertexStrideBytes;
+				output.skinningChunk.insert(
+					output.skinningChunk.end(),
+					skinningVertices->begin() + static_cast<std::ptrdiff_t>(sourceByteOffset),
+					skinningVertices->begin() + static_cast<std::ptrdiff_t>(sourceByteOffset + skinningVertexStrideBytes));
 				std::memcpy(&groupSkinningInfluences[groupVertexIndex],
 					skinningVertices->data() + sourceByteOffset + JointByteOffset,
 					sizeof(PackedSkinningInfluences));
@@ -1576,6 +1582,7 @@ namespace
 
 		// Raw per-group streams kept for voxel fallback candidate construction.
 		std::vector<std::vector<std::byte>> groupVertexChunks;
+		std::vector<std::vector<std::byte>> groupSkinningChunks;
 		std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
 		std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
 		std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
@@ -1619,6 +1626,7 @@ namespace
 	{
 		VoxelFallbackGroupAnalysis analysis{};
 		std::vector<std::byte> voxelVertices;
+		std::vector<std::byte> voxelSkinningVertices;
 		std::vector<uint32_t> voxelTriangleIndices;
 		uint32_t voxelVertexCount = 0;
 		bool autoWouldFitBudget = false;
@@ -1771,6 +1779,26 @@ namespace
 		padDegenerateAxis(aabbMin.y, aabbMax.y);
 		padDegenerateAxis(aabbMin.z, aabbMax.z);
 
+		auto expandAxisToExtent = [](float& minValue, float& maxValue, float targetExtent)
+		{
+			const float currentExtent = maxValue - minValue;
+			if (currentExtent >= targetExtent)
+			{
+				return;
+			}
+
+			const float center = 0.5f * (minValue + maxValue);
+			minValue = center - 0.5f * targetExtent;
+			maxValue = center + 0.5f * targetExtent;
+		};
+
+		// Runtime voxel reconstruction only stores one scalar voxel width, so the
+		// offline voxel volume must be cubic to keep build-time rasterization and
+		// runtime cube placement in the same space.
+		expandAxisToExtent(aabbMin.x, aabbMax.x, longestExtent);
+		expandAxisToExtent(aabbMin.y, aabbMax.y, longestExtent);
+		expandAxisToExtent(aabbMin.z, aabbMax.z, longestExtent);
+
 		if (surfaceArea <= 1.0e-12f || !std::isfinite(surfaceArea))
 		{
 			const float paddedExtentX = aabbMax.x - aabbMin.x;
@@ -1837,6 +1865,8 @@ namespace
 		if (refinedChildren.empty())
 		{
 			buildInput.voxelVertices = state.groupVertexChunks[groupIndex];
+			buildInput.voxelSkinningVertices =
+				(groupIndex < state.groupSkinningChunks.size()) ? state.groupSkinningChunks[groupIndex] : std::vector<std::byte>{};
 			buildInput.voxelTriangleIndices = BuildGroupTriangleIndices(
 				state.groupMeshletChunks[groupIndex],
 				state.groupMeshletVertexChunks[groupIndex],
@@ -1846,6 +1876,7 @@ namespace
 		}
 
 		buildInput.voxelVertices.clear();
+		buildInput.voxelSkinningVertices.clear();
 		buildInput.voxelTriangleIndices.clear();
 		buildInput.voxelVertexCount = 0;
 
@@ -1863,6 +1894,14 @@ namespace
 			const uint32_t vertexBase = buildInput.voxelVertexCount;
 			const std::vector<std::byte>& childVertices = state.groupVertexChunks[childGroupIndex];
 			buildInput.voxelVertices.insert(buildInput.voxelVertices.end(), childVertices.begin(), childVertices.end());
+			if (childGroupIndex < state.groupSkinningChunks.size())
+			{
+				const std::vector<std::byte>& childSkinning = state.groupSkinningChunks[childGroupIndex];
+				buildInput.voxelSkinningVertices.insert(
+					buildInput.voxelSkinningVertices.end(),
+					childSkinning.begin(),
+					childSkinning.end());
+			}
 			buildInput.voxelVertexCount += childGroup.groupVertexCount;
 
 			std::vector<uint32_t> childTriangles = BuildGroupTriangleIndices(
@@ -1879,7 +1918,7 @@ namespace
 		return !buildInput.voxelVertices.empty() && !buildInput.voxelTriangleIndices.empty();
 	}
 
-	void BuildVoxelFallbackCandidates(ClusterLODBuildState& state, size_t vertexStrideBytes, const ClusterLODBuilderSettings& settings)
+	void BuildVoxelFallbackCandidates(ClusterLODBuildState& state, size_t vertexStrideBytes, size_t skinningVertexStrideBytes, const ClusterLODBuilderSettings& settings)
 	{
 		const bool enabled = settings.enableVoxelFallback && settings.voxelFallbackMode != ClusterLODVoxelFallbackMode::MeshOnly;
 		if (!enabled || state.groups.empty())
@@ -1999,6 +2038,8 @@ namespace
 				VoxelizeTrianglesInput voxelInput{};
 				voxelInput.vertices = &buildInput.voxelVertices;
 				voxelInput.vertexStrideBytes = vertexStrideBytes;
+				voxelInput.skinningVertices = buildInput.voxelSkinningVertices.empty() ? nullptr : &buildInput.voxelSkinningVertices;
+				voxelInput.skinningVertexStrideBytes = skinningVertexStrideBytes;
 				voxelInput.triangleIndices = &buildInput.voxelTriangleIndices;
 				voxelInput.aabbMin = buildInput.analysis.aabbMin;
 				voxelInput.aabbMax = buildInput.analysis.aabbMax;
@@ -2846,6 +2887,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			std::vector<std::vector<std::vector<std::byte>>>* groupPageBlobs = nullptr;
 			// Raw per-group streams for voxel fallback candidate construction.
 			std::vector<std::vector<std::byte>>* groupVertexChunks = nullptr;
+			std::vector<std::vector<std::byte>>* groupSkinningChunks = nullptr;
 			std::vector<std::vector<uint32_t>>* groupMeshletVertexChunks = nullptr;
 			std::vector<std::vector<meshopt_Meshlet>>* groupMeshletChunks = nullptr;
 			std::vector<std::vector<uint8_t>>* groupMeshletTriangleChunks = nullptr;
@@ -2919,6 +2961,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				ensureIndexedStorage(*context->groupChunks);
 				ensureIndexedStorage(*context->groupPageBlobs);
 				ensureIndexedStorage(*context->groupVertexChunks);
+				ensureIndexedStorage(*context->groupSkinningChunks);
 				ensureIndexedStorage(*context->groupMeshletVertexChunks);
 				ensureIndexedStorage(*context->groupMeshletChunks);
 				ensureIndexedStorage(*context->groupMeshletTriangleChunks);
@@ -2936,6 +2979,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 				// Store raw streams for voxel fallback candidate construction.
 				(*context->groupVertexChunks)[groupId] = std::move(output.vertexChunk);
+				(*context->groupSkinningChunks)[groupId] = std::move(output.skinningChunk);
 				(*context->groupMeshletVertexChunks)[groupId] = std::move(output.meshletVertices);
 				(*context->groupMeshletChunks)[groupId] = std::move(output.meshlets);
 				(*context->groupMeshletTriangleChunks)[groupId] = std::move(output.meshletTriangles);
@@ -2971,6 +3015,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.groupChunks = &state.groupChunks;
 		captureContext.groupPageBlobs = &state.groupPageBlobs;
 		captureContext.groupVertexChunks = &state.groupVertexChunks;
+		captureContext.groupSkinningChunks = &state.groupSkinningChunks;
 		captureContext.groupMeshletVertexChunks = &state.groupMeshletVertexChunks;
 		captureContext.groupMeshletChunks = &state.groupMeshletChunks;
 		captureContext.groupMeshletTriangleChunks = &state.groupMeshletTriangleChunks;
@@ -3051,7 +3096,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		}
 	}
 
-	BuildVoxelFallbackCandidates(state, vertexStrideBytes, settings);
+	BuildVoxelFallbackCandidates(state, vertexStrideBytes, skinningVertexSize, settings);
 
 	// Build traversal hierarchy.
 	BuildClusterLODTraversalHierarchy(state, /*preferredNodeWidth=*/TraversalNodeFanout);

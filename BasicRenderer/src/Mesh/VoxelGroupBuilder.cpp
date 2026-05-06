@@ -17,6 +17,14 @@ namespace
 {
 	// Helpers
 
+	struct PackedSkinningInfluences
+	{
+		DirectX::XMUINT4 joints0{ 0, 0, 0, 0 };
+		DirectX::XMUINT4 joints1{ 0, 0, 0, 0 };
+		DirectX::XMFLOAT4 weights0{ 0, 0, 0, 0 };
+		DirectX::XMFLOAT4 weights1{ 0, 0, 0, 0 };
+	};
+
 	struct Float3
 	{
 		float x = 0.0f, y = 0.0f, z = 0.0f;
@@ -54,6 +62,108 @@ namespace
 	Float3 TriangleNormal(const Float3& a, const Float3& b, const Float3& c)
 	{
 		return (b - a).cross(c - a).normalized();
+	}
+
+	bool ReadSkinningInfluences(
+		const std::vector<std::byte>& skinningVertices,
+		size_t skinningVertexStrideBytes,
+		uint32_t vertexIndex,
+		PackedSkinningInfluences& outInfluences)
+	{
+		constexpr size_t kSkinningInfluenceOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
+		if (skinningVertexStrideBytes < kSkinningInfluenceOffset + sizeof(PackedSkinningInfluences))
+		{
+			return false;
+		}
+
+		const size_t vertexCount = skinningVertices.size() / skinningVertexStrideBytes;
+		if (vertexIndex >= vertexCount)
+		{
+			return false;
+		}
+
+		const size_t sourceByteOffset = static_cast<size_t>(vertexIndex) * skinningVertexStrideBytes + kSkinningInfluenceOffset;
+		std::memcpy(&outInfluences, skinningVertices.data() + sourceByteOffset, sizeof(PackedSkinningInfluences));
+		return true;
+	}
+
+	void AccumulateInfluenceSet(
+		const DirectX::XMUINT4& joints,
+		const DirectX::XMFLOAT4& weights,
+		std::unordered_map<uint32_t, float>& boneWeights)
+	{
+		const uint32_t jointValues[4] = { joints.x, joints.y, joints.z, joints.w };
+		const float weightValues[4] = { weights.x, weights.y, weights.z, weights.w };
+		for (uint32_t influenceIndex = 0; influenceIndex < 4u; ++influenceIndex)
+		{
+			if (weightValues[influenceIndex] <= 0.0f)
+			{
+				continue;
+			}
+
+			boneWeights[jointValues[influenceIndex]] += weightValues[influenceIndex];
+		}
+	}
+
+	uint32_t SelectDominantBoneIndex(const std::unordered_map<uint32_t, float>& boneWeights)
+	{
+		uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+		float dominantWeight = 0.0f;
+		for (const auto& [boneIndex, weight] : boneWeights)
+		{
+			if (weight <= dominantWeight)
+			{
+				continue;
+			}
+
+			dominantBoneIndex = boneIndex;
+			dominantWeight = weight;
+		}
+
+		return dominantBoneIndex;
+	}
+
+	uint32_t ComputeDominantBoneIndexForCell(
+		const VoxelizeTrianglesInput& input,
+		const std::vector<uint32_t>& overlappingTriangleIndices)
+	{
+		if (input.skinningVertices == nullptr || input.skinningVertices->empty() ||
+			input.skinningVertexStrideBytes == 0 || input.triangleIndices == nullptr)
+		{
+			return CLOD_VOXEL_STATIC_BONE_INDEX;
+		}
+
+		std::unordered_map<uint32_t, float> boneWeights;
+		boneWeights.reserve(8);
+
+		for (uint32_t triangleIndex : overlappingTriangleIndices)
+		{
+			const size_t triangleBase = static_cast<size_t>(triangleIndex) * 3u;
+			if (triangleBase + 2u >= input.triangleIndices->size())
+			{
+				continue;
+			}
+
+			const uint32_t vertexIndices[3] = {
+				(*input.triangleIndices)[triangleBase + 0u],
+				(*input.triangleIndices)[triangleBase + 1u],
+				(*input.triangleIndices)[triangleBase + 2u]
+			};
+
+			for (uint32_t vertexIndex : vertexIndices)
+			{
+				PackedSkinningInfluences influences{};
+				if (!ReadSkinningInfluences(*input.skinningVertices, input.skinningVertexStrideBytes, vertexIndex, influences))
+				{
+					continue;
+				}
+
+				AccumulateInfluenceSet(influences.joints0, influences.weights0, boneWeights);
+				AccumulateInfluenceSet(influences.joints1, influences.weights1, boneWeights);
+			}
+		}
+
+		return SelectDominantBoneIndex(boneWeights);
 	}
 
 	// Cell-key packing (supports resolutions up to 65535)
@@ -477,6 +587,7 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 		vc.z = cz;
 		vc.opacity = opacity;
 		vc.normal = ToXM(normalSum.normalized());
+		vc.dominantBoneIndex = ComputeDominantBoneIndexForCell(input, triIndices);
 
 		result.activeCells.push_back(vc);
 	}
@@ -521,6 +632,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		uint64_t mask = 0;
 		float opacitySum = 0.0f;
 		std::array<CLodVoxelAttributeSample, 64> attributes{};
+		std::unordered_map<uint32_t, float> boneWeights;
 	};
 
 	std::unordered_map<uint32_t, CubeAccum> cubeMap;
@@ -546,6 +658,10 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		accum.mask |= (uint64_t{ 1 } << localBit);
 		accum.opacitySum += cell.opacity;
 		accum.attributes[localBit].normalAndOpacity = DirectX::XMFLOAT4(cell.normal.x, cell.normal.y, cell.normal.z, cell.opacity);
+		if (cell.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
+		{
+			accum.boneWeights[cell.dominantBoneIndex] += std::max(cell.opacity, 1.0e-6f);
+		}
 	}
 
 	result.cubeRecords.reserve(cubeMap.size());
@@ -558,7 +674,9 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 
 		CLodVoxelCubeRecord record{};
 		record.cubeCoord = cubeCoord;
-		record.dominantBoneIndex = input.dominantBoneIndex;
+		record.dominantBoneIndex = accum.boneWeights.empty()
+			? input.dominantBoneIndex
+			: SelectDominantBoneIndex(accum.boneWeights);
 		record.occupancyMask = accum.mask;
 		record.opacitySum = accum.opacitySum;
 		record.firstAttribute = static_cast<uint32_t>(result.attributeSamples.size());

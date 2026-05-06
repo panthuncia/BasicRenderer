@@ -12,6 +12,8 @@ struct VoxelizeTrianglesInput
 	// Source vertices (interleaved, position at offset 0 as float3).
 	const std::vector<std::byte>* vertices = nullptr;
 	size_t vertexStrideBytes = 0;
+	const std::vector<std::byte>* skinningVertices = nullptr;
+	size_t skinningVertexStrideBytes = 0;
 
 	// Source triangle indices into the vertex buffer (3 per triangle).
 	const std::vector<uint32_t>* triangleIndices = nullptr;
@@ -37,6 +39,7 @@ struct PackVoxelGroupInput
 	const VoxelGroupPayload* payload = nullptr;
 	float voxelError = 0.0f;
 	float opacityThreshold = 0.0f;
+	// Fallback for static content or cells with no usable skinning data.
 	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
 	uint32_t firstCube = 0;
 };
