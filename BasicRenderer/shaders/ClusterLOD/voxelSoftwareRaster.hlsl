@@ -48,7 +48,8 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cu
         return false;
     }
 
-    const float startT = max(tEnter, 0.0f) + 1e-4f;
+    float currentT = max(tEnter, 0.0f) + 1e-4f;
+    const float startT = currentT;
     float3 p = clamp(rayOrigin + rayDir * startT, float3(0.0f, 0.0f, 0.0f), float3(3.9999f, 3.9999f, 3.9999f));
     int3 cell = int3(floor(p));
     const int3 stepDir = int3(rayDir.x >= 0.0f ? 1 : -1, rayDir.y >= 0.0f ? 1 : -1, rayDir.z >= 0.0f ? 1 : -1);
@@ -74,7 +75,7 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cu
         const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
         if (VoxelMaskTest(cube.occupancyMask, cellIndex))
         {
-            tHit = max(startT, min(min(tMax.x, tMax.y), tMax.z) - 1e-4f);
+            tHit = currentT;
             hitCellIndex = cellIndex;
             return true;
         }
@@ -82,18 +83,21 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cu
         if (tMax.x <= tMax.y && tMax.x <= tMax.z)
         {
             if (tMax.x > tExit) break;
+            currentT = tMax.x + 1e-4f;
             cell.x += stepDir.x;
             tMax.x += tDelta.x;
         }
         else if (tMax.y <= tMax.z)
         {
             if (tMax.y > tExit) break;
+            currentT = tMax.y + 1e-4f;
             cell.y += stepDir.y;
             tMax.y += tDelta.y;
         }
         else
         {
             if (tMax.z > tExit) break;
+            currentT = tMax.z + 1e-4f;
             cell.z += stepDir.z;
             tMax.z += tDelta.z;
         }

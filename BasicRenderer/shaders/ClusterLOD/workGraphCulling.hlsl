@@ -1415,6 +1415,66 @@ float ProjectedGeometricError(
     return worldSpaceError / denom;
 }
 
+bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
+    CLodMeshMetadata clodMeshMetadata,
+    ClusterLODGroup voxelGroup,
+    float4x4 objectModelMatrix,
+    float lodUniformScale,
+    CullingCameraInfo lodCam,
+    bool lodCameraIsOrtho)
+{
+    if (voxelGroup.segmentCount == 0u || voxelGroup.segmentCount == voxelGroup.terminalSegmentCount)
+    {
+        return false;
+    }
+
+    StructuredBuffer<ClusterLODGroupSegment> segments =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+    StructuredBuffer<ClusterLODGroup> groups =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+    ByteAddressBuffer nonResidentBits =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+
+    const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+    for (uint segmentOffset = 0u; segmentOffset < voxelGroup.segmentCount; ++segmentOffset)
+    {
+        const ClusterLODGroupSegment segment = segments[clodMeshMetadata.segmentsBase + voxelGroup.firstSegment + segmentOffset];
+        if (segment.refinedGroup < 0)
+        {
+            continue;
+        }
+
+        const uint childGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)segment.refinedGroup;
+        const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
+        const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+        const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
+        const float childEOD = ProjectedGeometricError(
+            childWorldCenter, childWorldRadius,
+            childGroup.bounds.error, lodUniformScale,
+            lodCam.positionWorldSpace.xyz, lodCam.zNear,
+            lodCameraIsOrtho);
+
+        if (childEOD < lodCam.errorOverDistanceThreshold)
+        {
+            continue;
+        }
+
+        bool childResident = true;
+        if (childGroupGlobalIndex < activeGroupScanCount)
+        {
+            childResident = !CLodReadBit(nonResidentBits, childGroupGlobalIndex);
+        }
+        if (childResident)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Node: ObjectCull (entry)
 #ifndef CLOD_COMPUTE_INCLUDE_ONLY
 [Shader("node")]
@@ -1689,6 +1749,13 @@ void WG_TraverseNodes(
 
                         if (isVoxelLeaf)
                         {
+                            if (CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
+                                clodMeshMetadata, grp, objectModelMatrix, lodUniformScale, lodCam, lodCamera.isOrtho))
+                            {
+                                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
+                                return;
+                            }
+
                             CLodVoxelGroupDescriptor voxelDescriptor;
                             if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
                             {

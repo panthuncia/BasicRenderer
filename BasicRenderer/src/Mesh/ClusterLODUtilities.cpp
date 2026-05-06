@@ -1816,7 +1816,36 @@ namespace
 		const bool forceAllVoxels = settings.voxelFallbackMode == ClusterLODVoxelFallbackMode::VoxelOnly;
 		const bool autoMode = settings.voxelFallbackMode == ClusterLODVoxelFallbackMode::Auto;
 		std::vector<VoxelFallbackGroupBuildInput> groupInputs(state.groups.size());
+		std::vector<float> finiteParentErrorForGroup(state.groups.size(), 0.0f);
 		uint32_t maxDepth = 0;
+
+		auto finiteVoxelDecisionError = [](float error) -> bool
+		{
+			return std::isfinite(error) && error > 0.0f && error < std::numeric_limits<float>::max() * 0.5f;
+		};
+
+		for (const ClusterLODGroup& parentGroup : state.groups)
+		{
+			if (!finiteVoxelDecisionError(parentGroup.bounds.error))
+			{
+				continue;
+			}
+
+			for (uint32_t segmentOffset = 0; segmentOffset < parentGroup.segmentCount; ++segmentOffset)
+			{
+				const ClusterLODGroupSegment& segment = state.segments[parentGroup.firstSegment + segmentOffset];
+				if (segment.refinedGroup < 0)
+				{
+					continue;
+				}
+
+				const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
+				if (childGroupIndex < finiteParentErrorForGroup.size())
+				{
+					finiteParentErrorForGroup[childGroupIndex] = std::max(finiteParentErrorForGroup[childGroupIndex], parentGroup.bounds.error);
+				}
+			}
+		}
 
 		for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
 		{
@@ -1850,7 +1879,11 @@ namespace
 			}
 
 			stats.validGroups++;
-			buildInput.autoWouldFitBudget = buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < group.bounds.error;
+			const float triangleErrorReference = finiteVoxelDecisionError(group.bounds.error)
+				? group.bounds.error
+				: finiteParentErrorForGroup[groupIndex];
+			buildInput.autoWouldFitBudget = finiteVoxelDecisionError(triangleErrorReference) &&
+				buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < triangleErrorReference;
 			if (buildInput.autoWouldFitBudget)
 			{
 				stats.autoCandidateGroups++;
@@ -1950,7 +1983,7 @@ namespace
 			const float triangleError = group.bounds.error;
 			const bool terminalErrorSentinel = triangleError >= std::numeric_limits<float>::max() * 0.5f;
 			group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
-			group.bounds.error = terminalErrorSentinel ? triangleError : voxelError;
+			group.bounds.error = (forceAllVoxels && terminalErrorSentinel) ? triangleError : voxelError;
 			spdlog::info(
 				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_error={} final_error={} terminal_sentinel={} terminal_segments={}/{} forced_budget_fit={}",
 				groupIndex,
@@ -1995,7 +2028,7 @@ namespace
 				}
 
 				const bool terminalGroup = group.segmentCount == group.terminalSegmentCount;
-				const bool acceptSeed = autoMode && terminalGroup && groupInputs[groupIndex].autoWouldFitBudget;
+				const bool acceptSeed = autoMode && !terminalGroup && groupInputs[groupIndex].autoWouldFitBudget;
 				if (forceAllVoxels)
 				{
 					if (buildVoxelGroup(groupIndex, false))
@@ -2022,12 +2055,6 @@ namespace
 
 		for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
 		{
-			const bool parentVoxel = (state.groups[groupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u;
-			if (!parentVoxel)
-			{
-				continue;
-			}
-
 			const ClusterLODGroup& group = state.groups[groupIndex];
 			for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
 			{
@@ -2038,9 +2065,11 @@ namespace
 				}
 
 				const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
-				if (childGroupIndex >= state.groups.size() || (state.groups[childGroupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u)
+				if (childGroupIndex < state.groups.size() &&
+					(state.groups[childGroupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u &&
+					(group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u)
 				{
-					throw std::runtime_error("Cluster LOD voxel fallback: voxelized group refines into a non-voxel child");
+					throw std::runtime_error("Cluster LOD voxel fallback: voxelized child has a non-voxel parent");
 				}
 			}
 		}
