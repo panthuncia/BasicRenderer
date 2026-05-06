@@ -90,25 +90,7 @@ public:
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 		commandList.BindPipeline(m_pso->GetHandle());
 
-		unsigned int descriptorIndices[rg::shaderapi::kNumResourceDescriptorIndicesRootConstants] = {};
-		int descriptorCount = 0;
-		for (const auto& binding : m_resourceDescriptorBindings.mandatoryResourceDescriptorSlots) {
-			descriptorIndices[descriptorCount] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, false, &binding.name);
-			++descriptorCount;
-		}
-		for (const auto& binding : m_resourceDescriptorBindings.optionalResourceDescriptorSlots) {
-			descriptorIndices[descriptorCount] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, true, &binding.name);
-			++descriptorCount;
-		}
-		if (descriptorCount > 0) {
-			commandList.PushConstants(
-				rhi::ShaderStage::All,
-				0,
-				rg::shaderapi::kResourceDescriptorIndicesRootParameter,
-				0,
-				descriptorCount,
-				descriptorIndices);
-		}
+        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		unsigned int misc[NumMiscUintRootConstants] = {};
 		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
