@@ -1421,7 +1421,11 @@ bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
     float4x4 objectModelMatrix,
     float lodUniformScale,
     CullingCameraInfo lodCam,
-    bool lodCameraIsOrtho)
+    bool lodCameraIsOrtho,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    float ownGroupErrorOverDistance)
 {
     if (voxelGroup.segmentCount == 0u || voxelGroup.segmentCount == voxelGroup.terminalSegmentCount)
     {
@@ -1469,6 +1473,32 @@ bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
         if (childResident)
         {
             return true;
+        }
+
+        if (childGroupGlobalIndex < activeGroupScanCount)
+        {
+            RWStructuredBuffer<CLodStreamingRequest> loadRequests =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+            RWStructuredBuffer<uint> loadRequestCounter =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+            uint requestIndex = 0u;
+            InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+            if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY)
+            {
+                CLodStreamingRequest req = (CLodStreamingRequest)0;
+                req.groupGlobalIndex = childGroupGlobalIndex;
+                req.meshInstanceIndex = instanceIndex;
+                req.meshBufferIndex = meshBufferIndex;
+                req.viewId = CLodPackViewPriority(viewId, ownGroupErrorOverDistance);
+                loadRequests[requestIndex] = req;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                CLodAppendVirtualShadowPredictiveInvalidationCandidate(
+                    childWorldCenter,
+                    childWorldRadius,
+                    viewId,
+                    childGroupGlobalIndex);
+#endif
+            }
         }
     }
 
@@ -1750,7 +1780,16 @@ void WG_TraverseNodes(
                         if (isVoxelLeaf)
                         {
                             if (CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
-                                clodMeshMetadata, grp, objectModelMatrix, lodUniformScale, lodCam, lodCamera.isOrtho))
+                                clodMeshMetadata,
+                                grp,
+                                objectModelMatrix,
+                                lodUniformScale,
+                                lodCam,
+                                lodCamera.isOrtho,
+                                rec.instanceIndex,
+                                instanceData.perMeshBufferIndex,
+                                rec.viewId,
+                                grpEOD))
                             {
                                 WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
                                 return;

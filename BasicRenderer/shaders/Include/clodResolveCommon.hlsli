@@ -63,6 +63,7 @@ struct ClodGBufferColorSample
 struct ClodGBufferDebugSample
 {
     uint meshletIndex;
+    bool isVoxelPath;
     float3 normalOS;
     float2 motionVector;
     MaterialInputs materialInputs;
@@ -71,6 +72,7 @@ struct ClodGBufferDebugSample
 struct ClodResolvedGBufferSample
 {
     uint meshletIndex;
+    bool isVoxelPath;
     float3 normalOS;
     float2 motionVector;
     MaterialInputs materialInputs;
@@ -82,6 +84,7 @@ struct ClodResolvedCommonSample
     uint clusterIndex;
     uint meshletTriangleIndex;
     uint meshletIndex;
+    bool isVoxelPath;
     float3 positionWS;
     float3 positionVS;
     float3 normalWSBase;
@@ -920,6 +923,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     sample.clusterIndex = visibleClusterIndex;
     sample.meshletTriangleIndex = cellIndex;
     sample.meshletIndex = localCubeIndex;
+    sample.isVoxelPath = true;
     sample.positionWS = worldPosition;
     sample.positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
     sample.normalWSBase = normalWS;
@@ -1341,6 +1345,7 @@ bool ResolveClodGBufferSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool 
     }
 
     sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.isVoxelPath = resolvedSample.isVoxelPath;
     sample.normalOS = resolvedSample.normalOS;
     sample.motionVector = resolvedSample.motionVector;
     sample.materialInputs = resolvedSample.materialInputs;
@@ -1398,6 +1403,7 @@ bool ResolveClodGBufferDebugSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, 
     }
 
     sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.isVoxelPath = resolvedSample.isVoxelPath;
     sample.normalOS = resolvedSample.normalOS;
     sample.motionVector = resolvedSample.motionVector;
     sample.materialInputs = resolvedSample.materialInputs;

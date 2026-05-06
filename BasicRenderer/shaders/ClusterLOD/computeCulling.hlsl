@@ -308,7 +308,16 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         if (isVoxelLeaf)
         {
             if (CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
-                clodMeshMetadata, grp, objectModelMatrix, lodUniformScale, lodCam, lodCamera.isOrtho))
+                clodMeshMetadata,
+                grp,
+                objectModelMatrix,
+                lodUniformScale,
+                lodCam,
+                lodCamera.isOrtho,
+                rec.instanceIndex,
+                instanceData.perMeshBufferIndex,
+                rec.viewId,
+                grpEOD))
             {
                 WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
                 return;

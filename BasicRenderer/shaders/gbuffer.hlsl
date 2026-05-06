@@ -93,6 +93,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
         case OUTPUT_REYES_GEOMETRY_PATH:
             payload = PackDebugFloat3(isReyesPatch ? float3(0.10, 0.95, 0.20) : float3(0.95, 0.15, 0.15));
             break;
+        case OUTPUT_VOXEL_GEOMETRY_PATH:
+            payload = PackDebugFloat3(sample.isVoxelPath ? float3(0.95, 0.15, 0.15) : float3(0.10, 0.95, 0.20));
+            break;
         case OUTPUT_MATERIAL_SELECTED_MIP:
             if (sample.materialInputs.selectedMaterialMipLevel != MATERIAL_DEBUG_INVALID_MIP_LEVEL)
             {

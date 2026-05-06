@@ -2153,6 +2153,73 @@ namespace
 			}
 		}
 
+		for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
+		{
+			const ClusterLODGroup& group = state.groups[groupIndex];
+			if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u)
+			{
+				continue;
+			}
+
+			float minChildError = std::numeric_limits<float>::max();
+			float maxChildError = 0.0f;
+			uint32_t refinedChildCount = 0;
+			uint32_t voxelChildCount = 0;
+			uint32_t triangleChildCount = 0;
+			bool monotonicWithChildren = true;
+
+			for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+			{
+				const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+				if (segment.refinedGroup < 0)
+				{
+					continue;
+				}
+
+				const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
+				if (childGroupIndex >= state.groups.size())
+				{
+					continue;
+				}
+
+				const ClusterLODGroup& childGroup = state.groups[childGroupIndex];
+				const float childError = childGroup.bounds.error;
+				minChildError = std::min(minChildError, childError);
+				maxChildError = std::max(maxChildError, childError);
+				refinedChildCount++;
+				if ((childGroup.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+				{
+					voxelChildCount++;
+				}
+				else
+				{
+					triangleChildCount++;
+				}
+
+				if (!(group.bounds.error > childError))
+				{
+					monotonicWithChildren = false;
+				}
+			}
+
+			if (refinedChildCount == 0)
+			{
+				minChildError = -1.0f;
+			}
+
+			spdlog::info(
+				"ClusterLOD voxel hierarchy: group={} depth={} traversal_error={} refined_children={} voxel_children={} triangle_children={} min_child_error={} max_child_error={} monotonic_with_children={}",
+				groupIndex,
+				group.depth,
+				group.bounds.error,
+				refinedChildCount,
+				voxelChildCount,
+				triangleChildCount,
+				minChildError,
+				maxChildError,
+				monotonicWithChildren);
+		}
+
 		uint32_t voxelGroups = 0;
 		for (const ClusterLODGroup& group : state.groups)
 		{
