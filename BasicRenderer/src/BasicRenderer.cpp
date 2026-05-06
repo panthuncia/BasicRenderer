@@ -362,7 +362,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto cherry = LoadModel("models/Trees/CherryTree.usd");
 
-    auto pine = LoadModel("models/Trees/Tree_Baltic_Pine_01_Foliage.usd");
+    auto pine = LoadModel("models/Trees/branch.usdz");
 
     renderer.SetCurrentScene(baseScene);
 

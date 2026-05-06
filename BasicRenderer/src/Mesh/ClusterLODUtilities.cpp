@@ -1618,7 +1618,9 @@ namespace
 	struct VoxelFallbackGroupBuildInput
 	{
 		VoxelFallbackGroupAnalysis analysis{};
-		std::vector<uint32_t> triangleIndices;
+		std::vector<std::byte> voxelVertices;
+		std::vector<uint32_t> voxelTriangleIndices;
+		uint32_t voxelVertexCount = 0;
 		bool autoWouldFitBudget = false;
 	};
 
@@ -1688,7 +1690,7 @@ namespace
 	}
 
 	VoxelFallbackGroupAnalysis AnalyzeVoxelFallbackGroup(
-		const ClusterLODGroup& group,
+		uint32_t sourceVertexCount,
 		const std::vector<std::byte>& groupVertices,
 		size_t vertexStrideBytes,
 		const std::vector<uint32_t>& triangleIndices,
@@ -1696,7 +1698,7 @@ namespace
 	{
 		VoxelFallbackGroupAnalysis analysis{};
 		analysis.triangleCount = static_cast<uint32_t>(triangleIndices.size() / 3u);
-		analysis.sourceVertexCount = group.groupVertexCount;
+		analysis.sourceVertexCount = sourceVertexCount;
 		if (analysis.triangleCount == 0u || groupVertices.empty() || vertexStrideBytes < sizeof(float) * 3u)
 		{
 			return analysis;
@@ -1714,7 +1716,7 @@ namespace
 		float surfaceArea = 0.0f;
 		for (uint32_t index : triangleIndices)
 		{
-			if (index >= group.groupVertexCount)
+			if (index >= sourceVertexCount)
 			{
 				continue;
 			}
@@ -1733,7 +1735,7 @@ namespace
 			const uint32_t i0 = triangleIndices[triangleBase + 0ull];
 			const uint32_t i1 = triangleIndices[triangleBase + 1ull];
 			const uint32_t i2 = triangleIndices[triangleBase + 2ull];
-			if (i0 >= group.groupVertexCount || i1 >= group.groupVertexCount || i2 >= group.groupVertexCount)
+			if (i0 >= sourceVertexCount || i1 >= sourceVertexCount || i2 >= sourceVertexCount)
 			{
 				continue;
 			}
@@ -1801,6 +1803,82 @@ namespace
 		return analysis;
 	}
 
+	bool BuildVoxelFallbackSourceGeometry(
+		const ClusterLODBuildState& state,
+		uint32_t groupIndex,
+		VoxelFallbackGroupBuildInput& buildInput)
+	{
+		if (groupIndex >= state.groups.size() || groupIndex >= state.groupVertexChunks.size())
+		{
+			return false;
+		}
+
+		const ClusterLODGroup& group = state.groups[groupIndex];
+		std::vector<uint32_t> refinedChildren;
+		refinedChildren.reserve(group.segmentCount);
+		std::unordered_set<uint32_t> seenChildren;
+		seenChildren.reserve(group.segmentCount);
+
+		for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+		{
+			const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+			if (segment.refinedGroup < 0)
+			{
+				continue;
+			}
+
+			const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
+			if (childGroupIndex < state.groups.size() && seenChildren.insert(childGroupIndex).second)
+			{
+				refinedChildren.push_back(childGroupIndex);
+			}
+		}
+
+		if (refinedChildren.empty())
+		{
+			buildInput.voxelVertices = state.groupVertexChunks[groupIndex];
+			buildInput.voxelTriangleIndices = BuildGroupTriangleIndices(
+				state.groupMeshletChunks[groupIndex],
+				state.groupMeshletVertexChunks[groupIndex],
+				state.groupMeshletTriangleChunks[groupIndex]);
+			buildInput.voxelVertexCount = group.groupVertexCount;
+			return true;
+		}
+
+		buildInput.voxelVertices.clear();
+		buildInput.voxelTriangleIndices.clear();
+		buildInput.voxelVertexCount = 0;
+
+		for (uint32_t childGroupIndex : refinedChildren)
+		{
+			if (childGroupIndex >= state.groupVertexChunks.size() ||
+				childGroupIndex >= state.groupMeshletChunks.size() ||
+				childGroupIndex >= state.groupMeshletVertexChunks.size() ||
+				childGroupIndex >= state.groupMeshletTriangleChunks.size())
+			{
+				return false;
+			}
+
+			const ClusterLODGroup& childGroup = state.groups[childGroupIndex];
+			const uint32_t vertexBase = buildInput.voxelVertexCount;
+			const std::vector<std::byte>& childVertices = state.groupVertexChunks[childGroupIndex];
+			buildInput.voxelVertices.insert(buildInput.voxelVertices.end(), childVertices.begin(), childVertices.end());
+			buildInput.voxelVertexCount += childGroup.groupVertexCount;
+
+			std::vector<uint32_t> childTriangles = BuildGroupTriangleIndices(
+				state.groupMeshletChunks[childGroupIndex],
+				state.groupMeshletVertexChunks[childGroupIndex],
+				state.groupMeshletTriangleChunks[childGroupIndex]);
+			buildInput.voxelTriangleIndices.reserve(buildInput.voxelTriangleIndices.size() + childTriangles.size());
+			for (uint32_t index : childTriangles)
+			{
+				buildInput.voxelTriangleIndices.push_back(vertexBase + index);
+			}
+		}
+
+		return !buildInput.voxelVertices.empty() && !buildInput.voxelTriangleIndices.empty();
+	}
+
 	void BuildVoxelFallbackCandidates(ClusterLODBuildState& state, size_t vertexStrideBytes, const ClusterLODBuilderSettings& settings)
 	{
 		const bool enabled = settings.enableVoxelFallback && settings.voxelFallbackMode != ClusterLODVoxelFallbackMode::MeshOnly;
@@ -1860,16 +1938,17 @@ namespace
 
 			const ClusterLODGroup& group = state.groups[groupIndex];
 			VoxelFallbackGroupBuildInput& buildInput = groupInputs[groupIndex];
-			buildInput.triangleIndices = BuildGroupTriangleIndices(
-				state.groupMeshletChunks[groupIndex],
-				state.groupMeshletVertexChunks[groupIndex],
-				state.groupMeshletTriangleChunks[groupIndex]);
+			if (!BuildVoxelFallbackSourceGeometry(state, groupIndex, buildInput))
+			{
+				stats.failedBuilds++;
+				continue;
+			}
 
 			buildInput.analysis = AnalyzeVoxelFallbackGroup(
-				group,
-				state.groupVertexChunks[groupIndex],
+				buildInput.voxelVertexCount,
+				buildInput.voxelVertices,
 				vertexStrideBytes,
-				buildInput.triangleIndices,
+				buildInput.voxelTriangleIndices,
 				settings);
 
 			if (!buildInput.analysis.valid)
@@ -1918,9 +1997,9 @@ namespace
 			for (uint32_t attempt = 0; attempt < retryCount; ++attempt)
 			{
 				VoxelizeTrianglesInput voxelInput{};
-				voxelInput.vertices = &state.groupVertexChunks[groupIndex];
+				voxelInput.vertices = &buildInput.voxelVertices;
 				voxelInput.vertexStrideBytes = vertexStrideBytes;
-				voxelInput.triangleIndices = &buildInput.triangleIndices;
+				voxelInput.triangleIndices = &buildInput.voxelTriangleIndices;
 				voxelInput.aabbMin = buildInput.analysis.aabbMin;
 				voxelInput.aabbMax = buildInput.analysis.aabbMax;
 				voxelInput.resolution = resolution;
@@ -1983,9 +2062,9 @@ namespace
 			const float triangleError = group.bounds.error;
 			const bool terminalErrorSentinel = triangleError >= std::numeric_limits<float>::max() * 0.5f;
 			group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
-			group.bounds.error = (forceAllVoxels && terminalErrorSentinel) ? triangleError : voxelError;
+			group.bounds.error = forceAllVoxels && !terminalErrorSentinel ? voxelError : triangleError;
 			spdlog::info(
-				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_error={} final_error={} terminal_sentinel={} terminal_segments={}/{} forced_budget_fit={}",
+				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_error={} traversal_error={} terminal_sentinel={} terminal_segments={}/{} forced_budget_fit={}",
 				groupIndex,
 				group.depth,
 				triangleError,
