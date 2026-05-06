@@ -364,7 +364,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto pine = LoadModel("models/Trees/branch.usdz");
 
+    //auto needles = LoadModel("models/Trees/needles_nostem.usdz");
+
     renderer.SetCurrentScene(baseScene);
+
+    //renderer.GetCurrentScene()->AppendScene(needles->Clone());
 
 	renderer.GetCurrentScene()->AppendScene(pine->Clone());
 

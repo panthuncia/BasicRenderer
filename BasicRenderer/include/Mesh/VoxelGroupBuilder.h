@@ -18,6 +18,10 @@ struct VoxelizeTrianglesInput
 	// Source triangle indices into the vertex buffer (3 per triangle).
 	const std::vector<uint32_t>* triangleIndices = nullptr;
 
+	// Optional already-voxelized sources. These are re-sampled as volumes when
+	// building a coarser voxel parent.
+	const std::vector<const VoxelGroupPayload*>* sourceVoxelPayloads = nullptr;
+
 	// World-space AABB of the geometry to voxelize.
 	DirectX::XMFLOAT3 aabbMin{};
 	DirectX::XMFLOAT3 aabbMax{};

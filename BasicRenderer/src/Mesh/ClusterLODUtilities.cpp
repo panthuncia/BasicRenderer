@@ -1628,6 +1628,7 @@ namespace
 		std::vector<std::byte> voxelVertices;
 		std::vector<std::byte> voxelSkinningVertices;
 		std::vector<uint32_t> voxelTriangleIndices;
+		std::vector<uint32_t> sourceVoxelPayloadIndices;
 		uint32_t voxelVertexCount = 0;
 		bool autoWouldFitBudget = false;
 	};
@@ -1829,9 +1830,176 @@ namespace
 		return analysis;
 	}
 
+	VoxelFallbackGroupAnalysis AnalyzeVoxelFallbackBuildInput(
+		const ClusterLODBuildState& state,
+		const VoxelFallbackGroupBuildInput& buildInput,
+		size_t vertexStrideBytes,
+		const ClusterLODBuilderSettings& settings)
+	{
+		VoxelFallbackGroupAnalysis analysis{};
+		DirectX::XMFLOAT3 aabbMin(
+			std::numeric_limits<float>::max(),
+			std::numeric_limits<float>::max(),
+			std::numeric_limits<float>::max());
+		DirectX::XMFLOAT3 aabbMax(
+			std::numeric_limits<float>::lowest(),
+			std::numeric_limits<float>::lowest(),
+			std::numeric_limits<float>::lowest());
+		float surfaceArea = 0.0f;
+		uint32_t sourceVertexCount = buildInput.voxelVertexCount;
+		uint32_t triangleCount = static_cast<uint32_t>(buildInput.voxelTriangleIndices.size() / 3u);
+		bool hasBounds = false;
+
+		for (uint32_t index : buildInput.voxelTriangleIndices)
+		{
+			if (index >= buildInput.voxelVertexCount)
+			{
+				continue;
+			}
+
+			const DirectX::XMFLOAT3 position = ReadGroupVertexPosition(buildInput.voxelVertices, vertexStrideBytes, index);
+			aabbMin.x = std::min(aabbMin.x, position.x);
+			aabbMin.y = std::min(aabbMin.y, position.y);
+			aabbMin.z = std::min(aabbMin.z, position.z);
+			aabbMax.x = std::max(aabbMax.x, position.x);
+			aabbMax.y = std::max(aabbMax.y, position.y);
+			aabbMax.z = std::max(aabbMax.z, position.z);
+			hasBounds = true;
+		}
+
+		for (size_t triangleBase = 0; triangleBase + 2ull < buildInput.voxelTriangleIndices.size(); triangleBase += 3ull)
+		{
+			const uint32_t i0 = buildInput.voxelTriangleIndices[triangleBase + 0ull];
+			const uint32_t i1 = buildInput.voxelTriangleIndices[triangleBase + 1ull];
+			const uint32_t i2 = buildInput.voxelTriangleIndices[triangleBase + 2ull];
+			if (i0 >= buildInput.voxelVertexCount || i1 >= buildInput.voxelVertexCount || i2 >= buildInput.voxelVertexCount)
+			{
+				continue;
+			}
+
+			surfaceArea += TriangleArea(
+				ReadGroupVertexPosition(buildInput.voxelVertices, vertexStrideBytes, i0),
+				ReadGroupVertexPosition(buildInput.voxelVertices, vertexStrideBytes, i1),
+				ReadGroupVertexPosition(buildInput.voxelVertices, vertexStrideBytes, i2));
+		}
+
+		for (uint32_t payloadIndex : buildInput.sourceVoxelPayloadIndices)
+		{
+			if (payloadIndex >= state.voxelGroupMapping.payloads.size())
+			{
+				continue;
+			}
+
+			const VoxelGroupPayload& payload = state.voxelGroupMapping.payloads[payloadIndex];
+			if (payload.voxelWidth <= 0.0f)
+			{
+				continue;
+			}
+
+			sourceVertexCount += static_cast<uint32_t>(std::min<size_t>(payload.activeCells.size(), std::numeric_limits<uint32_t>::max() - sourceVertexCount));
+			triangleCount += static_cast<uint32_t>(std::min<size_t>(payload.activeCells.size(), std::numeric_limits<uint32_t>::max() - triangleCount));
+			const float cellArea = 6.0f * payload.voxelWidth * payload.voxelWidth;
+			for (const VoxelCell& cell : payload.activeCells)
+			{
+				const float x0 = payload.aabbMin.x + static_cast<float>(cell.x) * payload.voxelWidth;
+				const float y0 = payload.aabbMin.y + static_cast<float>(cell.y) * payload.voxelWidth;
+				const float z0 = payload.aabbMin.z + static_cast<float>(cell.z) * payload.voxelWidth;
+				const float x1 = x0 + payload.voxelWidth;
+				const float y1 = y0 + payload.voxelWidth;
+				const float z1 = z0 + payload.voxelWidth;
+				aabbMin.x = std::min(aabbMin.x, x0);
+				aabbMin.y = std::min(aabbMin.y, y0);
+				aabbMin.z = std::min(aabbMin.z, z0);
+				aabbMax.x = std::max(aabbMax.x, x1);
+				aabbMax.y = std::max(aabbMax.y, y1);
+				aabbMax.z = std::max(aabbMax.z, z1);
+				surfaceArea += cellArea * std::clamp(cell.opacity, 0.0f, 1.0f);
+				hasBounds = true;
+			}
+		}
+
+		analysis.triangleCount = triangleCount;
+		analysis.sourceVertexCount = sourceVertexCount;
+		if (!hasBounds || triangleCount == 0u || sourceVertexCount == 0u)
+		{
+			return analysis;
+		}
+
+		const float extentX = aabbMax.x - aabbMin.x;
+		const float extentY = aabbMax.y - aabbMin.y;
+		const float extentZ = aabbMax.z - aabbMin.z;
+		const float longestExtent = std::max({ extentX, extentY, extentZ });
+		if (longestExtent <= 1.0e-8f || !std::isfinite(longestExtent))
+		{
+			return analysis;
+		}
+
+		const float minVoxelizationThickness = std::max(longestExtent * 1.0e-4f, 1.0e-5f);
+		auto padDegenerateAxis = [minVoxelizationThickness](float& minValue, float& maxValue)
+		{
+			if (maxValue - minValue > minVoxelizationThickness)
+			{
+				return;
+			}
+
+			const float center = 0.5f * (minValue + maxValue);
+			minValue = center - 0.5f * minVoxelizationThickness;
+			maxValue = center + 0.5f * minVoxelizationThickness;
+		};
+		padDegenerateAxis(aabbMin.x, aabbMax.x);
+		padDegenerateAxis(aabbMin.y, aabbMax.y);
+		padDegenerateAxis(aabbMin.z, aabbMax.z);
+
+		auto expandAxisToExtent = [](float& minValue, float& maxValue, float targetExtent)
+		{
+			const float currentExtent = maxValue - minValue;
+			if (currentExtent >= targetExtent)
+			{
+				return;
+			}
+
+			const float center = 0.5f * (minValue + maxValue);
+			minValue = center - 0.5f * targetExtent;
+			maxValue = center + 0.5f * targetExtent;
+		};
+		expandAxisToExtent(aabbMin.x, aabbMax.x, longestExtent);
+		expandAxisToExtent(aabbMin.y, aabbMax.y, longestExtent);
+		expandAxisToExtent(aabbMin.z, aabbMax.z, longestExtent);
+
+		if (surfaceArea <= 1.0e-12f || !std::isfinite(surfaceArea))
+		{
+			const float paddedExtentX = aabbMax.x - aabbMin.x;
+			const float paddedExtentY = aabbMax.y - aabbMin.y;
+			const float paddedExtentZ = aabbMax.z - aabbMin.z;
+			surfaceArea = 2.0f * (paddedExtentX * paddedExtentY + paddedExtentX * paddedExtentZ + paddedExtentY * paddedExtentZ);
+		}
+
+		const float voxelBudget = std::max(1.0f, settings.voxelFallbackScalingFactor * static_cast<float>(std::max(1u, sourceVertexCount)));
+		float targetVoxelWidth = std::sqrt(std::max(surfaceArea, 1.0e-12f) / voxelBudget);
+		if (!std::isfinite(targetVoxelWidth) || targetVoxelWidth <= 1.0e-8f)
+		{
+			targetVoxelWidth = longestExtent / static_cast<float>(std::max(1u, settings.voxelGridBaseResolution));
+		}
+
+		const uint32_t minResolution = std::max(2u, settings.voxelMinResolution);
+		const uint32_t targetResolution = std::max(
+			minResolution,
+			static_cast<uint32_t>(std::ceil(longestExtent / std::max(targetVoxelWidth, 1.0e-8f))));
+
+		analysis.valid = targetResolution >= minResolution;
+		analysis.aabbMin = aabbMin;
+		analysis.aabbMax = aabbMax;
+		analysis.surfaceArea = surfaceArea;
+		analysis.targetVoxelWidth = targetVoxelWidth;
+		analysis.targetResolution = targetResolution;
+		analysis.voxelBudget = voxelBudget;
+		return analysis;
+	}
+
 	bool BuildVoxelFallbackSourceGeometry(
 		const ClusterLODBuildState& state,
 		uint32_t groupIndex,
+		size_t vertexStrideBytes,
 		VoxelFallbackGroupBuildInput& buildInput)
 	{
 		if (groupIndex >= state.groups.size() || groupIndex >= state.groupVertexChunks.size())
@@ -1869,6 +2037,7 @@ namespace
 				state.groupMeshletChunks[groupIndex],
 				state.groupMeshletVertexChunks[groupIndex],
 				state.groupMeshletTriangleChunks[groupIndex]);
+			buildInput.sourceVoxelPayloadIndices.clear();
 			buildInput.voxelVertexCount = group.groupVertexCount;
 			return true;
 		}
@@ -1876,10 +2045,21 @@ namespace
 		buildInput.voxelVertices.clear();
 		buildInput.voxelSkinningVertices.clear();
 		buildInput.voxelTriangleIndices.clear();
+		buildInput.sourceVoxelPayloadIndices.clear();
 		buildInput.voxelVertexCount = 0;
 
 		for (uint32_t childGroupIndex : refinedChildren)
 		{
+			if (childGroupIndex < state.voxelGroupMapping.groupToPayloadIndex.size())
+			{
+				const int32_t payloadIndex = state.voxelGroupMapping.groupToPayloadIndex[childGroupIndex];
+				if (payloadIndex >= 0 && static_cast<size_t>(payloadIndex) < state.voxelGroupMapping.payloads.size())
+				{
+					buildInput.sourceVoxelPayloadIndices.push_back(static_cast<uint32_t>(payloadIndex));
+					continue;
+				}
+			}
+
 			if (childGroupIndex >= state.groupVertexChunks.size() ||
 				childGroupIndex >= state.groupMeshletChunks.size() ||
 				childGroupIndex >= state.groupMeshletVertexChunks.size() ||
@@ -1913,7 +2093,7 @@ namespace
 			}
 		}
 
-		return !buildInput.voxelVertices.empty() && !buildInput.voxelTriangleIndices.empty();
+		return (!buildInput.voxelVertices.empty() && !buildInput.voxelTriangleIndices.empty()) || !buildInput.sourceVoxelPayloadIndices.empty();
 	}
 
 	void BuildVoxelFallbackCandidates(ClusterLODBuildState& state, size_t vertexStrideBytes, size_t skinningVertexStrideBytes, const ClusterLODBuilderSettings& settings)
@@ -1975,18 +2155,13 @@ namespace
 
 			const ClusterLODGroup& group = state.groups[groupIndex];
 			VoxelFallbackGroupBuildInput& buildInput = groupInputs[groupIndex];
-			if (!BuildVoxelFallbackSourceGeometry(state, groupIndex, buildInput))
+			if (!BuildVoxelFallbackSourceGeometry(state, groupIndex, vertexStrideBytes, buildInput))
 			{
 				stats.failedBuilds++;
 				continue;
 			}
 
-			buildInput.analysis = AnalyzeVoxelFallbackGroup(
-				buildInput.voxelVertexCount,
-				buildInput.voxelVertices,
-				vertexStrideBytes,
-				buildInput.voxelTriangleIndices,
-				settings);
+			buildInput.analysis = AnalyzeVoxelFallbackBuildInput(state, buildInput, vertexStrideBytes, settings);
 
 			if (!buildInput.analysis.valid)
 			{
@@ -2014,6 +2189,14 @@ namespace
 			}
 
 			VoxelFallbackGroupBuildInput& buildInput = groupInputs[groupIndex];
+			if (!BuildVoxelFallbackSourceGeometry(state, groupIndex, vertexStrideBytes, buildInput))
+			{
+				stats.failedBuilds++;
+				return false;
+			}
+
+			buildInput.analysis = AnalyzeVoxelFallbackBuildInput(state, buildInput, vertexStrideBytes, settings);
+
 			if (!buildInput.analysis.valid)
 			{
 				stats.failedBuilds++;
@@ -2033,12 +2216,23 @@ namespace
 			const uint32_t retryCount = std::max(1u, settings.voxelFallbackMaxRetryCount + 1u);
 			for (uint32_t attempt = 0; attempt < retryCount; ++attempt)
 			{
+				std::vector<const VoxelGroupPayload*> sourceVoxelPayloads;
+				sourceVoxelPayloads.reserve(buildInput.sourceVoxelPayloadIndices.size());
+				for (uint32_t payloadIndex : buildInput.sourceVoxelPayloadIndices)
+				{
+					if (payloadIndex < state.voxelGroupMapping.payloads.size())
+					{
+						sourceVoxelPayloads.push_back(&state.voxelGroupMapping.payloads[payloadIndex]);
+					}
+				}
+
 				VoxelizeTrianglesInput voxelInput{};
-				voxelInput.vertices = &buildInput.voxelVertices;
+				voxelInput.vertices = buildInput.voxelVertices.empty() ? nullptr : &buildInput.voxelVertices;
 				voxelInput.vertexStrideBytes = vertexStrideBytes;
 				voxelInput.skinningVertices = buildInput.voxelSkinningVertices.empty() ? nullptr : &buildInput.voxelSkinningVertices;
 				voxelInput.skinningVertexStrideBytes = skinningVertexStrideBytes;
-				voxelInput.triangleIndices = &buildInput.voxelTriangleIndices;
+				voxelInput.triangleIndices = buildInput.voxelTriangleIndices.empty() ? nullptr : &buildInput.voxelTriangleIndices;
+				voxelInput.sourceVoxelPayloads = sourceVoxelPayloads.empty() ? nullptr : &sourceVoxelPayloads;
 				voxelInput.aabbMin = buildInput.analysis.aabbMin;
 				voxelInput.aabbMax = buildInput.analysis.aabbMax;
 				voxelInput.voxelWidth = voxelError;
@@ -2066,6 +2260,31 @@ namespace
 			{
 				stats.failedBuilds++;
 				return false;
+			}
+
+			float maxVoxelChildError = 0.0f;
+			for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+			{
+				const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+				if (segment.refinedGroup < 0)
+				{
+					continue;
+				}
+
+				const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
+				if (childGroupIndex < state.groups.size() && (state.groups[childGroupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+				{
+					const float childError = state.groups[childGroupIndex].bounds.error;
+					if (std::isfinite(childError) && childError > 0.0f && childError < std::numeric_limits<float>::max() * 0.5f)
+					{
+						maxVoxelChildError = std::max(maxVoxelChildError, childError);
+					}
+				}
+			}
+
+			if (maxVoxelChildError > 0.0f && voxelError <= maxVoxelChildError)
+			{
+				voxelError = std::nextafter(maxVoxelChildError, std::numeric_limits<float>::infinity());
 			}
 
 			const uint32_t payloadIndex = static_cast<uint32_t>(state.voxelGroupMapping.payloads.size());
