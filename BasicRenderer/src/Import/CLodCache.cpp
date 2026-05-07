@@ -717,11 +717,6 @@ namespace CLodCache {
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_CARRY_ZERO_COVERAGE");
-		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_COARSEN");
-		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_TARGET_CUBES");
-		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_MAX_LEVELS");
-		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_FANOUT");
-		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_GROWTH");
 		return static_cast<uint64_t>(seed);
 	}
 
