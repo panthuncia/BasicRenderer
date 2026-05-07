@@ -34,10 +34,21 @@ struct VoxelizeTrianglesInput
 	uint32_t raysPerCell = 64;
 };
 
+struct VoxelizeTrianglesResult
+{
+	// Cells used for rendering this group after coverage pruning.
+	VoxelGroupPayload renderPayload;
+	// Cells removed from this group's render payload by coverage pruning; used
+	// as supplemental source data for coarser parents.
+	VoxelGroupPayload sourcePayload;
+	uint32_t prunedCellCount = 0;
+};
+
 // Voxelize a triangle set into a single VoxelGroupPayload.
 // Rasterizes triangles into a 3D grid via triangle-AABB overlap (SAT),
 // then casts rays for per-cell opacity sampling.
 VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input);
+VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& input);
 
 struct PackVoxelGroupInput
 {
@@ -47,6 +58,7 @@ struct PackVoxelGroupInput
 	// Fallback for static content or cells with no usable skinning data.
 	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
 	uint32_t firstCube = 0;
+	uint32_t firstAttribute = 0;
 };
 
 struct PackedVoxelGroupBuildResult

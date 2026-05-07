@@ -9,9 +9,12 @@
 #include <numeric>
 #include <random>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <spdlog/spdlog.h>
+
+#include "Mesh/VertexLayout.h"
 
 namespace
 {
@@ -55,6 +58,21 @@ namespace
 		std::memcpy(&p.y, vertices.data() + offset + sizeof(float), sizeof(float));
 		std::memcpy(&p.z, vertices.data() + offset + sizeof(float) * 2, sizeof(float));
 		return p;
+	}
+
+	Float3 ReadNormal(const std::vector<std::byte>& vertices, size_t stride, uint32_t index)
+	{
+		if (stride < MeshVertexLayout::NormalOffset + sizeof(float) * 3u)
+		{
+			return Float3(0.0f, 0.0f, 0.0f);
+		}
+
+		Float3 n;
+		const size_t offset = static_cast<size_t>(index) * stride + MeshVertexLayout::NormalOffset;
+		std::memcpy(&n.x, vertices.data() + offset, sizeof(float));
+		std::memcpy(&n.y, vertices.data() + offset + sizeof(float), sizeof(float));
+		std::memcpy(&n.z, vertices.data() + offset + sizeof(float) * 2, sizeof(float));
+		return n;
 	}
 
 	Float3 ToFloat3(const DirectX::XMFLOAT3& v) { return { v.x, v.y, v.z }; }
@@ -237,7 +255,9 @@ namespace
 	bool RayTriangleIntersect(const Float3& origin, const Float3& dir,
 		const Float3& v0, const Float3& v1, const Float3& v2,
 		float tMax,
-		float& outT)
+		float& outT,
+		float* outU = nullptr,
+		float* outV = nullptr)
 	{
 		constexpr float kEpsilon = 1e-8f;
 		Float3 e1 = v1 - v0;
@@ -262,6 +282,14 @@ namespace
 		if (t > kEpsilon && t < tMax)
 		{
 			outT = t;
+			if (outU != nullptr)
+			{
+				*outU = u;
+			}
+			if (outV != nullptr)
+			{
+				*outV = v;
+			}
 			return true;
 		}
 
@@ -593,11 +621,20 @@ namespace
 				const Float3 v2 = ReadPosition(vertices, vertexStrideBytes, i2);
 
 				float hitT = 0.0f;
-				if (RayTriangleIntersect(origin, dir, v0, v1, v2, nearestT, hitT))
+				float hitU = 0.0f;
+				float hitV = 0.0f;
+				if (RayTriangleIntersect(origin, dir, v0, v1, v2, nearestT, hitT, &hitU, &hitV))
 				{
 					nearestT = hitT;
 					nearestTriangleIndex = triLocalIdx;
-					nearestNormal = TriangleNormal(v0, v1, v2);
+					const Float3 n0 = ReadNormal(vertices, vertexStrideBytes, i0);
+					const Float3 n1 = ReadNormal(vertices, vertexStrideBytes, i1);
+					const Float3 n2 = ReadNormal(vertices, vertexStrideBytes, i2);
+					const float hitW = 1.0f - hitU - hitV;
+					const Float3 interpolatedNormal = n0 * hitW + n1 * hitU + n2 * hitV;
+					nearestNormal = interpolatedNormal.lengthSq() > 1.0e-20f
+						? interpolatedNormal.normalized()
+						: TriangleNormal(v0, v1, v2);
 				}
 			}
 
@@ -681,11 +718,11 @@ namespace
 		return sample;
 	}
 
-	void PruneCellsByCoverage(std::vector<VoxelCell>& cells)
+	uint32_t PruneCellsByCoverage(std::vector<VoxelCell>& cells)
 	{
 		if (cells.empty())
 		{
-			return;
+			return 0u;
 		}
 
 		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
@@ -719,6 +756,8 @@ namespace
 		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
 			return PackCell(lhs.x, lhs.y, lhs.z) < PackCell(rhs.x, rhs.y, rhs.z);
 		});
+
+		return static_cast<uint32_t>(std::min<size_t>(removeCount, std::numeric_limits<uint32_t>::max()));
 	}
 
 	// Morton code: 10-bit per axis -> 30-bit interleaved
@@ -744,25 +783,26 @@ namespace
 }
 
 // Public API: VoxelizeTriangles
-VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
+VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& input)
 {
-	VoxelGroupPayload result{};
+	VoxelizeTrianglesResult detailedResult{};
+	VoxelGroupPayload& result = detailedResult.sourcePayload;
 
 	const bool hasTriangleSources = input.vertices != nullptr && input.vertexStrideBytes >= sizeof(float) * 3 &&
 		input.triangleIndices != nullptr && !input.triangleIndices->empty() && (input.triangleIndices->size() % 3) == 0;
 	const bool hasVoxelSources = HasVoxelSources(input);
 
 	if (!hasTriangleSources && !hasVoxelSources)
-		return result;
+		return detailedResult;
 
 	if (hasTriangleSources && input.vertexStrideBytes < sizeof(float) * 3)
-		return result;
+		return detailedResult;
 	
 	if (input.resolution < 2)
-		return result;
+		return detailedResult;
 
 	if (!(input.voxelWidth > 0.0f) || !std::isfinite(input.voxelWidth))
-		return result;
+		return detailedResult;
 
 	const Float3 aabbMin = ToFloat3(input.aabbMin);
 	const Float3 aabbMax = ToFloat3(input.aabbMax);
@@ -772,7 +812,7 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 		aabbMax.z - aabbMin.z <= 0.0f)
 	{
 		spdlog::warn("VoxelGroupBuilder: degenerate AABB, skipping triangle voxelization");
-		return result;
+		return detailedResult;
 	}
 
 	result.resolution = input.resolution;
@@ -802,7 +842,7 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 	}
 
 	if (cellTriMap.empty() && cellVoxelMap.empty())
-		return result;
+		return detailedResult;
 
 	const std::vector<Ray> rays = GenerateCellRays(std::max(1u, input.raysPerCell), input.resolution * 2654435761u);
 
@@ -909,9 +949,16 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
 		result.activeCells.push_back(vc);
 	}
 
-	PruneCellsByCoverage(result.activeCells);
+	detailedResult.sourcePayload = result;
+	detailedResult.renderPayload = result;
+	detailedResult.prunedCellCount = PruneCellsByCoverage(detailedResult.renderPayload.activeCells);
 
-	return result;
+	return detailedResult;
+}
+
+VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input)
+{
+	return VoxelizeTrianglesDetailed(input).renderPayload;
 }
 
 PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& input)
@@ -991,7 +1038,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 			: SelectDominantBoneIndex(accum.boneWeights);
 		record.occupancyMask = accum.mask;
 		record.opacitySum = accum.opacitySum;
-		record.firstAttribute = static_cast<uint32_t>(result.attributeSamples.size());
+		record.firstAttribute = input.firstAttribute + static_cast<uint32_t>(result.attributeSamples.size());
 		result.attributeSamples.insert(result.attributeSamples.end(), accum.attributes.begin(), accum.attributes.end());
 		result.cubeRecords.push_back(record);
 	}
