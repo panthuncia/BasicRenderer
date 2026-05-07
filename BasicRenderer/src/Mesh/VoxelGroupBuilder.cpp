@@ -388,6 +388,11 @@ namespace
 		return input.sourceVoxelPayloads != nullptr && !input.sourceVoxelPayloads->empty();
 	}
 
+	bool HasCandidateVoxelSources(const VoxelizeTrianglesInput& input)
+	{
+		return input.candidateVoxelPayloads != nullptr && !input.candidateVoxelPayloads->empty();
+	}
+
 	Float3 VoxelCellMin(const VoxelGroupPayload& payload, const VoxelCell& cell)
 	{
 		return {
@@ -533,6 +538,55 @@ namespace
 		}
 
 		return cellVoxelMap;
+	}
+
+	std::unordered_set<uint64_t> RasterizeVoxelCandidatePayloadsToGrid(
+		const std::vector<VoxelSourceCandidatePayload>& sourceVoxelPayloads,
+		const Float3& aabbMin,
+		float voxelWidth,
+		uint32_t resolution)
+	{
+		std::unordered_set<uint64_t> candidateCells;
+		if (resolution == 0u || voxelWidth <= 0.0f)
+		{
+			return candidateCells;
+		}
+
+		const float invCellSize = 1.0f / voxelWidth;
+		for (const VoxelSourceCandidatePayload& candidatePayload : sourceVoxelPayloads)
+		{
+			const VoxelGroupPayload* payload = candidatePayload.payload;
+			if (payload == nullptr || payload->voxelWidth <= 0.0f)
+			{
+				continue;
+			}
+
+			const float expansionRadius = std::max(0.0f, candidatePayload.expansionRadius);
+			for (const VoxelCell& sourceCell : payload->activeCells)
+			{
+				const Float3 sourceMin = VoxelCellMin(*payload, sourceCell) - Float3(expansionRadius, expansionRadius, expansionRadius);
+				const Float3 sourceMax = VoxelCellMax(*payload, sourceCell) + Float3(expansionRadius, expansionRadius, expansionRadius);
+				const uint32_t cxMin = ToCellCoord(sourceMin.x, aabbMin.x, invCellSize, resolution);
+				const uint32_t cyMin = ToCellCoord(sourceMin.y, aabbMin.y, invCellSize, resolution);
+				const uint32_t czMin = ToCellCoord(sourceMin.z, aabbMin.z, invCellSize, resolution);
+				const uint32_t cxMax = ToCellCoord(std::nextafter(sourceMax.x, -std::numeric_limits<float>::infinity()), aabbMin.x, invCellSize, resolution);
+				const uint32_t cyMax = ToCellCoord(std::nextafter(sourceMax.y, -std::numeric_limits<float>::infinity()), aabbMin.y, invCellSize, resolution);
+				const uint32_t czMax = ToCellCoord(std::nextafter(sourceMax.z, -std::numeric_limits<float>::infinity()), aabbMin.z, invCellSize, resolution);
+
+				for (uint32_t cz = czMin; cz <= czMax; ++cz)
+				{
+					for (uint32_t cy = cyMin; cy <= cyMax; ++cy)
+					{
+						for (uint32_t cx = cxMin; cx <= cxMax; ++cx)
+						{
+							candidateCells.insert(PackCell(cx, cy, cz));
+						}
+					}
+				}
+			}
+		}
+
+		return candidateCells;
 	}
 
 	bool RayAABBIntersect(const Float3& origin, const Float3& dir, const Float3& boxMin, const Float3& boxMax, float tMax, float& outT)
@@ -791,8 +845,9 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 	const bool hasTriangleSources = input.vertices != nullptr && input.vertexStrideBytes >= sizeof(float) * 3 &&
 		input.triangleIndices != nullptr && !input.triangleIndices->empty() && (input.triangleIndices->size() % 3) == 0;
 	const bool hasVoxelSources = HasVoxelSources(input);
+	const bool hasCandidateVoxelSources = HasCandidateVoxelSources(input);
 
-	if (!hasTriangleSources && !hasVoxelSources)
+	if (!hasTriangleSources && !hasVoxelSources && !hasCandidateVoxelSources)
 		return detailedResult;
 
 	if (hasTriangleSources && input.vertexStrideBytes < sizeof(float) * 3)
@@ -841,7 +896,19 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 		cellVoxelMap = RasterizeVoxelPayloadsToGrid(sourceVoxelPayloads, aabbMin, input.voxelWidth, input.resolution);
 	}
 
-	if (cellTriMap.empty() && cellVoxelMap.empty())
+	std::unordered_set<uint64_t> candidateVoxelKeys;
+	if (hasCandidateVoxelSources)
+	{
+		candidateVoxelKeys = RasterizeVoxelCandidatePayloadsToGrid(
+			*input.candidateVoxelPayloads,
+			aabbMin,
+			input.voxelWidth,
+			input.resolution);
+	}
+	detailedResult.triangleCandidateCellCount = static_cast<uint32_t>(std::min<size_t>(cellTriMap.size(), std::numeric_limits<uint32_t>::max()));
+	detailedResult.voxelCandidateCellCount = static_cast<uint32_t>(std::min<size_t>(candidateVoxelKeys.size() + cellVoxelMap.size(), std::numeric_limits<uint32_t>::max()));
+
+	if (cellTriMap.empty() && cellVoxelMap.empty() && candidateVoxelKeys.empty())
 		return detailedResult;
 
 	const std::vector<Ray> rays = GenerateCellRays(std::max(1u, input.raysPerCell), input.resolution * 2654435761u);
@@ -853,7 +920,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 	};
 
 	std::vector<uint64_t> candidateKeys;
-	candidateKeys.reserve(cellTriMap.size() + cellVoxelMap.size());
+	candidateKeys.reserve(cellTriMap.size() + cellVoxelMap.size() + candidateVoxelKeys.size());
 	for (const auto& [key, triIndices] : cellTriMap)
 	{
 		candidateKeys.push_back(key);
@@ -865,6 +932,14 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			candidateKeys.push_back(key);
 		}
 	}
+	for (uint64_t key : candidateVoxelKeys)
+	{
+		if (cellTriMap.find(key) == cellTriMap.end() && cellVoxelMap.find(key) == cellVoxelMap.end())
+		{
+			candidateKeys.push_back(key);
+		}
+	}
+	detailedResult.candidateCellCount = static_cast<uint32_t>(std::min<size_t>(candidateKeys.size(), std::numeric_limits<uint32_t>::max()));
 
 	result.activeCells.reserve(candidateKeys.size());
 
@@ -918,7 +993,14 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 				coverage.accumulatedNormal = coverage.accumulatedNormal + voxelCoverage.accumulatedNormal;
 			}
 		}
-		if (coverage.coverage <= 0.0f)
+		if (coverage.coverage > 0.0f)
+		{
+			++detailedResult.positiveCoverageCellCount;
+			detailedResult.totalCoverage += coverage.coverage;
+			detailedResult.maxCoverage = std::max(detailedResult.maxCoverage, coverage.coverage);
+		}
+
+		if (coverage.coverage <= 0.0f && !input.keepZeroCoverageSourceCells)
 		{
 			continue;
 		}

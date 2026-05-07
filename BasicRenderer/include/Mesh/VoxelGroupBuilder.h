@@ -6,6 +6,12 @@
 
 #include "Mesh/ClusterLODTypes.h"
 
+struct VoxelSourceCandidatePayload
+{
+	const VoxelGroupPayload* payload = nullptr;
+	float expansionRadius = 0.0f;
+};
+
 // Input: triangle-based source geometry to voxelize into a single group.
 struct VoxelizeTrianglesInput
 {
@@ -21,6 +27,11 @@ struct VoxelizeTrianglesInput
 	// Optional already-voxelized sources. These are re-sampled as volumes when
 	// building a coarser voxel parent.
 	const std::vector<const VoxelGroupPayload*>* sourceVoxelPayloads = nullptr;
+
+	// Optional already-voxelized sources used only to define candidate output
+	// cells. Coverage for these candidates is evaluated from triangle sources.
+	const std::vector<VoxelSourceCandidatePayload>* candidateVoxelPayloads = nullptr;
+	bool keepZeroCoverageSourceCells = false;
 
 	// World-space AABB of the geometry to voxelize.
 	DirectX::XMFLOAT3 aabbMin{};
@@ -38,9 +49,15 @@ struct VoxelizeTrianglesResult
 {
 	// Cells used for rendering this group after coverage pruning.
 	VoxelGroupPayload renderPayload;
-	// Cells removed from this group's render payload by coverage pruning; used
-	// as supplemental source data for coarser parents.
+	// Pre-prune candidate cells retained so coarser parents can reintroduce
+	// cells trimmed from this group's render payload.
 	VoxelGroupPayload sourcePayload;
+	uint32_t triangleCandidateCellCount = 0;
+	uint32_t voxelCandidateCellCount = 0;
+	uint32_t candidateCellCount = 0;
+	uint32_t positiveCoverageCellCount = 0;
+	float totalCoverage = 0.0f;
+	float maxCoverage = 0.0f;
 	uint32_t prunedCellCount = 0;
 };
 
