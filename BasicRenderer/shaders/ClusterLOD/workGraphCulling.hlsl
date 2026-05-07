@@ -1415,7 +1415,7 @@ float ProjectedGeometricError(
     return worldSpaceError / denom;
 }
 
-bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
+bool CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
     CLodMeshMetadata clodMeshMetadata,
     ClusterLODGroup voxelGroup,
     float4x4 objectModelMatrix,
@@ -1442,6 +1442,8 @@ bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
 
     const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+    bool hasRefinedChild = false;
+    bool everyRefinedChildCanRender = true;
     for (uint segmentOffset = 0u; segmentOffset < voxelGroup.segmentCount; ++segmentOffset)
     {
         const ClusterLODGroupSegment segment = segments[clodMeshMetadata.segmentsBase + voxelGroup.firstSegment + segmentOffset];
@@ -1449,6 +1451,7 @@ bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
         {
             continue;
         }
+        hasRefinedChild = true;
 
         const uint childGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)segment.refinedGroup;
         const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
@@ -1462,6 +1465,7 @@ bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
 
         if (childEOD < lodCam.errorOverDistanceThreshold)
         {
+            everyRefinedChildCanRender = false;
             continue;
         }
 
@@ -1472,8 +1476,10 @@ bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
         }
         if (childResident)
         {
-            return true;
+            continue;
         }
+
+        everyRefinedChildCanRender = false;
 
         if (childGroupGlobalIndex < activeGroupScanCount)
         {
@@ -1502,7 +1508,7 @@ bool CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
         }
     }
 
-    return false;
+    return hasRefinedChild && everyRefinedChildCanRender;
 }
 
 // Node: ObjectCull (entry)
@@ -1779,6 +1785,7 @@ void WG_TraverseNodes(
 
                         if (isVoxelLeaf)
                         {
+                            bool emitVoxelFallback = true;
                             StructuredBuffer<CLodStreamingRuntimeState> voxelRuntimeState =
                                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
                             const uint voxelActiveGroupScanCount = voxelRuntimeState[0].activeGroupScanCount;
@@ -1787,15 +1794,15 @@ void WG_TraverseNodes(
                             if (groupGlobalIndex < voxelActiveGroupScanCount && CLodReadBit(voxelNonResidentBits, groupGlobalIndex))
                             {
                                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
-                                return;
+                                emitVoxelFallback = false;
                             }
 
-                            if (grp.terminalSegmentCount != 0u)
+                            if (emitVoxelFallback && grp.terminalSegmentCount != 0u)
                             {
-                                return;
+                                emitVoxelFallback = false;
                             }
 
-                            if (CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
+                            if (emitVoxelFallback && CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
                                 clodMeshMetadata,
                                 grp,
                                 objectModelMatrix,
@@ -1808,18 +1815,21 @@ void WG_TraverseNodes(
                                 grpEOD))
                             {
                                 WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
-                                return;
+                                emitVoxelFallback = false;
                             }
 
-                            CLodVoxelGroupDescriptor voxelDescriptor;
-                            if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+                            if (emitVoxelFallback)
                             {
-                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                                CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
-                            }
-                            else
-                            {
-                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+                                CLodVoxelGroupDescriptor voxelDescriptor;
+                                if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+                                {
+                                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
+                                    CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
+                                }
+                                else
+                                {
+                                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+                                }
                             }
                         }
                         else

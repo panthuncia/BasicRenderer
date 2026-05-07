@@ -323,7 +323,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
                 return;
             }
 
-            if (CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
+            if (CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
                 clodMeshMetadata,
                 grp,
                 objectModelMatrix,
