@@ -869,7 +869,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
         return false;
     }
 
-    const CLodVoxelCubeRecord cube = CLodLoadVoxelCube(metadata, descriptor, localCubeIndex);
+    const CLodVoxelCubeRecord cube = CLodLoadVoxelCube(metadata, descriptor, localGroupId, localCubeIndex);
     const uint3 cubeCoord = CLodDecodeVoxelCubeCoord(cube.cubeCoord);
     const float voxelWidth = descriptor.aabbMinAndVoxelWidth.w;
     if (voxelWidth <= 0.0f)
@@ -910,7 +910,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
         cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
     }
 
-    CLodVoxelAttributeSample attributeSample = CLodLoadVoxelAttributeSample(metadata, cube, cellIndex);
+    CLodVoxelAttributeSample attributeSample = CLodLoadVoxelAttributeSample(metadata, cube, localGroupId, localCubeIndex, cellIndex);
     float3 normalOS = normalize(attributeSample.normalAndOpacity.xyz);
     normalOS = normalize(mul(normalOS, (float3x3)skinMatrix));
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];

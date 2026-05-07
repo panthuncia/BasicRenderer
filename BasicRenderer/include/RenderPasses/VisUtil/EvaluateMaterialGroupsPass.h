@@ -96,6 +96,7 @@ public:
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,
+            Builtin::CLod::GroupPageMap,
             Builtin::CLod::MeshMetadata,
             Builtin::CLod::VoxelDescriptorIndices,
             Builtin::CLod::VoxelGroupDescriptors,

@@ -420,8 +420,8 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			chunk.meshletCount = hint.meshletCount;
 			chunk.meshletTrianglesByteCount = hint.meshletTrianglesByteCount;
 
-			// Fresh chunks start non-resident, so expose zero counts to the GPU.
-			bool hasRuntimeChunkData = (chunk.meshletCount == 0u);
+			// Fresh chunks with streamable pages start non-resident, so expose zero counts to the GPU.
+			bool hasRuntimeChunkData = (hint.pageCount == 0u);
 			baselineGroupChunks[groupIndex] = chunk;
 
 			if (!hasRuntimeChunkData) {
@@ -938,10 +938,11 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 	}
 	const auto& sourceChunk = groupChunkHints[groupLocalIndex];
 
-	// The page-pool path considers a group "ready" when the page allocation is valid
-	// (meshlets + bounds are packed into the page-pool blob).
+	// The page-pool path considers a group "ready" when the page allocation is valid.
+	// Zero-meshlet voxel groups can still own streamable pages, so readiness is based
+	// on pageCount rather than meshletCount.
 	const bool hasRequiredAllocations = !residentAllocations.pageAllocations.empty()
-		|| sourceChunk.meshletCount == 0u;
+		|| sourceChunk.pageCount == 0u;
 
 	if (hasRequiredAllocations) {
 		return true;

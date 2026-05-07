@@ -179,7 +179,7 @@ struct ClusterLODBuilderSettings
 	float simplifyTangentSignWeight = 0.5f;
 
 	bool enableVoxelFallback = true;
-	ClusterLODVoxelFallbackMode voxelFallbackMode = ClusterLODVoxelFallbackMode::Auto;
+	ClusterLODVoxelFallbackMode voxelFallbackMode = ClusterLODVoxelFallbackMode::VoxelOnly;
 	uint32_t voxelGridBaseResolution = 32u;
 	uint32_t voxelMinResolution = 2u;
 	uint32_t voxelRaysPerCell = 64u;
@@ -189,6 +189,11 @@ struct ClusterLODBuilderSettings
 	float voxelFallbackAcceptanceBias = 1.0f;
 	float voxelFallbackOpacityThreshold = 0.0f;
 	bool voxelFallbackCarryZeroCoverage = false;
+	bool enableVoxelPostCoarsening = true;
+	uint32_t voxelPostCoarseningTargetCubes = 8u;
+	uint32_t voxelPostCoarseningMaxLevels = 8u;
+	uint32_t voxelPostCoarseningFanout = 8u;
+	float voxelPostCoarseningGrowthFactor = 2.0f;
 };
 
 inline std::string GetClusterLODEnvironmentVariable(const char* name)
@@ -279,6 +284,11 @@ inline ClusterLODBuilderSettings ApplyClusterLODBuilderEnvironmentOverrides(Clus
 	readFloat("BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS", settings.voxelFallbackAcceptanceBias);
 	readFloat("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD", settings.voxelFallbackOpacityThreshold);
 	readBool("BASICRENDERER_CLOD_VOXEL_CARRY_ZERO_COVERAGE", settings.voxelFallbackCarryZeroCoverage);
+	readBool("BASICRENDERER_CLOD_VOXEL_POST_COARSEN", settings.enableVoxelPostCoarsening);
+	readUint("BASICRENDERER_CLOD_VOXEL_POST_TARGET_CUBES", settings.voxelPostCoarseningTargetCubes);
+	readUint("BASICRENDERER_CLOD_VOXEL_POST_MAX_LEVELS", settings.voxelPostCoarseningMaxLevels);
+	readUint("BASICRENDERER_CLOD_VOXEL_POST_FANOUT", settings.voxelPostCoarseningFanout);
+	readFloat("BASICRENDERER_CLOD_VOXEL_POST_GROWTH", settings.voxelPostCoarseningGrowthFactor);
 
 	return settings;
 }

@@ -261,7 +261,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
     if (node.range.isLeaf != CLOD_NODE_INTERNAL) {
         const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
         const ClusterLODGroup grp = groups[groupGlobalIndex];
-        const bool isVoxelLeaf = (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF) || ((grp.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u);
+        const bool isVoxelLeaf = (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF);
         if (isVoxelLeaf) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS, 1);
         }
@@ -307,6 +307,22 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
 
         if (isVoxelLeaf)
         {
+            StructuredBuffer<CLodStreamingRuntimeState> voxelRuntimeState =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+            const uint voxelActiveGroupScanCount = voxelRuntimeState[0].activeGroupScanCount;
+            ByteAddressBuffer voxelNonResidentBits =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+            if (groupGlobalIndex < voxelActiveGroupScanCount && CLodReadBit(voxelNonResidentBits, groupGlobalIndex))
+            {
+                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+                return;
+            }
+
+            if (grp.terminalSegmentCount != 0u)
+            {
+                return;
+            }
+
             if (CLodVoxelLeafHasResidentRefinedChildAboveThreshold(
                 clodMeshMetadata,
                 grp,

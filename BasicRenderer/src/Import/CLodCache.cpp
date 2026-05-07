@@ -706,7 +706,7 @@ namespace CLodCache {
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // mesh quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // UV quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(7));  // USD compliance layout + inherited primvar card isolation
-		boost::hash_combine(seed, static_cast<uint32_t>(4));  // voxel candidate-mask retracing + terminal sentinel preservation
+		boost::hash_combine(seed, static_cast<uint32_t>(6));  // streamable voxel group page payloads
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MODE");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_GRID");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MIN_RES");
@@ -717,6 +717,11 @@ namespace CLodCache {
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_CARRY_ZERO_COVERAGE");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_COARSEN");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_TARGET_CUBES");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_MAX_LEVELS");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_FANOUT");
+		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_POST_GROWTH");
 		return static_cast<uint64_t>(seed);
 	}
 

@@ -197,7 +197,7 @@ void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
     {
         return;
     }
-    const CLodVoxelCubeRecord cube = CLodLoadVoxelCube(metadata, descriptor, localCubeIndex);
+    const CLodVoxelCubeRecord cube = CLodLoadVoxelCube(metadata, descriptor, localGroupId, localCubeIndex);
     if (cube.occupancyMask.x == 0u && cube.occupancyMask.y == 0u)
     {
         return;

@@ -11,6 +11,7 @@
 #include "Resources/PixelBuffer.h"
 
 class Buffer;
+class ResourceGroup;
 
 class VoxelSoftwareRasterizationPass : public ComputePass, public IDynamicDeclaredResources {
 public:
@@ -24,6 +25,7 @@ public:
         std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
         std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
         std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
+        std::shared_ptr<ResourceGroup> slabResourceGroup,
         uint32_t voxelWorkCapacity);
     ~VoxelSoftwareRasterizationPass() override;
 
@@ -46,6 +48,7 @@ private:
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_virtualShadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
+    std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     CLodRasterOutputKind m_outputKind = CLodRasterOutputKind::VisibilityBuffer;
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
     uint32_t m_voxelWorkCapacity = 0u;

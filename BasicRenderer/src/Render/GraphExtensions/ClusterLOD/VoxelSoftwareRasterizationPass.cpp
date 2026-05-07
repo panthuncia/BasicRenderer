@@ -7,6 +7,7 @@
 #include "Managers/ViewManager.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/components.h"
 #include "BuiltinResources.h"
@@ -23,6 +24,7 @@ VoxelSoftwareRasterizationPass::VoxelSoftwareRasterizationPass(
     std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
     std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
     std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
+    std::shared_ptr<ResourceGroup> slabResourceGroup,
     uint32_t voxelWorkCapacity)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_voxelWorkRecordsBuffer(std::move(voxelWorkRecordsBuffer))
@@ -32,6 +34,7 @@ VoxelSoftwareRasterizationPass::VoxelSoftwareRasterizationPass(
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
     , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
     , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
+    , m_slabResourceGroup(std::move(slabResourceGroup))
     , m_outputKind(outputKind)
     , m_voxelWorkCapacity(voxelWorkCapacity)
 {
@@ -77,6 +80,8 @@ void VoxelSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* b
             Builtin::CLod::VoxelGroupDescriptors,
             Builtin::CLod::VoxelCubeRecords,
             Builtin::CLod::VoxelAttributeSamples,
+            Builtin::CLod::Groups,
+            Builtin::CLod::GroupPageMap,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::InverseSkinMatrices,
             Builtin::SkeletonResources::BoneTransforms,
@@ -97,6 +102,10 @@ void VoxelSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* b
     else if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
         builder->WithShaderResource(m_virtualShadowClipmapInfoBuffer)
             .WithUnorderedAccess(m_virtualShadowPageTableTexture, m_virtualShadowPhysicalPagesTexture);
+    }
+
+    if (m_slabResourceGroup) {
+        builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
 }
 

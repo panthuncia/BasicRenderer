@@ -1855,6 +1855,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_shadowPageTableTexture,
                     m_shadowPhysicalPagesTexture,
                     m_shadowClipmapInfoBuffer,
+                    slabGroup,
                     m_voxelRasterWorkCapacity)));
 
         if (useComputeSWRaster) {
