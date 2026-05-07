@@ -1511,6 +1511,109 @@ bool CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
     return hasRefinedChild && everyRefinedChildCanRender;
 }
 
+struct CLodRenderableLeaf
+{
+    bool valid;
+    bool isVoxel;
+    uint groupGlobalIndex;
+    ClusterLODGroup group;
+    float errorOverDistance;
+};
+
+bool CLodGroupIsResident(uint groupGlobalIndex)
+{
+    StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+    const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+    if (groupGlobalIndex >= activeGroupScanCount)
+    {
+        return true;
+    }
+
+    ByteAddressBuffer nonResidentBits =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+    return !CLodReadBit(nonResidentBits, groupGlobalIndex);
+}
+
+void CLodMarkGroupTouched(uint groupGlobalIndex)
+{
+    RWStructuredBuffer<uint> usedGroupsCounter =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
+    RWStructuredBuffer<uint> usedGroupsBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
+    uint usedSlot = 0u;
+    InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
+    if (usedSlot < CLOD_USED_GROUPS_CAPACITY)
+    {
+        usedGroupsBuffer[usedSlot] = groupGlobalIndex;
+    }
+}
+
+bool CLodPrepareRenderableLeaf(
+    CLodMeshMetadata clodMeshMetadata,
+    ClusterLODNode node,
+    bool parentAllowsRefine,
+    float4x4 objectModelMatrix,
+    float lodUniformScale,
+    CullingCameraInfo lodCam,
+    bool lodCameraIsOrtho,
+    bool nodeTouchesDirtyPages,
+    out CLodRenderableLeaf leaf)
+{
+    leaf = (CLodRenderableLeaf)0;
+    leaf.groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
+    StructuredBuffer<ClusterLODGroup> groups =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    leaf.group = groups[leaf.groupGlobalIndex];
+    leaf.isVoxel = (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF);
+
+    if (leaf.isVoxel)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS, 1);
+    }
+
+    const float3 groupWorldCenter = mul(float4(leaf.group.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+    const float groupWorldRadius = leaf.group.bounds.centerAndRadius.w * lodUniformScale;
+    leaf.errorOverDistance = ProjectedGeometricError(
+        groupWorldCenter,
+        groupWorldRadius,
+        leaf.group.bounds.error,
+        lodUniformScale,
+        lodCam.positionWorldSpace.xyz,
+        lodCam.zNear,
+        lodCameraIsOrtho);
+
+    const bool wantsRender = parentAllowsRefine && (leaf.errorOverDistance >= lodCam.errorOverDistanceThreshold);
+    if (!wantsRender)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
+        if (leaf.isVoxel)
+        {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS, 1);
+        }
+        return false;
+    }
+
+    if (!nodeTouchesDirtyPages)
+    {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+        return false;
+    }
+
+    CLodMarkGroupTouched(leaf.groupGlobalIndex);
+    if (!CLodGroupIsResident(leaf.groupGlobalIndex))
+    {
+        if (leaf.isVoxel)
+        {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+        }
+        return false;
+    }
+
+    leaf.valid = true;
+    return true;
+}
+
 // Node: ObjectCull (entry)
 #ifndef CLOD_COMPUTE_INCLUDE_ONLY
 [Shader("node")]
@@ -1689,8 +1792,6 @@ void WG_TraverseNodes(
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         const CullingCameraInfo lodCam = cameraInfos[lodViewId];
-        StructuredBuffer<ClusterLODGroup> groups =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
         StructuredBuffer<ClusterLODNode> lodNodes =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
@@ -1730,81 +1831,33 @@ void WG_TraverseNodes(
             // error provide a conservative bound.
 
             if (node.range.isLeaf != CLOD_NODE_INTERNAL) {
-                // Segment-leaf: LOD check + inlined SegmentEvaluate.
-                const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
-                const ClusterLODGroup grp = groups[groupGlobalIndex];
-                const bool isVoxelLeaf = (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF);
-                if (isVoxelLeaf) {
-                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS, 1);
-                }
-
-                const float3 grpWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                const float grpWorldRadius = grp.bounds.centerAndRadius.w * lodUniformScale;
-                const float grpEOD = ProjectedGeometricError(
-                    grpWorldCenter, grpWorldRadius,
-                    grp.bounds.error, lodUniformScale,
-                    lodCam.positionWorldSpace.xyz, lodCam.zNear,
-                    lodCamera.isOrtho);
-                const bool nodeWantsTraversal = parentAllowsRefine && (grpEOD >= lodCam.errorOverDistanceThreshold);
-
-                if (!nodeWantsTraversal) {
-                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
-                    if (isVoxelLeaf) {
-                        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS, 1);
-                    }
-                }
-                else {
-                    bool nodeTouchesDirtyPages = true;
+                bool nodeTouchesDirtyPages = true;
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-                    if (dirtyPageCullingEnabled)
-                    {
-                        const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
-                        nodeTouchesDirtyPages = CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId);
-                    }
+                if (dirtyPageCullingEnabled)
+                {
+                    const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+                    nodeTouchesDirtyPages = CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId);
+                }
 #endif
 
-                    if (!nodeTouchesDirtyPages)
+                CLodRenderableLeaf leaf;
+                if (CLodPrepareRenderableLeaf(
+                    clodMeshMetadata,
+                    node,
+                    parentAllowsRefine,
+                    objectModelMatrix,
+                    lodUniformScale,
+                    lodCam,
+                    lodCamera.isOrtho,
+                    nodeTouchesDirtyPages,
+                    leaf))
+                {
+                    if (leaf.isVoxel)
                     {
-                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
-                    }
-                    else
-                    {
-
-                        // Used-groups tracking: mark the owning group as touched for streaming protection
-                        {
-                            RWStructuredBuffer<uint> usedGroupsCounter =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
-                            RWStructuredBuffer<uint> usedGroupsBuffer =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
-                            uint usedSlot = 0;
-                            InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
-                            if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
-                                usedGroupsBuffer[usedSlot] = groupGlobalIndex;
-                            }
-                        }
-
-                        if (isVoxelLeaf)
-                        {
-                            bool emitVoxelFallback = true;
-                            StructuredBuffer<CLodStreamingRuntimeState> voxelRuntimeState =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-                            const uint voxelActiveGroupScanCount = voxelRuntimeState[0].activeGroupScanCount;
-                            ByteAddressBuffer voxelNonResidentBits =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-                            if (groupGlobalIndex < voxelActiveGroupScanCount && CLodReadBit(voxelNonResidentBits, groupGlobalIndex))
-                            {
-                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
-                                emitVoxelFallback = false;
-                            }
-
-                            if (emitVoxelFallback && grp.terminalSegmentCount != 0u)
-                            {
-                                emitVoxelFallback = false;
-                            }
-
-                            if (emitVoxelFallback && CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
+                        const bool coveredByChildren =
+                            CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
                                 clodMeshMetadata,
-                                grp,
+                                leaf.group,
                                 objectModelMatrix,
                                 lodUniformScale,
                                 lodCam,
@@ -1812,58 +1865,41 @@ void WG_TraverseNodes(
                                 rec.instanceIndex,
                                 instanceData.perMeshBufferIndex,
                                 rec.viewId,
-                                grpEOD))
-                            {
-                                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
-                                emitVoxelFallback = false;
-                            }
+                                leaf.errorOverDistance);
 
-                            if (emitVoxelFallback)
-                            {
-                                CLodVoxelGroupDescriptor voxelDescriptor;
-                                if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
-                                {
-                                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                                    CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
-                                }
-                                else
-                                {
-                                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
-                                }
-                            }
+                        if (coveredByChildren)
+                        {
+                            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
                         }
                         else
                         {
-                        // Inlined SegmentEvaluate
+                            CLodVoxelGroupDescriptor voxelDescriptor;
+                            if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+                            {
+                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
+                                CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
+                            }
+                            else
+                            {
+                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Final emit for triangle meshlet payloads.
                         StructuredBuffer<ClusterLODGroupSegment> segments =
                             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
                         const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
                         const ClusterLODGroupSegment seg = segments[segGlobalIndex];
 
-                        // LOD condition 1 already confirmed by nodeWantsTraversal.
-                        bool shouldEmit = (seg.meshletCount != 0);
-
-                        // Suppress emission when own group's pages are non-resident.
-                        {
-                            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-                            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-                            ByteAddressBuffer nonResidentBits =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-                            if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
-                                if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
-                                    shouldEmit = false;
-                                }
-                            }
-                        }
-
-                        emitBucket = shouldEmit;
+                        emitBucket = (seg.meshletCount != 0);
 
                         if (emitBucket) {
                             WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
                             emittedSegmentMeshletCount = seg.meshletCount;
 
-                            const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + grp.pageMapBase, seg.pageIndex);
+                            const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + leaf.group.pageMapBase, seg.pageIndex);
 
                             bucketRecord.instanceIndex = rec.instanceIndex;
                             bucketRecord.viewId = rec.viewId;
@@ -1893,7 +1929,6 @@ void WG_TraverseNodes(
                             else if (tail > 2)  { n4++;  }
                             else if (tail > 1)  { n2++;  }
                             else if (tail > 0)  { n1 = 1; }
-                        }
                         }
                     }
                 }
