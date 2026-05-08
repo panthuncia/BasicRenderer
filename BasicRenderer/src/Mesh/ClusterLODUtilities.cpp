@@ -1828,11 +1828,22 @@ namespace
 	std::vector<uint32_t> BuildGroupTriangleIndices(
 		const std::vector<meshopt_Meshlet>& meshlets,
 		const std::vector<uint32_t>& meshletVertices,
-		const std::vector<uint8_t>& meshletTriangles)
+		const std::vector<uint8_t>& meshletTriangles,
+		uint32_t firstMeshlet,
+		uint32_t meshletCount)
 	{
 		std::vector<uint32_t> triangleIndices;
-		for (const meshopt_Meshlet& meshlet : meshlets)
+		if (firstMeshlet >= meshlets.size() || meshletCount == 0u)
 		{
+			return triangleIndices;
+		}
+
+		const uint32_t endMeshlet = std::min<uint32_t>(
+			static_cast<uint32_t>(meshlets.size()),
+			firstMeshlet + meshletCount);
+		for (uint32_t meshletIndex = firstMeshlet; meshletIndex < endMeshlet; ++meshletIndex)
+		{
+			const meshopt_Meshlet& meshlet = meshlets[meshletIndex];
 			triangleIndices.reserve(triangleIndices.size() + static_cast<size_t>(meshlet.triangle_count) * 3ull);
 			for (uint32_t triangleIndex = 0; triangleIndex < meshlet.triangle_count; ++triangleIndex)
 			{
@@ -1864,6 +1875,19 @@ namespace
 			}
 		}
 		return triangleIndices;
+	}
+
+	std::vector<uint32_t> BuildGroupTriangleIndices(
+		const std::vector<meshopt_Meshlet>& meshlets,
+		const std::vector<uint32_t>& meshletVertices,
+		const std::vector<uint8_t>& meshletTriangles)
+	{
+		return BuildGroupTriangleIndices(
+			meshlets,
+			meshletVertices,
+			meshletTriangles,
+			0u,
+			static_cast<uint32_t>(meshlets.size()));
 	}
 
 	VoxelFallbackGroupAnalysis AnalyzeVoxelFallbackGroup(
@@ -2182,6 +2206,7 @@ namespace
 		const ClusterLODBuildState& state,
 		uint32_t groupIndex,
 		VoxelFallbackGroupBuildInput& buildInput,
+		size_t vertexStrideBytes,
 		int32_t refinedGroupTag = -1)
 	{
 		if (groupIndex >= state.groups.size() ||
@@ -2205,7 +2230,10 @@ namespace
 				skinning.begin(),
 				skinning.end());
 		}
-		buildInput.voxelVertexCount += group.groupVertexCount;
+		const uint32_t sourceVertexCount = vertexStrideBytes > 0u
+			? static_cast<uint32_t>(std::min<size_t>(vertices.size() / vertexStrideBytes, std::numeric_limits<uint32_t>::max()))
+			: group.groupVertexCount;
+		buildInput.voxelVertexCount += sourceVertexCount;
 
 		std::vector<uint32_t> triangles = BuildGroupTriangleIndices(
 			state.groupMeshletChunks[groupIndex],
@@ -2225,11 +2253,111 @@ namespace
 		return true;
 	}
 
+	uint32_t ComputeGroupSegmentFirstMeshlet(const ClusterLODBuildState& state, const ClusterLODGroup& group, const ClusterLODGroupSegment& segment)
+	{
+		uint32_t firstMeshlet = 0u;
+		for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+		{
+			const ClusterLODGroupSegment& candidate = state.segments[group.firstSegment + segmentOffset];
+			if (candidate.pageIndex < segment.pageIndex)
+			{
+				firstMeshlet += candidate.meshletCount;
+			}
+		}
+		return firstMeshlet + segment.firstMeshletInPage;
+	}
+
+	bool AppendGroupSegmentTriangleSourceGeometry(
+		const ClusterLODBuildState& state,
+		uint32_t groupIndex,
+		const ClusterLODGroupSegment& segment,
+		VoxelFallbackGroupBuildInput& buildInput,
+		size_t vertexStrideBytes,
+		int32_t refinedGroupTag)
+	{
+		if (groupIndex >= state.groups.size() ||
+			groupIndex >= state.groupVertexChunks.size() ||
+			groupIndex >= state.groupMeshletChunks.size() ||
+			groupIndex >= state.groupMeshletVertexChunks.size() ||
+			groupIndex >= state.groupMeshletTriangleChunks.size())
+		{
+			return false;
+		}
+
+		const ClusterLODGroup& group = state.groups[groupIndex];
+		const uint32_t vertexBase = buildInput.voxelVertexCount;
+		const std::vector<std::byte>& vertices = state.groupVertexChunks[groupIndex];
+		buildInput.voxelVertices.insert(buildInput.voxelVertices.end(), vertices.begin(), vertices.end());
+		if (groupIndex < state.groupSkinningChunks.size())
+		{
+			const std::vector<std::byte>& skinning = state.groupSkinningChunks[groupIndex];
+			buildInput.voxelSkinningVertices.insert(
+				buildInput.voxelSkinningVertices.end(),
+				skinning.begin(),
+				skinning.end());
+		}
+		const uint32_t sourceVertexCount = vertexStrideBytes > 0u
+			? static_cast<uint32_t>(std::min<size_t>(vertices.size() / vertexStrideBytes, std::numeric_limits<uint32_t>::max()))
+			: group.groupVertexCount;
+		buildInput.voxelVertexCount += sourceVertexCount;
+
+		const uint32_t firstMeshlet = ComputeGroupSegmentFirstMeshlet(state, group, segment);
+		std::vector<uint32_t> triangles = BuildGroupTriangleIndices(
+			state.groupMeshletChunks[groupIndex],
+			state.groupMeshletVertexChunks[groupIndex],
+			state.groupMeshletTriangleChunks[groupIndex],
+			firstMeshlet,
+			segment.meshletCount);
+		buildInput.voxelTriangleIndices.reserve(buildInput.voxelTriangleIndices.size() + triangles.size());
+		buildInput.voxelTriangleRefinedGroupIds.reserve(buildInput.voxelTriangleRefinedGroupIds.size() + triangles.size() / 3ull);
+		for (uint32_t index : triangles)
+		{
+			buildInput.voxelTriangleIndices.push_back(vertexBase + index);
+		}
+		for (size_t triangleIndex = 0; triangleIndex < triangles.size() / 3ull; ++triangleIndex)
+		{
+			buildInput.voxelTriangleRefinedGroupIds.push_back(refinedGroupTag);
+		}
+
+		return true;
+	}
+
+	bool AppendTerminalSegmentSourceGeometry(
+		const ClusterLODBuildState& state,
+		uint32_t groupIndex,
+		VoxelFallbackGroupBuildInput& buildInput,
+		size_t vertexStrideBytes,
+		int32_t refinedGroupTag)
+	{
+		if (groupIndex >= state.groups.size())
+		{
+			return false;
+		}
+
+		const ClusterLODGroup& group = state.groups[groupIndex];
+		for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+		{
+			const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+			if (segment.refinedGroup >= 0)
+			{
+				continue;
+			}
+
+			if (!AppendGroupSegmentTriangleSourceGeometry(state, groupIndex, segment, buildInput, vertexStrideBytes, refinedGroupTag))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	bool AppendDescendantTriangleSourceGeometry(
 		const ClusterLODBuildState& state,
 		uint32_t groupIndex,
 		VoxelFallbackGroupBuildInput& buildInput,
 		std::unordered_set<uint32_t>& visitedGroups,
+		size_t vertexStrideBytes,
 		int32_t refinedGroupTag)
 	{
 		if (groupIndex >= state.groups.size())
@@ -2264,12 +2392,17 @@ namespace
 
 		if (refinedChildren.empty())
 		{
-			return AppendGroupTriangleSourceGeometry(state, groupIndex, buildInput, refinedGroupTag);
+			return AppendGroupTriangleSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes, refinedGroupTag);
+		}
+
+		if (!AppendTerminalSegmentSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes, refinedGroupTag))
+		{
+			return false;
 		}
 
 		for (uint32_t childGroupIndex : refinedChildren)
 		{
-			if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedGroups, refinedGroupTag))
+			if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedGroups, vertexStrideBytes, refinedGroupTag))
 			{
 				return false;
 			}
@@ -2448,7 +2581,7 @@ namespace
 			buildInput.voxelTriangleRefinedGroupIds.clear();
 			buildInput.sourceVoxelGroupIndices.clear();
 			buildInput.voxelVertexCount = 0;
-			return AppendGroupTriangleSourceGeometry(state, groupIndex, buildInput);
+			return AppendGroupTriangleSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes);
 		}
 
 		buildInput.voxelVertices.clear();
@@ -2458,6 +2591,10 @@ namespace
 		buildInput.sourceVoxelGroupIndices.clear();
 		buildInput.voxelVertexCount = 0;
 		std::unordered_set<uint32_t> visitedSourceGroups;
+		if (!AppendTerminalSegmentSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes, -1))
+		{
+			return false;
+		}
 
 		for (uint32_t childGroupIndex : refinedChildren)
 		{
@@ -2465,14 +2602,14 @@ namespace
 				GetVoxelRenderPayloadForGroup(state, childGroupIndex) != nullptr)
 			{
 				buildInput.sourceVoxelGroupIndices.push_back(childGroupIndex);
-				if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedSourceGroups, static_cast<int32_t>(childGroupIndex)))
+				if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedSourceGroups, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
 				{
 					return false;
 				}
 				continue;
 			}
 
-			if (!AppendGroupTriangleSourceGeometry(state, childGroupIndex, buildInput, static_cast<int32_t>(childGroupIndex)))
+			if (!AppendGroupTriangleSourceGeometry(state, childGroupIndex, buildInput, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
 			{
 				return false;
 			}
@@ -2658,8 +2795,7 @@ namespace
 
 				std::vector<const VoxelGroupPayload*> sourceVoxelPayloads;
 				std::vector<VoxelSourceCandidatePayload> candidateVoxelPayloads;
-				const bool hasTriangleVoxelSource = !buildInput.voxelTriangleIndices.empty();
-				if (!hasTriangleVoxelSource)
+				if (!buildInput.sourceVoxelGroupIndices.empty())
 				{
 					sourceVoxelPayloads.reserve(buildInput.sourceVoxelGroupIndices.size() * 2ull);
 					candidateVoxelPayloads.reserve(buildInput.sourceVoxelGroupIndices.size() * 2ull);

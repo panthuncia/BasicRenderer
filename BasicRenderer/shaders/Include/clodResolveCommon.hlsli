@@ -855,7 +855,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
 
     const uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
     const uint localGroupId = CLodVisibleClusterGroupID(packedCluster);
-    const uint localCubeIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    const uint localCubeIndex = CLodVisibleClusterVoxelCubeIndex(packedCluster);
 
     const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[instanceIndex];
     const PerObjectBuffer obj = perObjectBuffer[instanceData.perObjectBufferIndex];

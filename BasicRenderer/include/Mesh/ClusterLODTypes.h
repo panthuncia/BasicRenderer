@@ -196,7 +196,7 @@ struct ClusterLODBuilderSettings
 	float voxelFallbackAcceptanceBias = 1.0f;
 	float voxelFallbackOpacityThreshold = 0.0f;
 	bool voxelFallbackCarryZeroCoverage = false;
-	ClusterLODVoxelPruningMode voxelFallbackPruningMode = ClusterLODVoxelPruningMode::Spatial;
+	ClusterLODVoxelPruningMode voxelFallbackPruningMode = ClusterLODVoxelPruningMode::Coverage;
 };
 
 inline std::string GetClusterLODEnvironmentVariable(const char* name)
