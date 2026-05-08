@@ -21,7 +21,8 @@ public:
 		size_t vertexStrideBytes,
 		const std::vector<uint32_t>* triangleIndices,
 		const std::vector<std::byte>* skinningVertices = nullptr,
-		size_t skinningVertexStrideBytes = 0);
+		size_t skinningVertexStrideBytes = 0,
+		const std::vector<int32_t>* triangleRefinedGroupIds = nullptr);
 
 	bool IsValid() const;
 	void QueryAABB(
@@ -34,6 +35,7 @@ public:
 	const std::vector<std::byte>* SkinningVertices() const { return m_skinningVertices; }
 	size_t SkinningVertexStrideBytes() const { return m_skinningVertexStrideBytes; }
 	const std::vector<uint32_t>* TriangleIndices() const { return m_triangleIndices; }
+	const std::vector<int32_t>* TriangleRefinedGroupIds() const { return m_triangleRefinedGroupIds; }
 
 private:
 	struct Node
@@ -53,6 +55,7 @@ private:
 	const std::vector<std::byte>* m_skinningVertices = nullptr;
 	size_t m_skinningVertexStrideBytes = 0;
 	const std::vector<uint32_t>* m_triangleIndices = nullptr;
+	const std::vector<int32_t>* m_triangleRefinedGroupIds = nullptr;
 	std::vector<uint32_t> m_triangleOrder;
 	std::vector<Node> m_nodes;
 };
@@ -115,6 +118,22 @@ struct VoxelizeTrianglesResult
 	uint64_t sourceCoverageTriangleCandidateCount = 0;
 	uint64_t sourceCoverageTriangleTestCount = 0;
 	uint64_t sourceCoverageOutOfCellRejectionCount = 0;
+
+	struct RefinedGroupStats
+	{
+		int32_t refinedGroup = -1;
+		uint32_t candidateKeys = 0;
+		uint32_t triangleOwnedCells = 0;
+		uint32_t voxelOwnedCells = 0;
+		uint32_t candidateOwnedCells = 0;
+		uint32_t candidateOnlyCells = 0;
+		uint32_t positiveCoverageCells = 0;
+		uint32_t zeroCoverageDroppedCells = 0;
+		uint32_t emittedSourceCells = 0;
+		float totalCoverage = 0.0f;
+		float maxCoverage = 0.0f;
+	};
+	std::vector<RefinedGroupStats> refinedGroupStats;
 };
 
 // Voxelize a triangle set into a single VoxelGroupPayload.

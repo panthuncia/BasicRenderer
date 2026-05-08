@@ -89,6 +89,7 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
             color = saturate(float(UnpackDebugUint(payload)) / 16.0f).xxx;
             break;
         case OUTPUT_MESHLETS:
+        case OUTPUT_GEOMETRY_GROUP:
         case OUTPUT_LIGHT_CLUSTER_ID:
         case OUTPUT_VSM_PHYSICAL_PAGE:
             color = HashToColor(UnpackDebugUint(payload));

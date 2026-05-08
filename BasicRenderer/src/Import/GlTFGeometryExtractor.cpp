@@ -28,6 +28,7 @@
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
+#include "Mesh/DefaultCLodSettings.h"
 #include "Utilities/CachePathUtilities.h"
 
 using nlohmann::json;
@@ -1015,7 +1016,7 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 
 	auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
-	MeshIngestBuilder ingest(vertexSize, skinningVertexSize, meshFlags);
+	MeshIngestBuilder ingest(vertexSize, skinningVertexSize, meshFlags, GetDefaultBuilderSettings());
     std::vector<MeshUvSetData> uvSets;
     if (hasAnyTexcoordSet) {
         uvSets.resize(static_cast<size_t>(maxTexcoordSetIndex) + 1u);

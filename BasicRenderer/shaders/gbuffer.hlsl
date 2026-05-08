@@ -84,6 +84,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
         case OUTPUT_MESHLETS:
             payload = PackDebugUint(sample.meshletIndex);
             break;
+        case OUTPUT_GEOMETRY_GROUP:
+            payload = PackDebugUint(sample.geometryGroupIndex);
+            break;
         case OUTPUT_MODEL_NORMALS:
             payload = PackDebugFloat3(sample.normalOS * 0.5 + 0.5);
             break;

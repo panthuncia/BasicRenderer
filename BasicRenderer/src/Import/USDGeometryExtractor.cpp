@@ -28,6 +28,7 @@
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
+#include "Mesh/DefaultCLodSettings.h"
 
 using namespace pxr;
 
@@ -783,7 +784,7 @@ MeshPreprocessResult ExtractSubMesh(
 	// Populate MeshIngestBuilder
 	MeshIngestBuilder ingest(vertexSize,
 		(skinningData && *skinningData) ? skinningVertexSize : 0,
-		vertexFlags);
+		vertexFlags, GetDefaultBuilderSettings());
     ingest.SetUvSets(std::move(uvSets));
 
 	const size_t vertexCount = rawData->size() / static_cast<size_t>(vertexSize);

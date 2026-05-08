@@ -18,6 +18,7 @@
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
+#include "Mesh/DefaultCLodSettings.h"
 #include "Utilities/CachePathUtilities.h"
 
 namespace {
@@ -223,7 +224,7 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 		auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
 		// Populate MeshIngestBuilder
-		MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags);
+		MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags, GetDefaultBuilderSettings());
         ingest.SetUvSets(std::move(uvSets));
 		ingest.ReserveVertices(numVertices);
 		if (hasBones) {

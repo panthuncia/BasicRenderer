@@ -36,6 +36,7 @@ enum OutputType {
 	TRANSPARENT_VBOIT_DEPTH_DISTRIBUTION_EXPONENT = 32,
 	MATERIAL_SELECTED_MIP = 33,
 	VOXEL_GEOMETRY_PATH = 34,
+	GEOMETRY_GROUP = 35,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -74,4 +75,5 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Transparent VBOIT Depth Distribution Exponent",
 	"Material Selected Mip",
 	"Voxel Geometry Path",
+	"Geometry Group",
 };

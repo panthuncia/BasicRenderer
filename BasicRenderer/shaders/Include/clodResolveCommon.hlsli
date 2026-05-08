@@ -63,6 +63,7 @@ struct ClodGBufferColorSample
 struct ClodGBufferDebugSample
 {
     uint meshletIndex;
+    uint geometryGroupIndex;
     bool isVoxelPath;
     float3 normalOS;
     float2 motionVector;
@@ -72,6 +73,7 @@ struct ClodGBufferDebugSample
 struct ClodResolvedGBufferSample
 {
     uint meshletIndex;
+    uint geometryGroupIndex;
     bool isVoxelPath;
     float3 normalOS;
     float2 motionVector;
@@ -84,6 +86,7 @@ struct ClodResolvedCommonSample
     uint clusterIndex;
     uint meshletTriangleIndex;
     uint meshletIndex;
+    uint geometryGroupIndex;
     bool isVoxelPath;
     float3 positionWS;
     float3 positionVS;
@@ -923,6 +926,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     sample.clusterIndex = visibleClusterIndex;
     sample.meshletTriangleIndex = cellIndex;
     sample.meshletIndex = localCubeIndex;
+    sample.geometryGroupIndex = localGroupId;
     sample.isVoxelPath = true;
     sample.positionWS = worldPosition;
     sample.positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
@@ -1282,6 +1286,7 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
     sample.clusterIndex = clusterIndex;
     sample.meshletTriangleIndex = meshletTriangleIndex;
     sample.meshletIndex = md.drawcallAndMeshlet.y;
+    sample.geometryGroupIndex = CLodVisibleClusterGroupID(packedVisibleCluster);
     sample.positionWS = worldPosition;
     sample.positionVS = positionVS;
     sample.normalWSBase = worldNormal;
@@ -1345,6 +1350,7 @@ bool ResolveClodGBufferSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool 
     }
 
     sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.geometryGroupIndex = resolvedSample.geometryGroupIndex;
     sample.isVoxelPath = resolvedSample.isVoxelPath;
     sample.normalOS = resolvedSample.normalOS;
     sample.motionVector = resolvedSample.motionVector;
@@ -1403,6 +1409,7 @@ bool ResolveClodGBufferDebugSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, 
     }
 
     sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.geometryGroupIndex = resolvedSample.geometryGroupIndex;
     sample.isVoxelPath = resolvedSample.isVoxelPath;
     sample.normalOS = resolvedSample.normalOS;
     sample.motionVector = resolvedSample.motionVector;

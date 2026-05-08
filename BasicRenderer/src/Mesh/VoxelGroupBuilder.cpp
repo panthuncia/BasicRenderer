@@ -635,13 +635,13 @@ namespace
 		return cellVoxelMap;
 	}
 
-	std::unordered_set<uint64_t> RasterizeVoxelCandidatePayloadsToGrid(
+	std::unordered_map<uint64_t, std::vector<int32_t>> RasterizeVoxelCandidatePayloadsToGrid(
 		const std::vector<VoxelSourceCandidatePayload>& sourceVoxelPayloads,
 		const Float3& aabbMin,
 		float voxelWidth,
 		uint32_t resolution)
 	{
-		std::unordered_set<uint64_t> candidateCells;
+		std::unordered_map<uint64_t, std::vector<int32_t>> candidateCells;
 		if (resolution == 0u || voxelWidth <= 0.0f)
 		{
 			return candidateCells;
@@ -674,7 +674,7 @@ namespace
 					{
 						for (uint32_t cx = cxMin; cx <= cxMax; ++cx)
 						{
-							candidateCells.insert(PackCell(cx, cy, cz));
+							AddUniqueRefinedGroup(candidateCells[PackCell(cx, cy, cz)], sourceCell.refinedGroup);
 						}
 					}
 				}
@@ -845,6 +845,7 @@ namespace
 
 	CellCoverageSample SampleCellCoverageSourceTriangles(
 		const VoxelSourceTriangleBVH& sourceTriangles,
+		int32_t refinedGroupFilter,
 		const Float3& cellWorldMin,
 		const Float3& cellWorldMax,
 		const std::vector<Ray>& rays,
@@ -870,6 +871,7 @@ namespace
 
 		const std::vector<std::byte>* vertices = sourceTriangles.Vertices();
 		const std::vector<uint32_t>* meshTriangleIndices = sourceTriangles.TriangleIndices();
+		const std::vector<int32_t>* triangleRefinedGroupIds = sourceTriangles.TriangleRefinedGroupIds();
 		if (vertices == nullptr || meshTriangleIndices == nullptr)
 		{
 			return sample;
@@ -899,6 +901,11 @@ namespace
 			Float3 nearestNormal{};
 			for (uint32_t triLocalIdx : sourceCandidateTriangles)
 			{
+				if (triangleRefinedGroupIds != nullptr && triLocalIdx < triangleRefinedGroupIds->size() && (*triangleRefinedGroupIds)[triLocalIdx] != refinedGroupFilter)
+				{
+					continue;
+				}
+
 				const size_t triangleBase = static_cast<size_t>(triLocalIdx) * 3u;
 				if (triangleBase + 2u >= meshTriangleIndices->size())
 				{
@@ -1028,39 +1035,78 @@ namespace
 			return 0u;
 		}
 
-		float totalCoverage = 0.0f;
-		for (const VoxelCell& cell : cells)
-		{
-			totalCoverage += std::clamp(cell.opacity, 0.0f, 1.0f);
-		}
-
-		const uint32_t targetCellCount = std::min<uint32_t>(
-			static_cast<uint32_t>(std::ceil(std::max(0.0f, totalCoverage))),
-			static_cast<uint32_t>(cells.size()));
-		if (targetCellCount >= cells.size())
-		{
-			return 0u;
-		}
-
+		const size_t originalCount = cells.size();
 		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
-			const float lhsOpacity = std::clamp(lhs.opacity, 0.0f, 1.0f);
-			const float rhsOpacity = std::clamp(rhs.opacity, 0.0f, 1.0f);
-			if (lhsOpacity != rhsOpacity)
+			if (lhs.refinedGroup != rhs.refinedGroup)
 			{
-				return lhsOpacity > rhsOpacity;
+				return lhs.refinedGroup < rhs.refinedGroup;
 			}
 			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
 			const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
-			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
+			return lhsCell < rhsCell;
 		});
 
-		const uint32_t removedCount = static_cast<uint32_t>(cells.size() - targetCellCount);
-		cells.resize(targetCellCount);
-		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
+		std::vector<VoxelCell> keptCells;
+		keptCells.reserve(cells.size());
+
+		auto appendPrunedSection = [&keptCells](std::vector<VoxelCell>::iterator begin, std::vector<VoxelCell>::iterator end)
+		{
+			float totalCoverage = 0.0f;
+			for (auto it = begin; it != end; ++it)
+			{
+				totalCoverage += std::clamp(it->opacity, 0.0f, 1.0f);
+			}
+
+			const size_t sectionCellCount = static_cast<size_t>(std::distance(begin, end));
+			const uint32_t targetCellCount = std::min<uint32_t>(
+				static_cast<uint32_t>(std::ceil(std::max(0.0f, totalCoverage))),
+				static_cast<uint32_t>(std::min<size_t>(sectionCellCount, std::numeric_limits<uint32_t>::max())));
+			if (targetCellCount == 0u)
+			{
+				return;
+			}
+
+			std::vector<VoxelCell> sectionCells(begin, end);
+			if (targetCellCount < sectionCells.size())
+			{
+				std::sort(sectionCells.begin(), sectionCells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
+					const float lhsOpacity = std::clamp(lhs.opacity, 0.0f, 1.0f);
+					const float rhsOpacity = std::clamp(rhs.opacity, 0.0f, 1.0f);
+					if (lhsOpacity != rhsOpacity)
+					{
+						return lhsOpacity > rhsOpacity;
+					}
+					const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
+					const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
+					return lhsCell < rhsCell;
+				});
+				sectionCells.resize(targetCellCount);
+			}
+
+			keptCells.insert(keptCells.end(), sectionCells.begin(), sectionCells.end());
+		};
+
+		auto sectionBegin = cells.begin();
+		while (sectionBegin != cells.end())
+		{
+			auto sectionEnd = sectionBegin + 1;
+			while (sectionEnd != cells.end() && sectionEnd->refinedGroup == sectionBegin->refinedGroup)
+			{
+				++sectionEnd;
+			}
+
+			appendPrunedSection(sectionBegin, sectionEnd);
+			sectionBegin = sectionEnd;
+		}
+
+		std::sort(keptCells.begin(), keptCells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
 			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
 			const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
 			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
 		});
+
+		const uint32_t removedCount = static_cast<uint32_t>(std::min<size_t>(originalCount - keptCells.size(), std::numeric_limits<uint32_t>::max()));
+		cells = std::move(keptCells);
 		return removedCount;
 	}
 
@@ -1116,6 +1162,8 @@ namespace
 	{
 		switch (pruningMode)
 		{
+		case ClusterLODVoxelPruningMode::None:
+			return 0u;
 		case ClusterLODVoxelPruningMode::Coverage:
 			return PruneCellsByPureCoverage(cells);
 		case ClusterLODVoxelPruningMode::Spatial:
@@ -1151,13 +1199,15 @@ void VoxelSourceTriangleBVH::Build(
 	size_t vertexStrideBytes,
 	const std::vector<uint32_t>* triangleIndices,
 	const std::vector<std::byte>* skinningVertices,
-	size_t skinningVertexStrideBytes)
+	size_t skinningVertexStrideBytes,
+	const std::vector<int32_t>* triangleRefinedGroupIds)
 {
 	m_vertices = vertices;
 	m_vertexStrideBytes = vertexStrideBytes;
 	m_skinningVertices = skinningVertices;
 	m_skinningVertexStrideBytes = skinningVertexStrideBytes;
 	m_triangleIndices = triangleIndices;
+	m_triangleRefinedGroupIds = triangleRefinedGroupIds;
 	m_triangleOrder.clear();
 	m_nodes.clear();
 
@@ -1369,19 +1419,19 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 		cellVoxelMap = RasterizeVoxelPayloadsToGrid(sourceVoxelPayloads, aabbMin, input.voxelWidth, input.resolution);
 	}
 
-	std::unordered_set<uint64_t> candidateVoxelKeys;
+	std::unordered_map<uint64_t, std::vector<int32_t>> candidateVoxelMap;
 	if (hasCandidateVoxelSources)
 	{
-		candidateVoxelKeys = RasterizeVoxelCandidatePayloadsToGrid(
+		candidateVoxelMap = RasterizeVoxelCandidatePayloadsToGrid(
 			*input.candidateVoxelPayloads,
 			aabbMin,
 			input.voxelWidth,
 			input.resolution);
 	}
 	detailedResult.triangleCandidateCellCount = static_cast<uint32_t>(std::min<size_t>(cellTriMap.size(), std::numeric_limits<uint32_t>::max()));
-	detailedResult.voxelCandidateCellCount = static_cast<uint32_t>(std::min<size_t>(candidateVoxelKeys.size() + cellVoxelMap.size(), std::numeric_limits<uint32_t>::max()));
+	detailedResult.voxelCandidateCellCount = static_cast<uint32_t>(std::min<size_t>(candidateVoxelMap.size() + cellVoxelMap.size(), std::numeric_limits<uint32_t>::max()));
 
-	if (cellTriMap.empty() && cellVoxelMap.empty() && candidateVoxelKeys.empty())
+	if (cellTriMap.empty() && cellVoxelMap.empty() && candidateVoxelMap.empty())
 		return detailedResult;
 
 	const std::vector<Ray> rays = GenerateCellRays(std::max(1u, input.raysPerCell), input.resolution * 2654435761u);
@@ -1393,7 +1443,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 	};
 
 	std::vector<uint64_t> candidateKeys;
-	candidateKeys.reserve(cellTriMap.size() + cellVoxelMap.size() + candidateVoxelKeys.size());
+	candidateKeys.reserve(cellTriMap.size() + cellVoxelMap.size() + candidateVoxelMap.size());
 	for (const auto& [key, triIndices] : cellTriMap)
 	{
 		candidateKeys.push_back(key);
@@ -1405,7 +1455,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			candidateKeys.push_back(key);
 		}
 	}
-	for (uint64_t key : candidateVoxelKeys)
+	for (const auto& [key, candidateRefinedGroups] : candidateVoxelMap)
 	{
 		if (cellTriMap.find(key) == cellTriMap.end() && cellVoxelMap.find(key) == cellVoxelMap.end())
 		{
@@ -1415,6 +1465,13 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 	detailedResult.candidateCellCount = static_cast<uint32_t>(std::min<size_t>(candidateKeys.size(), std::numeric_limits<uint32_t>::max()));
 
 	result.activeCells.reserve(candidateKeys.size());
+	std::unordered_map<int32_t, VoxelizeTrianglesResult::RefinedGroupStats> refinedGroupStats;
+	auto getRefinedGroupStats = [&refinedGroupStats](int32_t refinedGroup) -> VoxelizeTrianglesResult::RefinedGroupStats&
+	{
+		VoxelizeTrianglesResult::RefinedGroupStats& stats = refinedGroupStats[refinedGroup];
+		stats.refinedGroup = refinedGroup;
+		return stats;
+	};
 
 	for (uint64_t key : candidateKeys)
 	{
@@ -1434,6 +1491,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 
 		const auto triIt = cellTriMap.find(key);
 		const auto voxelIt = cellVoxelMap.find(key);
+		const auto candidateIt = candidateVoxelMap.find(key);
 		std::vector<int32_t> refinedGroups;
 		if (triIt != cellTriMap.end() && hasTriangleSources)
 		{
@@ -1463,6 +1521,13 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 				AddUniqueRefinedGroup(refinedGroups, refinedGroup);
 			}
 		}
+		if (candidateIt != candidateVoxelMap.end())
+		{
+			for (int32_t refinedGroup : candidateIt->second)
+			{
+				AddUniqueRefinedGroup(refinedGroups, refinedGroup);
+			}
+		}
 		if (refinedGroups.empty())
 		{
 			refinedGroups.push_back(-1);
@@ -1471,6 +1536,14 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 		std::sort(refinedGroups.begin(), refinedGroups.end());
 		for (int32_t refinedGroup : refinedGroups)
 		{
+			VoxelizeTrianglesResult::RefinedGroupStats& stats = getRefinedGroupStats(refinedGroup);
+			++stats.candidateKeys;
+			const bool hasOnlyCandidateSource = triIt == cellTriMap.end() && voxelIt == cellVoxelMap.end() && candidateIt != candidateVoxelMap.end();
+			if (hasOnlyCandidateSource)
+			{
+				++stats.candidateOnlyCells;
+			}
+
 			std::vector<uint32_t> ownedTriangles;
 			if (triIt != cellTriMap.end() && hasTriangleSources)
 			{
@@ -1487,6 +1560,10 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 						ownedTriangles.push_back(triangleIndex);
 					}
 				}
+			}
+			if (!ownedTriangles.empty())
+			{
+				++stats.triangleOwnedCells;
 			}
 
 			std::vector<VoxelSourceCellRef> ownedVoxelRefs;
@@ -1510,6 +1587,15 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 					}
 				}
 			}
+			if (!ownedVoxelRefs.empty())
+			{
+				++stats.voxelOwnedCells;
+			}
+			if (candidateIt != candidateVoxelMap.end() &&
+				std::find(candidateIt->second.begin(), candidateIt->second.end(), refinedGroup) != candidateIt->second.end())
+			{
+				++stats.candidateOwnedCells;
+			}
 
 			CellCoverageSample coverage{};
 			uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
@@ -1517,6 +1603,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			{
 				coverage = SampleCellCoverageSourceTriangles(
 					*input.coverageSourceTriangles,
+					refinedGroup,
 					cellMin,
 					cellMax,
 					rays,
@@ -1540,7 +1627,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 				dominantBoneIndex = ComputeDominantBoneIndexForCell(input, ownedTriangles);
 			}
 
-			if (!ownedVoxelRefs.empty() && !hasCoverageSourceTriangles)
+			if (!ownedVoxelRefs.empty())
 			{
 				uint32_t voxelDominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
 				CellCoverageSample voxelCoverage = SampleCellCoverageVoxels(
@@ -1565,9 +1652,13 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 				++detailedResult.positiveCoverageCellCount;
 				detailedResult.totalCoverage += coverage.coverage;
 				detailedResult.maxCoverage = std::max(detailedResult.maxCoverage, coverage.coverage);
+				++stats.positiveCoverageCells;
+				stats.totalCoverage += coverage.coverage;
+				stats.maxCoverage = std::max(stats.maxCoverage, coverage.coverage);
 			}
 			if (coverage.coverage <= 0.0f && !input.keepZeroCoverageSourceCells)
 			{
+				++stats.zeroCoverageDroppedCells;
 				continue;
 			}
 
@@ -1596,8 +1687,18 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			vc.refinedGroup = refinedGroup;
 
 			result.activeCells.push_back(vc);
+			++stats.emittedSourceCells;
 		}
 	}
+
+	detailedResult.refinedGroupStats.reserve(refinedGroupStats.size());
+	for (auto& [refinedGroup, stats] : refinedGroupStats)
+	{
+		detailedResult.refinedGroupStats.push_back(stats);
+	}
+	std::sort(detailedResult.refinedGroupStats.begin(), detailedResult.refinedGroupStats.end(), [](const auto& lhs, const auto& rhs) {
+		return lhs.refinedGroup < rhs.refinedGroup;
+	});
 
 	detailedResult.sourcePayload = result;
 	detailedResult.renderPayload = result;

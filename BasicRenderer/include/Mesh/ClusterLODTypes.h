@@ -169,6 +169,7 @@ enum class ClusterLODVoxelFallbackMode : uint8_t
 
 enum class ClusterLODVoxelPruningMode : uint8_t
 {
+	None,
 	Spatial,
 	Coverage,
 };
@@ -188,11 +189,11 @@ struct ClusterLODBuilderSettings
 	bool enableVoxelFallback = true;
 	ClusterLODVoxelFallbackMode voxelFallbackMode = ClusterLODVoxelFallbackMode::Auto;
 	uint32_t voxelGridBaseResolution = 32u;
-	uint32_t voxelMinResolution = 2u;
+	uint32_t voxelMinResolution = 0u;
 	uint32_t voxelRaysPerCell = 64u;
-	float voxelFallbackScalingFactor = 1.0f;
-	uint32_t voxelFallbackMaxRetryCount = 4u;
-	float voxelFallbackGrowthFactor = 1.25f;
+	float voxelFallbackScalingFactor = 0.75f;
+	uint32_t voxelFallbackMaxRetryCount = 1000u;
+	float voxelFallbackGrowthFactor = 1.1f;
 	float voxelFallbackAcceptanceBias = 1.0f;
 	float voxelFallbackOpacityThreshold = 0.0f;
 	bool voxelFallbackCarryZeroCoverage = false;
