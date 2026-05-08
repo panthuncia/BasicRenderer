@@ -329,11 +329,6 @@ bool CLodTryFindVoxelPage(
     for (uint pageIndex = 0u; pageIndex < group.pageCount; ++pageIndex)
     {
         GroupPageMapEntry candidateEntry = CLodLoadVoxelPageMapEntry(metadata, group, pageIndex);
-        if (candidateEntry.slabDescriptorIndex == 0u && candidateEntry.slabByteOffset == 0u)
-        {
-            continue;
-        }
-
         CLodVoxelPageHeader candidateHeader = CLodLoadVoxelPageHeader(candidateEntry.slabDescriptorIndex, candidateEntry.slabByteOffset);
         if (candidateHeader.magic != CLOD_VOXEL_PAGE_MAGIC || candidateHeader.version != CLOD_VOXEL_PAGE_VERSION)
         {
@@ -370,11 +365,6 @@ bool CLodTryLoadVoxelGroupDescriptor(
         for (uint pageIndex = 0u; pageIndex < group.pageCount; ++pageIndex)
         {
             GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, pageIndex);
-            if (pageEntry.slabDescriptorIndex == 0u && pageEntry.slabByteOffset == 0u)
-            {
-                continue;
-            }
-
             CLodVoxelPageHeader pageHeader = CLodLoadVoxelPageHeader(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset);
             if (pageHeader.magic != CLOD_VOXEL_PAGE_MAGIC || pageHeader.version != CLOD_VOXEL_PAGE_VERSION)
             {

@@ -1736,6 +1736,7 @@ namespace
 		std::vector<uint32_t> sourceVoxelGroupIndices;
 		uint32_t voxelVertexCount = 0;
 		bool autoWouldFitBudget = false;
+		float autoAcceptanceErrorReference = 0.0f;
 	};
 
 	struct VoxelSourcePayloadRef
@@ -2572,8 +2573,9 @@ namespace
 					? group.bounds.error
 					: finiteParentErrorForGroup[groupIndex];
 			}
-			buildInput.autoWouldFitBudget = hasRefinedDomain && finiteVoxelDecisionError(triangleErrorReference) &&
-				buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < triangleErrorReference;
+			buildInput.autoAcceptanceErrorReference = triangleErrorReference;
+			buildInput.autoWouldFitBudget = hasRefinedDomain && finiteVoxelDecisionError(buildInput.autoAcceptanceErrorReference) &&
+				buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < buildInput.autoAcceptanceErrorReference;
 			if (buildInput.autoWouldFitBudget)
 			{
 				stats.autoCandidateGroups++;
@@ -2615,6 +2617,12 @@ namespace
 			const uint32_t retryCount = std::max(1u, settings.voxelFallbackMaxRetryCount + 1u);
 			for (uint32_t attempt = 0; attempt < retryCount; ++attempt)
 			{
+				if (requireBudgetFit && finiteVoxelDecisionError(buildInput.autoAcceptanceErrorReference) &&
+					voxelError * std::max(1.0f, settings.voxelFallbackAcceptanceBias) >= buildInput.autoAcceptanceErrorReference)
+				{
+					break;
+				}
+
 				std::vector<const VoxelGroupPayload*> sourceVoxelPayloads;
 				std::vector<VoxelSourceCandidatePayload> candidateVoxelPayloads;
 				const bool hasTriangleVoxelSource = !buildInput.voxelTriangleIndices.empty();
@@ -2749,6 +2757,20 @@ namespace
 				stats.failedBuilds++;
 				return false;
 			}
+			uint32_t packedOccupiedCells = 0u;
+			for (const CLodVoxelCubeRecord& cubeRecord : packed.cubeRecords)
+			{
+				packedOccupiedCells += static_cast<uint32_t>(std::popcount(cubeRecord.occupancyMask));
+			}
+			if (packedOccupiedCells != payload.activeCells.size())
+			{
+				spdlog::warn(
+					"ClusterLOD voxel pack occupancy mismatch: group={} payload_cells={} packed_occupied_cells={} packed_cubes={}",
+					groupIndex,
+					payload.activeCells.size(),
+					packedOccupiedCells,
+					packed.cubeRecords.size());
+			}
 
 			std::vector<std::vector<std::byte>> voxelPageBlobs = BuildVoxelGroupPageBlobs(
 				packed.descriptor,
@@ -2765,6 +2787,7 @@ namespace
 				auto& sections = state.voxelTraversalSections[groupIndex];
 				sections.clear();
 				uint32_t runBegin = 0u;
+				uint32_t sectionCubeCount = 0u;
 				while (runBegin < static_cast<uint32_t>(packed.cubeRecords.size()))
 				{
 					const int32_t refinedGroup = packed.cubeRecords[runBegin].refinedGroup;
@@ -2784,7 +2807,16 @@ namespace
 						sectionDescriptorIndex,
 						runEnd - runBegin,
 						refinedGroup });
+					sectionCubeCount += runEnd - runBegin;
 					runBegin = runEnd;
+				}
+				if (sectionCubeCount != packed.descriptor.cubeCount)
+				{
+					spdlog::warn(
+						"ClusterLOD voxel section cube mismatch: group={} descriptor_cubes={} section_cubes={}",
+						groupIndex,
+						packed.descriptor.cubeCount,
+						sectionCubeCount);
 				}
 			}
 			state.voxelGroupMapping.packedCubeRecords.insert(

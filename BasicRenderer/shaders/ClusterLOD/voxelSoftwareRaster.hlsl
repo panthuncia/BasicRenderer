@@ -21,14 +21,44 @@ bool VoxelMaskTest(uint2 mask, uint bitIndex)
 
 bool RayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxMax, out float tEnter, out float tExit)
 {
-    const float3 invDir = 1.0f / rayDir;
-    const float3 t0 = (boxMin - rayOrigin) * invDir;
-    const float3 t1 = (boxMax - rayOrigin) * invDir;
-    const float3 tMin3 = min(t0, t1);
-    const float3 tMax3 = max(t0, t1);
-    tEnter = max(max(tMin3.x, tMin3.y), tMin3.z);
-    tExit = min(min(tMax3.x, tMax3.y), tMax3.z);
-    return tExit >= max(tEnter, 0.0f);
+    tEnter = 0.0f;
+    tExit = 3.402823e+38f;
+
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
+    {
+        const float origin = rayOrigin[axis];
+        const float dir = rayDir[axis];
+        const float bMin = boxMin[axis];
+        const float bMax = boxMax[axis];
+
+        if (abs(dir) <= 1.0e-8f)
+        {
+            if (origin < bMin || origin > bMax)
+            {
+                return false;
+            }
+            continue;
+        }
+
+        const float invDir = 1.0f / dir;
+        float t0 = (bMin - origin) * invDir;
+        float t1 = (bMax - origin) * invDir;
+        if (t0 > t1)
+        {
+            const float tmp = t0;
+            t0 = t1;
+            t1 = tmp;
+        }
+        tEnter = max(tEnter, t0);
+        tExit = min(tExit, t1);
+        if (tExit < tEnter)
+        {
+            return false;
+        }
+    }
+
+    return tExit >= 0.0f;
 }
 
 bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cube, out float tHit, out uint hitCellIndex)
@@ -53,11 +83,15 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cu
         stepDir.x > 0 ? float(cell.x + 1) : float(cell.x),
         stepDir.y > 0 ? float(cell.y + 1) : float(cell.y),
         stepDir.z > 0 ? float(cell.z + 1) : float(cell.z));
-    float3 tMax = (nextBoundary - rayOrigin) / rayDir;
-    float3 tDelta = abs(1.0f / rayDir);
     const float largeT = 3.402823e+38f;
-    tMax = float3(isfinite(tMax.x) ? tMax.x : largeT, isfinite(tMax.y) ? tMax.y : largeT, isfinite(tMax.z) ? tMax.z : largeT);
-    tDelta = float3(isfinite(tDelta.x) ? tDelta.x : largeT, isfinite(tDelta.y) ? tDelta.y : largeT, isfinite(tDelta.z) ? tDelta.z : largeT);
+    float3 tMax = float3(
+        abs(rayDir.x) > 1.0e-8f ? (nextBoundary.x - rayOrigin.x) / rayDir.x : largeT,
+        abs(rayDir.y) > 1.0e-8f ? (nextBoundary.y - rayOrigin.y) / rayDir.y : largeT,
+        abs(rayDir.z) > 1.0e-8f ? (nextBoundary.z - rayOrigin.z) / rayDir.z : largeT);
+    float3 tDelta = float3(
+        abs(rayDir.x) > 1.0e-8f ? abs(1.0f / rayDir.x) : largeT,
+        abs(rayDir.y) > 1.0e-8f ? abs(1.0f / rayDir.y) : largeT,
+        abs(rayDir.z) > 1.0e-8f ? abs(1.0f / rayDir.z) : largeT);
 
     [loop]
     for (uint iter = 0u; iter < 16u; ++iter)
