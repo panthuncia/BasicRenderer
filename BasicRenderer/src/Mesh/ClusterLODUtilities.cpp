@@ -2478,12 +2478,18 @@ namespace
 		const uint32_t originalGroupCount = static_cast<uint32_t>(state.groups.size());
 		std::vector<VoxelFallbackGroupBuildInput> groupInputs(originalGroupCount);
 		std::vector<float> finiteParentErrorForGroup(originalGroupCount, 0.0f);
+		std::vector<float> originalGroupErrors(originalGroupCount, 0.0f);
 		uint32_t maxDepth = 0;
 
 		auto finiteVoxelDecisionError = [](float error) -> bool
 		{
 			return std::isfinite(error) && error > 0.0f && error < std::numeric_limits<float>::max() * 0.5f;
 		};
+
+		for (uint32_t groupIndex = 0; groupIndex < originalGroupCount; ++groupIndex)
+		{
+			originalGroupErrors[groupIndex] = state.groups[groupIndex].bounds.error;
+		}
 
 		for (const ClusterLODGroup& parentGroup : state.groups)
 		{
@@ -2537,9 +2543,35 @@ namespace
 
 			stats.validGroups++;
 			const bool hasRefinedDomain = group.terminalSegmentCount < group.segmentCount;
-			const float triangleErrorReference = finiteVoxelDecisionError(group.bounds.error)
-				? group.bounds.error
-				: finiteParentErrorForGroup[groupIndex];
+			float triangleErrorReference = std::numeric_limits<float>::max();
+			uint32_t finiteRefinedChildErrorCount = 0u;
+			if (hasRefinedDomain)
+			{
+				for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+				{
+					const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+					if (segment.refinedGroup < 0)
+					{
+						continue;
+					}
+
+					const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
+					const float childError = childGroupIndex < originalGroupErrors.size()
+						? originalGroupErrors[childGroupIndex]
+						: 0.0f;
+					if (finiteVoxelDecisionError(childError))
+					{
+						triangleErrorReference = std::min(triangleErrorReference, childError);
+						finiteRefinedChildErrorCount++;
+					}
+				}
+			}
+			if (finiteRefinedChildErrorCount == 0u)
+			{
+				triangleErrorReference = finiteVoxelDecisionError(group.bounds.error)
+					? group.bounds.error
+					: finiteParentErrorForGroup[groupIndex];
+			}
 			buildInput.autoWouldFitBudget = hasRefinedDomain && finiteVoxelDecisionError(triangleErrorReference) &&
 				buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < triangleErrorReference;
 			if (buildInput.autoWouldFitBudget)
@@ -2742,15 +2774,11 @@ namespace
 						runEnd++;
 					}
 
-					uint32_t sectionDescriptorIndex = descriptorIndex;
-					if (runBegin != 0u || runEnd != static_cast<uint32_t>(packed.cubeRecords.size()))
-					{
-						CLodVoxelGroupDescriptor sectionDescriptor = packed.descriptor;
-						sectionDescriptor.firstCube = firstCube + runBegin;
-						sectionDescriptor.cubeCount = runEnd - runBegin;
-						sectionDescriptorIndex = static_cast<uint32_t>(state.voxelGroupMapping.packedGroupDescriptors.size());
-						state.voxelGroupMapping.packedGroupDescriptors.push_back(sectionDescriptor);
-					}
+					CLodVoxelGroupDescriptor sectionDescriptor = packed.descriptor;
+					sectionDescriptor.firstCube = runBegin;
+					sectionDescriptor.cubeCount = runEnd - runBegin;
+					const uint32_t sectionDescriptorIndex = static_cast<uint32_t>(state.voxelGroupMapping.packedGroupDescriptors.size());
+					state.voxelGroupMapping.packedGroupDescriptors.push_back(sectionDescriptor);
 
 					sections.push_back(ClusterLODBuildState::VoxelTraversalSection{
 						sectionDescriptorIndex,
@@ -2833,7 +2861,7 @@ namespace
 			}
 		}
 
-		bool propagatedAny = true;
+		bool propagatedAny = forceAllVoxels;
 		while (propagatedAny)
 		{
 			propagatedAny = false;
