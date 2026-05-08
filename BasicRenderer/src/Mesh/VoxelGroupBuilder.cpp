@@ -780,42 +780,87 @@ namespace
 		return sample;
 	}
 
-	uint32_t PruneCellsByCoverage(std::vector<VoxelCell>& cells)
+	uint32_t PruneCellsByPureCoverage(std::vector<VoxelCell>& cells)
 	{
 		if (cells.empty())
 		{
 			return 0u;
 		}
 
-		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
-			if (lhs.opacity != rhs.opacity)
-			{
-				return lhs.opacity < rhs.opacity;
-			}
-
-			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
-			const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
-			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
-		});
-
-		float totalCoverageVolume = 0.0f;
+		float totalCoverage = 0.0f;
 		for (const VoxelCell& cell : cells)
 		{
-			totalCoverageVolume += std::clamp(cell.opacity, 0.0f, 1.0f);
+			totalCoverage += std::clamp(cell.opacity, 0.0f, 1.0f);
 		}
 
-		size_t survivingCount = cells.size();
-		size_t removeCount = 0;
-		while (survivingCount > 0 && static_cast<float>(survivingCount - 1u) >= totalCoverageVolume)
+		const uint32_t targetCellCount = std::min<uint32_t>(
+			static_cast<uint32_t>(std::ceil(std::max(0.0f, totalCoverage))),
+			static_cast<uint32_t>(cells.size()));
+		if (targetCellCount >= cells.size())
 		{
-			--survivingCount;
-			++removeCount;
+			return 0u;
 		}
 
-		if (removeCount > 0)
+		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
+			const float lhsOpacity = std::clamp(lhs.opacity, 0.0f, 1.0f);
+			const float rhsOpacity = std::clamp(rhs.opacity, 0.0f, 1.0f);
+			if (lhsOpacity != rhsOpacity)
+			{
+				return lhsOpacity > rhsOpacity;
+			}
+			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
+			const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
+			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
+		});
+
+		const uint32_t removedCount = static_cast<uint32_t>(cells.size() - targetCellCount);
+		cells.resize(targetCellCount);
+		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
+			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
+			const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
+			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
+		});
+		return removedCount;
+	}
+
+	uint32_t PruneCellsBySpatialCoverage(std::vector<VoxelCell>& cells)
+	{
+		if (cells.empty())
 		{
-			cells.erase(cells.begin(), cells.begin() + static_cast<std::ptrdiff_t>(removeCount));
+			return 0u;
 		}
+
+		const size_t originalCount = cells.size();
+		cells.erase(std::remove_if(cells.begin(), cells.end(), [](const VoxelCell& cell) {
+			const float coverage = std::clamp(cell.opacity, 0.0f, 1.0f);
+			if (coverage >= 1.0f)
+			{
+				return false;
+			}
+			if (coverage <= 0.0f)
+			{
+				return true;
+			}
+
+			uint32_t hash = 2166136261u;
+			auto mix = [&hash](uint32_t value)
+			{
+				hash ^= value;
+				hash *= 16777619u;
+			};
+			mix(cell.x);
+			mix(cell.y);
+			mix(cell.z);
+			mix(static_cast<uint32_t>(cell.refinedGroup));
+			hash ^= hash >> 16u;
+			hash *= 0x7feb352du;
+			hash ^= hash >> 15u;
+			hash *= 0x846ca68bu;
+			hash ^= hash >> 16u;
+
+			const float stochasticCoverage = static_cast<float>(hash >> 8u) * (1.0f / 16777216.0f);
+			return stochasticCoverage >= coverage;
+		}), cells.end());
 
 		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
 			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
@@ -823,7 +868,19 @@ namespace
 			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
 		});
 
-		return static_cast<uint32_t>(std::min<size_t>(removeCount, std::numeric_limits<uint32_t>::max()));
+		return static_cast<uint32_t>(std::min<size_t>(originalCount - cells.size(), std::numeric_limits<uint32_t>::max()));
+	}
+
+	uint32_t PruneCellsByCoverage(std::vector<VoxelCell>& cells, ClusterLODVoxelPruningMode pruningMode)
+	{
+		switch (pruningMode)
+		{
+		case ClusterLODVoxelPruningMode::Coverage:
+			return PruneCellsByPureCoverage(cells);
+		case ClusterLODVoxelPruningMode::Spatial:
+		default:
+			return PruneCellsBySpatialCoverage(cells);
+		}
 	}
 
 	// Morton code: 10-bit per axis -> 30-bit interleaved
@@ -1124,7 +1181,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 
 	detailedResult.sourcePayload = result;
 	detailedResult.renderPayload = result;
-	detailedResult.prunedCellCount = PruneCellsByCoverage(detailedResult.renderPayload.activeCells);
+	detailedResult.prunedCellCount = PruneCellsByCoverage(detailedResult.renderPayload.activeCells, input.pruningMode);
 
 	return detailedResult;
 }

@@ -167,6 +167,12 @@ enum class ClusterLODVoxelFallbackMode : uint8_t
 	VoxelOnly,
 };
 
+enum class ClusterLODVoxelPruningMode : uint8_t
+{
+	Spatial,
+	Coverage,
+};
+
 struct ClusterLODBuilderSettings
 {
 	bool disableSloppyFallback = false;
@@ -190,6 +196,7 @@ struct ClusterLODBuilderSettings
 	float voxelFallbackAcceptanceBias = 1.0f;
 	float voxelFallbackOpacityThreshold = 0.0f;
 	bool voxelFallbackCarryZeroCoverage = false;
+	ClusterLODVoxelPruningMode voxelFallbackPruningMode = ClusterLODVoxelPruningMode::Spatial;
 };
 
 inline std::string GetClusterLODEnvironmentVariable(const char* name)
@@ -280,6 +287,19 @@ inline ClusterLODBuilderSettings ApplyClusterLODBuilderEnvironmentOverrides(Clus
 	readFloat("BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS", settings.voxelFallbackAcceptanceBias);
 	readFloat("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD", settings.voxelFallbackOpacityThreshold);
 	readBool("BASICRENDERER_CLOD_VOXEL_CARRY_ZERO_COVERAGE", settings.voxelFallbackCarryZeroCoverage);
+
+	const std::string pruningModeString = GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_PRUNING");
+	if (!pruningModeString.empty())
+	{
+		if (pruningModeString == "coverage" || pruningModeString == "global" || pruningModeString == "pure-coverage")
+		{
+			settings.voxelFallbackPruningMode = ClusterLODVoxelPruningMode::Coverage;
+		}
+		else if (pruningModeString == "spatial")
+		{
+			settings.voxelFallbackPruningMode = ClusterLODVoxelPruningMode::Spatial;
+		}
+	}
 
 	return settings;
 }

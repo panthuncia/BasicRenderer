@@ -65,7 +65,7 @@ namespace {
 		std::call_once(logOnce, [buildHash]() {
 			const ClusterLODBuilderSettings effectiveSettings = ApplyClusterLODBuilderEnvironmentOverrides({});
 			spdlog::info(
-				"CLod cache build config: hash=0x{:016X} voxel_enabled={} voxel_mode='{}' voxel_grid={} voxel_rays={} voxel_scale={} voxel_opacity_threshold={} env_mode='{}' env_grid='{}' env_rays='{}' env_scale='{}' env_opacity_threshold='{}'",
+				"CLod cache build config: hash=0x{:016X} voxel_enabled={} voxel_mode='{}' voxel_grid={} voxel_rays={} voxel_scale={} voxel_opacity_threshold={} voxel_pruning='{}' env_mode='{}' env_grid='{}' env_rays='{}' env_scale='{}' env_opacity_threshold='{}' env_pruning='{}'",
 				buildHash,
 				effectiveSettings.enableVoxelFallback,
 				ToVoxelFallbackModeString(effectiveSettings.voxelFallbackMode),
@@ -73,11 +73,13 @@ namespace {
 				effectiveSettings.voxelRaysPerCell,
 				effectiveSettings.voxelFallbackScalingFactor,
 				effectiveSettings.voxelFallbackOpacityThreshold,
+				effectiveSettings.voxelFallbackPruningMode == ClusterLODVoxelPruningMode::Coverage ? "coverage" : "spatial",
 				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_MODE"),
 				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_GRID"),
 				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_RAYS"),
 				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_SCALE"),
-				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD"));
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_PRUNING"));
 		});
 	}
 }

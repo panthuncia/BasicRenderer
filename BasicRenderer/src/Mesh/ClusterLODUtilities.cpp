@@ -2310,6 +2310,27 @@ namespace
 		return state.voxelGroupMapping.packedGroupDescriptors[static_cast<size_t>(descriptorIndex)].aabbMaxAndError.w;
 	}
 
+	float GetMaxSourceVoxelWidthForBuildInput(
+		const ClusterLODBuildState& state,
+		const VoxelFallbackGroupBuildInput& buildInput)
+	{
+		float maxSourceVoxelWidth = 0.0f;
+		for (uint32_t sourceVoxelGroupIndex : buildInput.sourceVoxelGroupIndices)
+		{
+			std::vector<VoxelSourcePayloadRef> sourcePayloadRefs;
+			AppendVoxelSourcePayloadRefsForGroup(state, sourceVoxelGroupIndex, sourcePayloadRefs);
+			for (const VoxelSourcePayloadRef& payloadRef : sourcePayloadRefs)
+			{
+				const VoxelGroupPayload* payload = payloadRef.payload;
+				if (payload != nullptr && std::isfinite(payload->voxelWidth) && payload->voxelWidth > 0.0f)
+				{
+					maxSourceVoxelWidth = std::max(maxSourceVoxelWidth, payload->voxelWidth);
+				}
+			}
+		}
+		return maxSourceVoxelWidth;
+	}
+
 	float GetFiniteVoxelErrorForGroup(const ClusterLODBuildState& state, uint32_t groupIndex)
 	{
 		if (groupIndex >= state.groups.size())
@@ -2613,6 +2634,18 @@ namespace
 			VoxelGroupPayload payload{};
 			uint32_t resolution = buildInput.analysis.targetResolution;
 			float voxelError = buildInput.analysis.targetVoxelWidth;
+			const float minSourceVoxelWidth = GetMaxSourceVoxelWidthForBuildInput(state, buildInput);
+			if (minSourceVoxelWidth > 0.0f && voxelError < minSourceVoxelWidth)
+			{
+				voxelError = minSourceVoxelWidth;
+				const float extentX = buildInput.analysis.aabbMax.x - buildInput.analysis.aabbMin.x;
+				const float extentY = buildInput.analysis.aabbMax.y - buildInput.analysis.aabbMin.y;
+				const float extentZ = buildInput.analysis.aabbMax.z - buildInput.analysis.aabbMin.z;
+				const float longestExtent = std::max({ extentX, extentY, extentZ });
+				resolution = std::max(
+					std::max(2u, settings.voxelMinResolution),
+					static_cast<uint32_t>(std::ceil(longestExtent / std::max(voxelError, 1.0e-8f))));
+			}
 			bool payloadFitsBudget = false;
 			const uint32_t retryCount = std::max(1u, settings.voxelFallbackMaxRetryCount + 1u);
 			for (uint32_t attempt = 0; attempt < retryCount; ++attempt)
@@ -2660,14 +2693,17 @@ namespace
 				voxelInput.voxelWidth = voxelError;
 				voxelInput.resolution = resolution;
 				voxelInput.raysPerCell = settings.voxelRaysPerCell;
+				voxelInput.pruningMode = settings.voxelFallbackPruningMode;
 				VoxelizeTrianglesResult voxelResult = VoxelizeTrianglesDetailed(voxelInput);
 				spdlog::info(
-					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} source_tris={} source_voxel_groups={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={}",
+					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} min_source_voxel_width={} pruning={} source_tris={} source_voxel_groups={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={}",
 					groupIndex,
 					group.depth,
 					attempt,
 					resolution,
 					voxelError,
+					minSourceVoxelWidth,
+					settings.voxelFallbackPruningMode == ClusterLODVoxelPruningMode::Coverage ? "coverage" : "spatial",
 					buildInput.voxelTriangleIndices.size() / 3ull,
 					buildInput.sourceVoxelGroupIndices.size(),
 					voxelResult.triangleCandidateCellCount,
@@ -2800,8 +2836,21 @@ namespace
 					CLodVoxelGroupDescriptor sectionDescriptor = packed.descriptor;
 					sectionDescriptor.firstCube = runBegin;
 					sectionDescriptor.cubeCount = runEnd - runBegin;
+					uint32_t sectionCellCount = 0u;
+					for (uint32_t cubeIndex = runBegin; cubeIndex < runEnd; ++cubeIndex)
+					{
+						sectionCellCount += static_cast<uint32_t>(std::popcount(packed.cubeRecords[cubeIndex].occupancyMask));
+					}
 					const uint32_t sectionDescriptorIndex = static_cast<uint32_t>(state.voxelGroupMapping.packedGroupDescriptors.size());
 					state.voxelGroupMapping.packedGroupDescriptors.push_back(sectionDescriptor);
+					spdlog::info(
+						"ClusterLOD voxel section: group={} depth={} refined_group={} first_cube={} cube_count={} occupied_cells={}",
+						groupIndex,
+						group.depth,
+						refinedGroup,
+						runBegin,
+						runEnd - runBegin,
+						sectionCellCount);
 
 					sections.push_back(ClusterLODBuildState::VoxelTraversalSection{
 						sectionDescriptorIndex,
