@@ -1223,7 +1223,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 	}
 
 	std::sort(result.cubeRecords.begin(), result.cubeRecords.end(), [](const CLodVoxelCubeRecord& lhs, const CLodVoxelCubeRecord& rhs) {
-		return lhs.cubeCoord == rhs.cubeCoord ? lhs.refinedGroup < rhs.refinedGroup : lhs.cubeCoord < rhs.cubeCoord;
+		return lhs.refinedGroup == rhs.refinedGroup ? lhs.cubeCoord < rhs.cubeCoord : lhs.refinedGroup < rhs.refinedGroup;
 	});
 
 	result.descriptor.cubeCount = static_cast<uint32_t>(result.cubeRecords.size());

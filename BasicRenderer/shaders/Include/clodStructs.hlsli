@@ -400,6 +400,22 @@ bool CLodTryLoadVoxelGroupDescriptor(
     return descriptor.cubeCount > 0u;
 }
 
+bool CLodTryLoadVoxelDescriptorByLocalIndex(
+    CLodMeshMetadata metadata,
+    uint localDescriptorIndex,
+    out CLodVoxelGroupDescriptor descriptor)
+{
+    descriptor = (CLodVoxelGroupDescriptor)0;
+    if (localDescriptorIndex >= metadata.voxelGroupDescriptorCount)
+    {
+        return false;
+    }
+
+    StructuredBuffer<CLodVoxelGroupDescriptor> descriptors = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::VoxelGroupDescriptors)];
+    descriptor = descriptors[metadata.voxelGroupDescriptorBase + localDescriptorIndex];
+    return descriptor.cubeCount > 0u;
+}
+
 CLodVoxelCubeRecord CLodLoadVoxelCube(CLodMeshMetadata metadata, CLodVoxelGroupDescriptor descriptor, uint localGroupId, uint localCubeIndex)
 {
     StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];

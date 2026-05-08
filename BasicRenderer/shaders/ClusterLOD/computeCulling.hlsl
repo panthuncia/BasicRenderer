@@ -282,8 +282,24 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
 
         if (leaf.isVoxel)
         {
+            if (CLodVoxelLeafRefinedChildCanRender(
+                clodMeshMetadata,
+                node.range.countMinusOne,
+                objectModelMatrix,
+                lodUniformScale,
+                lodCam,
+                lodCamera.isOrtho,
+                rec.instanceIndex,
+                instanceData.perMeshBufferIndex,
+                rec.viewId,
+                leaf.errorOverDistance))
+            {
+                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
+                return;
+            }
+
             CLodVoxelGroupDescriptor voxelDescriptor;
-            if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+            if (CLodTryLoadVoxelDescriptorByLocalIndex(clodMeshMetadata, node.range.indexOrOffset, voxelDescriptor))
             {
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
                 CLodAppendVoxelRasterCubeWork(

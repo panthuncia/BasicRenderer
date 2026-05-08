@@ -60,9 +60,9 @@ struct Meshlet
 struct ClusterLODNodeRange
 {
     uint isLeaf; // 0=internal node, 1=voxel group leaf, 2=segment leaf
-    uint indexOrOffset; // segment-leaf: mesh-local segment index
+    uint indexOrOffset; // voxel leaf: mesh-local voxel descriptor index; segment-leaf: mesh-local segment index
                          // internal: childOffset (relative to lodNodesBase)
-    uint countMinusOne; // internal: childCountMinusOne; leaf: unused
+    uint countMinusOne; // internal: childCountMinusOne; voxel leaf: refinedGroup+1, or 0 for terminal
     uint ownerGroupId;  // segment-leaf: mesh-local group index (for page resolution + streaming)
 };
 
@@ -1085,9 +1085,9 @@ void CLodAppendVoxelRasterCubeWork(
             visibleClusterIndex,
             viewId,
             instanceIndex,
-            cubeIndex & 0x3FFFu,
+            (voxelDescriptor.firstCube + cubeIndex) & 0x3FFFu,
             localGroupId,
-            cubeIndex >> 14u,
+            (voxelDescriptor.firstCube + cubeIndex) >> 14u,
             0u,
             CLodVisibleClusterMarkVoxelPayload(CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX)));
 
@@ -1441,9 +1441,9 @@ float ProjectedGeometricError(
     return worldSpaceError / denom;
 }
 
-bool CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
+bool CLodVoxelLeafRefinedChildCanRender(
     CLodMeshMetadata clodMeshMetadata,
-    ClusterLODGroup voxelGroup,
+    uint refinedGroupEncoded,
     float4x4 objectModelMatrix,
     float lodUniformScale,
     CullingCameraInfo lodCam,
@@ -1453,13 +1453,11 @@ bool CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
     uint viewId,
     float ownGroupErrorOverDistance)
 {
-    if (voxelGroup.segmentCount == 0u || voxelGroup.segmentCount == voxelGroup.terminalSegmentCount)
+    if (refinedGroupEncoded == 0u)
     {
         return false;
     }
 
-    StructuredBuffer<ClusterLODGroupSegment> segments =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
     StructuredBuffer<ClusterLODGroup> groups =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
     StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
@@ -1468,73 +1466,58 @@ bool CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
 
     const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-    bool hasRefinedChild = false;
-    bool everyRefinedChildCanRender = true;
-    for (uint segmentOffset = 0u; segmentOffset < voxelGroup.segmentCount; ++segmentOffset)
+    const uint childGroupGlobalIndex = clodMeshMetadata.groupsBase + refinedGroupEncoded - 1u;
+    const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
+    const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+    const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
+    const float childEOD = ProjectedGeometricError(
+        childWorldCenter, childWorldRadius,
+        childGroup.bounds.error, lodUniformScale,
+        lodCam.positionWorldSpace.xyz, lodCam.zNear,
+        lodCameraIsOrtho);
+
+    if (childEOD < lodCam.errorOverDistanceThreshold)
     {
-        const ClusterLODGroupSegment segment = segments[clodMeshMetadata.segmentsBase + voxelGroup.firstSegment + segmentOffset];
-        if (segment.refinedGroup < 0)
-        {
-            continue;
-        }
-        hasRefinedChild = true;
+        return false;
+    }
 
-        const uint childGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)segment.refinedGroup;
-        const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
-        const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-        const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
-        const float childEOD = ProjectedGeometricError(
-            childWorldCenter, childWorldRadius,
-            childGroup.bounds.error, lodUniformScale,
-            lodCam.positionWorldSpace.xyz, lodCam.zNear,
-            lodCameraIsOrtho);
+    bool childResident = true;
+    if (childGroupGlobalIndex < activeGroupScanCount)
+    {
+        childResident = !CLodReadBit(nonResidentBits, childGroupGlobalIndex);
+    }
+    if (childResident)
+    {
+        return true;
+    }
 
-        if (childEOD < lodCam.errorOverDistanceThreshold)
+    if (childGroupGlobalIndex < activeGroupScanCount)
+    {
+        RWStructuredBuffer<CLodStreamingRequest> loadRequests =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+        RWStructuredBuffer<uint> loadRequestCounter =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+        uint requestIndex = 0u;
+        InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+        if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY)
         {
-            everyRefinedChildCanRender = false;
-            continue;
-        }
-
-        bool childResident = true;
-        if (childGroupGlobalIndex < activeGroupScanCount)
-        {
-            childResident = !CLodReadBit(nonResidentBits, childGroupGlobalIndex);
-        }
-        if (childResident)
-        {
-            continue;
-        }
-
-        everyRefinedChildCanRender = false;
-
-        if (childGroupGlobalIndex < activeGroupScanCount)
-        {
-            RWStructuredBuffer<CLodStreamingRequest> loadRequests =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
-            RWStructuredBuffer<uint> loadRequestCounter =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-            uint requestIndex = 0u;
-            InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-            if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY)
-            {
-                CLodStreamingRequest req = (CLodStreamingRequest)0;
-                req.groupGlobalIndex = childGroupGlobalIndex;
-                req.meshInstanceIndex = instanceIndex;
-                req.meshBufferIndex = meshBufferIndex;
-                req.viewId = CLodPackViewPriority(viewId, ownGroupErrorOverDistance);
-                loadRequests[requestIndex] = req;
+            CLodStreamingRequest req = (CLodStreamingRequest)0;
+            req.groupGlobalIndex = childGroupGlobalIndex;
+            req.meshInstanceIndex = instanceIndex;
+            req.meshBufferIndex = meshBufferIndex;
+            req.viewId = CLodPackViewPriority(viewId, ownGroupErrorOverDistance);
+            loadRequests[requestIndex] = req;
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-                CLodAppendVirtualShadowPredictiveInvalidationCandidate(
-                    childWorldCenter,
-                    childWorldRadius,
-                    viewId,
-                    childGroupGlobalIndex);
+            CLodAppendVirtualShadowPredictiveInvalidationCandidate(
+                childWorldCenter,
+                childWorldRadius,
+                viewId,
+                childGroupGlobalIndex);
 #endif
-            }
         }
     }
 
-    return hasRefinedChild && everyRefinedChildCanRender;
+    return false;
 }
 
 struct CLodRenderableLeaf
@@ -1880,27 +1863,44 @@ void WG_TraverseNodes(
                 {
                     if (leaf.isVoxel)
                     {
-                        CLodVoxelGroupDescriptor voxelDescriptor;
-                        if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+                        if (CLodVoxelLeafRefinedChildCanRender(
+                            clodMeshMetadata,
+                            node.range.countMinusOne,
+                            objectModelMatrix,
+                            lodUniformScale,
+                            lodCam,
+                            lodCamera.isOrtho,
+                            rec.instanceIndex,
+                            instanceData.perMeshBufferIndex,
+                            rec.viewId,
+                            leaf.errorOverDistance))
                         {
-                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                            CLodAppendVoxelRasterCubeWork(
-                                clodMeshMetadata,
-                                rec.instanceIndex,
-                                rec.viewId,
-                                node.range.ownerGroupId,
-                                leaf.group,
-                                voxelDescriptor,
-                                objectModelMatrix,
-                                lodUniformScale,
-                                lodCam,
-                                lodCamera.isOrtho,
-                                instanceData.perMeshBufferIndex,
-                                leaf.errorOverDistance);
+                            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
                         }
                         else
                         {
-                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+                            CLodVoxelGroupDescriptor voxelDescriptor;
+                            if (CLodTryLoadVoxelDescriptorByLocalIndex(clodMeshMetadata, node.range.indexOrOffset, voxelDescriptor))
+                            {
+                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
+                                CLodAppendVoxelRasterCubeWork(
+                                    clodMeshMetadata,
+                                    rec.instanceIndex,
+                                    rec.viewId,
+                                    node.range.ownerGroupId,
+                                    leaf.group,
+                                    voxelDescriptor,
+                                    objectModelMatrix,
+                                    lodUniformScale,
+                                    lodCam,
+                                    lodCamera.isOrtho,
+                                    instanceData.perMeshBufferIndex,
+                                    leaf.errorOverDistance);
+                            }
+                            else
+                            {
+                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+                            }
                         }
                     }
                     else
