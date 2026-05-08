@@ -198,7 +198,17 @@ struct CLodVoxelCubeRecord
     uint2 occupancyMask;
     float opacitySum;
     uint firstAttribute;
+    int refinedGroup;
+    uint reserved0;
 };
+
+uint3 CLodVoxelDecodeCubeCoord(uint packedCoord)
+{
+    return uint3(
+        packedCoord & 0x3FFu,
+        (packedCoord >> 10u) & 0x3FFu,
+        (packedCoord >> 20u) & 0x3FFu);
+}
 
 struct CLodVoxelAttributeSample
 {
@@ -229,10 +239,10 @@ struct CLodVoxelRasterDispatchCommand
 };
 
 static const uint CLOD_VOXEL_PAGE_MAGIC = 0x4C435856u;
-static const uint CLOD_VOXEL_PAGE_VERSION = 1u;
+static const uint CLOD_VOXEL_PAGE_VERSION = 2u;
 static const uint CLOD_VOXEL_PAGE_DESCRIPTOR_OFFSET = 64u;
 static const uint CLOD_VOXEL_PAGE_CUBE_RECORD_OFFSET = 112u;
-static const uint CLOD_VOXEL_CUBE_RECORD_STRIDE = 24u;
+static const uint CLOD_VOXEL_CUBE_RECORD_STRIDE = 32u;
 static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 16u;
 
 struct CLodVoxelPageHeader
@@ -292,13 +302,15 @@ CLodVoxelCubeRecord CLodLoadVoxelCubeFromPage(uint slabDescriptorIndex, uint pag
     ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
     uint addr = pageByteOffset + cubeRecordsOffset + pageLocalCubeIndex * CLOD_VOXEL_CUBE_RECORD_STRIDE;
     uint4 d0 = slab.Load4(addr + 0u);
-    uint2 d1 = slab.Load2(addr + 16u);
+    uint4 d1 = slab.Load4(addr + 16u);
     CLodVoxelCubeRecord cube;
     cube.cubeCoord = d0.x;
     cube.dominantBoneIndex = d0.y;
     cube.occupancyMask = d0.zw;
     cube.opacitySum = asfloat(d1.x);
     cube.firstAttribute = d1.y;
+    cube.refinedGroup = asint(d1.z);
+    cube.reserved0 = d1.w;
     return cube;
 }
 

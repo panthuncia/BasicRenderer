@@ -154,8 +154,10 @@ struct CLodVoxelCubeRecord
 	uint64_t occupancyMask = 0;
 	float opacitySum = 0.0f;
 	uint32_t firstAttribute = 0; // first of 64 CLodVoxelAttributeSample records for this cube
+	int32_t refinedGroup = -1;
+	uint32_t reserved0 = 0;
 };
-static_assert(sizeof(CLodVoxelCubeRecord) == 24, "CLodVoxelCubeRecord must be 24 bytes");
+static_assert(sizeof(CLodVoxelCubeRecord) == 32, "CLodVoxelCubeRecord must be 32 bytes");
 
 struct CLodVoxelAttributeSample
 {

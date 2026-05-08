@@ -383,6 +383,14 @@ namespace
 		uint32_t cellIndex = 0;
 	};
 
+	void AddUniqueRefinedGroup(std::vector<int32_t>& refinedGroups, int32_t refinedGroup)
+	{
+		if (std::find(refinedGroups.begin(), refinedGroups.end(), refinedGroup) == refinedGroups.end())
+		{
+			refinedGroups.push_back(refinedGroup);
+		}
+	}
+
 	bool HasVoxelSources(const VoxelizeTrianglesInput& input)
 	{
 		return input.sourceVoxelPayloads != nullptr && !input.sourceVoxelPayloads->empty();
@@ -785,7 +793,9 @@ namespace
 				return lhs.opacity < rhs.opacity;
 			}
 
-			return PackCell(lhs.x, lhs.y, lhs.z) < PackCell(rhs.x, rhs.y, rhs.z);
+			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
+			const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
+			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
 		});
 
 		float totalCoverageVolume = 0.0f;
@@ -808,7 +818,9 @@ namespace
 		}
 
 		std::sort(cells.begin(), cells.end(), [](const VoxelCell& lhs, const VoxelCell& rhs) {
-			return PackCell(lhs.x, lhs.y, lhs.z) < PackCell(rhs.x, rhs.y, rhs.z);
+			const uint64_t lhsCell = PackCell(lhs.x, lhs.y, lhs.z);
+			const uint64_t rhsCell = PackCell(rhs.x, rhs.y, rhs.z);
+			return lhsCell == rhsCell ? lhs.refinedGroup < rhs.refinedGroup : lhsCell < rhsCell;
 		});
 
 		return static_cast<uint32_t>(std::min<size_t>(removeCount, std::numeric_limits<uint32_t>::max()));
@@ -959,76 +971,155 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			cellMin.z + cellSize.z
 		};
 
-		CellCoverageSample coverage{};
-		uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
 		const auto triIt = cellTriMap.find(key);
+		const auto voxelIt = cellVoxelMap.find(key);
+		std::vector<int32_t> refinedGroups;
 		if (triIt != cellTriMap.end() && hasTriangleSources)
 		{
-			coverage = SampleCellCoverageTriangles(
-				*input.vertices, input.vertexStrideBytes,
-				*input.triangleIndices,
-				triIt->second,
-				cellMin, cellMax,
-				rays);
-			dominantBoneIndex = ComputeDominantBoneIndexForCell(input, triIt->second);
+			for (uint32_t triangleIndex : triIt->second)
+			{
+				int32_t refinedGroup = -1;
+				if (input.triangleRefinedGroupIds != nullptr && triangleIndex < input.triangleRefinedGroupIds->size())
+				{
+					refinedGroup = (*input.triangleRefinedGroupIds)[triangleIndex];
+				}
+				AddUniqueRefinedGroup(refinedGroups, refinedGroup);
+			}
 		}
-
-		const auto voxelIt = cellVoxelMap.find(key);
 		if (voxelIt != cellVoxelMap.end())
 		{
-			uint32_t voxelDominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
-			CellCoverageSample voxelCoverage = SampleCellCoverageVoxels(
-				sourceVoxelPayloads,
-				voxelIt->second,
-				cellMin,
-				cellMax,
-				voxelDominantBoneIndex);
-			if (voxelCoverage.coverage > coverage.coverage)
+			for (const VoxelSourceCellRef& cellRef : voxelIt->second)
 			{
-				coverage = voxelCoverage;
-				dominantBoneIndex = voxelDominantBoneIndex;
-			}
-			else
-			{
-				coverage.accumulatedNormal = coverage.accumulatedNormal + voxelCoverage.accumulatedNormal;
+				int32_t refinedGroup = -1;
+				if (cellRef.payloadIndex < sourceVoxelPayloads.size())
+				{
+					const VoxelGroupPayload* sourcePayload = sourceVoxelPayloads[cellRef.payloadIndex];
+					if (sourcePayload != nullptr && cellRef.cellIndex < sourcePayload->activeCells.size())
+					{
+						refinedGroup = sourcePayload->activeCells[cellRef.cellIndex].refinedGroup;
+					}
+				}
+				AddUniqueRefinedGroup(refinedGroups, refinedGroup);
 			}
 		}
-		if (coverage.coverage > 0.0f)
+		if (refinedGroups.empty())
 		{
-			++detailedResult.positiveCoverageCellCount;
-			detailedResult.totalCoverage += coverage.coverage;
-			detailedResult.maxCoverage = std::max(detailedResult.maxCoverage, coverage.coverage);
+			refinedGroups.push_back(-1);
 		}
 
-		if (coverage.coverage <= 0.0f && !input.keepZeroCoverageSourceCells)
+		std::sort(refinedGroups.begin(), refinedGroups.end());
+		for (int32_t refinedGroup : refinedGroups)
 		{
-			continue;
-		}
-
-		Float3 normalSum = coverage.accumulatedNormal;
-		if (normalSum.lengthSq() <= 1.0e-20f && triIt != cellTriMap.end() && hasTriangleSources)
-		{
-			for (uint32_t triIndex : triIt->second)
+			std::vector<uint32_t> ownedTriangles;
+			if (triIt != cellTriMap.end() && hasTriangleSources)
 			{
-				const uint32_t i0 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 0u];
-				const uint32_t i1 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 1u];
-				const uint32_t i2 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 2u];
-				const Float3 p0 = ReadPosition(*input.vertices, input.vertexStrideBytes, i0);
-				const Float3 p1 = ReadPosition(*input.vertices, input.vertexStrideBytes, i1);
-				const Float3 p2 = ReadPosition(*input.vertices, input.vertexStrideBytes, i2);
-				normalSum = normalSum + TriangleNormal(p0, p1, p2);
+				ownedTriangles.reserve(triIt->second.size());
+				for (uint32_t triangleIndex : triIt->second)
+				{
+					int32_t triangleRefinedGroup = -1;
+					if (input.triangleRefinedGroupIds != nullptr && triangleIndex < input.triangleRefinedGroupIds->size())
+					{
+						triangleRefinedGroup = (*input.triangleRefinedGroupIds)[triangleIndex];
+					}
+					if (triangleRefinedGroup == refinedGroup)
+					{
+						ownedTriangles.push_back(triangleIndex);
+					}
+				}
 			}
+
+			std::vector<VoxelSourceCellRef> ownedVoxelRefs;
+			if (voxelIt != cellVoxelMap.end())
+			{
+				ownedVoxelRefs.reserve(voxelIt->second.size());
+				for (const VoxelSourceCellRef& cellRef : voxelIt->second)
+				{
+					int32_t cellRefinedGroup = -1;
+					if (cellRef.payloadIndex < sourceVoxelPayloads.size())
+					{
+						const VoxelGroupPayload* sourcePayload = sourceVoxelPayloads[cellRef.payloadIndex];
+						if (sourcePayload != nullptr && cellRef.cellIndex < sourcePayload->activeCells.size())
+						{
+							cellRefinedGroup = sourcePayload->activeCells[cellRef.cellIndex].refinedGroup;
+						}
+					}
+					if (cellRefinedGroup == refinedGroup)
+					{
+						ownedVoxelRefs.push_back(cellRef);
+					}
+				}
+			}
+
+			CellCoverageSample coverage{};
+			uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+			if (!ownedTriangles.empty())
+			{
+				coverage = SampleCellCoverageTriangles(
+					*input.vertices, input.vertexStrideBytes,
+					*input.triangleIndices,
+					ownedTriangles,
+					cellMin, cellMax,
+					rays);
+				dominantBoneIndex = ComputeDominantBoneIndexForCell(input, ownedTriangles);
+			}
+
+			if (!ownedVoxelRefs.empty())
+			{
+				uint32_t voxelDominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+				CellCoverageSample voxelCoverage = SampleCellCoverageVoxels(
+					sourceVoxelPayloads,
+					ownedVoxelRefs,
+					cellMin,
+					cellMax,
+					voxelDominantBoneIndex);
+				if (voxelCoverage.coverage > coverage.coverage)
+				{
+					coverage = voxelCoverage;
+					dominantBoneIndex = voxelDominantBoneIndex;
+				}
+				else
+				{
+					coverage.accumulatedNormal = coverage.accumulatedNormal + voxelCoverage.accumulatedNormal;
+				}
+			}
+
+			if (coverage.coverage > 0.0f)
+			{
+				++detailedResult.positiveCoverageCellCount;
+				detailedResult.totalCoverage += coverage.coverage;
+				detailedResult.maxCoverage = std::max(detailedResult.maxCoverage, coverage.coverage);
+			}
+			if (coverage.coverage <= 0.0f && !input.keepZeroCoverageSourceCells)
+			{
+				continue;
+			}
+
+			Float3 normalSum = coverage.accumulatedNormal;
+			if (normalSum.lengthSq() <= 1.0e-20f && !ownedTriangles.empty())
+			{
+				for (uint32_t triIndex : ownedTriangles)
+				{
+					const uint32_t i0 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 0u];
+					const uint32_t i1 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 1u];
+					const uint32_t i2 = (*input.triangleIndices)[static_cast<size_t>(triIndex) * 3u + 2u];
+					const Float3 p0 = ReadPosition(*input.vertices, input.vertexStrideBytes, i0);
+					const Float3 p1 = ReadPosition(*input.vertices, input.vertexStrideBytes, i1);
+					const Float3 p2 = ReadPosition(*input.vertices, input.vertexStrideBytes, i2);
+					normalSum = normalSum + TriangleNormal(p0, p1, p2);
+				}
+			}
+
+			VoxelCell vc{};
+			vc.x = cx;
+			vc.y = cy;
+			vc.z = cz;
+			vc.opacity = coverage.coverage;
+			vc.normal = ToXM(normalSum.normalized());
+			vc.dominantBoneIndex = dominantBoneIndex;
+			vc.refinedGroup = refinedGroup;
+
+			result.activeCells.push_back(vc);
 		}
-
-		VoxelCell vc{};
-		vc.x = cx;
-		vc.y = cy;
-		vc.z = cz;
-		vc.opacity = coverage.coverage;
-		vc.normal = ToXM(normalSum.normalized());
-		vc.dominantBoneIndex = dominantBoneIndex;
-
-		result.activeCells.push_back(vc);
 	}
 
 	detailedResult.sourcePayload = result;
@@ -1070,13 +1161,15 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 
 	struct CubeAccum
 	{
+		uint32_t cubeCoord = 0;
+		int32_t refinedGroup = -1;
 		uint64_t mask = 0;
 		float opacitySum = 0.0f;
 		std::array<CLodVoxelAttributeSample, 64> attributes{};
 		std::unordered_map<uint32_t, float> boneWeights;
 	};
 
-	std::unordered_map<uint32_t, CubeAccum> cubeMap;
+	std::unordered_map<uint64_t, CubeAccum> cubeMap;
 	cubeMap.reserve(payload.activeCells.size());
 
 	for (const VoxelCell& cell : payload.activeCells)
@@ -1094,8 +1187,11 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		const uint32_t localZ = cell.z & 3u;
 		const uint32_t localBit = localX | (localY << 2u) | (localZ << 4u);
 		const uint32_t cubeCoord = PackCubeCoord(cubeX, cubeY, cubeZ);
+		const uint64_t cubeKey = (uint64_t{ cubeCoord } << 32u) | static_cast<uint32_t>(cell.refinedGroup + 1);
 
-		CubeAccum& accum = cubeMap[cubeCoord];
+		CubeAccum& accum = cubeMap[cubeKey];
+		accum.cubeCoord = cubeCoord;
+		accum.refinedGroup = cell.refinedGroup;
 		accum.mask |= (uint64_t{ 1 } << localBit);
 		accum.opacitySum += cell.opacity;
 		accum.attributes[localBit].normalAndOpacity = DirectX::XMFLOAT4(cell.normal.x, cell.normal.y, cell.normal.z, cell.opacity);
@@ -1106,7 +1202,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 	}
 
 	result.cubeRecords.reserve(cubeMap.size());
-	for (const auto& [cubeCoord, accum] : cubeMap)
+	for (const auto& [cubeKey, accum] : cubeMap)
 	{
 		if (accum.mask == 0)
 		{
@@ -1114,10 +1210,11 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		}
 
 		CLodVoxelCubeRecord record{};
-		record.cubeCoord = cubeCoord;
+		record.cubeCoord = accum.cubeCoord;
 		record.dominantBoneIndex = accum.boneWeights.empty()
 			? input.dominantBoneIndex
 			: SelectDominantBoneIndex(accum.boneWeights);
+		record.refinedGroup = accum.refinedGroup;
 		record.occupancyMask = accum.mask;
 		record.opacitySum = accum.opacitySum;
 		record.firstAttribute = input.firstAttribute + static_cast<uint32_t>(result.attributeSamples.size());
@@ -1126,7 +1223,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 	}
 
 	std::sort(result.cubeRecords.begin(), result.cubeRecords.end(), [](const CLodVoxelCubeRecord& lhs, const CLodVoxelCubeRecord& rhs) {
-		return lhs.cubeCoord < rhs.cubeCoord;
+		return lhs.cubeCoord == rhs.cubeCoord ? lhs.refinedGroup < rhs.refinedGroup : lhs.cubeCoord < rhs.cubeCoord;
 	});
 
 	result.descriptor.cubeCount = static_cast<uint32_t>(result.cubeRecords.size());

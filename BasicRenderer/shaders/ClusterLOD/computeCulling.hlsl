@@ -282,30 +282,23 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
 
         if (leaf.isVoxel)
         {
-            const bool coveredByChildren =
-                CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
-                    clodMeshMetadata,
-                    leaf.group,
-                    objectModelMatrix,
-                    lodUniformScale,
-                    lodCam,
-                    lodCamera.isOrtho,
-                    rec.instanceIndex,
-                    instanceData.perMeshBufferIndex,
-                    rec.viewId,
-                    leaf.errorOverDistance);
-
-            if (coveredByChildren)
-            {
-                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
-                return;
-            }
-
             CLodVoxelGroupDescriptor voxelDescriptor;
             if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
             {
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
+                CLodAppendVoxelRasterCubeWork(
+                    clodMeshMetadata,
+                    rec.instanceIndex,
+                    rec.viewId,
+                    node.range.ownerGroupId,
+                    leaf.group,
+                    voxelDescriptor,
+                    objectModelMatrix,
+                    lodUniformScale,
+                    lodCam,
+                    lodCamera.isOrtho,
+                    instanceData.perMeshBufferIndex,
+                    leaf.errorOverDistance);
             }
             else
             {

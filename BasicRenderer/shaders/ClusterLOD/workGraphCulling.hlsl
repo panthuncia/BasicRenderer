@@ -982,12 +982,38 @@ void WGTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
+float ProjectedGeometricError(
+    float3 worldCenter,
+    float worldRadius,
+    float errorMeshSpace,
+    float errorScale,
+    float3 cameraPos,
+    float zNear,
+    bool isOrtho);
+
 void CLodAppendVoxelRasterCubeWork(
+    CLodMeshMetadata clodMeshMetadata,
     uint instanceIndex,
     uint viewId,
     uint localGroupId,
-    CLodVoxelGroupDescriptor voxelDescriptor)
+    ClusterLODGroup voxelGroup,
+    CLodVoxelGroupDescriptor voxelDescriptor,
+    float4x4 objectModelMatrix,
+    float lodUniformScale,
+    CullingCameraInfo lodCam,
+    bool lodCameraIsOrtho,
+    uint meshBufferIndex,
+    float ownGroupErrorOverDistance)
 {
+    (void)clodMeshMetadata;
+    (void)voxelGroup;
+    (void)objectModelMatrix;
+    (void)lodUniformScale;
+    (void)lodCam;
+    (void)lodCameraIsOrtho;
+    (void)meshBufferIndex;
+    (void)ownGroupErrorOverDistance;
+
     if (voxelDescriptor.cubeCount == 0u)
     {
         return;
@@ -1028,12 +1054,6 @@ void CLodAppendVoxelRasterCubeWork(
         InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
     }
 
-    uint visibleBase = 0u;
-    if (visibleWritableCount != 0u)
-    {
-        InterlockedAdd(visibleClusterCounter[0], visibleWritableCount, visibleBase);
-    }
-
     uint baseSlot = 0u;
     InterlockedAdd(workRecordCounter[0], visibleWritableCount, baseSlot);
     const uint writableCount =
@@ -1049,6 +1069,12 @@ void CLodAppendVoxelRasterCubeWork(
     {
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, voxelDescriptor.cubeCount - visibleWritableCount);
     }
+
+    uint visibleBase = 0u;
+    if (writableCount != 0u)
+    {
+        InterlockedAdd(visibleClusterCounter[0], writableCount, visibleBase);
+    }
     WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS, writableCount);
 
     for (uint cubeIndex = 0u; cubeIndex < writableCount; ++cubeIndex)
@@ -1059,9 +1085,9 @@ void CLodAppendVoxelRasterCubeWork(
             visibleClusterIndex,
             viewId,
             instanceIndex,
-            cubeIndex,
+            cubeIndex & 0x3FFFu,
             localGroupId,
-            0u,
+            cubeIndex >> 14u,
             0u,
             CLodVisibleClusterMarkVoxelPayload(CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX)));
 
@@ -1854,35 +1880,27 @@ void WG_TraverseNodes(
                 {
                     if (leaf.isVoxel)
                     {
-                        const bool coveredByChildren =
-                            CLodVoxelLeafCoveredByResidentRefinedChildrenAboveThreshold(
+                        CLodVoxelGroupDescriptor voxelDescriptor;
+                        if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
+                        {
+                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
+                            CLodAppendVoxelRasterCubeWork(
                                 clodMeshMetadata,
+                                rec.instanceIndex,
+                                rec.viewId,
+                                node.range.ownerGroupId,
                                 leaf.group,
+                                voxelDescriptor,
                                 objectModelMatrix,
                                 lodUniformScale,
                                 lodCam,
                                 lodCamera.isOrtho,
-                                rec.instanceIndex,
                                 instanceData.perMeshBufferIndex,
-                                rec.viewId,
                                 leaf.errorOverDistance);
-
-                        if (coveredByChildren)
-                        {
-                            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
                         }
                         else
                         {
-                            CLodVoxelGroupDescriptor voxelDescriptor;
-                            if (CLodTryLoadVoxelGroupDescriptor(clodMeshMetadata, node.range.ownerGroupId, voxelDescriptor))
-                            {
-                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                                CLodAppendVoxelRasterCubeWork(rec.instanceIndex, rec.viewId, node.range.ownerGroupId, voxelDescriptor);
-                            }
-                            else
-                            {
-                                WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
-                            }
+                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
                         }
                     }
                     else

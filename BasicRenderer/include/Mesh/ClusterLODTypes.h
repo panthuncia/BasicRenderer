@@ -95,6 +95,7 @@ struct VoxelCell
 	float    opacity = 0.0f;
 	DirectX::XMFLOAT3 normal = { 0.0f, 0.0f, 1.0f };
 	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+	int32_t refinedGroup = -1;
 };
 
 struct VoxelGroupPayload

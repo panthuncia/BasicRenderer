@@ -362,15 +362,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto cherry = LoadModel("models/Trees/CherryTree.usd");
 
-    auto pine = LoadModel("models/Trees/branch.usdz");
+    //auto pine = LoadModel("models/Trees/branch.usdz");
+	//pine->GetRoot().set<Components::Position>({ 0.0, 2.0, 0.0 });
 
-    //auto needles = LoadModel("models/Trees/needles_nostem.usdz");
+    auto needles = LoadModel("models/Trees/needles_nostem.usdz");
 
     renderer.SetCurrentScene(baseScene);
 
-    //renderer.GetCurrentScene()->AppendScene(needles->Clone());
+    renderer.GetCurrentScene()->AppendScene(needles->Clone());
 
-	renderer.GetCurrentScene()->AppendScene(pine->Clone());
+	//renderer.GetCurrentScene()->AppendScene(pine->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(cherry->Clone());
 

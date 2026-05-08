@@ -105,6 +105,12 @@ uint CLodVisibleClusterPageSlabDescriptorIndex(uint4 packedCluster)
     return (packedCluster.z >> 2u) & 0xFFFFFu;
 }
 
+uint CLodVisibleClusterVoxelCubeIndex(uint4 packedCluster)
+{
+    return CLodVisibleClusterLocalMeshletIndex(packedCluster) |
+        (CLodVisibleClusterPageSlabDescriptorIndex(packedCluster) << 14u);
+}
+
 uint CLodVisibleClusterPageSlabByteOffset(uint4 packedCluster)
 {
     return ((packedCluster.z >> 22u) & CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK) << CLOD_PACKED_VISIBLE_CLUSTER_PAGE_SHIFT;

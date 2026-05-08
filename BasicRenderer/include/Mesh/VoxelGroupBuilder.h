@@ -23,6 +23,7 @@ struct VoxelizeTrianglesInput
 
 	// Source triangle indices into the vertex buffer (3 per triangle).
 	const std::vector<uint32_t>* triangleIndices = nullptr;
+	const std::vector<int32_t>* triangleRefinedGroupIds = nullptr;
 
 	// Optional already-voxelized sources. These are re-sampled as volumes when
 	// building a coarser voxel parent.

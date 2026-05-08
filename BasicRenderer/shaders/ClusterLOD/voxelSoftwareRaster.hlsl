@@ -14,11 +14,6 @@
 
 static const uint VOXEL_RASTER_THREADS_PER_GROUP = 64u;
 
-uint3 DecodeVoxelCubeCoord(uint packedCoord)
-{
-    return uint3(packedCoord & 0x3FFu, (packedCoord >> 10u) & 0x3FFu, (packedCoord >> 20u) & 0x3FFu);
-}
-
 bool VoxelMaskTest(uint2 mask, uint bitIndex)
 {
     return bitIndex < 32u ? ((mask.x & (1u << bitIndex)) != 0u) : ((mask.y & (1u << (bitIndex - 32u))) != 0u);
@@ -183,7 +178,7 @@ void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
     const uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
     const uint viewId = CLodVisibleClusterViewID(packedCluster);
     const uint localGroupId = CLodVisibleClusterGroupID(packedCluster);
-    const uint localCubeIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    const uint localCubeIndex = CLodVisibleClusterVoxelCubeIndex(packedCluster);
 
     const PerMeshInstanceBuffer meshInstance = meshInstances[instanceIndex];
     const PerObjectBuffer objectData = objects[meshInstance.perObjectBufferIndex];
@@ -203,7 +198,7 @@ void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-    const uint3 cubeCoord = DecodeVoxelCubeCoord(cube.cubeCoord);
+    const uint3 cubeCoord = CLodVoxelDecodeCubeCoord(cube.cubeCoord);
     const float voxelWidth = descriptor.aabbMinAndVoxelWidth.w;
     const float3 cubeMinObject = descriptor.aabbMinAndVoxelWidth.xyz + float3(cubeCoord) * (voxelWidth * 4.0f);
     const float3 cubeMaxObject = cubeMinObject + voxelWidth * 4.0f;
