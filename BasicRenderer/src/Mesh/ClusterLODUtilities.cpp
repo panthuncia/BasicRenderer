@@ -2618,7 +2618,12 @@ namespace
 		return (!buildInput.voxelVertices.empty() && !buildInput.voxelTriangleIndices.empty()) || !buildInput.sourceVoxelGroupIndices.empty();
 	}
 
-	void BuildVoxelFallbackCandidates(ClusterLODBuildState& state, size_t vertexStrideBytes, size_t skinningVertexStrideBytes, const ClusterLODBuilderSettings& settings)
+	void BuildVoxelFallbackCandidates(
+		ClusterLODBuildState& state,
+		size_t vertexStrideBytes,
+		size_t skinningVertexStrideBytes,
+		const VoxelSourceTriangleBVH* coverageSourceTriangles,
+		const ClusterLODBuilderSettings& settings)
 	{
 		const bool enabled = settings.enableVoxelFallback && settings.voxelFallbackMode != ClusterLODVoxelFallbackMode::MeshOnly;
 		if (!enabled || state.groups.empty())
@@ -2821,6 +2826,7 @@ namespace
 				voxelInput.skinningVertexStrideBytes = skinningVertexStrideBytes;
 				voxelInput.triangleIndices = buildInput.voxelTriangleIndices.empty() ? nullptr : &buildInput.voxelTriangleIndices;
 				voxelInput.triangleRefinedGroupIds = buildInput.voxelTriangleRefinedGroupIds.empty() ? nullptr : &buildInput.voxelTriangleRefinedGroupIds;
+				voxelInput.coverageSourceTriangles = coverageSourceTriangles;
 				voxelInput.sourceVoxelPayloads = sourceVoxelPayloads.empty() ? nullptr : &sourceVoxelPayloads;
 				voxelInput.candidateVoxelPayloads = candidateVoxelPayloads.empty() ? nullptr : &candidateVoxelPayloads;
 				voxelInput.keepZeroCoverageSourceCells = settings.voxelFallbackCarryZeroCoverage;
@@ -2832,7 +2838,7 @@ namespace
 				voxelInput.pruningMode = settings.voxelFallbackPruningMode;
 				VoxelizeTrianglesResult voxelResult = VoxelizeTrianglesDetailed(voxelInput);
 				spdlog::info(
-					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} min_source_voxel_width={} pruning={} source_tris={} source_voxel_groups={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={}",
+					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} min_source_voxel_width={} pruning={} source_tris={} source_voxel_groups={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={} source_coverage_queries={} source_coverage_candidates={} source_coverage_tests={} source_coverage_out_of_cell={}",
 					groupIndex,
 					group.depth,
 					attempt,
@@ -2850,7 +2856,11 @@ namespace
 					voxelResult.maxCoverage,
 					voxelResult.sourcePayload.activeCells.size(),
 					voxelResult.renderPayload.activeCells.size(),
-					voxelResult.prunedCellCount);
+					voxelResult.prunedCellCount,
+					voxelResult.sourceCoverageQueryCount,
+					voxelResult.sourceCoverageTriangleCandidateCount,
+					voxelResult.sourceCoverageTriangleTestCount,
+					voxelResult.sourceCoverageOutOfCellRejectionCount);
 				payload = std::move(voxelResult.renderPayload);
 				state.voxelCarryPayloads[groupIndex] = std::move(voxelResult.sourcePayload);
 
@@ -4327,7 +4337,20 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		}
 	}
 
-	BuildVoxelFallbackCandidates(state, vertexStrideBytes, skinningVertexSize, settings);
+	VoxelSourceTriangleBVH coverageSourceTriangles;
+	coverageSourceTriangles.Build(
+		&vertices,
+		vertexStrideBytes,
+		&indices,
+		skinningVertices,
+		skinningVertexSize);
+
+	BuildVoxelFallbackCandidates(
+		state,
+		vertexStrideBytes,
+		skinningVertexSize,
+		coverageSourceTriangles.IsValid() ? &coverageSourceTriangles : nullptr,
+		settings);
 
 	// Build traversal hierarchy.
 	BuildClusterLODTraversalHierarchy(state, /*preferredNodeWidth=*/TraversalNodeFanout);

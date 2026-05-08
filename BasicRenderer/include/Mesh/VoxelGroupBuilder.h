@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <vector>
 #include <directxmath.h>
 
@@ -10,6 +11,50 @@ struct VoxelSourceCandidatePayload
 {
 	const VoxelGroupPayload* payload = nullptr;
 	float expansionRadius = 0.0f;
+};
+
+class VoxelSourceTriangleBVH
+{
+public:
+	void Build(
+		const std::vector<std::byte>* vertices,
+		size_t vertexStrideBytes,
+		const std::vector<uint32_t>* triangleIndices,
+		const std::vector<std::byte>* skinningVertices = nullptr,
+		size_t skinningVertexStrideBytes = 0);
+
+	bool IsValid() const;
+	void QueryAABB(
+		const DirectX::XMFLOAT3& aabbMin,
+		const DirectX::XMFLOAT3& aabbMax,
+		std::vector<uint32_t>& outTriangleIndices) const;
+
+	const std::vector<std::byte>* Vertices() const { return m_vertices; }
+	size_t VertexStrideBytes() const { return m_vertexStrideBytes; }
+	const std::vector<std::byte>* SkinningVertices() const { return m_skinningVertices; }
+	size_t SkinningVertexStrideBytes() const { return m_skinningVertexStrideBytes; }
+	const std::vector<uint32_t>* TriangleIndices() const { return m_triangleIndices; }
+
+private:
+	struct Node
+	{
+		DirectX::XMFLOAT3 boundsMin{};
+		DirectX::XMFLOAT3 boundsMax{};
+		uint32_t firstTriangle = 0;
+		uint32_t triangleCount = 0;
+		uint32_t leftChild = UINT32_MAX;
+		uint32_t rightChild = UINT32_MAX;
+	};
+
+	uint32_t BuildNode(uint32_t firstTriangle, uint32_t triangleCount);
+
+	const std::vector<std::byte>* m_vertices = nullptr;
+	size_t m_vertexStrideBytes = 0;
+	const std::vector<std::byte>* m_skinningVertices = nullptr;
+	size_t m_skinningVertexStrideBytes = 0;
+	const std::vector<uint32_t>* m_triangleIndices = nullptr;
+	std::vector<uint32_t> m_triangleOrder;
+	std::vector<Node> m_nodes;
 };
 
 // Input: triangle-based source geometry to voxelize into a single group.
@@ -24,6 +69,11 @@ struct VoxelizeTrianglesInput
 	// Source triangle indices into the vertex buffer (3 per triangle).
 	const std::vector<uint32_t>* triangleIndices = nullptr;
 	const std::vector<int32_t>* triangleRefinedGroupIds = nullptr;
+
+	// Optional authoritative original source geometry used only for per-cell
+	// coverage tracing. Candidate generation still uses triangleIndices and
+	// source/candidate voxel payloads.
+	const VoxelSourceTriangleBVH* coverageSourceTriangles = nullptr;
 
 	// Optional already-voxelized sources. These are re-sampled as volumes when
 	// building a coarser voxel parent.
@@ -61,6 +111,10 @@ struct VoxelizeTrianglesResult
 	float totalCoverage = 0.0f;
 	float maxCoverage = 0.0f;
 	uint32_t prunedCellCount = 0;
+	uint64_t sourceCoverageQueryCount = 0;
+	uint64_t sourceCoverageTriangleCandidateCount = 0;
+	uint64_t sourceCoverageTriangleTestCount = 0;
+	uint64_t sourceCoverageOutOfCellRejectionCount = 0;
 };
 
 // Voxelize a triangle set into a single VoxelGroupPayload.

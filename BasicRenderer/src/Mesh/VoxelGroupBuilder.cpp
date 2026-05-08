@@ -77,9 +77,62 @@ namespace
 
 	Float3 ToFloat3(const DirectX::XMFLOAT3& v) { return { v.x, v.y, v.z }; }
 	DirectX::XMFLOAT3 ToXM(const Float3& v) { return { v.x, v.y, v.z }; }
+	Float3 MinFloat3(const Float3& a, const Float3& b) { return { std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z) }; }
+	Float3 MaxFloat3(const Float3& a, const Float3& b) { return { std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z) }; }
+	Float3 AxisExtent(const Float3& minValue, const Float3& maxValue) { return maxValue - minValue; }
+	float AxisValue(const Float3& v, uint32_t axis)
+	{
+		switch (axis)
+		{
+		case 0: return v.x;
+		case 1: return v.y;
+		default: return v.z;
+		}
+	}
 	Float3 TriangleNormal(const Float3& a, const Float3& b, const Float3& c)
 	{
 		return (b - a).cross(c - a).normalized();
+	}
+
+	struct TriangleBounds
+	{
+		Float3 boundsMin{};
+		Float3 boundsMax{};
+		Float3 centroid{};
+	};
+
+	TriangleBounds ComputeTriangleBounds(
+		const std::vector<std::byte>& vertices,
+		size_t vertexStrideBytes,
+		const std::vector<uint32_t>& triangleIndices,
+		uint32_t triangleIndex)
+	{
+		const size_t triangleBase = static_cast<size_t>(triangleIndex) * 3u;
+		const uint32_t i0 = triangleIndices[triangleBase + 0u];
+		const uint32_t i1 = triangleIndices[triangleBase + 1u];
+		const uint32_t i2 = triangleIndices[triangleBase + 2u];
+		const Float3 v0 = ReadPosition(vertices, vertexStrideBytes, i0);
+		const Float3 v1 = ReadPosition(vertices, vertexStrideBytes, i1);
+		const Float3 v2 = ReadPosition(vertices, vertexStrideBytes, i2);
+		TriangleBounds bounds{};
+		bounds.boundsMin = MinFloat3(v0, MinFloat3(v1, v2));
+		bounds.boundsMax = MaxFloat3(v0, MaxFloat3(v1, v2));
+		bounds.centroid = (v0 + v1 + v2) * (1.0f / 3.0f);
+		return bounds;
+	}
+
+	bool AABBOverlap(const Float3& aMin, const Float3& aMax, const Float3& bMin, const Float3& bMax)
+	{
+		return aMin.x <= bMax.x && aMax.x >= bMin.x &&
+			aMin.y <= bMax.y && aMax.y >= bMin.y &&
+			aMin.z <= bMax.z && aMax.z >= bMin.z;
+	}
+
+	bool PointInsideAABB(const Float3& p, const Float3& boxMin, const Float3& boxMax, float epsilon)
+	{
+		return p.x >= boxMin.x - epsilon && p.x <= boxMax.x + epsilon &&
+			p.y >= boxMin.y - epsilon && p.y <= boxMax.y + epsilon &&
+			p.z >= boxMin.z - epsilon && p.z <= boxMax.z + epsilon;
 	}
 
 	bool ReadSkinningInfluences(
@@ -179,6 +232,40 @@ namespace
 				AccumulateInfluenceSet(influences.joints0, influences.weights0, boneWeights);
 				AccumulateInfluenceSet(influences.joints1, influences.weights1, boneWeights);
 			}
+		}
+
+		return SelectDominantBoneIndex(boneWeights);
+	}
+
+	uint32_t ComputeDominantBoneIndexForSourceTriangle(
+		const VoxelSourceTriangleBVH& sourceTriangles,
+		uint32_t triangleIndex)
+	{
+		const std::vector<std::byte>* skinningVertices = sourceTriangles.SkinningVertices();
+		const std::vector<uint32_t>* triangleIndices = sourceTriangles.TriangleIndices();
+		if (skinningVertices == nullptr || skinningVertices->empty() || sourceTriangles.SkinningVertexStrideBytes() == 0u || triangleIndices == nullptr)
+		{
+			return CLOD_VOXEL_STATIC_BONE_INDEX;
+		}
+
+		const size_t triangleBase = static_cast<size_t>(triangleIndex) * 3u;
+		if (triangleBase + 2u >= triangleIndices->size())
+		{
+			return CLOD_VOXEL_STATIC_BONE_INDEX;
+		}
+
+		std::unordered_map<uint32_t, float> boneWeights;
+		boneWeights.reserve(8);
+		for (uint32_t corner = 0; corner < 3u; ++corner)
+		{
+			PackedSkinningInfluences influences{};
+			if (!ReadSkinningInfluences(*skinningVertices, sourceTriangles.SkinningVertexStrideBytes(), (*triangleIndices)[triangleBase + corner], influences))
+			{
+				continue;
+			}
+
+			AccumulateInfluenceSet(influences.joints0, influences.weights0, boneWeights);
+			AccumulateInfluenceSet(influences.joints1, influences.weights1, boneWeights);
 		}
 
 		return SelectDominantBoneIndex(boneWeights);
@@ -637,6 +724,47 @@ namespace
 		return tFar >= 0.0f && tMin < tMax;
 	}
 
+	bool RayAABBInterval(const Float3& origin, const Float3& dir, const Float3& boxMin, const Float3& boxMax, float tMax, float& outTEnter, float& outTExit)
+	{
+		float tMin = 0.0f;
+		float tFar = tMax;
+		const float originValues[3] = { origin.x, origin.y, origin.z };
+		const float dirValues[3] = { dir.x, dir.y, dir.z };
+		const float minValues[3] = { boxMin.x, boxMin.y, boxMin.z };
+		const float maxValues[3] = { boxMax.x, boxMax.y, boxMax.z };
+
+		for (uint32_t axis = 0; axis < 3u; ++axis)
+		{
+			if (std::abs(dirValues[axis]) < 1.0e-8f)
+			{
+				if (originValues[axis] < minValues[axis] || originValues[axis] > maxValues[axis])
+				{
+					return false;
+				}
+				continue;
+			}
+
+			const float invDir = 1.0f / dirValues[axis];
+			float nearT = (minValues[axis] - originValues[axis]) * invDir;
+			float farT = (maxValues[axis] - originValues[axis]) * invDir;
+			if (nearT > farT)
+			{
+				std::swap(nearT, farT);
+			}
+
+			tMin = std::max(tMin, nearT);
+			tFar = std::min(tFar, farT);
+			if (tMin > tFar)
+			{
+				return false;
+			}
+		}
+
+		outTEnter = tMin;
+		outTExit = tFar;
+		return tFar >= 0.0f && tMin < tMax;
+	}
+
 	struct CellCoverageSample
 	{
 		float coverage = 0.0f;
@@ -698,6 +826,119 @@ namespace
 						? interpolatedNormal.normalized()
 						: TriangleNormal(v0, v1, v2);
 				}
+			}
+
+			if (nearestTriangleIndex != std::numeric_limits<uint32_t>::max())
+			{
+				++sample.hitCount;
+				if (sample.representativeTriangleIndex == std::numeric_limits<uint32_t>::max())
+				{
+					sample.representativeTriangleIndex = nearestTriangleIndex;
+				}
+				sample.accumulatedNormal = sample.accumulatedNormal + nearestNormal;
+			}
+		}
+
+		sample.coverage = static_cast<float>(sample.hitCount) / static_cast<float>(rays.size());
+		return sample;
+	}
+
+	CellCoverageSample SampleCellCoverageSourceTriangles(
+		const VoxelSourceTriangleBVH& sourceTriangles,
+		const Float3& cellWorldMin,
+		const Float3& cellWorldMax,
+		const std::vector<Ray>& rays,
+		uint64_t& sourceCoverageQueryCount,
+		uint64_t& sourceCoverageTriangleCandidateCount,
+		uint64_t& sourceCoverageTriangleTestCount,
+		uint64_t& sourceCoverageOutOfCellRejectionCount)
+	{
+		CellCoverageSample sample{};
+		if (!sourceTriangles.IsValid() || rays.empty())
+		{
+			return sample;
+		}
+
+		std::vector<uint32_t> sourceCandidateTriangles;
+		sourceTriangles.QueryAABB(ToXM(cellWorldMin), ToXM(cellWorldMax), sourceCandidateTriangles);
+		++sourceCoverageQueryCount;
+		sourceCoverageTriangleCandidateCount += sourceCandidateTriangles.size();
+		if (sourceCandidateTriangles.empty())
+		{
+			return sample;
+		}
+
+		const std::vector<std::byte>* vertices = sourceTriangles.Vertices();
+		const std::vector<uint32_t>* meshTriangleIndices = sourceTriangles.TriangleIndices();
+		if (vertices == nullptr || meshTriangleIndices == nullptr)
+		{
+			return sample;
+		}
+
+		const Float3 cellExtent = cellWorldMax - cellWorldMin;
+		constexpr float kCellHitEpsilon = 1.0e-5f;
+		for (const Ray& ray : rays)
+		{
+			Float3 origin, dir;
+			float tMax;
+			MapRayToWorldCell(ray, cellWorldMin, cellExtent, origin, dir, tMax);
+			if (tMax < 1e-12f)
+			{
+				continue;
+			}
+
+			float tEnter = 0.0f;
+			float tExit = tMax;
+			if (!RayAABBInterval(origin, dir, cellWorldMin, cellWorldMax, tMax, tEnter, tExit))
+			{
+				continue;
+			}
+
+			uint32_t nearestTriangleIndex = std::numeric_limits<uint32_t>::max();
+			float nearestT = tExit + kCellHitEpsilon;
+			Float3 nearestNormal{};
+			for (uint32_t triLocalIdx : sourceCandidateTriangles)
+			{
+				const size_t triangleBase = static_cast<size_t>(triLocalIdx) * 3u;
+				if (triangleBase + 2u >= meshTriangleIndices->size())
+				{
+					continue;
+				}
+
+				const uint32_t i0 = (*meshTriangleIndices)[triangleBase + 0u];
+				const uint32_t i1 = (*meshTriangleIndices)[triangleBase + 1u];
+				const uint32_t i2 = (*meshTriangleIndices)[triangleBase + 2u];
+
+				const Float3 v0 = ReadPosition(*vertices, sourceTriangles.VertexStrideBytes(), i0);
+				const Float3 v1 = ReadPosition(*vertices, sourceTriangles.VertexStrideBytes(), i1);
+				const Float3 v2 = ReadPosition(*vertices, sourceTriangles.VertexStrideBytes(), i2);
+
+				float hitT = 0.0f;
+				float hitU = 0.0f;
+				float hitV = 0.0f;
+				++sourceCoverageTriangleTestCount;
+				if (!RayTriangleIntersect(origin, dir, v0, v1, v2, nearestT, hitT, &hitU, &hitV))
+				{
+					continue;
+				}
+
+				const Float3 hitPoint = origin + dir * hitT;
+				if (hitT + kCellHitEpsilon < tEnter || hitT > tExit + kCellHitEpsilon || !PointInsideAABB(hitPoint, cellWorldMin, cellWorldMax, kCellHitEpsilon))
+				{
+					++sourceCoverageOutOfCellRejectionCount;
+					continue;
+				}
+
+				nearestT = hitT;
+				nearestTriangleIndex = triLocalIdx;
+				const Float3 n0 = ReadNormal(*vertices, sourceTriangles.VertexStrideBytes(), i0);
+				const Float3 n1 = ReadNormal(*vertices, sourceTriangles.VertexStrideBytes(), i1);
+				const Float3 n2 = ReadNormal(*vertices, sourceTriangles.VertexStrideBytes(), i2);
+				const float hitW = 1.0f - hitU - hitV;
+				const Float3 interpolatedNormal = n0 * hitW + n1 * hitU + n2 * hitV;
+				nearestNormal = interpolatedNormal.lengthSq() > 1.0e-20f
+					? interpolatedNormal.normalized()
+					: TriangleNormal(v0, v1, v2);
 			}
 
 			if (nearestTriangleIndex != std::numeric_limits<uint32_t>::max())
@@ -905,6 +1146,168 @@ namespace
 	}
 }
 
+void VoxelSourceTriangleBVH::Build(
+	const std::vector<std::byte>* vertices,
+	size_t vertexStrideBytes,
+	const std::vector<uint32_t>* triangleIndices,
+	const std::vector<std::byte>* skinningVertices,
+	size_t skinningVertexStrideBytes)
+{
+	m_vertices = vertices;
+	m_vertexStrideBytes = vertexStrideBytes;
+	m_skinningVertices = skinningVertices;
+	m_skinningVertexStrideBytes = skinningVertexStrideBytes;
+	m_triangleIndices = triangleIndices;
+	m_triangleOrder.clear();
+	m_nodes.clear();
+
+	if (vertices == nullptr || triangleIndices == nullptr || vertexStrideBytes < sizeof(float) * 3u || triangleIndices->size() < 3u || (triangleIndices->size() % 3u) != 0u)
+	{
+		return;
+	}
+
+	const uint32_t triangleCount = static_cast<uint32_t>(std::min<size_t>(triangleIndices->size() / 3u, std::numeric_limits<uint32_t>::max()));
+	m_triangleOrder.resize(triangleCount);
+	std::iota(m_triangleOrder.begin(), m_triangleOrder.end(), 0u);
+	m_nodes.reserve(std::max<uint32_t>(1u, triangleCount * 2u));
+	BuildNode(0u, triangleCount);
+}
+
+bool VoxelSourceTriangleBVH::IsValid() const
+{
+	return m_vertices != nullptr && m_triangleIndices != nullptr && !m_triangleOrder.empty() && !m_nodes.empty();
+}
+
+uint32_t VoxelSourceTriangleBVH::BuildNode(uint32_t firstTriangle, uint32_t triangleCount)
+{
+	const uint32_t nodeIndex = static_cast<uint32_t>(m_nodes.size());
+	m_nodes.push_back(Node{});
+	Node& node = m_nodes.back();
+	node.firstTriangle = firstTriangle;
+	node.triangleCount = triangleCount;
+
+	Float3 boundsMin(
+		std::numeric_limits<float>::max(),
+		std::numeric_limits<float>::max(),
+		std::numeric_limits<float>::max());
+	Float3 boundsMax(
+		-std::numeric_limits<float>::max(),
+		-std::numeric_limits<float>::max(),
+		-std::numeric_limits<float>::max());
+	Float3 centroidMin = boundsMin;
+	Float3 centroidMax = boundsMax;
+
+	for (uint32_t offset = 0; offset < triangleCount; ++offset)
+	{
+		const uint32_t triangleIndex = m_triangleOrder[firstTriangle + offset];
+		const TriangleBounds triangleBounds = ComputeTriangleBounds(*m_vertices, m_vertexStrideBytes, *m_triangleIndices, triangleIndex);
+		boundsMin = MinFloat3(boundsMin, triangleBounds.boundsMin);
+		boundsMax = MaxFloat3(boundsMax, triangleBounds.boundsMax);
+		centroidMin = MinFloat3(centroidMin, triangleBounds.centroid);
+		centroidMax = MaxFloat3(centroidMax, triangleBounds.centroid);
+	}
+
+	node.boundsMin = ToXM(boundsMin);
+	node.boundsMax = ToXM(boundsMax);
+
+	constexpr uint32_t kLeafTriangleCount = 8u;
+	if (triangleCount <= kLeafTriangleCount)
+	{
+		return nodeIndex;
+	}
+
+	const Float3 centroidExtent = AxisExtent(centroidMin, centroidMax);
+	uint32_t splitAxis = 0u;
+	if (centroidExtent.y > centroidExtent.x && centroidExtent.y >= centroidExtent.z)
+	{
+		splitAxis = 1u;
+	}
+	else if (centroidExtent.z > centroidExtent.x && centroidExtent.z > centroidExtent.y)
+	{
+		splitAxis = 2u;
+	}
+
+	const uint32_t mid = firstTriangle + triangleCount / 2u;
+	auto begin = m_triangleOrder.begin() + firstTriangle;
+	auto middle = m_triangleOrder.begin() + mid;
+	auto end = m_triangleOrder.begin() + firstTriangle + triangleCount;
+	std::nth_element(begin, middle, end, [&](uint32_t lhs, uint32_t rhs)
+		{
+			const TriangleBounds lhsBounds = ComputeTriangleBounds(*m_vertices, m_vertexStrideBytes, *m_triangleIndices, lhs);
+			const TriangleBounds rhsBounds = ComputeTriangleBounds(*m_vertices, m_vertexStrideBytes, *m_triangleIndices, rhs);
+			return AxisValue(lhsBounds.centroid, splitAxis) < AxisValue(rhsBounds.centroid, splitAxis);
+		});
+
+	const uint32_t leftCount = mid - firstTriangle;
+	const uint32_t rightCount = triangleCount - leftCount;
+	if (leftCount == 0u || rightCount == 0u)
+	{
+		return nodeIndex;
+	}
+
+	const uint32_t leftChild = BuildNode(firstTriangle, leftCount);
+	const uint32_t rightChild = BuildNode(mid, rightCount);
+	m_nodes[nodeIndex].leftChild = leftChild;
+	m_nodes[nodeIndex].rightChild = rightChild;
+	m_nodes[nodeIndex].triangleCount = 0u;
+	return nodeIndex;
+}
+
+void VoxelSourceTriangleBVH::QueryAABB(
+	const DirectX::XMFLOAT3& aabbMin,
+	const DirectX::XMFLOAT3& aabbMax,
+	std::vector<uint32_t>& outTriangleIndices) const
+{
+	outTriangleIndices.clear();
+	if (!IsValid())
+	{
+		return;
+	}
+
+	const Float3 queryMin = ToFloat3(aabbMin);
+	const Float3 queryMax = ToFloat3(aabbMax);
+	std::vector<uint32_t> stack;
+	stack.push_back(0u);
+	while (!stack.empty())
+	{
+		const uint32_t nodeIndex = stack.back();
+		stack.pop_back();
+		if (nodeIndex >= m_nodes.size())
+		{
+			continue;
+		}
+
+		const Node& node = m_nodes[nodeIndex];
+		if (!AABBOverlap(ToFloat3(node.boundsMin), ToFloat3(node.boundsMax), queryMin, queryMax))
+		{
+			continue;
+		}
+
+		if (node.triangleCount > 0u)
+		{
+			for (uint32_t offset = 0; offset < node.triangleCount; ++offset)
+			{
+				const uint32_t triangleIndex = m_triangleOrder[node.firstTriangle + offset];
+				const TriangleBounds triangleBounds = ComputeTriangleBounds(*m_vertices, m_vertexStrideBytes, *m_triangleIndices, triangleIndex);
+				if (AABBOverlap(triangleBounds.boundsMin, triangleBounds.boundsMax, queryMin, queryMax))
+				{
+					outTriangleIndices.push_back(triangleIndex);
+				}
+			}
+			continue;
+		}
+
+		if (node.leftChild != UINT32_MAX)
+		{
+			stack.push_back(node.leftChild);
+		}
+		if (node.rightChild != UINT32_MAX)
+		{
+			stack.push_back(node.rightChild);
+		}
+	}
+}
+
 // Public API: VoxelizeTriangles
 VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& input)
 {
@@ -915,6 +1318,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 		input.triangleIndices != nullptr && !input.triangleIndices->empty() && (input.triangleIndices->size() % 3) == 0;
 	const bool hasVoxelSources = HasVoxelSources(input);
 	const bool hasCandidateVoxelSources = HasCandidateVoxelSources(input);
+	const bool hasCoverageSourceTriangles = input.coverageSourceTriangles != nullptr && input.coverageSourceTriangles->IsValid();
 
 	if (!hasTriangleSources && !hasVoxelSources && !hasCandidateVoxelSources)
 		return detailedResult;
@@ -1109,7 +1513,23 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 
 			CellCoverageSample coverage{};
 			uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
-			if (!ownedTriangles.empty())
+			if (hasCoverageSourceTriangles)
+			{
+				coverage = SampleCellCoverageSourceTriangles(
+					*input.coverageSourceTriangles,
+					cellMin,
+					cellMax,
+					rays,
+					detailedResult.sourceCoverageQueryCount,
+					detailedResult.sourceCoverageTriangleCandidateCount,
+					detailedResult.sourceCoverageTriangleTestCount,
+					detailedResult.sourceCoverageOutOfCellRejectionCount);
+				if (coverage.representativeTriangleIndex != std::numeric_limits<uint32_t>::max())
+				{
+					dominantBoneIndex = ComputeDominantBoneIndexForSourceTriangle(*input.coverageSourceTriangles, coverage.representativeTriangleIndex);
+				}
+			}
+			else if (!ownedTriangles.empty())
 			{
 				coverage = SampleCellCoverageTriangles(
 					*input.vertices, input.vertexStrideBytes,
@@ -1120,7 +1540,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 				dominantBoneIndex = ComputeDominantBoneIndexForCell(input, ownedTriangles);
 			}
 
-			if (!ownedVoxelRefs.empty())
+			if (!ownedVoxelRefs.empty() && !hasCoverageSourceTriangles)
 			{
 				uint32_t voxelDominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
 				CellCoverageSample voxelCoverage = SampleCellCoverageVoxels(
