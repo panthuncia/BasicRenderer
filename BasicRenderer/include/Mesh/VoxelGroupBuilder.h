@@ -97,7 +97,7 @@ struct VoxelizeTrianglesInput
 
 	// Number of rays cast per active cell for opacity sampling.
 	uint32_t raysPerCell = 64;
-	ClusterLODVoxelPruningMode pruningMode = ClusterLODVoxelPruningMode::Spatial;
+	ClusterLODVoxelPruningMode pruningMode = ClusterLODVoxelPruningMode::None;
 };
 
 struct VoxelizeTrianglesResult

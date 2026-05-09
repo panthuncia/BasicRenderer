@@ -382,6 +382,7 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
             Builtin::CLod::VoxelCubeRecords,
             Builtin::CLod::StreamingNonResidentBits,
             Builtin::CLod::MeshMetadata,
+            CLodLevelInfosBufferId,
             Builtin::CLod::GroupPageMap,
             Builtin::CLod::StreamingRuntimeState,
             Builtin::CullingCameraBuffer,
@@ -504,6 +505,8 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     uint32_t sharedRootConstants[NumMiscUintRootConstants] = {};
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    sharedRootConstants[CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT] =
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodForceTraversalDepthRootSettingName)();
     sharedRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] =
         m_swVisibleClustersCounterBuffer
             ? m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index

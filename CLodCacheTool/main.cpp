@@ -75,6 +75,7 @@ static bool TryConsumeOption(const std::string& arg) {
     constexpr const char* growthPrefix = "--clod-voxel-growth=";
     constexpr const char* biasPrefix = "--clod-voxel-acceptance-bias=";
     constexpr const char* opacityPrefix = "--clod-voxel-opacity-threshold=";
+    constexpr const char* pruningPrefix = "--clod-voxel-pruning=";
 
     auto consumeValue = [&arg](const char* prefix, const char* envName) -> bool {
         const std::string prefixString(prefix);
@@ -93,7 +94,8 @@ static bool TryConsumeOption(const std::string& arg) {
         consumeValue(retriesPrefix, "BASICRENDERER_CLOD_VOXEL_RETRIES") ||
         consumeValue(growthPrefix, "BASICRENDERER_CLOD_VOXEL_GROWTH") ||
         consumeValue(biasPrefix, "BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS") ||
-        consumeValue(opacityPrefix, "BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD");
+        consumeValue(opacityPrefix, "BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD") ||
+        consumeValue(pruningPrefix, "BASICRENDERER_CLOD_VOXEL_PRUNING");
 }
 
 // Processing

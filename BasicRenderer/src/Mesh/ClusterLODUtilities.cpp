@@ -2795,7 +2795,8 @@ namespace
 				continue;
 			}
 
-			if (!AppendGroupTriangleSourceGeometry(state, childGroupIndex, buildInput, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
+			std::unordered_set<uint32_t> visitedSourceGroups;
+			if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedSourceGroups, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
 			{
 				return false;
 			}
@@ -3069,10 +3070,14 @@ namespace
 
 				std::vector<const VoxelGroupPayload*> sourceVoxelPayloads;
 				std::vector<VoxelSourceCandidatePayload> candidateVoxelPayloads;
+				std::vector<VoxelGroupPayload> retaggedSourceVoxelPayloads;
+				std::vector<float> retaggedSourceVoxelExpansionRadii;
 				if (!buildInput.sourceVoxelGroupIndices.empty())
 				{
 					sourceVoxelPayloads.reserve(buildInput.sourceVoxelGroupIndices.size() * 2ull);
 					candidateVoxelPayloads.reserve(buildInput.sourceVoxelGroupIndices.size() * 2ull);
+					retaggedSourceVoxelPayloads.reserve(buildInput.sourceVoxelGroupIndices.size() * 2ull);
+					retaggedSourceVoxelExpansionRadii.reserve(buildInput.sourceVoxelGroupIndices.size() * 2ull);
 					for (uint32_t sourceVoxelGroupIndex : buildInput.sourceVoxelGroupIndices)
 					{
 						std::vector<VoxelSourcePayloadRef> sourcePayloadRefs;
@@ -3081,10 +3086,23 @@ namespace
 						{
 							if (payloadRef.payload != nullptr)
 							{
-								sourceVoxelPayloads.push_back(payloadRef.payload);
-								candidateVoxelPayloads.push_back(VoxelSourceCandidatePayload{ payloadRef.payload, payloadRef.expansionRadius });
+								retaggedSourceVoxelPayloads.push_back(*payloadRef.payload);
+								VoxelGroupPayload& retaggedPayload = retaggedSourceVoxelPayloads.back();
+								for (VoxelCell& cell : retaggedPayload.activeCells)
+								{
+									cell.refinedGroup = static_cast<int32_t>(sourceVoxelGroupIndex);
+								}
+
+								retaggedSourceVoxelExpansionRadii.push_back(payloadRef.expansionRadius);
 							}
 						}
+					}
+
+					for (uint32_t payloadIndex = 0; payloadIndex < static_cast<uint32_t>(retaggedSourceVoxelPayloads.size()); ++payloadIndex)
+					{
+						const VoxelGroupPayload* retaggedPayload = &retaggedSourceVoxelPayloads[payloadIndex];
+						sourceVoxelPayloads.push_back(retaggedPayload);
+						candidateVoxelPayloads.push_back(VoxelSourceCandidatePayload{ retaggedPayload, retaggedSourceVoxelExpansionRadii[payloadIndex] });
 					}
 				}
 

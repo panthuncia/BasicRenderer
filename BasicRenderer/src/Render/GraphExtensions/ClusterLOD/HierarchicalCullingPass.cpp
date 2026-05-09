@@ -247,6 +247,7 @@ void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
             Builtin::CLod::StreamingActiveGroupsBits,
             Builtin::CLod::StreamingNonResidentBits,
             Builtin::CLod::MeshMetadata,
+            CLodLevelInfosBufferId,
             Builtin::CLod::GroupPageMap,
             Builtin::CullingCameraBuffer,
             Builtin::PerMeshInstanceBuffer,
@@ -405,6 +406,8 @@ PassReturn HierarchicalCullingPass::Execute(PassExecutionContext& executionConte
     uintRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT] =
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodForceTraversalDepthRootSettingName)();
     if (UsesSWClassification(m_workGraphMode)) {
         uintRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     }

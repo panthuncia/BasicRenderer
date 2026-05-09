@@ -197,7 +197,7 @@ struct ClusterLODBuilderSettings
 	float voxelFallbackAcceptanceBias = 1.0f;
 	float voxelFallbackOpacityThreshold = 0.0f;
 	bool voxelFallbackCarryZeroCoverage = false;
-	ClusterLODVoxelPruningMode voxelFallbackPruningMode = ClusterLODVoxelPruningMode::Coverage;
+	ClusterLODVoxelPruningMode voxelFallbackPruningMode = ClusterLODVoxelPruningMode::None;
 };
 
 inline std::string GetClusterLODEnvironmentVariable(const char* name)
@@ -292,7 +292,11 @@ inline ClusterLODBuilderSettings ApplyClusterLODBuilderEnvironmentOverrides(Clus
 	const std::string pruningModeString = GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_PRUNING");
 	if (!pruningModeString.empty())
 	{
-		if (pruningModeString == "coverage" || pruningModeString == "global" || pruningModeString == "pure-coverage")
+		if (pruningModeString == "none" || pruningModeString == "off" || pruningModeString == "disabled")
+		{
+			settings.voxelFallbackPruningMode = ClusterLODVoxelPruningMode::None;
+		}
+		else if (pruningModeString == "coverage" || pruningModeString == "global" || pruningModeString == "pure-coverage")
 		{
 			settings.voxelFallbackPruningMode = ClusterLODVoxelPruningMode::Coverage;
 		}

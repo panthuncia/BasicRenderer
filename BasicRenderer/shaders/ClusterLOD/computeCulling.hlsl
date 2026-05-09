@@ -167,7 +167,7 @@ void PureComputeObjectCullCS(const uint3 vDispatchThreadID : SV_DispatchThreadID
 
     outFrontier[outputIndex].viewId = CLOD_PC_OBJECT_CULL_VIEW_DATA_INDEX;
     outFrontier[outputIndex].instanceIndex = perMeshInstanceBufferIndex;
-    outFrontier[outputIndex].nodeIdPacked = PackTraverseNodeId(clodMeshMetadata.rootNode, CLOD_RECORD_SOURCE_PASS1, 1u);
+    outFrontier[outputIndex].nodeIdPacked = PackTraverseNodeId(CLodResolveTraversalRootNode(clodMeshMetadata), CLOD_RECORD_SOURCE_PASS1, 1u);
 
     WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS, 1);
     WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_TRAVERSE_RECORDS, 1);
@@ -203,6 +203,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
     const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
     const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
+    const bool forceLodDecision = CLodForcedTraversalDepthRootEnabled(clodMeshMetadata);
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[rec.instanceIndex];
@@ -275,12 +276,13 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
             lodCam,
             lodCamera.isOrtho,
             nodeTouchesDirtyPages,
+            forceLodDecision,
             leaf))
         {
             return;
         }
 
-        if (CLodRefinedChildSuppressesParent(
+        if (!forceLodDecision && CLodRefinedChildSuppressesParent(
             clodMeshMetadata.groupsBase,
             node.range.countMinusOne - 1u,
             node.range.countMinusOne != 0u,
@@ -500,7 +502,9 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         lodCam.positionWorldSpace.xyz,
         lodCam.zNear,
         lodCamera.isOrtho);
-    const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= lodCam.errorOverDistanceThreshold);
+    const bool nodeWantsTraversal =
+        forceLodDecision ||
+        (parentAllowsRefine && (nodeErrorOverDistance >= lodCam.errorOverDistanceThreshold));
 
     if (!nodeWantsTraversal) {
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -572,7 +576,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
             continue;
         }
 
-        if (child.range.isLeaf == CLOD_NODE_INTERNAL) {
+        if (!forceLodDecision && child.range.isLeaf == CLOD_NODE_INTERNAL) {
             const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
             const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
             const float childEOD = ProjectedGeometricError(

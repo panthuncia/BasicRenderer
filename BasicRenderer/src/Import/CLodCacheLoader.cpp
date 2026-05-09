@@ -30,6 +30,21 @@ namespace {
 		}
 	}
 
+	const char* ToVoxelPruningModeString(ClusterLODVoxelPruningMode mode)
+	{
+		switch (mode)
+		{
+		case ClusterLODVoxelPruningMode::None:
+			return "none";
+		case ClusterLODVoxelPruningMode::Coverage:
+			return "coverage";
+		case ClusterLODVoxelPruningMode::Spatial:
+			return "spatial";
+		default:
+			return "unknown";
+		}
+	}
+
 		std::mutex& GetCacheSaveMutexForIdentity(const MeshCacheIdentity& identity)
 		{
 			static std::mutex cacheMutexTableGuard;
@@ -73,7 +88,7 @@ namespace {
 				effectiveSettings.voxelRaysPerCell,
 				effectiveSettings.voxelFallbackScalingFactor,
 				effectiveSettings.voxelFallbackOpacityThreshold,
-				effectiveSettings.voxelFallbackPruningMode == ClusterLODVoxelPruningMode::Coverage ? "coverage" : "spatial",
+				ToVoxelPruningModeString(effectiveSettings.voxelFallbackPruningMode),
 				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_MODE"),
 				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_GRID"),
 				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_RAYS"),

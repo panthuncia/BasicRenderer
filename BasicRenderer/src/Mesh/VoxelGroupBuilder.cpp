@@ -390,6 +390,17 @@ namespace
 		Float3 direction;
 	};
 
+	uint32_t HashVoxelCellSampleSeed(uint32_t baseSeed, uint64_t cellKey, int32_t refinedGroup)
+	{
+		uint64_t x = cellKey ^ (uint64_t{ static_cast<uint32_t>(refinedGroup) } << 32u) ^ baseSeed;
+		x ^= x >> 33u;
+		x *= 0xff51afd7ed558ccdull;
+		x ^= x >> 33u;
+		x *= 0xc4ceb9fe1a85ec53ull;
+		x ^= x >> 33u;
+		return static_cast<uint32_t>(x) ^ static_cast<uint32_t>(x >> 32u);
+	}
+
 	std::vector<Ray> GenerateCellRays(uint32_t rayCount, uint32_t seed)
 	{
 		std::mt19937 rng(seed);
@@ -398,16 +409,14 @@ namespace
 		std::vector<Ray> rays;
 		rays.reserve(rayCount);
 
-		const uint32_t raysPerAxis = std::max(1u, rayCount / 3u);
-		const uint32_t axisRayCounts[3] = {
-			raysPerAxis,
-			raysPerAxis,
-			rayCount - 2u * raysPerAxis
-		};
+		const uint32_t faceCount = 6u;
+		const uint32_t raysPerFace = rayCount / faceCount;
+		const uint32_t extraRays = rayCount - raysPerFace * faceCount;
 
-		for (uint32_t axis = 0; axis < 3; ++axis)
+		for (uint32_t face = 0; face < faceCount; ++face)
 		{
-			for (uint32_t i = 0; i < axisRayCounts[axis]; ++i)
+			const uint32_t faceRayCount = raysPerFace + (face < extraRays ? 1u : 0u);
+			for (uint32_t i = 0; i < faceRayCount; ++i)
 			{
 				Float3 origin{};
 				Float3 direction{};
@@ -415,19 +424,32 @@ namespace
 				float u = dist(rng);
 				float v = dist(rng);
 
-				switch (axis)
+				switch (face)
 				{
 				case 0:
 					origin = { 0.0f, u, v };
 					direction = { 1.0f, 0.0f, 0.0f };
 					break;
 				case 1:
+					origin = { 1.0f, u, v };
+					direction = { -1.0f, 0.0f, 0.0f };
+					break;
+				case 2:
 					origin = { u, 0.0f, v };
 					direction = { 0.0f, 1.0f, 0.0f };
 					break;
-				case 2:
+				case 3:
+					origin = { u, 1.0f, v };
+					direction = { 0.0f, -1.0f, 0.0f };
+					break;
+				case 4:
 					origin = { u, v, 0.0f };
 					direction = { 0.0f, 0.0f, 1.0f };
+					break;
+				case 5:
+				default:
+					origin = { u, v, 1.0f };
+					direction = { 0.0f, 0.0f, -1.0f };
 					break;
 				}
 
@@ -1434,7 +1456,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 	if (cellTriMap.empty() && cellVoxelMap.empty() && candidateVoxelMap.empty())
 		return detailedResult;
 
-	const std::vector<Ray> rays = GenerateCellRays(std::max(1u, input.raysPerCell), input.resolution * 2654435761u);
+	const uint32_t baseRaySeed = input.resolution * 2654435761u;
 
 	const Float3 cellSize = {
 		input.voxelWidth,
@@ -1536,6 +1558,9 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 		std::sort(refinedGroups.begin(), refinedGroups.end());
 		for (int32_t refinedGroup : refinedGroups)
 		{
+			const std::vector<Ray> rays = GenerateCellRays(
+				std::max(1u, input.raysPerCell),
+				HashVoxelCellSampleSeed(baseRaySeed, key, refinedGroup));
 			VoxelizeTrianglesResult::RefinedGroupStats& stats = getRefinedGroupStats(refinedGroup);
 			++stats.candidateKeys;
 			const bool hasOnlyCandidateSource = triIt == cellTriMap.end() && voxelIt == cellVoxelMap.end() && candidateIt != candidateVoxelMap.end();

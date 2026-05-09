@@ -519,6 +519,10 @@ private:
     std::function<bool()> getCLodPageJobForceAll;
     std::function<void(bool)> setCLodPageJobForceAll;
 
+    uint32_t m_clodForceTraversalDepthRoot = CLodForceTraversalDepthRootDisabled;
+    std::function<uint32_t()> getCLodForceTraversalDepthRoot;
+    std::function<void(uint32_t)> setCLodForceTraversalDepthRoot;
+
     uint32_t m_clodDirectionalVirtualShadowMaxBackingResolution = CLodVirtualShadowDefaultBackingResolution;
     std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxBackingResolution;
     std::function<void(uint32_t)> setCLodDirectionalVirtualShadowMaxBackingResolution;
@@ -897,6 +901,11 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     setCLodPageJobForceAll = settingsManager.getSettingSetter<bool>(CLodPageJobForceAllSettingName);
     m_clodPageJobForceAll = getCLodPageJobForceAll();
     observerSetting(m_clodPageJobForceAll, CLodPageJobForceAllSettingName);
+
+    getCLodForceTraversalDepthRoot = settingsManager.getSettingGetter<uint32_t>(CLodForceTraversalDepthRootSettingName);
+    setCLodForceTraversalDepthRoot = settingsManager.getSettingSetter<uint32_t>(CLodForceTraversalDepthRootSettingName);
+    m_clodForceTraversalDepthRoot = getCLodForceTraversalDepthRoot();
+    observerSetting(m_clodForceTraversalDepthRoot, CLodForceTraversalDepthRootSettingName);
 
     getCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
     setCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
@@ -1342,6 +1351,19 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         }
         if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
             setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
+        }
+        bool forceTraversalDepthRoot = m_clodForceTraversalDepthRoot != CLodForceTraversalDepthRootDisabled;
+        if (ImGui::Checkbox("Force CLod Traversal Depth Root", &forceTraversalDepthRoot)) {
+            m_clodForceTraversalDepthRoot = forceTraversalDepthRoot ? 0u : CLodForceTraversalDepthRootDisabled;
+            setCLodForceTraversalDepthRoot(m_clodForceTraversalDepthRoot);
+        }
+        if (forceTraversalDepthRoot) {
+            int forcedDepth = static_cast<int>(std::min<uint32_t>(m_clodForceTraversalDepthRoot, 255u));
+            if (ImGui::InputInt("Forced CLod Depth Root", &forcedDepth)) {
+                forcedDepth = std::max(forcedDepth, 0);
+                m_clodForceTraversalDepthRoot = static_cast<uint32_t>(forcedDepth);
+                setCLodForceTraversalDepthRoot(m_clodForceTraversalDepthRoot);
+            }
         }
         if (ImGui::SliderFloat(
                 "Shadow Reyes Coarse Target Pages/Triangle",

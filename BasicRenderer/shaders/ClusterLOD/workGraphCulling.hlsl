@@ -24,6 +24,10 @@
 #define CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID "CLod::VoxelRasterQueueDescriptors"
 #endif
 
+#ifndef CLOD_HIERARCHY_LEVEL_INFOS_BUFFER_ID
+#define CLOD_HIERARCHY_LEVEL_INFOS_BUFFER_ID "Builtin::CLod::LevelInfos"
+#endif
+
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION
 #define CLOD_WG_ENABLE_SW_CLASSIFICATION 1
 #endif
@@ -214,6 +218,26 @@ static const uint CLOD_VIRTUAL_SHADOW_PREDICTIVE_CANDIDATE_CAPACITY = (1u << 16)
 
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
 static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
+
+bool CLodForcedTraversalDepthRootEnabled(CLodMeshMetadata clodMeshMetadata)
+{
+    const uint forcedDepth = CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT;
+    return
+        forcedDepth != CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT_DISABLED &&
+        forcedDepth < clodMeshMetadata.lodLevelCount;
+}
+
+uint CLodResolveTraversalRootNode(CLodMeshMetadata clodMeshMetadata)
+{
+    if (!CLodForcedTraversalDepthRootEnabled(clodMeshMetadata))
+    {
+        return clodMeshMetadata.rootNode;
+    }
+
+    StructuredBuffer<CLodHierarchyLevelInfo> levelInfos =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_HIERARCHY_LEVEL_INFOS_BUFFER_ID)];
+    return levelInfos[clodMeshMetadata.lodLevelInfoBase + CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT].rootNode;
+}
 
 bool CLodWorkGraphTelemetryEnabled()
 {
@@ -1577,6 +1601,7 @@ bool CLodPrepareRenderableLeaf(
     CullingCameraInfo lodCam,
     bool lodCameraIsOrtho,
     bool nodeTouchesDirtyPages,
+    bool forceLodDecision,
     out CLodRenderableLeaf leaf)
 {
     leaf = (CLodRenderableLeaf)0;
@@ -1602,7 +1627,7 @@ bool CLodPrepareRenderableLeaf(
         lodCam.zNear,
         lodCameraIsOrtho);
 
-    const bool wantsRender = parentAllowsRefine && (leaf.errorOverDistance >= lodCam.errorOverDistanceThreshold);
+    const bool wantsRender = forceLodDecision || (parentAllowsRefine && (leaf.errorOverDistance >= lodCam.errorOverDistanceThreshold));
     if (!wantsRender)
     {
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -1718,7 +1743,7 @@ void WG_ObjectCull(
 
             outRecord.viewId = hdr.viewDataIndex;
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
-            outRecord.nodeIdPacked = PackTraverseNodeId(clodMeshMetadata.rootNode, CLOD_RECORD_SOURCE_PASS1, 1u);
+            outRecord.nodeIdPacked = PackTraverseNodeId(CLodResolveTraversalRootNode(clodMeshMetadata), CLOD_RECORD_SOURCE_PASS1, 1u);
             outCount = 1;
 
             WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS, 1);
@@ -1791,6 +1816,7 @@ void WG_TraverseNodes(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
         const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
+        const bool forceLodDecision = CLodForcedTraversalDepthRootEnabled(clodMeshMetadata);
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[rec.instanceIndex];
@@ -1869,9 +1895,10 @@ void WG_TraverseNodes(
                     lodCam,
                     lodCamera.isOrtho,
                     nodeTouchesDirtyPages,
+                    forceLodDecision,
                     leaf))
                 {
-                    if (CLodRefinedChildSuppressesParent(
+                    if (!forceLodDecision && CLodRefinedChildSuppressesParent(
                         clodMeshMetadata.groupsBase,
                         node.range.countMinusOne - 1u,
                         node.range.countMinusOne != 0u,
@@ -1974,7 +2001,9 @@ void WG_TraverseNodes(
                     lodCam.positionWorldSpace.xyz,
                     lodCam.zNear,
                     lodCamera.isOrtho);
-                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= lodCam.errorOverDistanceThreshold);
+                const bool nodeWantsTraversal =
+                    forceLodDecision ||
+                    (parentAllowsRefine && (nodeErrorOverDistance >= lodCam.errorOverDistanceThreshold));
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -2061,7 +2090,7 @@ void WG_TraverseNodes(
                                 // LOD pre-filter for internal children only.
                                 // Leaf children use the group sphere for LOD (different from node sphere),
                                 // so we skip the LOD check here and let the leaf thread handle it.
-                                if (child.range.isLeaf == CLOD_NODE_INTERNAL) {
+                                if (!forceLodDecision && child.range.isLeaf == CLOD_NODE_INTERNAL) {
                                     const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                                     const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
                                     const float childEOD = ProjectedGeometricError(
@@ -2268,6 +2297,7 @@ void ClusterCullBody(
     bool isSkinned = false;
     bool reyesDisplacementCandidate = false;
     bool isAlphaTestedMaterial = false;
+    bool forceLodDecision = false;
     uint skinningInstanceSlot = 0xFFFFFFFFu;
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
     bool objectInvalidatedThisFrame = false;
@@ -2350,7 +2380,9 @@ void ClusterCullBody(
         StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         const MeshInstanceClodOffsets clodOff = clodOffsets[b.instanceIndex];
-        groupsBase = clodMeshMetadataBuffer[clodOff.clodMeshMetadataIndex].groupsBase;
+        const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[clodOff.clodMeshMetadataIndex];
+        groupsBase = clodMeshMetadata.groupsBase;
+        forceLodDecision = CLodForcedTraversalDepthRootEnabled(clodMeshMetadata);
 
         // Own group EOD for streaming request priority
         {
@@ -2464,7 +2496,7 @@ void ClusterCullBody(
                 // Per-meshlet LOD condition 2: read refined group ID from descriptor.
                 // Terminal meshlets (refinedGroupId < 0) pass automatically.
                 // Non-terminal meshlets check if the child group is acceptable.
-                if (survives) {
+                if (survives && !forceLodDecision) {
                     const int refinedGroupId = CLodDescRefinedGroupId(desc);
                     if (CLodRefinedChildSuppressesParent(
                         groupsBase,
