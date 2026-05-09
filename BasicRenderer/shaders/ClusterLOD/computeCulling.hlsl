@@ -277,6 +277,9 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
             lodCamera.isOrtho,
             nodeTouchesDirtyPages,
             forceLodDecision,
+            rec.instanceIndex,
+            instanceData.perMeshBufferIndex,
+            rec.viewId,
             leaf))
         {
             return;

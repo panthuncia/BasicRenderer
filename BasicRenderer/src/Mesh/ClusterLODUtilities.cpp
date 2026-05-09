@@ -2993,8 +2993,14 @@ namespace
 					? group.bounds.error
 					: finiteParentErrorForGroup[groupIndex];
 			}
+			const bool hasFiniteTriangleReductionError = finiteVoxelDecisionError(originalGroupErrors[groupIndex]);
 			buildInput.autoAcceptanceErrorReference = triangleErrorReference;
-			buildInput.autoWouldFitBudget = hasRefinedDomain && finiteVoxelDecisionError(buildInput.autoAcceptanceErrorReference) &&
+			// Auto fallback compares voxel error against the triangle reduction error
+			// for this group. Terminal/source groups use the FLT_MAX sentinel instead
+			// of a real reduction error, so they must remain triangle groups unless
+			// voxel-only mode explicitly asks to replace them.
+			buildInput.autoWouldFitBudget = hasRefinedDomain && hasFiniteTriangleReductionError &&
+				finiteVoxelDecisionError(buildInput.autoAcceptanceErrorReference) &&
 				buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < buildInput.autoAcceptanceErrorReference;
 			if (buildInput.autoWouldFitBudget)
 			{

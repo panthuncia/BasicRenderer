@@ -1592,6 +1592,38 @@ void CLodMarkGroupTouched(uint groupGlobalIndex)
     }
 }
 
+void CLodRequestGroupLoad(
+    uint groupGlobalIndex,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    float requestPriorityErrorOverDistance)
+{
+    StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+    const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+    if (groupGlobalIndex >= activeGroupScanCount)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<CLodStreamingRequest> loadRequests =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+    RWStructuredBuffer<uint> loadRequestCounter =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+    uint requestIndex = 0u;
+    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY)
+    {
+        CLodStreamingRequest req = (CLodStreamingRequest)0;
+        req.groupGlobalIndex = groupGlobalIndex;
+        req.meshInstanceIndex = instanceIndex;
+        req.meshBufferIndex = meshBufferIndex;
+        req.viewId = CLodPackViewPriority(viewId, requestPriorityErrorOverDistance);
+        loadRequests[requestIndex] = req;
+    }
+}
+
 bool CLodPrepareRenderableLeaf(
     CLodMeshMetadata clodMeshMetadata,
     ClusterLODNode node,
@@ -1602,6 +1634,9 @@ bool CLodPrepareRenderableLeaf(
     bool lodCameraIsOrtho,
     bool nodeTouchesDirtyPages,
     bool forceLodDecision,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
     out CLodRenderableLeaf leaf)
 {
     leaf = (CLodRenderableLeaf)0;
@@ -1647,6 +1682,12 @@ bool CLodPrepareRenderableLeaf(
     CLodMarkGroupTouched(leaf.groupGlobalIndex);
     if (!CLodGroupIsResident(leaf.groupGlobalIndex))
     {
+        CLodRequestGroupLoad(
+            leaf.groupGlobalIndex,
+            instanceIndex,
+            meshBufferIndex,
+            viewId,
+            leaf.errorOverDistance);
         if (leaf.isVoxel)
         {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
@@ -1896,6 +1937,9 @@ void WG_TraverseNodes(
                     lodCamera.isOrtho,
                     nodeTouchesDirtyPages,
                     forceLodDecision,
+                    rec.instanceIndex,
+                    instanceData.perMeshBufferIndex,
+                    rec.viewId,
                     leaf))
                 {
                     if (!forceLodDecision && CLodRefinedChildSuppressesParent(
