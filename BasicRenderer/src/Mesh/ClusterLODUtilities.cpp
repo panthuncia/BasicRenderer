@@ -2786,22 +2786,25 @@ namespace
 			return false;
 		}
 
+		// Voxel sections have to preserve the same DAG cut contract as triangle
+		// sections: condition 2 suppresses a parent against each immediate refined
+		// child group. Do not recursively expand these children here; shared DAG
+		// descendants would be attributed to multiple sections and can render as
+		// misplaced duplicates while leaving the intended child without coverage.
 		for (uint32_t childGroupIndex : refinedChildren)
 		{
 			if ((state.groups[childGroupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u &&
 				GetVoxelRenderPayloadForGroup(state, childGroupIndex) != nullptr)
 			{
 				buildInput.sourceVoxelGroupIndices.push_back(childGroupIndex);
-				std::unordered_set<uint32_t> visitedSourceGroups;
-				if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedSourceGroups, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
+				if (!AppendGroupTriangleSourceGeometry(state, childGroupIndex, buildInput, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
 				{
 					return false;
 				}
 				continue;
 			}
 
-			std::unordered_set<uint32_t> visitedSourceGroups;
-			if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedSourceGroups, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
+			if (!AppendGroupTriangleSourceGeometry(state, childGroupIndex, buildInput, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
 			{
 				return false;
 			}
@@ -2859,14 +2862,14 @@ namespace
 			return false;
 		}
 
+		// Coverage must be measured over the same immediate refined-child domains
+		// used for candidate ownership; descendant expansion breaks DAG sharing.
 		for (uint32_t childGroupIndex : refinedChildren)
 		{
-			std::unordered_set<uint32_t> visitedSourceGroups;
-			if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedSourceGroups, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
+			if (!AppendGroupTriangleSourceGeometry(state, childGroupIndex, buildInput, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
 			{
 				return false;
 			}
-
 		}
 
 		return !buildInput.voxelVertices.empty() && !buildInput.voxelTriangleIndices.empty();

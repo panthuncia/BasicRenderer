@@ -1109,9 +1109,9 @@ void CLodAppendVoxelRasterCubeWork(
             visibleClusterIndex,
             viewId,
             instanceIndex,
-            cubeIndex & 0x3FFFu,
+            (voxelDescriptor.firstCube + cubeIndex) & 0x3FFFu,
             localGroupId,
-            cubeIndex >> 14u,
+            (voxelDescriptor.firstCube + cubeIndex) >> 14u,
             0u,
             CLodVisibleClusterMarkVoxelPayload(CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX)));
 
