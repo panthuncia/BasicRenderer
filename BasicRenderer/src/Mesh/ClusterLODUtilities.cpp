@@ -2416,11 +2416,14 @@ namespace
 
 		if (refinedChildren.empty())
 		{
-			return AppendGroupTriangleSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes, refinedGroupTag);
+			const bool appended = AppendGroupTriangleSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes, refinedGroupTag);
+			visitedGroups.erase(groupIndex);
+			return appended;
 		}
 
 		if (!AppendTerminalSegmentSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes, refinedGroupTag))
 		{
+			visitedGroups.erase(groupIndex);
 			return false;
 		}
 
@@ -2428,10 +2431,12 @@ namespace
 		{
 			if (!AppendDescendantTriangleSourceGeometry(state, childGroupIndex, buildInput, visitedGroups, vertexStrideBytes, refinedGroupTag))
 			{
+				visitedGroups.erase(groupIndex);
 				return false;
 			}
 		}
 
+		visitedGroups.erase(groupIndex);
 		return true;
 	}
 
@@ -4666,8 +4671,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	// Build traversal hierarchy.
 	BuildClusterLODTraversalHierarchy(state, /*preferredNodeWidth=*/TraversalNodeFanout);
 
-	// Release raw streams after mesh hierarchy construction. Future voxel fallback candidate construction
-	// should run before this point.
+	// Release raw streams after mesh hierarchy construction.
 	{ std::vector<std::vector<std::byte>>().swap(state.groupVertexChunks); }
 	{ std::vector<std::vector<uint32_t>>().swap(state.groupMeshletVertexChunks); }
 	{ std::vector<std::vector<meshopt_Meshlet>>().swap(state.groupMeshletChunks); }
