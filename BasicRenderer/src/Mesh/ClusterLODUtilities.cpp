@@ -2808,8 +2808,7 @@ namespace
 		// misplaced duplicates while leaving the intended child without coverage.
 		for (uint32_t childGroupIndex : refinedChildren)
 		{
-			if ((state.groups[childGroupIndex].flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u &&
-				GetVoxelRenderPayloadForGroup(state, childGroupIndex) != nullptr)
+			if (GetVoxelRenderPayloadForGroup(state, childGroupIndex) != nullptr)
 			{
 				buildInput.sourceVoxelGroupIndices.push_back(childGroupIndex);
 				if (!AppendGroupTriangleSourceGeometry(state, childGroupIndex, buildInput, vertexStrideBytes, static_cast<int32_t>(childGroupIndex)))
@@ -2979,42 +2978,17 @@ namespace
 
 			stats.validGroups++;
 			const bool hasRefinedDomain = group.terminalSegmentCount < group.segmentCount;
-			float triangleErrorReference = std::numeric_limits<float>::max();
-			uint32_t finiteRefinedChildErrorCount = 0u;
-			if (hasRefinedDomain)
-			{
-				for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
-				{
-					const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
-					if (segment.refinedGroup < 0)
-					{
-						continue;
-					}
-
-					const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
-					const float childError = childGroupIndex < originalGroupErrors.size()
-						? originalGroupErrors[childGroupIndex]
-						: 0.0f;
-					if (finiteVoxelDecisionError(childError))
-					{
-						triangleErrorReference = std::min(triangleErrorReference, childError);
-						finiteRefinedChildErrorCount++;
-					}
-				}
-			}
-			if (finiteRefinedChildErrorCount == 0u)
-			{
-				triangleErrorReference = finiteVoxelDecisionError(group.bounds.error)
-					? group.bounds.error
-					: finiteParentErrorForGroup[groupIndex];
-			}
 			const bool hasFiniteTriangleReductionError = finiteVoxelDecisionError(originalGroupErrors[groupIndex]);
-			buildInput.autoAcceptanceErrorReference = triangleErrorReference;
-			// Auto fallback compares voxel error against the triangle reduction error
-			// for this group. Terminal/source groups use the FLT_MAX sentinel instead
-			// of a real reduction error, so they must remain triangle groups unless
-			// voxel-only mode explicitly asks to replace them.
-			buildInput.autoWouldFitBudget = hasRefinedDomain && hasFiniteTriangleReductionError &&
+			buildInput.autoAcceptanceErrorReference = hasFiniteTriangleReductionError
+				? originalGroupErrors[groupIndex]
+				: finiteParentErrorForGroup[groupIndex];
+			// Auto fallback compares the voxel error against the triangle
+			// reduction error for the group being replaced. Finite terminal
+			// groups can be voxel seeds; this lets the first voxel parent refine
+			// into a smaller voxel error instead of being clamped to a large
+			// terminal triangle error. FLT_MAX sentinel/source groups still do
+			// not auto-voxelize because they do not represent a reduction error.
+			buildInput.autoWouldFitBudget = hasFiniteTriangleReductionError &&
 				finiteVoxelDecisionError(buildInput.autoAcceptanceErrorReference) &&
 				buildInput.analysis.targetVoxelWidth * std::max(1.0f, settings.voxelFallbackAcceptanceBias) < buildInput.autoAcceptanceErrorReference;
 			if (buildInput.autoWouldFitBudget)
@@ -3054,11 +3028,35 @@ namespace
 			VoxelGroupPayload payload{};
 			uint32_t resolution = buildInput.analysis.targetResolution;
 			float voxelError = buildInput.analysis.targetVoxelWidth;
+			float maxRefinedChildError = 0.0f;
+			uint32_t refinedChildErrorCount = 0u;
+			for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+			{
+				const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+				if (segment.refinedGroup < 0)
+				{
+					continue;
+				}
+
+				const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
+				if (childGroupIndex < state.groups.size())
+				{
+					const float childError = state.groups[childGroupIndex].bounds.error;
+					if (std::isfinite(childError) && childError > 0.0f && childError < std::numeric_limits<float>::max() * 0.5f)
+					{
+						maxRefinedChildError = std::max(maxRefinedChildError, childError);
+						refinedChildErrorCount++;
+					}
+				}
+			}
+			const float hierarchyVoxelErrorFloor = maxRefinedChildError > 0.0f
+				? std::nextafter(maxRefinedChildError, std::numeric_limits<float>::infinity())
+				: 0.0f;
 			const float minSourceVoxelWidth = GetMaxSourceVoxelWidthForBuildInput(state, buildInput);
 			LogVoxelTriangleTagHistogram("candidate", groupIndex, group.depth, buildInput);
-			if (minSourceVoxelWidth > 0.0f && voxelError < minSourceVoxelWidth)
+			if (minSourceVoxelWidth > 0.0f && voxelError <= minSourceVoxelWidth)
 			{
-				voxelError = minSourceVoxelWidth;
+				voxelError = std::nextafter(minSourceVoxelWidth, std::numeric_limits<float>::infinity());
 				const float extentX = buildInput.analysis.aabbMax.x - buildInput.analysis.aabbMin.x;
 				const float extentY = buildInput.analysis.aabbMax.y - buildInput.analysis.aabbMin.y;
 				const float extentZ = buildInput.analysis.aabbMax.z - buildInput.analysis.aabbMin.z;
@@ -3154,13 +3152,14 @@ namespace
 				voxelInput.pruningMode = settings.voxelFallbackPruningMode;
 				VoxelizeTrianglesResult voxelResult = VoxelizeTrianglesDetailed(voxelInput);
 				spdlog::info(
-					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} min_source_voxel_width={} pruning={} source_tris={} source_voxel_groups={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={} source_coverage_queries={} source_coverage_candidates={} source_coverage_tests={} source_coverage_out_of_cell={}",
+					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} min_source_voxel_width={} hierarchy_error_floor={} pruning={} source_tris={} source_voxel_groups={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={} source_coverage_queries={} source_coverage_candidates={} source_coverage_tests={} source_coverage_out_of_cell={}",
 					groupIndex,
 					group.depth,
 					attempt,
 					resolution,
 					voxelError,
 					minSourceVoxelWidth,
+					hierarchyVoxelErrorFloor,
 					VoxelPruningModeName(settings.voxelFallbackPruningMode),
 					buildInput.voxelTriangleIndices.size() / 3ull,
 					buildInput.sourceVoxelGroupIndices.size(),
@@ -3223,32 +3222,6 @@ namespace
 				return false;
 			}
 
-			float maxRefinedChildError = 0.0f;
-			uint32_t refinedChildErrorCount = 0u;
-			for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
-			{
-				const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
-				if (segment.refinedGroup < 0)
-				{
-					continue;
-				}
-
-				const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
-				if (childGroupIndex < state.groups.size())
-				{
-					const float childError = state.groups[childGroupIndex].bounds.error;
-					if (std::isfinite(childError) && childError > 0.0f && childError < std::numeric_limits<float>::max() * 0.5f)
-					{
-						maxRefinedChildError = std::max(maxRefinedChildError, childError);
-						refinedChildErrorCount++;
-					}
-				}
-			}
-			const float traversalError = (maxRefinedChildError > 0.0f && voxelError <= maxRefinedChildError)
-				? std::nextafter(maxRefinedChildError, std::numeric_limits<float>::infinity())
-				: voxelError;
-			const bool traversalErrorLifted = traversalError != voxelError;
-
 			const uint32_t payloadIndex = static_cast<uint32_t>(state.voxelGroupMapping.payloads.size());
 			const uint32_t descriptorIndex = static_cast<uint32_t>(state.voxelGroupMapping.packedGroupDescriptors.size());
 			const uint32_t firstCube = static_cast<uint32_t>(state.voxelGroupMapping.packedCubeRecords.size());
@@ -3269,7 +3242,7 @@ namespace
 				packed.cubeRecords.size(),
 				packed.attributeSamples.size(),
 				payload.voxelWidth,
-				traversalError,
+				voxelError,
 				settings.voxelFallbackOpacityThreshold);
 			if (packed.cubeRecords.empty())
 			{
@@ -3367,24 +3340,28 @@ namespace
 
 			const float triangleError = group.bounds.error;
 			const bool terminalErrorSentinel = triangleError >= std::numeric_limits<float>::max() * 0.5f;
-			group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
-			group.meshletCount = 0u;
-			group.groupVertexCount = 0u;
-			group.pageCount = static_cast<uint32_t>(voxelPageBlobs.size());
-			group.bounds.error = (forceAllVoxels || autoMode) && !terminalErrorSentinel ? traversalError : triangleError;
-			if (groupIndex < state.groupPageBlobs.size())
+			const bool replaceGroupWithVoxels = forceAllVoxels || group.terminalSegmentCount < group.segmentCount;
+			group.bounds.error = voxelError;
+			if (replaceGroupWithVoxels)
 			{
-				state.groupPageBlobs[groupIndex] = std::move(voxelPageBlobs);
-			}
-			if (groupIndex < state.groupChunks.size())
-			{
-				ClusterLODGroupChunk& chunk = state.groupChunks[groupIndex];
-				chunk.groupVertexCount = 0u;
-				chunk.meshletCount = 0u;
-				chunk.meshletTrianglesByteCount = 0u;
+				group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
+				group.meshletCount = 0u;
+				group.groupVertexCount = 0u;
+				group.pageCount = static_cast<uint32_t>(voxelPageBlobs.size());
+				if (groupIndex < state.groupPageBlobs.size())
+				{
+					state.groupPageBlobs[groupIndex] = std::move(voxelPageBlobs);
+				}
+				if (groupIndex < state.groupChunks.size())
+				{
+					ClusterLODGroupChunk& chunk = state.groupChunks[groupIndex];
+					chunk.groupVertexCount = 0u;
+					chunk.meshletCount = 0u;
+					chunk.meshletTrianglesByteCount = 0u;
+				}
 			}
 			spdlog::info(
-				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_width={} traversal_error={} terminal_sentinel={} terminal_segments={}/{} refined_child_errors={} max_refined_child_error={} traversal_error_lifted={} forced_budget_fit={}",
+				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_width={} traversal_error={} terminal_sentinel={} terminal_segments={}/{} refined_child_errors={} max_refined_child_error={} hierarchy_error_floor={} forced_budget_fit={} replaces_group={}",
 				groupIndex,
 				group.depth,
 				triangleError,
@@ -3395,8 +3372,9 @@ namespace
 				group.segmentCount,
 				refinedChildErrorCount,
 				maxRefinedChildError,
-				traversalErrorLifted,
-				requireBudgetFit);
+				hierarchyVoxelErrorFloor,
+				requireBudgetFit,
+				replaceGroupWithVoxels);
 			stats.generatedPayloads++;
 			stats.generatedCubes += static_cast<uint32_t>(packed.cubeRecords.size());
 			return true;
