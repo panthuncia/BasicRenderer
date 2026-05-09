@@ -197,24 +197,6 @@ namespace CLodCache {
 			WritePod(out, prebuiltData.maxDepth);
 			WritePod(out, prebuiltData.maxTraversalDepth);
 
-			// --- Voxel group mapping ---
-			const auto& vgm = prebuiltData.voxelGroupMapping;
-			const uint32_t payloadCount = static_cast<uint32_t>(vgm.payloads.size());
-			WritePod(out, payloadCount);
-			for (const VoxelGroupPayload& payload : vgm.payloads)
-			{
-				WritePod(out, payload.resolution);
-				WritePod(out, payload.aabbMin);
-				WritePod(out, payload.aabbMax);
-				WritePod(out, payload.voxelWidth);
-				WriteVectorPod(out, payload.activeCells);
-			}
-			WriteVectorPod(out, vgm.groupToPayloadIndex);
-			WriteVectorPod(out, vgm.groupToPackedDescriptorIndex);
-			WriteVectorPod(out, vgm.packedGroupDescriptors);
-			WriteVectorPod(out, vgm.packedCubeRecords);
-			WriteVectorPod(out, vgm.packedAttributeSamples);
-
 			return out;
 		}
 
@@ -251,25 +233,6 @@ namespace CLodCache {
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.lodLevelRoots)) return false;
 			if (!ReadPod(blob, offset, out.prebuiltData.maxDepth)) return false;
 			if (!ReadPod(blob, offset, out.prebuiltData.maxTraversalDepth)) return false;
-
-			// --- Voxel group mapping ---
-			uint32_t payloadCount = 0;
-			if (!ReadPod(blob, offset, payloadCount)) return false;
-			out.prebuiltData.voxelGroupMapping.payloads.resize(payloadCount);
-			for (uint32_t pi = 0; pi < payloadCount; ++pi)
-			{
-				VoxelGroupPayload& payload = out.prebuiltData.voxelGroupMapping.payloads[pi];
-				if (!ReadPod(blob, offset, payload.resolution)) return false;
-				if (!ReadPod(blob, offset, payload.aabbMin)) return false;
-				if (!ReadPod(blob, offset, payload.aabbMax)) return false;
-				if (!ReadPod(blob, offset, payload.voxelWidth)) return false;
-				if (!ReadVectorPod(blob, offset, payload.activeCells)) return false;
-			}
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.groupToPayloadIndex)) return false;
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.groupToPackedDescriptorIndex)) return false;
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedGroupDescriptors)) return false;
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedCubeRecords)) return false;
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.packedAttributeSamples)) return false;
 
 			return offset == blob.size();
 		}

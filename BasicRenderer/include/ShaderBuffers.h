@@ -494,14 +494,6 @@ struct CLodMeshMetadata
     uint lodLevelInfoBase;
     uint lodLevelCount;
     uint maxDepth;
-    uint voxelDescriptorIndexBase;
-    uint voxelDescriptorIndexCount;
-    uint voxelGroupDescriptorBase;
-    uint voxelGroupDescriptorCount;
-    uint voxelCubeRecordBase;
-    uint voxelCubeRecordCount;
-    uint voxelAttributeSampleBase;
-    uint voxelAttributeSampleCount;
 };
 
 struct CLodHierarchyLevelInfo

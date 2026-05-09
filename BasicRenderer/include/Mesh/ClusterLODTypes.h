@@ -133,7 +133,6 @@ struct ClusterLODPrebuiltData
 	std::vector<uint32_t> lodLevelRoots;
 	uint32_t maxDepth = 0;
 	uint32_t maxTraversalDepth = 0;
-	VoxelGroupMapping voxelGroupMapping;
 };
 
 struct ClusterLODCacheBuildPayload

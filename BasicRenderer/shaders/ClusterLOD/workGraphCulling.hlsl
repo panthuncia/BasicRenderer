@@ -64,7 +64,7 @@ struct Meshlet
 struct ClusterLODNodeRange
 {
     uint isLeaf; // 0=internal node, 1=voxel group leaf, 2=segment leaf
-    uint indexOrOffset; // voxel leaf: mesh-local voxel descriptor index; segment-leaf: mesh-local segment index
+    uint indexOrOffset; // voxel leaf: group-local section index; segment-leaf: mesh-local segment index
                          // internal: childOffset (relative to lodNodesBase)
     uint countMinusOne; // internal: childCountMinusOne; voxel leaf: refinedGroup+1, or 0 for terminal
     uint ownerGroupId;  // segment-leaf: mesh-local group index (for page resolution + streaming)
@@ -1963,7 +1963,7 @@ void WG_TraverseNodes(
                     else if (leaf.isVoxel)
                     {
                         CLodVoxelGroupDescriptor voxelDescriptor;
-                        if (CLodTryLoadVoxelDescriptorByLocalIndex(clodMeshMetadata, node.range.indexOrOffset, voxelDescriptor))
+                        if (CLodTryLoadVoxelDescriptorByLocalIndex(clodMeshMetadata, node.range.ownerGroupId, node.range.indexOrOffset, voxelDescriptor))
                         {
                             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
                             CLodAppendVoxelRasterCubeWork(

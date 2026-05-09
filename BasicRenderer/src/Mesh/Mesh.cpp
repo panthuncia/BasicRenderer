@@ -422,7 +422,6 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodLodLevelRoots = data.lodLevelRoots;
 	m_clodTopRootNode = 0;
 	m_perMeshBufferData.boundingSphere = data.objectBoundingSphere;
-	m_voxelGroupMapping = data.voxelGroupMapping;
 	{
 		uint32_t voxelGroupCount = 0;
 		for (const ClusterLODGroup& group : m_clodGroups) {
@@ -430,13 +429,11 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 				voxelGroupCount++;
 			}
 		}
-		if (voxelGroupCount != 0u || !m_voxelGroupMapping.packedGroupDescriptors.empty()) {
+		if (voxelGroupCount != 0u) {
 			spdlog::info(
-				"ClusterLOD runtime adoption: groups={} voxel_groups={} voxel_descriptors={} voxel_cubes={} nodes={} cache_hash=0x{:016X}",
+				"ClusterLOD runtime adoption: groups={} voxel_groups={} nodes={} cache_hash=0x{:016X}",
 				m_clodGroups.size(),
 				voxelGroupCount,
-				m_voxelGroupMapping.packedGroupDescriptors.size(),
-				m_voxelGroupMapping.packedCubeRecords.size(),
 				m_clodNodes.size(),
 				data.cacheSource.buildConfigHash);
 		}
@@ -505,7 +502,6 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.lodLevelRoots = m_clodLodLevelRoots;
 	out.maxDepth = m_clodMaxDepth;
 	out.maxTraversalDepth = m_clodMaxTraversalDepth;
-	out.voxelGroupMapping = m_voxelGroupMapping;
 	return out;
 }
 

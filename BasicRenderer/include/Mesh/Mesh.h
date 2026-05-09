@@ -290,16 +290,8 @@ public:
 		return m_clodLodLevelRoots.back();
 	}
 
-	const VoxelGroupMapping& GetVoxelGroupMapping() const {
-		return m_voxelGroupMapping;
-	}
-
 	const std::vector<MeshUvSetData>& GetUvSets() const {
 		return m_uvSets;
-	}
-
-	bool HasVoxelGroups() const {
-		return !m_voxelGroupMapping.payloads.empty() || !m_voxelGroupMapping.packedGroupDescriptors.empty();
 	}
 
 	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;
@@ -367,7 +359,6 @@ private:
 	uint32_t                         m_clodTopRootNode = 0;      // always 0
 	uint32_t                         m_clodMaxDepth = 0;
 	uint32_t                         m_clodMaxTraversalDepth = 0;
-	VoxelGroupMapping                m_voxelGroupMapping;        // Per-group voxel payloads (empty when no voxel groups exist)
 	std::optional<ClusterLODPrebuiltData> m_prebuiltClusterLOD;
 
 	std::unique_ptr<BufferView> m_clusterLODGroupsView = nullptr;

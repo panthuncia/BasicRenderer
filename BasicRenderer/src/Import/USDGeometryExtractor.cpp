@@ -752,7 +752,7 @@ MeshPreprocessResult ExtractSubMesh(
 		? subset->GetPrim().GetName().GetString()
 		: std::string{};
 
-	auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subsetName);
+	auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subsetName, geomTimeCode);
 	spdlog::info("    ExtractSubMesh: prim='{}' subset='{}' source='{}'",
 		cacheIdentity.primPath, subsetName, cacheIdentity.sourceIdentifier);
 	spdlog::info("    Geometry sample time for prim='{}' is {}",
