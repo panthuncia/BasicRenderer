@@ -838,6 +838,8 @@ MaterialInputs BuildVoxelMaterialInputs(MaterialInfo materialInfo, float3 normal
     return inputs;
 }
 
+float2 ComputeClodMotionVector(float3 posOS, float3 worldPosition, float4x4 prevModel, float4x4 unjitteredViewProj, float4x4 prevUnjitteredViewProj);
+
 bool ResolveClodVoxelCommonSampleFromPackedCluster(
     uint4 packedCluster,
     uint visibleClusterIndex,
@@ -917,6 +919,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     const float rayT = linearDepth / max(-rayDirVS.z, 1e-6f);
     const float3 worldPosition = rayOriginWS + rayDirWS * rayT;
     const float3 objectPosition = mul(float4(worldPosition, 1.0f), worldToLocal).xyz;
+    const float3 skinnedObjectPosition = mul(float4(objectPosition, 1.0f), skinMatrix).xyz;
 
     const int3 cell = clamp(int3(floor((objectPosition - cubeMinObject) / voxelWidth)), int3(0, 0, 0), int3(3, 3, 3));
     const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
@@ -943,7 +946,12 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     sample.vertexColor = float3(1.0f, 1.0f, 1.0f);
     sample.dpdxWS = 0.0f.xxx;
     sample.dpdyWS = 0.0f.xxx;
-    sample.motionVector = float2(0.0f, 0.0f);
+    sample.motionVector = ComputeClodMotionVector(
+        skinnedObjectPosition,
+        worldPosition,
+        obj.prevModel,
+        mul(cam.view, cam.unjitteredProjection),
+        mul(cam.prevView, cam.prevUnjitteredProjection));
 #if defined(VISUTIL_USE_COMPACT_MATERIAL_EVAL)
     sample.materialInfo = (MaterialInfo)0;
 #else
