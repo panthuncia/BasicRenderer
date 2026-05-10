@@ -816,6 +816,134 @@ uint3 CLodDecodeVoxelCubeCoord(uint packedCoord)
     return uint3(packedCoord & 0x3FFu, (packedCoord >> 10u) & 0x3FFu, (packedCoord >> 20u) & 0x3FFu);
 }
 
+bool ResolveVoxelMaskTest(uint2 mask, uint bitIndex)
+{
+    return bitIndex < 32u ? ((mask.x & (1u << bitIndex)) != 0u) : ((mask.y & (1u << (bitIndex - 32u))) != 0u);
+}
+
+bool ResolveRayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxMax, out float tEnter, out float tExit)
+{
+    tEnter = 0.0f;
+    tExit = 3.402823e+38f;
+
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
+    {
+        const float origin = rayOrigin[axis];
+        const float dir = rayDir[axis];
+        const float bMin = boxMin[axis];
+        const float bMax = boxMax[axis];
+
+        if (abs(dir) <= 1.0e-8f)
+        {
+            if (origin < bMin || origin > bMax)
+            {
+                return false;
+            }
+            continue;
+        }
+
+        const float invDir = 1.0f / dir;
+        float t0 = (bMin - origin) * invDir;
+        float t1 = (bMax - origin) * invDir;
+        if (t0 > t1)
+        {
+            const float tmp = t0;
+            t0 = t1;
+            t1 = tmp;
+        }
+
+        tEnter = max(tEnter, t0);
+        tExit = min(tExit, t1);
+        if (tExit < tEnter)
+        {
+            return false;
+        }
+    }
+
+    return tExit >= 0.0f;
+}
+
+bool ResolveRaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, uint2 occupancyMask, out float tHit)
+{
+    tHit = 0.0f;
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    if (!ResolveRayBoxIntersect(rayOrigin, rayDir, float3(0.0f, 0.0f, 0.0f), float3(4.0f, 4.0f, 4.0f), tEnter, tExit))
+    {
+        return false;
+    }
+
+    float currentT = max(tEnter, 0.0f) + 1.0e-4f;
+    const float3 p = clamp(rayOrigin + rayDir * currentT, float3(0.0f, 0.0f, 0.0f), float3(3.9999f, 3.9999f, 3.9999f));
+    int3 cell = int3(floor(p));
+    const int3 stepDir = int3(rayDir.x >= 0.0f ? 1 : -1, rayDir.y >= 0.0f ? 1 : -1, rayDir.z >= 0.0f ? 1 : -1);
+
+    const float largeT = 3.402823e+38f;
+    float3 nextBoundary = float3(
+        stepDir.x > 0 ? float(cell.x + 1) : float(cell.x),
+        stepDir.y > 0 ? float(cell.y + 1) : float(cell.y),
+        stepDir.z > 0 ? float(cell.z + 1) : float(cell.z));
+    float3 tMax = float3(
+        abs(rayDir.x) > 1.0e-8f ? (nextBoundary.x - rayOrigin.x) / rayDir.x : largeT,
+        abs(rayDir.y) > 1.0e-8f ? (nextBoundary.y - rayOrigin.y) / rayDir.y : largeT,
+        abs(rayDir.z) > 1.0e-8f ? (nextBoundary.z - rayOrigin.z) / rayDir.z : largeT);
+    float3 tDelta = float3(
+        abs(rayDir.x) > 1.0e-8f ? abs(1.0f / rayDir.x) : largeT,
+        abs(rayDir.y) > 1.0e-8f ? abs(1.0f / rayDir.y) : largeT,
+        abs(rayDir.z) > 1.0e-8f ? abs(1.0f / rayDir.z) : largeT);
+
+    [loop]
+    for (uint iter = 0u; iter < 16u; ++iter)
+    {
+        if (any(cell < 0) || any(cell >= 4))
+        {
+            break;
+        }
+
+        const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
+        if (ResolveVoxelMaskTest(occupancyMask, cellIndex))
+        {
+            tHit = currentT;
+            return true;
+        }
+
+        if (tMax.x <= tMax.y && tMax.x <= tMax.z)
+        {
+            if (tMax.x > tExit)
+            {
+                break;
+            }
+            currentT = tMax.x + 1.0e-4f;
+            cell.x += stepDir.x;
+            tMax.x += tDelta.x;
+        }
+        else if (tMax.y <= tMax.z)
+        {
+            if (tMax.y > tExit)
+            {
+                break;
+            }
+            currentT = tMax.y + 1.0e-4f;
+            cell.y += stepDir.y;
+            tMax.y += tDelta.y;
+        }
+        else
+        {
+            if (tMax.z > tExit)
+            {
+                break;
+            }
+            currentT = tMax.z + 1.0e-4f;
+            cell.z += stepDir.z;
+            tMax.z += tDelta.z;
+        }
+    }
+
+    return false;
+}
+
 MaterialInputs BuildVoxelMaterialInputs(MaterialInfo materialInfo, float3 normalWS, float opacity)
 {
     MaterialInputs inputs = (MaterialInputs)0;
@@ -914,12 +1042,21 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     float4 worldNear = mul(float4(viewNear.xyz, 1.0f), cam.viewInverse);
     const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1e-6f);
     const float3 rayOriginWS = cam.positionWorldSpace.xyz;
-    const float3 rayDirWS = normalize(worldPoint - rayOriginWS);
-    const float3 rayDirVS = mul(float4(rayDirWS, 0.0f), cam.view).xyz;
-    const float rayT = linearDepth / max(-rayDirVS.z, 1e-6f);
-    const float3 worldPosition = rayOriginWS + rayDirWS * rayT;
-    const float3 objectPosition = mul(float4(worldPosition, 1.0f), worldToLocal).xyz;
+    const float3 rayOriginObject = mul(float4(rayOriginWS, 1.0f), worldToLocal).xyz;
+    const float3 localPoint = mul(float4(worldPoint, 1.0f), worldToLocal).xyz;
+    const float3 rayDirObject = normalize(localPoint - rayOriginObject);
+    const float3 rayOriginCube = (rayOriginObject - cubeMinObject) / voxelWidth;
+    const float3 rayDirCube = rayDirObject / voxelWidth;
+
+    float tHitCube = 0.0f;
+    if (!ResolveRaycastVoxelCubeDDA(rayOriginCube, rayDirCube, cube.occupancyMask, tHitCube))
+    {
+        return false;
+    }
+
+    const float3 objectPosition = rayOriginObject + rayDirObject * tHitCube;
     const float3 skinnedObjectPosition = mul(float4(objectPosition, 1.0f), skinMatrix).xyz;
+    const float3 worldPosition = mul(float4(objectPosition, 1.0f), localToWorld).xyz;
 
     const int3 cell = clamp(int3(floor((objectPosition - cubeMinObject) / voxelWidth)), int3(0, 0, 0), int3(3, 3, 3));
     const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);

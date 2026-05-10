@@ -14,6 +14,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/VertexLayout.h"
 
 namespace
@@ -554,10 +555,12 @@ namespace
 		};
 		const Float3 halfCell = cellSize * 0.5f;
 
-		cellTriMap.reserve(triangleCount * 2);
+		std::vector<std::vector<uint64_t>> perTriangleCells(triangleCount);
 
-		for (uint32_t triIdx = 0; triIdx < triangleCount; ++triIdx)
+		TaskSchedulerManager::GetInstance().ParallelFor("VoxelGroupBuilder::RasterizeTriangles", triangleCount,
+			[&](size_t triangleWorkIndex)
 		{
+			const uint32_t triIdx = static_cast<uint32_t>(triangleWorkIndex);
 			const uint32_t i0 = triangleIndices[triIdx * 3 + 0];
 			const uint32_t i1 = triangleIndices[triIdx * 3 + 1];
 			const uint32_t i2 = triangleIndices[triIdx * 3 + 2];
@@ -584,6 +587,13 @@ namespace
 			const uint32_t cyMax = ToCellCoord(triMax.y + halfCell.y, aabbMin.y, invCellSize.y, resolution);
 			const uint32_t czMax = ToCellCoord(triMax.z + halfCell.z, aabbMin.z, invCellSize.z, resolution);
 
+			std::vector<uint64_t>& triangleCells = perTriangleCells[triIdx];
+			const uint64_t candidateCellCount =
+				static_cast<uint64_t>(cxMax - cxMin + 1u) *
+				static_cast<uint64_t>(cyMax - cyMin + 1u) *
+				static_cast<uint64_t>(czMax - czMin + 1u);
+			triangleCells.reserve(static_cast<size_t>(std::min<uint64_t>(candidateCellCount, 64u)));
+
 			for (uint32_t cz = czMin; cz <= czMax; ++cz)
 			{
 				for (uint32_t cy = cyMin; cy <= cyMax; ++cy)
@@ -598,10 +608,25 @@ namespace
 
 						if (TriangleAABBOverlap(v0, v1, v2, center, halfCell))
 						{
-							cellTriMap[PackCell(cx, cy, cz)].push_back(triIdx);
+							triangleCells.push_back(PackCell(cx, cy, cz));
 						}
 					}
 				}
+			}
+		});
+
+		size_t totalCellReferences = 0;
+		for (const std::vector<uint64_t>& triangleCells : perTriangleCells)
+		{
+			totalCellReferences += triangleCells.size();
+		}
+
+		cellTriMap.reserve(std::max<size_t>(triangleCount * 2u, totalCellReferences));
+		for (uint32_t triIdx = 0; triIdx < triangleCount; ++triIdx)
+		{
+			for (uint64_t cellKey : perTriangleCells[triIdx])
+			{
+				cellTriMap[cellKey].push_back(triIdx);
 			}
 		}
 
@@ -1486,17 +1511,32 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 	}
 	detailedResult.candidateCellCount = static_cast<uint32_t>(std::min<size_t>(candidateKeys.size(), std::numeric_limits<uint32_t>::max()));
 
-	result.activeCells.reserve(candidateKeys.size());
-	std::unordered_map<int32_t, VoxelizeTrianglesResult::RefinedGroupStats> refinedGroupStats;
-	auto getRefinedGroupStats = [&refinedGroupStats](int32_t refinedGroup) -> VoxelizeTrianglesResult::RefinedGroupStats&
+	struct VoxelCoverageWorkResult
 	{
-		VoxelizeTrianglesResult::RefinedGroupStats& stats = refinedGroupStats[refinedGroup];
-		stats.refinedGroup = refinedGroup;
-		return stats;
+		std::vector<VoxelCell> emittedCells;
+		std::unordered_map<int32_t, VoxelizeTrianglesResult::RefinedGroupStats> refinedGroupStats;
+		uint32_t positiveCoverageCellCount = 0;
+		float totalCoverage = 0.0f;
+		float maxCoverage = 0.0f;
+		uint64_t sourceCoverageQueryCount = 0;
+		uint64_t sourceCoverageTriangleCandidateCount = 0;
+		uint64_t sourceCoverageTriangleTestCount = 0;
+		uint64_t sourceCoverageOutOfCellRejectionCount = 0;
 	};
 
-	for (uint64_t key : candidateKeys)
+	std::vector<VoxelCoverageWorkResult> coverageWorkResults(candidateKeys.size());
+	TaskSchedulerManager::GetInstance().ParallelFor("VoxelGroupBuilder::TraceCoverage", candidateKeys.size(),
+		[&](size_t candidateKeyIndex)
 	{
+		VoxelCoverageWorkResult& workResult = coverageWorkResults[candidateKeyIndex];
+		auto getRefinedGroupStats = [&workResult](int32_t refinedGroup) -> VoxelizeTrianglesResult::RefinedGroupStats&
+		{
+			VoxelizeTrianglesResult::RefinedGroupStats& stats = workResult.refinedGroupStats[refinedGroup];
+			stats.refinedGroup = refinedGroup;
+			return stats;
+		};
+
+		const uint64_t key = candidateKeys[candidateKeyIndex];
 		uint32_t cx, cy, cz;
 		UnpackCell(key, cx, cy, cz);
 
@@ -1632,10 +1672,10 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 					cellMin,
 					cellMax,
 					rays,
-					detailedResult.sourceCoverageQueryCount,
-					detailedResult.sourceCoverageTriangleCandidateCount,
-					detailedResult.sourceCoverageTriangleTestCount,
-					detailedResult.sourceCoverageOutOfCellRejectionCount);
+					workResult.sourceCoverageQueryCount,
+					workResult.sourceCoverageTriangleCandidateCount,
+					workResult.sourceCoverageTriangleTestCount,
+					workResult.sourceCoverageOutOfCellRejectionCount);
 				if (coverage.representativeTriangleIndex != std::numeric_limits<uint32_t>::max())
 				{
 					dominantBoneIndex = ComputeDominantBoneIndexForSourceTriangle(*input.coverageSourceTriangles, coverage.representativeTriangleIndex);
@@ -1674,9 +1714,9 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 
 			if (coverage.coverage > 0.0f)
 			{
-				++detailedResult.positiveCoverageCellCount;
-				detailedResult.totalCoverage += coverage.coverage;
-				detailedResult.maxCoverage = std::max(detailedResult.maxCoverage, coverage.coverage);
+				++workResult.positiveCoverageCellCount;
+				workResult.totalCoverage += coverage.coverage;
+				workResult.maxCoverage = std::max(workResult.maxCoverage, coverage.coverage);
 				++stats.positiveCoverageCells;
 				stats.totalCoverage += coverage.coverage;
 				stats.maxCoverage = std::max(stats.maxCoverage, coverage.coverage);
@@ -1711,9 +1751,44 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			vc.dominantBoneIndex = dominantBoneIndex;
 			vc.refinedGroup = refinedGroup;
 
-			result.activeCells.push_back(vc);
+			workResult.emittedCells.push_back(vc);
 			++stats.emittedSourceCells;
 		}
+	});
+
+	result.activeCells.reserve(candidateKeys.size());
+	std::unordered_map<int32_t, VoxelizeTrianglesResult::RefinedGroupStats> refinedGroupStats;
+	auto accumulateRefinedGroupStats = [](VoxelizeTrianglesResult::RefinedGroupStats& dst, const VoxelizeTrianglesResult::RefinedGroupStats& src)
+	{
+		dst.refinedGroup = src.refinedGroup;
+		dst.candidateKeys += src.candidateKeys;
+		dst.triangleOwnedCells += src.triangleOwnedCells;
+		dst.voxelOwnedCells += src.voxelOwnedCells;
+		dst.candidateOwnedCells += src.candidateOwnedCells;
+		dst.candidateOnlyCells += src.candidateOnlyCells;
+		dst.positiveCoverageCells += src.positiveCoverageCells;
+		dst.zeroCoverageDroppedCells += src.zeroCoverageDroppedCells;
+		dst.emittedSourceCells += src.emittedSourceCells;
+		dst.totalCoverage += src.totalCoverage;
+		dst.maxCoverage = std::max(dst.maxCoverage, src.maxCoverage);
+	};
+
+	for (VoxelCoverageWorkResult& workResult : coverageWorkResults)
+	{
+		detailedResult.positiveCoverageCellCount += workResult.positiveCoverageCellCount;
+		detailedResult.totalCoverage += workResult.totalCoverage;
+		detailedResult.maxCoverage = std::max(detailedResult.maxCoverage, workResult.maxCoverage);
+		detailedResult.sourceCoverageQueryCount += workResult.sourceCoverageQueryCount;
+		detailedResult.sourceCoverageTriangleCandidateCount += workResult.sourceCoverageTriangleCandidateCount;
+		detailedResult.sourceCoverageTriangleTestCount += workResult.sourceCoverageTriangleTestCount;
+		detailedResult.sourceCoverageOutOfCellRejectionCount += workResult.sourceCoverageOutOfCellRejectionCount;
+
+		for (const auto& [refinedGroup, stats] : workResult.refinedGroupStats)
+		{
+			accumulateRefinedGroupStats(refinedGroupStats[refinedGroup], stats);
+		}
+
+		result.activeCells.insert(result.activeCells.end(), workResult.emittedCells.begin(), workResult.emittedCells.end());
 	}
 
 	detailedResult.refinedGroupStats.reserve(refinedGroupStats.size());

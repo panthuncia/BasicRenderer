@@ -737,6 +737,7 @@ namespace
 		std::vector<BoundingSphere> segmentBounds;
 		std::vector<std::byte> vertexChunk;
 		std::vector<std::byte> skinningChunk;
+		std::vector<int32_t> meshletRefinedGroups;
 		std::vector<std::vector<std::byte>> pageBlobs;
 		ClusterLODGroupChunk groupChunk{};
 	};
@@ -871,6 +872,7 @@ namespace
 		}
 
 		assert(localMeshletCursor == output.group.meshletCount);
+		output.meshletRefinedGroups = meshletBucketTag;
 
 		output.group.groupVertexCount = static_cast<uint32_t>(groupLocalToGlobal.size());
 
@@ -1738,6 +1740,7 @@ namespace
 		std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
 		std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
 		std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
+		std::vector<std::vector<int32_t>> groupMeshletRefinedGroupChunks;
 
 		std::vector<ClusterLODNode> nodes;
 		std::vector<ClusterLODNodeRangeAlloc> lodNodeRanges;
@@ -1960,6 +1963,23 @@ namespace
 			meshletTriangles,
 			0u,
 			static_cast<uint32_t>(meshlets.size()));
+	}
+
+	const std::vector<int32_t>* GetGroupMeshletRefinedGroups(const ClusterLODBuildState& state, uint32_t groupIndex)
+	{
+		if (groupIndex >= state.groupMeshletRefinedGroupChunks.size() ||
+			groupIndex >= state.groupMeshletChunks.size())
+		{
+			return nullptr;
+		}
+
+		const std::vector<int32_t>& tags = state.groupMeshletRefinedGroupChunks[groupIndex];
+		if (tags.size() != state.groupMeshletChunks[groupIndex].size())
+		{
+			return nullptr;
+		}
+
+		return &tags;
 	}
 
 	VoxelFallbackGroupAnalysis AnalyzeVoxelFallbackGroup(
@@ -2409,9 +2429,75 @@ namespace
 		size_t vertexStrideBytes,
 		int32_t refinedGroupTag)
 	{
-		if (groupIndex >= state.groups.size())
+		if (groupIndex >= state.groups.size() ||
+			groupIndex >= state.groupVertexChunks.size() ||
+			groupIndex >= state.groupMeshletChunks.size() ||
+			groupIndex >= state.groupMeshletVertexChunks.size() ||
+			groupIndex >= state.groupMeshletTriangleChunks.size())
 		{
 			return false;
+		}
+
+		if (const std::vector<int32_t>* meshletRefinedGroups = GetGroupMeshletRefinedGroups(state, groupIndex))
+		{
+			bool hasTerminalMeshlet = false;
+			for (int32_t refinedGroup : *meshletRefinedGroups)
+			{
+				if (refinedGroup < 0)
+				{
+					hasTerminalMeshlet = true;
+					break;
+				}
+			}
+			if (!hasTerminalMeshlet)
+			{
+				return true;
+			}
+
+			const ClusterLODGroup& group = state.groups[groupIndex];
+			const uint32_t vertexBase = buildInput.voxelVertexCount;
+			const std::vector<std::byte>& vertices = state.groupVertexChunks[groupIndex];
+			buildInput.voxelVertices.insert(buildInput.voxelVertices.end(), vertices.begin(), vertices.end());
+			if (groupIndex < state.groupSkinningChunks.size())
+			{
+				const std::vector<std::byte>& skinning = state.groupSkinningChunks[groupIndex];
+				buildInput.voxelSkinningVertices.insert(
+					buildInput.voxelSkinningVertices.end(),
+					skinning.begin(),
+					skinning.end());
+			}
+
+			const uint32_t sourceVertexCount = vertexStrideBytes > 0u
+				? static_cast<uint32_t>(std::min<size_t>(vertices.size() / vertexStrideBytes, std::numeric_limits<uint32_t>::max()))
+				: group.groupVertexCount;
+			buildInput.voxelVertexCount += sourceVertexCount;
+
+			for (uint32_t meshletIndex = 0; meshletIndex < static_cast<uint32_t>(meshletRefinedGroups->size()); ++meshletIndex)
+			{
+				if ((*meshletRefinedGroups)[meshletIndex] >= 0)
+				{
+					continue;
+				}
+
+				std::vector<uint32_t> triangles = BuildGroupTriangleIndices(
+					state.groupMeshletChunks[groupIndex],
+					state.groupMeshletVertexChunks[groupIndex],
+					state.groupMeshletTriangleChunks[groupIndex],
+					meshletIndex,
+					1u);
+				buildInput.voxelTriangleIndices.reserve(buildInput.voxelTriangleIndices.size() + triangles.size());
+				buildInput.voxelTriangleRefinedGroupIds.reserve(buildInput.voxelTriangleRefinedGroupIds.size() + triangles.size() / 3ull);
+				for (uint32_t index : triangles)
+				{
+					buildInput.voxelTriangleIndices.push_back(vertexBase + index);
+				}
+				for (size_t triangleIndex = 0; triangleIndex < triangles.size() / 3ull; ++triangleIndex)
+				{
+					buildInput.voxelTriangleRefinedGroupIds.push_back(refinedGroupTag);
+				}
+			}
+
+			return true;
 		}
 
 		const ClusterLODGroup& group = state.groups[groupIndex];
@@ -2617,19 +2703,14 @@ namespace
 		return maxSourceError;
 	}
 
-	float GetMaxRefinedChildTraversalError(const ClusterLODBuildState& state, const ClusterLODGroup& group, uint32_t* outCount = nullptr)
+	std::vector<uint32_t> CollectUniqueRefinedChildren(const ClusterLODBuildState& state, uint32_t groupIndex);
+
+	float GetMaxRefinedChildTraversalError(const ClusterLODBuildState& state, uint32_t groupIndex, uint32_t* outCount = nullptr)
 	{
 		float maxRefinedChildError = 0.0f;
 		uint32_t refinedChildErrorCount = 0u;
-		for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
+		for (uint32_t childGroupIndex : CollectUniqueRefinedChildren(state, groupIndex))
 		{
-			const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
-			if (segment.refinedGroup < 0)
-			{
-				continue;
-			}
-
-			const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
 			if (childGroupIndex < state.groups.size())
 			{
 				const float childError = state.groups[childGroupIndex].bounds.error;
@@ -2741,6 +2822,26 @@ namespace
 		std::vector<uint32_t> refinedChildren;
 		if (groupIndex >= state.groups.size())
 		{
+			return refinedChildren;
+		}
+
+		if (const std::vector<int32_t>* meshletRefinedGroups = GetGroupMeshletRefinedGroups(state, groupIndex))
+		{
+			std::unordered_set<uint32_t> seenChildren;
+			seenChildren.reserve(meshletRefinedGroups->size());
+			for (int32_t refinedGroup : *meshletRefinedGroups)
+			{
+				if (refinedGroup < 0)
+				{
+					continue;
+				}
+
+				const uint32_t childGroupIndex = static_cast<uint32_t>(refinedGroup);
+				if (childGroupIndex < state.groups.size() && seenChildren.insert(childGroupIndex).second)
+				{
+					refinedChildren.push_back(childGroupIndex);
+				}
+			}
 			return refinedChildren;
 		}
 
@@ -2875,26 +2976,7 @@ namespace
 			return false;
 		}
 
-		const ClusterLODGroup& group = state.groups[groupIndex];
-		std::vector<uint32_t> refinedChildren;
-		refinedChildren.reserve(group.segmentCount);
-		std::unordered_set<uint32_t> seenChildren;
-		seenChildren.reserve(group.segmentCount);
-
-		for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
-		{
-			const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
-			if (segment.refinedGroup < 0)
-			{
-				continue;
-			}
-
-			const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
-			if (childGroupIndex < state.groups.size() && seenChildren.insert(childGroupIndex).second)
-			{
-				refinedChildren.push_back(childGroupIndex);
-			}
-		}
+		const std::vector<uint32_t> refinedChildren = CollectUniqueRefinedChildren(state, groupIndex);
 
 		if (refinedChildren.empty())
 		{
@@ -2962,26 +3044,7 @@ namespace
 		buildInput.sourceVoxelGroupIndices.clear();
 		buildInput.voxelVertexCount = 0;
 
-		const ClusterLODGroup& group = state.groups[groupIndex];
-		std::vector<uint32_t> refinedChildren;
-		refinedChildren.reserve(group.segmentCount);
-		std::unordered_set<uint32_t> seenChildren;
-		seenChildren.reserve(group.segmentCount);
-
-		for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
-		{
-			const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
-			if (segment.refinedGroup < 0)
-			{
-				continue;
-			}
-
-			const uint32_t childGroupIndex = static_cast<uint32_t>(segment.refinedGroup);
-			if (childGroupIndex < state.groups.size() && seenChildren.insert(childGroupIndex).second)
-			{
-				refinedChildren.push_back(childGroupIndex);
-			}
-		}
+		const std::vector<uint32_t> refinedChildren = CollectUniqueRefinedChildren(state, groupIndex);
 
 		if (refinedChildren.empty())
 		{
@@ -3101,7 +3164,7 @@ namespace
 				: finiteParentErrorForGroup[groupIndex];
 			const float targetVoxelTraversalError = ComputeVoxelTraversalError(
 				buildInput.analysis.targetVoxelWidth,
-				GetMaxRefinedChildTraversalError(state, group));
+				GetMaxRefinedChildTraversalError(state, groupIndex));
 			// Auto fallback compares the voxel error against the triangle
 			// reduction error for the group being replaced. Finite terminal
 			// groups can be voxel seeds; this lets the first voxel parent refine
@@ -3148,7 +3211,7 @@ namespace
 			VoxelGroupPayload payload{};
 			uint32_t resolution = buildInput.analysis.targetResolution;
 			uint32_t refinedChildErrorCount = 0u;
-			const float maxRefinedChildError = GetMaxRefinedChildTraversalError(state, group, &refinedChildErrorCount);
+			const float maxRefinedChildError = GetMaxRefinedChildTraversalError(state, groupIndex, &refinedChildErrorCount);
 			const float sourceRepresentationError = std::max(
 				maxRefinedChildError,
 				GetMaxSourceVoxelTraversalErrorForBuildInput(state, buildInput));
@@ -3160,7 +3223,8 @@ namespace
 			float voxelWidth = buildInput.analysis.targetVoxelWidth;
 			if (minSourceVoxelWidth > 0.0f && voxelWidth <= minSourceVoxelWidth)
 			{
-				voxelWidth = std::nextafter(minSourceVoxelWidth, std::numeric_limits<float>::infinity());
+				const float coarseningFactor = std::max(1.01f, settings.voxelFallbackGrowthFactor);
+				voxelWidth = minSourceVoxelWidth * coarseningFactor;
 				const float extentX = buildInput.analysis.aabbMax.x - buildInput.analysis.aabbMin.x;
 				const float extentY = buildInput.analysis.aabbMax.y - buildInput.analysis.aabbMin.y;
 				const float extentZ = buildInput.analysis.aabbMax.z - buildInput.analysis.aabbMin.z;
@@ -4588,6 +4652,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			std::vector<std::vector<uint32_t>>* groupMeshletVertexChunks = nullptr;
 			std::vector<std::vector<meshopt_Meshlet>>* groupMeshletChunks = nullptr;
 			std::vector<std::vector<uint8_t>>* groupMeshletTriangleChunks = nullptr;
+			std::vector<std::vector<int32_t>>* groupMeshletRefinedGroupChunks = nullptr;
 			float meshPositionQuantScale = 1.0f;
 			uint32_t meshPositionQuantExp = 0;
 			bool recomputeGroupNormals = false;
@@ -4662,6 +4727,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				ensureIndexedStorage(*context->groupMeshletVertexChunks);
 				ensureIndexedStorage(*context->groupMeshletChunks);
 				ensureIndexedStorage(*context->groupMeshletTriangleChunks);
+				ensureIndexedStorage(*context->groupMeshletRefinedGroupChunks);
 
 				finalizedGroup.firstMeshlet = context->cumulativeMeshletCount;
 				finalizedGroup.firstGroupVertex = context->cumulativeGroupVertexCount;
@@ -4680,6 +4746,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				(*context->groupMeshletVertexChunks)[groupId] = std::move(output.meshletVertices);
 				(*context->groupMeshletChunks)[groupId] = std::move(output.meshlets);
 				(*context->groupMeshletTriangleChunks)[groupId] = std::move(output.meshletTriangles);
+				(*context->groupMeshletRefinedGroupChunks)[groupId] = std::move(output.meshletRefinedGroups);
 
 				(*context->groupChunks)[groupId] = output.groupChunk;
 				(*context->groups)[groupId] = finalizedGroup;
@@ -4716,6 +4783,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.groupMeshletVertexChunks = &state.groupMeshletVertexChunks;
 		captureContext.groupMeshletChunks = &state.groupMeshletChunks;
 		captureContext.groupMeshletTriangleChunks = &state.groupMeshletTriangleChunks;
+		captureContext.groupMeshletRefinedGroupChunks = &state.groupMeshletRefinedGroupChunks;
 		captureContext.meshPositionQuantScale = meshPositionQuantScale;
 		captureContext.meshPositionQuantExp = meshPositionQuantExp;
 		captureContext.recomputeGroupNormals = recomputeGroupNormals;
@@ -4816,6 +4884,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	{ std::vector<std::vector<uint32_t>>().swap(state.groupMeshletVertexChunks); }
 	{ std::vector<std::vector<meshopt_Meshlet>>().swap(state.groupMeshletChunks); }
 	{ std::vector<std::vector<uint8_t>>().swap(state.groupMeshletTriangleChunks); }
+	{ std::vector<std::vector<int32_t>>().swap(state.groupMeshletRefinedGroupChunks); }
 
 	for (const ClusterLODNode& node : state.nodes)
 	{
