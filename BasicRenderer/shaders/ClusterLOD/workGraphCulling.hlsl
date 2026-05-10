@@ -1465,104 +1465,6 @@ float ProjectedGeometricError(
     return worldSpaceError / denom;
 }
 
-bool CLodRefinedChildSuppressesParent(
-    uint groupsBase,
-    uint childGroupLocalIndex,
-    bool hasRefinedChild,
-    float4x4 objectModelMatrix,
-    float lodUniformScale,
-    CullingCameraInfo lodCam,
-    bool lodCameraIsOrtho,
-    uint instanceIndex,
-    uint meshBufferIndex,
-    uint viewId,
-    float requestPriorityErrorOverDistance,
-    float3 predictiveCenterWorld,
-    float predictiveRadiusWorld,
-    bool emitNonResidentTelemetry)
-{
-    if (!hasRefinedChild)
-    {
-        return false;
-    }
-
-    StructuredBuffer<ClusterLODGroup> groups =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-    StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-    ByteAddressBuffer nonResidentBits =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-
-    const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-    const uint childGroupGlobalIndex = groupsBase + childGroupLocalIndex;
-    const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
-    const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-    const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
-    const float childEOD = ProjectedGeometricError(
-        childWorldCenter, childWorldRadius,
-        childGroup.bounds.error, lodUniformScale,
-        lodCam.positionWorldSpace.xyz, lodCam.zNear,
-        lodCameraIsOrtho);
-
-    if (childEOD < lodCam.errorOverDistanceThreshold)
-    {
-        return false;
-    }
-
-    bool childResident = true;
-    if (childGroupGlobalIndex < activeGroupScanCount)
-    {
-        childResident = !CLodReadBit(nonResidentBits, childGroupGlobalIndex);
-    }
-    if (childResident)
-    {
-        return true;
-    }
-
-    if (emitNonResidentTelemetry)
-    {
-        WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
-    }
-
-    if (childGroupGlobalIndex < activeGroupScanCount)
-    {
-        RWStructuredBuffer<CLodStreamingRequest> loadRequests =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
-        RWStructuredBuffer<uint> loadRequestCounter =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-        uint requestIndex = 0u;
-        InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-        if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY)
-        {
-            CLodStreamingRequest req = (CLodStreamingRequest)0;
-            req.groupGlobalIndex = childGroupGlobalIndex;
-            req.meshInstanceIndex = instanceIndex;
-            req.meshBufferIndex = meshBufferIndex;
-            req.viewId = CLodPackViewPriority(viewId, requestPriorityErrorOverDistance);
-            loadRequests[requestIndex] = req;
-#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-            const bool useChildPredictiveBounds = predictiveRadiusWorld < 0.0f;
-            CLodAppendVirtualShadowPredictiveInvalidationCandidate(
-                useChildPredictiveBounds ? childWorldCenter : predictiveCenterWorld,
-                useChildPredictiveBounds ? childWorldRadius : predictiveRadiusWorld,
-                viewId,
-                childGroupGlobalIndex);
-#endif
-        }
-    }
-
-    return false;
-}
-
-struct CLodRenderableLeaf
-{
-    bool valid;
-    bool isVoxel;
-    uint groupGlobalIndex;
-    ClusterLODGroup group;
-    float errorOverDistance;
-};
-
 bool CLodGroupIsResident(uint groupGlobalIndex)
 {
     StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
@@ -1624,6 +1526,103 @@ void CLodRequestGroupLoad(
     }
 }
 
+bool CLodTouchAndRequestGroupResident(
+    uint groupGlobalIndex,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    float requestPriorityErrorOverDistance)
+{
+    CLodMarkGroupTouched(groupGlobalIndex);
+    if (CLodGroupIsResident(groupGlobalIndex))
+    {
+        return true;
+    }
+
+    CLodRequestGroupLoad(
+        groupGlobalIndex,
+        instanceIndex,
+        meshBufferIndex,
+        viewId,
+        requestPriorityErrorOverDistance);
+    return false;
+}
+
+bool CLodRefinedChildSuppressesParent(
+    uint groupsBase,
+    uint childGroupLocalIndex,
+    bool hasRefinedChild,
+    float4x4 objectModelMatrix,
+    float lodUniformScale,
+    CullingCameraInfo lodCam,
+    bool lodCameraIsOrtho,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    float requestPriorityErrorOverDistance,
+    float3 predictiveCenterWorld,
+    float predictiveRadiusWorld,
+    bool emitNonResidentTelemetry)
+{
+    if (!hasRefinedChild)
+    {
+        return false;
+    }
+
+    StructuredBuffer<ClusterLODGroup> groups =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+
+    const uint childGroupGlobalIndex = groupsBase + childGroupLocalIndex;
+    const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
+    const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+    const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
+    const float childEOD = ProjectedGeometricError(
+        childWorldCenter, childWorldRadius,
+        childGroup.bounds.error, lodUniformScale,
+        lodCam.positionWorldSpace.xyz, lodCam.zNear,
+        lodCameraIsOrtho);
+
+    if (childEOD < lodCam.errorOverDistanceThreshold)
+    {
+        return false;
+    }
+
+    if (CLodTouchAndRequestGroupResident(
+        childGroupGlobalIndex,
+        instanceIndex,
+        meshBufferIndex,
+        viewId,
+        requestPriorityErrorOverDistance))
+    {
+        return true;
+    }
+
+    if (emitNonResidentTelemetry)
+    {
+        WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
+    }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    const bool useChildPredictiveBounds = predictiveRadiusWorld < 0.0f;
+    CLodAppendVirtualShadowPredictiveInvalidationCandidate(
+        useChildPredictiveBounds ? childWorldCenter : predictiveCenterWorld,
+        useChildPredictiveBounds ? childWorldRadius : predictiveRadiusWorld,
+        viewId,
+        childGroupGlobalIndex);
+#endif
+
+    return false;
+}
+
+struct CLodRenderableLeaf
+{
+    bool valid;
+    bool isVoxel;
+    uint groupGlobalIndex;
+    ClusterLODGroup group;
+    float errorOverDistance;
+};
+
 bool CLodPrepareRenderableLeaf(
     CLodMeshMetadata clodMeshMetadata,
     ClusterLODNode node,
@@ -1679,15 +1678,13 @@ bool CLodPrepareRenderableLeaf(
         return false;
     }
 
-    CLodMarkGroupTouched(leaf.groupGlobalIndex);
-    if (!CLodGroupIsResident(leaf.groupGlobalIndex))
+    if (!CLodTouchAndRequestGroupResident(
+        leaf.groupGlobalIndex,
+        instanceIndex,
+        meshBufferIndex,
+        viewId,
+        leaf.errorOverDistance))
     {
-        CLodRequestGroupLoad(
-            leaf.groupGlobalIndex,
-            instanceIndex,
-            meshBufferIndex,
-            viewId,
-            leaf.errorOverDistance);
         if (leaf.isVoxel)
         {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
