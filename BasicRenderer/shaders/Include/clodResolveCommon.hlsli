@@ -858,7 +858,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
 
     const uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
     const uint localGroupId = CLodVisibleClusterGroupID(packedCluster);
-    const uint localCubeIndex = CLodVisibleClusterVoxelCubeIndex(packedCluster);
+    const uint localVoxelClusterIndex = CLodVisibleClusterVoxelClusterIndex(packedCluster);
 
     const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[instanceIndex];
     const PerObjectBuffer obj = perObjectBuffer[instanceData.perObjectBufferIndex];
@@ -867,12 +867,24 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     const CLodMeshMetadata metadata = metadataBuffer[offsets.clodMeshMetadataIndex];
 
     CLodVoxelGroupDescriptor descriptor;
-    if (!CLodTryLoadVoxelGroupDescriptor(metadata, localGroupId, descriptor) || localCubeIndex >= descriptor.cubeCount)
+    if (!CLodTryLoadVoxelGroupDescriptor(metadata, localGroupId, descriptor) || localVoxelClusterIndex >= descriptor.clusterCount)
     {
         return false;
     }
 
-    const CLodVoxelCubeRecord cube = CLodLoadVoxelCube(metadata, descriptor, localGroupId, localCubeIndex);
+    GroupPageMapEntry pageEntry;
+    CLodVoxelPageHeader pageHeader;
+    const CLodVoxelClusterRecord voxelCluster = CLodLoadVoxelCluster(metadata, descriptor, localGroupId, localVoxelClusterIndex, pageEntry, pageHeader);
+    const uint cubeLocalIndex = primID;
+    if (cubeLocalIndex >= voxelCluster.cubeCount)
+    {
+        return false;
+    }
+    const CLodVoxelCubeRecord cube = CLodLoadVoxelCubeFromPage(
+        pageEntry.slabDescriptorIndex,
+        pageEntry.slabByteOffset,
+        pageHeader.cubeRecordsOffset,
+        voxelCluster.firstCube + cubeLocalIndex);
     const uint3 cubeCoord = CLodDecodeVoxelCubeCoord(cube.cubeCoord);
     const float voxelWidth = descriptor.aabbMinAndVoxelWidth.w;
     if (voxelWidth <= 0.0f)
@@ -906,14 +918,10 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     const float3 worldPosition = rayOriginWS + rayDirWS * rayT;
     const float3 objectPosition = mul(float4(worldPosition, 1.0f), worldToLocal).xyz;
 
-    uint cellIndex = primID;
-    if (cellIndex >= 64u)
-    {
-        const int3 cell = clamp(int3(floor((objectPosition - cubeMinObject) / voxelWidth)), int3(0, 0, 0), int3(3, 3, 3));
-        cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
-    }
+    const int3 cell = clamp(int3(floor((objectPosition - cubeMinObject) / voxelWidth)), int3(0, 0, 0), int3(3, 3, 3));
+    const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
 
-    CLodVoxelAttributeSample attributeSample = CLodLoadVoxelAttributeSample(metadata, cube, localGroupId, localCubeIndex, cellIndex);
+    CLodVoxelAttributeSample attributeSample = CLodLoadVoxelAttributeSampleFromPage(pageEntry, pageHeader, cube, cellIndex);
     float3 normalOS = normalize(attributeSample.normalAndOpacity.xyz);
     normalOS = normalize(mul(normalOS, (float3x3)skinMatrix));
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
@@ -924,8 +932,8 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
 
     sample.linearDepth = linearDepth;
     sample.clusterIndex = visibleClusterIndex;
-    sample.meshletTriangleIndex = cellIndex;
-    sample.meshletIndex = localCubeIndex;
+    sample.meshletTriangleIndex = cubeLocalIndex;
+    sample.meshletIndex = localVoxelClusterIndex;
     sample.geometryGroupIndex = localGroupId;
     sample.isVoxelPath = true;
     sample.positionWS = worldPosition;
@@ -1079,7 +1087,7 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
 
     ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     const uint4 packedVisibleCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
-    if (CLodVisibleClusterIsVoxelCube(packedVisibleCluster))
+    if (CLodVisibleClusterIsVoxel(packedVisibleCluster))
     {
         return ResolveClodVoxelCommonSampleFromPackedCluster(
             packedVisibleCluster,

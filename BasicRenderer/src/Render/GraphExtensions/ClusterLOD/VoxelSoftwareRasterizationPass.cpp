@@ -72,7 +72,7 @@ void VoxelSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* b
     builder->WithShaderResource(
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
-            Builtin::CameraBuffer,
+            Builtin::CullingCameraBuffer,
             Builtin::PerMeshBuffer,
 			Builtin::CLod::Offsets,
             Builtin::CLod::MeshMetadata,

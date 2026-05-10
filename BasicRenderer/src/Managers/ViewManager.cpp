@@ -57,10 +57,17 @@ namespace
     {
         CullingCameraInfo cullInfo{};
         cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
+        cullInfo.projX = DirectX::XMVectorGetX(cameraInfo.jitteredProjection.r[0]);
         cullInfo.projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]);
         cullInfo.zNear = cameraInfo.zNear;
         cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
+        cullInfo.isOrtho = cameraInfo.isOrtho;
+        DirectX::XMStoreFloat4(&cullInfo.viewRightWorld, DirectX::XMVectorSetW(cameraInfo.viewInverse.r[0], 0.0f));
+        DirectX::XMStoreFloat4(&cullInfo.viewUpWorld, DirectX::XMVectorSetW(cameraInfo.viewInverse.r[1], 0.0f));
+        DirectX::XMStoreFloat4(&cullInfo.viewForwardWorld, DirectX::XMVectorSetW(DirectX::XMVectorNegate(cameraInfo.viewInverse.r[2]), 0.0f));
         cullInfo.viewProjection = cameraInfo.viewProjection;
+        cullInfo.viewInverse = cameraInfo.viewInverse;
+        cullInfo.projectionInverse = cameraInfo.projectionInverse;
         cullInfo.viewZ = {
             DirectX::XMVectorGetZ(cameraInfo.view.r[0]),
             DirectX::XMVectorGetZ(cameraInfo.view.r[1]),

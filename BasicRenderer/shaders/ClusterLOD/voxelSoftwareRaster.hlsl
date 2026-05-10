@@ -12,7 +12,7 @@
 #define CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW 0
 #endif
 
-static const uint VOXEL_RASTER_THREADS_PER_GROUP = 64u;
+static const uint VOXEL_RASTER_THREADS_PER_GROUP = 32u;
 
 bool VoxelMaskTest(uint2 mask, uint bitIndex)
 {
@@ -24,7 +24,7 @@ bool RayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxM
     tEnter = 0.0f;
     tExit = 3.402823e+38f;
 
-    [unroll]
+    //[unroll]
     for (uint axis = 0u; axis < 3u; ++axis)
     {
         const float origin = rayOrigin[axis];
@@ -61,10 +61,9 @@ bool RayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxM
     return tExit >= 0.0f;
 }
 
-bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cube, out float tHit, out uint hitCellIndex)
+bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, uint2 occupancyMask, out float tHit)
 {
     tHit = 0.0f;
-    hitCellIndex = 0u;
 
     float tEnter = 0.0f;
     float tExit = 0.0f;
@@ -102,10 +101,9 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cu
         }
 
         const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
-        if (VoxelMaskTest(cube.occupancyMask, cellIndex))
+        if (VoxelMaskTest(occupancyMask, cellIndex))
         {
             tHit = currentT;
-            hitCellIndex = cellIndex;
             return true;
         }
 
@@ -136,22 +134,17 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, CLodVoxelCubeRecord cu
 }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-bool VoxelRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
+bool VoxelRasterWriteVirtualShadow(
+    uint2 pixel,
+    float linearDepth,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWTexture2DArray<uint> pageTable,
+    RWTexture2D<uint> physicalPages)
 {
-    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
-        ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
-
-    CLodVirtualShadowClipmapInfo clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
-    if (!CLodVirtualShadowTryGetClipmapInfoForView(viewID, clipmapInfos, clipmapInfo))
-    {
-        return false;
-    }
-
     const float2 shadowUv = saturate((float2(pixel) + 0.5f) / max((float)clipmapInfo.virtualResolution, 1.0f));
     const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUv, clipmapInfo);
     const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
 
-    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
     const uint3 pageCoords = uint3(wrappedPageCoords, clipmapInfo.pageTableLayer);
     const uint pageEntry = pageTable[pageCoords];
     if (!CLodVirtualShadowPageEntryCanRaster(pageEntry))
@@ -163,7 +156,6 @@ bool VoxelRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
     const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(shadowUv, clipmapInfo);
     const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords, clipmapInfo);
 
-    RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
     InterlockedMin(physicalPages[atlasPixel], asuint(linearDepth));
     uint ignored = 0u;
     InterlockedOr(pageTable[pageCoords], kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask, ignored);
@@ -177,15 +169,16 @@ void VoxelRasterBuildDispatchArgsCS()
     StructuredBuffer<uint> counter = ResourceDescriptorHeap[CLOD_RASTER_VOXEL_WORK_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodVoxelRasterDispatchCommand> args = ResourceDescriptorHeap[CLOD_RASTER_VOXEL_INDIRECT_ARGS_DESCRIPTOR_INDEX];
     const uint count = min(counter[0], CLOD_RASTER_VOXEL_WORK_CAPACITY);
-    args[0].dispatchX = (count + VOXEL_RASTER_THREADS_PER_GROUP - 1u) / VOXEL_RASTER_THREADS_PER_GROUP;
+    args[0].dispatchX = count;
     args[0].dispatchY = 1u;
     args[0].dispatchZ = 1u;
 }
 
 [numthreads(VOXEL_RASTER_THREADS_PER_GROUP, 1, 1)]
-void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
+void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThreadID)
 {
-    const uint workIndex = dispatchThreadID.x;
+    const uint workIndex = groupId.x;
+    const uint GI = groupThreadID.x;
     StructuredBuffer<uint> counter = ResourceDescriptorHeap[CLOD_RASTER_VOXEL_WORK_COUNTER_DESCRIPTOR_INDEX];
     const uint workCount = min(counter[0], CLOD_RASTER_VOXEL_WORK_CAPACITY);
     if (workIndex >= workCount)
@@ -197,7 +190,7 @@ void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
     const CLodVoxelRasterWorkRecord work = workRecords[workIndex];
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_RASTER_VOXEL_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
     const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, work.visibleClusterIndex);
-    if (!CLodVisibleClusterIsVoxelCube(packedCluster))
+    if (!CLodVisibleClusterIsVoxel(packedCluster))
     {
         return;
     }
@@ -206,79 +199,52 @@ void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
     StructuredBuffer<PerObjectBuffer> objects = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
     StructuredBuffer<CLodMeshMetadata> metadataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    StructuredBuffer<CullingCameraInfo> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
 
     const uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
     const uint viewId = CLodVisibleClusterViewID(packedCluster);
     const uint localGroupId = CLodVisibleClusterGroupID(packedCluster);
-    const uint localCubeIndex = CLodVisibleClusterVoxelCubeIndex(packedCluster);
+    const uint localVoxelClusterIndex = CLodVisibleClusterVoxelClusterIndex(packedCluster);
 
     const PerMeshInstanceBuffer meshInstance = meshInstances[instanceIndex];
     const PerObjectBuffer objectData = objects[meshInstance.perObjectBufferIndex];
     const MeshInstanceClodOffsets offsets = meshInstanceClodOffsets[instanceIndex];
     const CLodMeshMetadata metadata = metadataBuffer[offsets.clodMeshMetadataIndex];
-    const Camera camera = cameras[viewId];
+    const CullingCameraInfo camera = cameras[viewId];
     const ClodViewRasterInfo rasterInfo = viewRasterInfoBuffer[viewId];
 
     CLodVoxelGroupDescriptor descriptor;
-    if (!CLodTryLoadVoxelGroupDescriptor(metadata, localGroupId, descriptor) || localCubeIndex >= descriptor.cubeCount)
-    {
-        return;
-    }
-    const CLodVoxelCubeRecord cube = CLodLoadVoxelCube(metadata, descriptor, localGroupId, localCubeIndex);
-    if (cube.occupancyMask.x == 0u && cube.occupancyMask.y == 0u)
+    if (!CLodTryLoadVoxelGroupDescriptor(metadata, localGroupId, descriptor) || localVoxelClusterIndex >= descriptor.clusterCount)
     {
         return;
     }
 
-    const uint3 cubeCoord = CLodVoxelDecodeCubeCoord(cube.cubeCoord);
+    GroupPageMapEntry pageEntry;
+    CLodVoxelPageHeader pageHeader;
+    const CLodVoxelClusterRecord voxelCluster = CLodLoadVoxelCluster(metadata, descriptor, localGroupId, localVoxelClusterIndex, pageEntry, pageHeader);
+    if (voxelCluster.cubeCount == 0u || voxelCluster.cubeCount > CLOD_VOXEL_MAX_CUBES_PER_CLUSTER)
+    {
+        return;
+    }
+
     const float voxelWidth = descriptor.aabbMinAndVoxelWidth.w;
-    const float3 cubeMinObject = descriptor.aabbMinAndVoxelWidth.xyz + float3(cubeCoord) * (voxelWidth * 4.0f);
-    const float3 cubeMaxObject = cubeMinObject + voxelWidth * 4.0f;
-
-    float4x4 skinMatrix = IdentitySkinMatrix();
-    float4x4 inverseSkinMatrix = IdentitySkinMatrix();
-    if (cube.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
-    {
-        skinMatrix = LoadBoneSkinMatrix(meshInstance.skinningInstanceSlot, cube.dominantBoneIndex);
-        inverseSkinMatrix = LoadBoneInverseSkinMatrix(meshInstance.skinningInstanceSlot, cube.dominantBoneIndex);
-    }
-    const row_major matrix objectModel = objectData.model;
-    const row_major matrix localToWorld = mul(skinMatrix, objectModel);
-    const row_major matrix worldToLocal = mul(objectData.modelInverse, inverseSkinMatrix);
-    const row_major matrix localToClip = mul(localToWorld, camera.viewProjection);
-
-    float2 screenMin = float2(3.402823e+38f, 3.402823e+38f);
-    float2 screenMax = float2(-3.402823e+38f, -3.402823e+38f);
-    bool validProjection = false;
-    [unroll]
-    for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex)
-    {
-        const float3 corner = float3(
-            (cornerIndex & 1u) ? cubeMaxObject.x : cubeMinObject.x,
-            (cornerIndex & 2u) ? cubeMaxObject.y : cubeMinObject.y,
-            (cornerIndex & 4u) ? cubeMaxObject.z : cubeMinObject.z);
-        const float4 clip = mul(float4(corner, 1.0f), localToClip);
-        if (clip.w <= 0.0f)
-        {
-            continue;
-        }
-        const float2 ndc = clip.xy / clip.w;
-        const float2 screen = float2(
-            (ndc.x + 1.0f) * 0.5f * float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX) + float(rasterInfo.scissorMinX),
-            (1.0f - ndc.y) * 0.5f * float(rasterInfo.scissorMaxY - rasterInfo.scissorMinY) + float(rasterInfo.scissorMinY));
-        screenMin = min(screenMin, screen);
-        screenMax = max(screenMax, screen);
-        validProjection = true;
-    }
-    if (!validProjection)
+    if (voxelWidth <= 0.0f)
     {
         return;
     }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
     uint2 targetDims = uint2(rasterInfo.scissorMaxX, rasterInfo.scissorMaxY);
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+    CLodVirtualShadowClipmapInfo clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    if (!CLodVirtualShadowTryGetClipmapInfoForView(viewId, clipmapInfos, clipmapInfo))
+    {
+        return;
+    }
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
+    RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
 #else
     if (rasterInfo.visibilityUAVDescriptorIndex == 0xFFFFFFFFu)
     {
@@ -289,49 +255,109 @@ void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
     visibilityBuffer.GetDimensions(targetDims.x, targetDims.y);
 #endif
 
-    int2 minPx = int2(floor(screenMin));
-    int2 maxPx = int2(floor(screenMax));
-    minPx = max(minPx, int2(rasterInfo.scissorMinX, rasterInfo.scissorMinY));
-    maxPx = min(maxPx, int2(int(rasterInfo.scissorMaxX) - 1, int(rasterInfo.scissorMaxY) - 1));
-    minPx = max(minPx, int2(0, 0));
-    maxPx = min(maxPx, int2(int(targetDims.x) - 1, int(targetDims.y) - 1));
-    if (minPx.x > maxPx.x || minPx.y > maxPx.y)
-    {
-        return;
-    }
-
-    const float3 cameraOriginLocal = mul(float4(camera.positionWorldSpace.xyz, 1.0f), worldToLocal).xyz;
-    const float3 cubeScale = (cubeMaxObject - cubeMinObject) / 4.0f;
     RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     const bool debugMode = perFrameBuffer.outputType == OUTPUT_SW_RASTER;
+    const row_major matrix objectModel = objectData.model;
+    const float2 targetDimsInv = rcp(max(float2(targetDims), float2(1.0f, 1.0f)));
 
-    for (int py = minPx.y; py <= maxPx.y; ++py)
+    for (uint cubeOffset = 0u; cubeOffset < voxelCluster.cubeCount; ++cubeOffset)
     {
-        for (int px = minPx.x; px <= maxPx.x; ++px)
+        const CLodVoxelCubeRecord cube = CLodLoadVoxelCubeFromPage(
+            pageEntry.slabDescriptorIndex,
+            pageEntry.slabByteOffset,
+            pageHeader.cubeRecordsOffset,
+            voxelCluster.firstCube + cubeOffset);
+        if (cube.occupancyMask.x == 0u && cube.occupancyMask.y == 0u)
         {
-            const float2 uv = (float2(px, py) + 0.5f) / max(float2(targetDims), float2(1.0f, 1.0f));
+            continue;
+        }
+
+        const uint3 cubeCoord = CLodVoxelDecodeCubeCoord(cube.cubeCoord);
+        const float cubeObjectWidth = voxelWidth * 4.0f;
+        const float3 cubeMinObject = descriptor.aabbMinAndVoxelWidth.xyz + float3(cubeCoord) * cubeObjectWidth;
+        const float3 cubeMaxObject = cubeMinObject + cubeObjectWidth;
+
+        float4x4 skinMatrix = IdentitySkinMatrix();
+        float4x4 inverseSkinMatrix = IdentitySkinMatrix();
+        if (cube.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
+        {
+            skinMatrix = LoadBoneSkinMatrix(meshInstance.skinningInstanceSlot, cube.dominantBoneIndex);
+            inverseSkinMatrix = LoadBoneInverseSkinMatrix(meshInstance.skinningInstanceSlot, cube.dominantBoneIndex);
+        }
+        const row_major matrix localToWorld = mul(skinMatrix, objectModel);
+        const row_major matrix worldToLocal = mul(objectData.modelInverse, inverseSkinMatrix);
+        const row_major matrix localToClip = mul(localToWorld, camera.viewProjection);
+        const float4 localViewZ = mul(localToWorld, camera.viewZ);
+
+        float2 screenMin = float2(3.402823e+38f, 3.402823e+38f);
+        float2 screenMax = float2(-3.402823e+38f, -3.402823e+38f);
+        bool validProjection = false;
+        //[unroll]
+        for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex)
+        {
+            const float3 corner = float3(
+                (cornerIndex & 1u) ? cubeMaxObject.x : cubeMinObject.x,
+                (cornerIndex & 2u) ? cubeMaxObject.y : cubeMinObject.y,
+                (cornerIndex & 4u) ? cubeMaxObject.z : cubeMinObject.z);
+            const float4 clip = mul(float4(corner, 1.0f), localToClip);
+            if (clip.w <= 0.0f)
+            {
+                continue;
+            }
+            const float2 ndc = clip.xy / clip.w;
+            const float2 screen = float2(
+                (ndc.x + 1.0f) * 0.5f * float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX) + float(rasterInfo.scissorMinX),
+                (1.0f - ndc.y) * 0.5f * float(rasterInfo.scissorMaxY - rasterInfo.scissorMinY) + float(rasterInfo.scissorMinY));
+            screenMin = min(screenMin, screen);
+            screenMax = max(screenMax, screen);
+            validProjection = true;
+        }
+        if (!validProjection)
+        {
+            continue;
+        }
+
+        int2 minPx = int2(floor(screenMin));
+        int2 maxPx = int2(floor(screenMax));
+        minPx = max(minPx, int2(rasterInfo.scissorMinX, rasterInfo.scissorMinY));
+        maxPx = min(maxPx, int2(int(rasterInfo.scissorMaxX) - 1, int(rasterInfo.scissorMaxY) - 1));
+        minPx = max(minPx, int2(0, 0));
+        maxPx = min(maxPx, int2(int(targetDims.x) - 1, int(targetDims.y) - 1));
+        if (minPx.x > maxPx.x || minPx.y > maxPx.y)
+        {
+            continue;
+        }
+
+        const float3 cameraOriginLocal = mul(float4(camera.positionWorldSpace.xyz, 1.0f), worldToLocal).xyz;
+        const uint pixelWidth = uint(maxPx.x - minPx.x + 1);
+        const uint pixelHeight = uint(maxPx.y - minPx.y + 1);
+        const uint pixelCount = pixelWidth * pixelHeight;
+        for (uint pixelLinear = GI; pixelLinear < pixelCount; pixelLinear += VOXEL_RASTER_THREADS_PER_GROUP)
+        {
+            const int px = minPx.x + int(pixelLinear % pixelWidth);
+            const int py = minPx.y + int(pixelLinear / pixelWidth);
+            const float2 uv = (float2(px, py) + 0.5f) * targetDimsInv;
             const float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
             float4 viewNear = mul(float4(ndc, 0.0f, 1.0f), camera.projectionInverse);
-            viewNear.xyz /= max(viewNear.w, 1e-6f);
+            viewNear.xyz /= max(viewNear.w, 1.0e-6f);
             float4 worldNear = mul(float4(viewNear.xyz, 1.0f), camera.viewInverse);
-            const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1e-6f);
+            const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1.0e-6f);
             const float3 localPoint = mul(float4(worldPoint, 1.0f), worldToLocal).xyz;
-            const float3 rayDirObject = normalize(localPoint - cameraOriginLocal);
-            const float3 rayOriginCube = (cameraOriginLocal - cubeMinObject) / cubeScale;
-            const float3 rayDirCube = rayDirObject / cubeScale;
+            const float3 rayOriginObject = cameraOriginLocal;
+            const float3 rayDirObject = normalize(localPoint - rayOriginObject);
+
+            const float3 rayOriginCube = (rayOriginObject - cubeMinObject) / voxelWidth;
+            const float3 rayDirCube = rayDirObject / voxelWidth;
 
             float tHitCube = 0.0f;
-            uint hitCellIndex = 0u;
-            if (!RaycastVoxelCubeDDA(rayOriginCube, rayDirCube, cube, tHitCube, hitCellIndex))
+            if (!RaycastVoxelCubeDDA(rayOriginCube, rayDirCube, cube.occupancyMask, tHitCube))
             {
                 continue;
             }
 
-            const float3 hitObject = cubeMinObject + (rayOriginCube + rayDirCube * tHitCube) * cubeScale;
-            const float4 hitWorld = mul(float4(hitObject, 1.0f), localToWorld);
-            const float4 hitView = mul(hitWorld, camera.view);
-            const float linearDepth = -hitView.z;
+            const float3 hitObject = rayOriginObject + rayDirObject * tHitCube;
+            const float linearDepth = -dot(float4(hitObject, 1.0f), localViewZ);
             if (linearDepth <= 0.0f)
             {
                 continue;
@@ -343,9 +369,9 @@ void VoxelRasterCS(uint3 dispatchThreadID : SV_DispatchThreadID)
             }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-            VoxelRasterWriteVirtualShadow(uint2(px, py), viewId, linearDepth);
+            VoxelRasterWriteVirtualShadow(uint2(px, py), linearDepth, clipmapInfo, pageTable, physicalPages);
 #else
-            const uint64_t visKey = PackVisKey(linearDepth, work.visibleClusterIndex, hitCellIndex);
+            const uint64_t visKey = PackVisKey(linearDepth, work.visibleClusterIndex, cubeOffset);
             InterlockedMin(visibilityBuffer[uint2(px, py)], visKey);
 #endif
         }

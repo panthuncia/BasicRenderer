@@ -1015,7 +1015,7 @@ float ProjectedGeometricError(
     float zNear,
     bool isOrtho);
 
-void CLodAppendVoxelRasterCubeWork(
+void CLodAppendVoxelRasterClusterWork(
     CLodMeshMetadata clodMeshMetadata,
     uint instanceIndex,
     uint viewId,
@@ -1038,7 +1038,7 @@ void CLodAppendVoxelRasterCubeWork(
     (void)meshBufferIndex;
     (void)ownGroupErrorOverDistance;
 
-    if (voxelDescriptor.cubeCount == 0u)
+    if (voxelDescriptor.clusterCount == 0u)
     {
         return;
     }
@@ -1068,12 +1068,12 @@ void CLodAppendVoxelRasterCubeWork(
 
     const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
     uint combinedBase = 0u;
-    InterlockedAdd(replayState[0].visibleClusterCombinedCount, voxelDescriptor.cubeCount, combinedBase);
+    InterlockedAdd(replayState[0].visibleClusterCombinedCount, voxelDescriptor.clusterCount, combinedBase);
     const uint visibleWritableCount =
         (combinedBase < visibleClusterCapacity)
-            ? min(voxelDescriptor.cubeCount, visibleClusterCapacity - combinedBase)
+            ? min(voxelDescriptor.clusterCount, visibleClusterCapacity - combinedBase)
             : 0u;
-    if (combinedBase + voxelDescriptor.cubeCount > visibleClusterCapacity)
+    if (combinedBase + voxelDescriptor.clusterCount > visibleClusterCapacity)
     {
         InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
     }
@@ -1089,9 +1089,9 @@ void CLodAppendVoxelRasterCubeWork(
         InterlockedMin(workRecordCounter[0], queueDescriptors.workRecordCapacity);
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, visibleWritableCount - writableCount);
     }
-    if (visibleWritableCount < voxelDescriptor.cubeCount)
+    if (visibleWritableCount < voxelDescriptor.clusterCount)
     {
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, voxelDescriptor.cubeCount - visibleWritableCount);
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, voxelDescriptor.clusterCount - visibleWritableCount);
     }
 
     uint visibleBase = 0u;
@@ -1101,17 +1101,18 @@ void CLodAppendVoxelRasterCubeWork(
     }
     WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS, writableCount);
 
-    for (uint cubeIndex = 0u; cubeIndex < writableCount; ++cubeIndex)
+    for (uint clusterIndex = 0u; clusterIndex < writableCount; ++clusterIndex)
     {
-        const uint visibleClusterIndex = phase1HWBase + visibleBase + cubeIndex;
+        const uint visibleClusterIndex = phase1HWBase + visibleBase + clusterIndex;
+        const uint localVoxelClusterIndex = voxelDescriptor.firstCluster + clusterIndex;
         CLodStoreVisibleClusterWithVsmPayloadGloballyCoherent(
             visibleClusters,
             visibleClusterIndex,
             viewId,
             instanceIndex,
-            (voxelDescriptor.firstCube + cubeIndex) & 0x3FFFu,
+            localVoxelClusterIndex & 0x3FFFu,
             localGroupId,
-            (voxelDescriptor.firstCube + cubeIndex) >> 14u,
+            localVoxelClusterIndex >> 14u,
             0u,
             CLodVisibleClusterMarkVoxelPayload(CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX)));
 
@@ -1120,7 +1121,7 @@ void CLodAppendVoxelRasterCubeWork(
         record.pad0 = 0u;
         record.pad1 = 0u;
         record.pad2 = 0u;
-        workRecords[baseSlot + cubeIndex] = record;
+        workRecords[baseSlot + clusterIndex] = record;
     }
 }
 
@@ -1963,7 +1964,7 @@ void WG_TraverseNodes(
                         if (CLodTryLoadVoxelDescriptorByLocalIndex(clodMeshMetadata, node.range.ownerGroupId, node.range.indexOrOffset, voxelDescriptor))
                         {
                             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
-                            CLodAppendVoxelRasterCubeWork(
+                            CLodAppendVoxelRasterClusterWork(
                                 clodMeshMetadata,
                                 rec.instanceIndex,
                                 rec.viewId,

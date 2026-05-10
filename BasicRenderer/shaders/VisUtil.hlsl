@@ -18,7 +18,7 @@ uint GetMaterialIdFromCluster(uint clusterIndex,
     }
 
     const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
-    if (CLodVisibleClusterIsVoxelCube(packedCluster))
+    if (CLodVisibleClusterIsVoxel(packedCluster))
     {
         return VISBUF_VOXEL_MATERIAL_BIN_INDEX;
     }

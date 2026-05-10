@@ -2624,7 +2624,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
 
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, visibleClusterReadIndex);
-    if (CLodVisibleClusterIsVoxelCube(packedCluster))
+    if (CLodVisibleClusterIsVoxel(packedCluster))
     {
         return;
     }
@@ -2864,7 +2864,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
         const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
-        if (CLodVisibleClusterIsVoxelCube(packedCluster))
+        if (CLodVisibleClusterIsVoxel(packedCluster))
         {
             return;
         }

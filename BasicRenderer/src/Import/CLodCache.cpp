@@ -669,7 +669,7 @@ namespace CLodCache {
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // mesh quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // UV quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(7));  // USD compliance layout + inherited primvar card isolation
-		boost::hash_combine(seed, static_cast<uint32_t>(23));  // voxel parent carry payloads retag to the immediate refined child
+		boost::hash_combine(seed, static_cast<uint32_t>(24));  // voxel page format stores clustered cube work units
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MODE");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_GRID");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MIN_RES");

@@ -105,10 +105,15 @@ uint CLodVisibleClusterPageSlabDescriptorIndex(uint4 packedCluster)
     return (packedCluster.z >> 2u) & 0xFFFFFu;
 }
 
-uint CLodVisibleClusterVoxelCubeIndex(uint4 packedCluster)
+uint CLodVisibleClusterVoxelClusterIndex(uint4 packedCluster)
 {
     return CLodVisibleClusterLocalMeshletIndex(packedCluster) |
         (CLodVisibleClusterPageSlabDescriptorIndex(packedCluster) << 14u);
+}
+
+uint CLodVisibleClusterVoxelCubeIndex(uint4 packedCluster)
+{
+    return CLodVisibleClusterVoxelClusterIndex(packedCluster);
 }
 
 uint CLodVisibleClusterPageSlabByteOffset(uint4 packedCluster)
@@ -121,9 +126,14 @@ uint CLodVisibleClusterVsmPayload(uint4 packedCluster)
     return packedCluster.w;
 }
 
-bool CLodVisibleClusterIsVoxelCube(uint4 packedCluster)
+bool CLodVisibleClusterIsVoxel(uint4 packedCluster)
 {
     return (packedCluster.w & CLOD_PACKED_VISIBLE_CLUSTER_VOXEL_FLAG) != 0u;
+}
+
+bool CLodVisibleClusterIsVoxelCube(uint4 packedCluster)
+{
+    return CLodVisibleClusterIsVoxel(packedCluster);
 }
 
 uint CLodVisibleClusterMarkVoxelPayload(uint vsmPayload)

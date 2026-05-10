@@ -179,12 +179,19 @@ struct Camera {
 struct CullingCameraInfo
 {
     float4 positionWorldSpace;
+    float projX;
     float projY;
     float zNear;
     float errorOverDistanceThreshold; // Threshold for (error * scale) / distance metric
-    float pad;
+    uint isOrtho;
+    float3 pad;
+    float4 viewRightWorld;
+    float4 viewUpWorld;
+    float4 viewForwardWorld;
     row_major matrix viewProjection;
     float4 viewZ;
+    row_major matrix viewInverse;
+    row_major matrix projectionInverse;
 };
 
 struct PerFrameBuffer {

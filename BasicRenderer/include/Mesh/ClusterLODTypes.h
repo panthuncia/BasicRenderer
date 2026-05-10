@@ -113,6 +113,7 @@ struct VoxelGroupMapping
 	std::vector<VoxelGroupPayload> payloads;
 	std::vector<int32_t> groupToPackedDescriptorIndex;
 	std::vector<CLodVoxelGroupDescriptor> packedGroupDescriptors;
+	std::vector<CLodVoxelClusterRecord> packedClusterRecords;
 	std::vector<CLodVoxelCubeRecord> packedCubeRecords;
 	std::vector<CLodVoxelAttributeSample> packedAttributeSamples;
 };

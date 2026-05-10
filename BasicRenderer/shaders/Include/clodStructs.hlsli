@@ -172,15 +172,29 @@ static const uint CLOD_NODE_SEGMENT_LEAF = 2u;
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
 static const uint CLOD_VOXEL_STATIC_BONE_INDEX = 0xFFFFFFFFu;
+static const uint CLOD_VOXEL_MAX_CUBES_PER_CLUSTER = 128u;
 
 struct CLodVoxelGroupDescriptor
 {
     float4 aabbMinAndVoxelWidth;
     float4 aabbMaxAndError;
+    uint firstCluster;
+    uint clusterCount;
     uint firstCube;
     uint cubeCount;
     uint resolution;
     uint flags;
+    uint reserved0;
+    uint reserved1;
+};
+
+struct CLodVoxelClusterRecord
+{
+    uint firstCube;
+    uint cubeCount;
+    int refinedGroup;
+    uint flags;
+    float4 bounds;
 };
 
 struct CLodVoxelCubeRecord
@@ -231,7 +245,8 @@ struct CLodVoxelRasterDispatchCommand
 };
 
 static const uint CLOD_VOXEL_PAGE_MAGIC = 0x4C435856u;
-static const uint CLOD_VOXEL_PAGE_VERSION = 3u;
+static const uint CLOD_VOXEL_PAGE_VERSION = 4u;
+static const uint CLOD_VOXEL_CLUSTER_RECORD_STRIDE = 32u;
 static const uint CLOD_VOXEL_CUBE_RECORD_STRIDE = 32u;
 static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 16u;
 
@@ -239,14 +254,19 @@ struct CLodVoxelPageHeader
 {
     uint magic;
     uint version;
+    uint firstCluster;
+    uint clusterCount;
     uint firstCube;
     uint cubeCount;
     uint groupDescriptorOffset;
     uint sectionDescriptorOffset;
     uint sectionDescriptorCount;
+    uint clusterRecordsOffset;
     uint cubeRecordsOffset;
     uint attributeSamplesOffset;
     uint attributeSamplesPerCube;
+    uint clusterRecordStride;
+    uint cubeRecordStride;
 };
 
 GroupPageMapEntry CLodLoadVoxelPageMapEntry(CLodMeshMetadata metadata, ClusterLODGroup group, uint pageIndex)
@@ -260,18 +280,24 @@ CLodVoxelPageHeader CLodLoadVoxelPageHeader(uint slabDescriptorIndex, uint pageB
     ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
     uint4 d0 = slab.Load4(pageByteOffset + 0u);
     uint4 d1 = slab.Load4(pageByteOffset + 16u);
+    uint4 d2 = slab.Load4(pageByteOffset + 32u);
+    uint4 d3 = slab.Load4(pageByteOffset + 48u);
     CLodVoxelPageHeader header;
     header.magic = d0.x;
     header.version = d0.y;
-    header.firstCube = d0.z;
-    header.cubeCount = d0.w;
-    uint4 d2 = slab.Load4(pageByteOffset + 32u);
-    header.groupDescriptorOffset = d1.x;
-    header.sectionDescriptorOffset = d1.y;
-    header.sectionDescriptorCount = d1.z;
-    header.cubeRecordsOffset = d1.w;
-    header.attributeSamplesOffset = d2.x;
-    header.attributeSamplesPerCube = d2.y;
+    header.firstCluster = d0.z;
+    header.clusterCount = d0.w;
+    header.firstCube = d1.x;
+    header.cubeCount = d1.y;
+    header.groupDescriptorOffset = d1.z;
+    header.sectionDescriptorOffset = d1.w;
+    header.sectionDescriptorCount = d2.x;
+    header.clusterRecordsOffset = d2.y;
+    header.cubeRecordsOffset = d2.z;
+    header.attributeSamplesOffset = d2.w;
+    header.attributeSamplesPerCube = d3.x;
+    header.clusterRecordStride = d3.y;
+    header.cubeRecordStride = d3.z;
     return header;
 }
 
@@ -282,14 +308,34 @@ CLodVoxelGroupDescriptor CLodLoadVoxelDescriptorFromPage(uint slabDescriptorInde
     uint4 d0 = slab.Load4(addr + 0u);
     uint4 d1 = slab.Load4(addr + 16u);
     uint4 d2 = slab.Load4(addr + 32u);
+    uint4 d3 = slab.Load4(addr + 48u);
     CLodVoxelGroupDescriptor descriptor;
     descriptor.aabbMinAndVoxelWidth = asfloat(d0);
     descriptor.aabbMaxAndError = asfloat(d1);
-    descriptor.firstCube = d2.x;
-    descriptor.cubeCount = d2.y;
-    descriptor.resolution = d2.z;
-    descriptor.flags = d2.w;
+    descriptor.firstCluster = d2.x;
+    descriptor.clusterCount = d2.y;
+    descriptor.firstCube = d2.z;
+    descriptor.cubeCount = d2.w;
+    descriptor.resolution = d3.x;
+    descriptor.flags = d3.y;
+    descriptor.reserved0 = d3.z;
+    descriptor.reserved1 = d3.w;
     return descriptor;
+}
+
+CLodVoxelClusterRecord CLodLoadVoxelClusterFromPage(uint slabDescriptorIndex, uint pageByteOffset, uint clusterRecordsOffset, uint pageLocalClusterIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
+    uint addr = pageByteOffset + clusterRecordsOffset + pageLocalClusterIndex * CLOD_VOXEL_CLUSTER_RECORD_STRIDE;
+    uint4 d0 = slab.Load4(addr + 0u);
+    uint4 d1 = slab.Load4(addr + 16u);
+    CLodVoxelClusterRecord cluster;
+    cluster.firstCube = d0.x;
+    cluster.cubeCount = d0.y;
+    cluster.refinedGroup = asint(d0.z);
+    cluster.flags = d0.w;
+    cluster.bounds = asfloat(d1);
+    return cluster;
 }
 
 CLodVoxelCubeRecord CLodLoadVoxelCubeFromPage(uint slabDescriptorIndex, uint pageByteOffset, uint cubeRecordsOffset, uint pageLocalCubeIndex)
@@ -342,6 +388,39 @@ bool CLodTryFindVoxelPage(
     return false;
 }
 
+bool CLodTryFindVoxelPageByCluster(
+    CLodMeshMetadata metadata,
+    ClusterLODGroup group,
+    uint localClusterIndex,
+    out GroupPageMapEntry pageEntry,
+    out CLodVoxelPageHeader pageHeader,
+    out uint pageLocalClusterIndex)
+{
+    pageEntry = (GroupPageMapEntry)0;
+    pageHeader = (CLodVoxelPageHeader)0;
+    pageLocalClusterIndex = 0u;
+
+    for (uint pageIndex = 0u; pageIndex < group.pageCount; ++pageIndex)
+    {
+        GroupPageMapEntry candidateEntry = CLodLoadVoxelPageMapEntry(metadata, group, pageIndex);
+        CLodVoxelPageHeader candidateHeader = CLodLoadVoxelPageHeader(candidateEntry.slabDescriptorIndex, candidateEntry.slabByteOffset);
+        if (candidateHeader.magic != CLOD_VOXEL_PAGE_MAGIC || candidateHeader.version != CLOD_VOXEL_PAGE_VERSION)
+        {
+            continue;
+        }
+
+        if (localClusterIndex >= candidateHeader.firstCluster && localClusterIndex < candidateHeader.firstCluster + candidateHeader.clusterCount)
+        {
+            pageEntry = candidateEntry;
+            pageHeader = candidateHeader;
+            pageLocalClusterIndex = localClusterIndex - candidateHeader.firstCluster;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool CLodTryLoadVoxelGroupDescriptor(
     CLodMeshMetadata metadata,
     uint localGroupId,
@@ -363,7 +442,7 @@ bool CLodTryLoadVoxelGroupDescriptor(
     }
 
     descriptor = CLodLoadVoxelDescriptorFromPage(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset, pageHeader.groupDescriptorOffset);
-    return descriptor.cubeCount > 0u;
+    return descriptor.clusterCount > 0u;
 }
 
 bool CLodTryLoadVoxelDescriptorByLocalIndex(
@@ -392,8 +471,26 @@ bool CLodTryLoadVoxelDescriptorByLocalIndex(
     descriptor = CLodLoadVoxelDescriptorFromPage(
         pageEntry.slabDescriptorIndex,
         pageEntry.slabByteOffset,
-        pageHeader.sectionDescriptorOffset + sectionIndex * 48u);
-    return descriptor.cubeCount > 0u;
+        pageHeader.sectionDescriptorOffset + sectionIndex * 64u);
+    return descriptor.clusterCount > 0u;
+}
+
+CLodVoxelClusterRecord CLodLoadVoxelCluster(CLodMeshMetadata metadata, CLodVoxelGroupDescriptor descriptor, uint localGroupId, uint localClusterIndex, out GroupPageMapEntry pageEntry, out CLodVoxelPageHeader pageHeader)
+{
+    pageEntry = (GroupPageMapEntry)0;
+    pageHeader = (CLodVoxelPageHeader)0;
+    StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    const ClusterLODGroup group = groups[metadata.groupsBase + localGroupId];
+    if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u && group.pageCount > 0u)
+    {
+        uint pageLocalClusterIndex;
+        if (CLodTryFindVoxelPageByCluster(metadata, group, localClusterIndex, pageEntry, pageHeader, pageLocalClusterIndex))
+        {
+            return CLodLoadVoxelClusterFromPage(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset, pageHeader.clusterRecordsOffset, pageLocalClusterIndex);
+        }
+    }
+
+    return (CLodVoxelClusterRecord)0;
 }
 
 CLodVoxelCubeRecord CLodLoadVoxelCube(CLodMeshMetadata metadata, CLodVoxelGroupDescriptor descriptor, uint localGroupId, uint localCubeIndex)
@@ -439,6 +536,16 @@ CLodVoxelAttributeSample CLodLoadVoxelAttributeSample(CLodMeshMetadata metadata,
     }
 
     return (CLodVoxelAttributeSample)0;
+}
+
+CLodVoxelAttributeSample CLodLoadVoxelAttributeSampleFromPage(GroupPageMapEntry pageEntry, CLodVoxelPageHeader pageHeader, CLodVoxelCubeRecord cube, uint localCellIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pageEntry.slabDescriptorIndex)];
+    const uint attributeIndex = cube.firstAttribute + localCellIndex;
+    const uint addr = pageEntry.slabByteOffset + pageHeader.attributeSamplesOffset + attributeIndex * CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE;
+    CLodVoxelAttributeSample sample;
+    sample.normalAndOpacity = asfloat(slab.Load4(addr));
+    return sample;
 }
 
 // Replay buffer: single physical buffer split into two regions.

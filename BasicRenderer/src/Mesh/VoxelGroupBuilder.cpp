@@ -1833,6 +1833,98 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 	return result;
 }
 
+void BuildVoxelClustersFromCubes(PackedVoxelGroupBuildResult& packed, uint32_t maxCubesPerCluster)
+{
+	packed.clusterRecords.clear();
+	packed.descriptor.clusterCount = 0u;
+
+	if (packed.cubeRecords.empty())
+	{
+		return;
+	}
+
+	const uint32_t clusterLimit = std::clamp(maxCubesPerCluster, 1u, CLOD_VOXEL_MAX_CUBES_PER_CLUSTER);
+	const DirectX::XMFLOAT3 aabbMin{
+		packed.descriptor.aabbMinAndVoxelWidth.x,
+		packed.descriptor.aabbMinAndVoxelWidth.y,
+		packed.descriptor.aabbMinAndVoxelWidth.z
+	};
+	const float voxelWidth = packed.descriptor.aabbMinAndVoxelWidth.w;
+	const float cubeWidth = voxelWidth * 4.0f;
+
+	uint32_t runBegin = 0u;
+	while (runBegin < static_cast<uint32_t>(packed.cubeRecords.size()))
+	{
+		const int32_t refinedGroup = packed.cubeRecords[runBegin].refinedGroup;
+		uint32_t runEnd = runBegin + 1u;
+		while (runEnd < static_cast<uint32_t>(packed.cubeRecords.size()) &&
+			packed.cubeRecords[runEnd].refinedGroup == refinedGroup)
+		{
+			runEnd++;
+		}
+
+		for (uint32_t clusterBegin = runBegin; clusterBegin < runEnd; clusterBegin += clusterLimit)
+		{
+			const uint32_t clusterEnd = std::min(runEnd, clusterBegin + clusterLimit);
+			DirectX::XMFLOAT3 clusterMin{
+				std::numeric_limits<float>::max(),
+				std::numeric_limits<float>::max(),
+				std::numeric_limits<float>::max()
+			};
+			DirectX::XMFLOAT3 clusterMax{
+				-std::numeric_limits<float>::max(),
+				-std::numeric_limits<float>::max(),
+				-std::numeric_limits<float>::max()
+			};
+
+			for (uint32_t cubeIndex = clusterBegin; cubeIndex < clusterEnd; ++cubeIndex)
+			{
+				const uint32_t packedCoord = packed.cubeRecords[cubeIndex].cubeCoord;
+				const uint32_t cubeX = packedCoord & 0x3FFu;
+				const uint32_t cubeY = (packedCoord >> 10u) & 0x3FFu;
+				const uint32_t cubeZ = (packedCoord >> 20u) & 0x3FFu;
+				const DirectX::XMFLOAT3 cubeMin{
+					aabbMin.x + static_cast<float>(cubeX) * cubeWidth,
+					aabbMin.y + static_cast<float>(cubeY) * cubeWidth,
+					aabbMin.z + static_cast<float>(cubeZ) * cubeWidth
+				};
+				const DirectX::XMFLOAT3 cubeMax{
+					cubeMin.x + cubeWidth,
+					cubeMin.y + cubeWidth,
+					cubeMin.z + cubeWidth
+				};
+				clusterMin.x = std::min(clusterMin.x, cubeMin.x);
+				clusterMin.y = std::min(clusterMin.y, cubeMin.y);
+				clusterMin.z = std::min(clusterMin.z, cubeMin.z);
+				clusterMax.x = std::max(clusterMax.x, cubeMax.x);
+				clusterMax.y = std::max(clusterMax.y, cubeMax.y);
+				clusterMax.z = std::max(clusterMax.z, cubeMax.z);
+			}
+
+			const DirectX::XMFLOAT3 center{
+				(clusterMin.x + clusterMax.x) * 0.5f,
+				(clusterMin.y + clusterMax.y) * 0.5f,
+				(clusterMin.z + clusterMax.z) * 0.5f
+			};
+			const float dx = clusterMax.x - center.x;
+			const float dy = clusterMax.y - center.y;
+			const float dz = clusterMax.z - center.z;
+			const float radius = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+			CLodVoxelClusterRecord cluster{};
+			cluster.firstCube = clusterBegin;
+			cluster.cubeCount = clusterEnd - clusterBegin;
+			cluster.refinedGroup = refinedGroup;
+			cluster.bounds = DirectX::XMFLOAT4(center.x, center.y, center.z, radius);
+			packed.clusterRecords.push_back(cluster);
+		}
+
+		runBegin = runEnd;
+	}
+
+	packed.descriptor.clusterCount = static_cast<uint32_t>(packed.clusterRecords.size());
+}
+
 // Public API: MortonSort
 std::vector<uint32_t> MortonSort(
 	const DirectX::XMFLOAT3* positions,

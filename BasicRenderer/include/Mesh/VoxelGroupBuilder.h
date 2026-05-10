@@ -156,11 +156,13 @@ struct PackVoxelGroupInput
 struct PackedVoxelGroupBuildResult
 {
 	CLodVoxelGroupDescriptor descriptor{};
+	std::vector<CLodVoxelClusterRecord> clusterRecords;
 	std::vector<CLodVoxelCubeRecord> cubeRecords;
 	std::vector<CLodVoxelAttributeSample> attributeSamples;
 };
 
 PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& input);
+void BuildVoxelClustersFromCubes(PackedVoxelGroupBuildResult& packed, uint32_t maxCubesPerCluster);
 
 // Morton sorting: returns a permutation of [0, count) that places positions
 // in 3D Morton (Z-order) order within the given AABB.

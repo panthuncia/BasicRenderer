@@ -44,12 +44,19 @@ struct CameraInfo {
 
 struct CullingCameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
+    float projX = 0.0f;
     float projY = 0.0f;
-	float zNear = 0.0f;
+    float zNear = 0.0f;
     float errorOverDistanceThreshold = 0.0f; // Threshold for (error * scale) / distance metric
-    float pad[1];
+    unsigned int isOrtho = 0;
+    float pad[3] = {};
+    DirectX::XMFLOAT4 viewRightWorld;
+    DirectX::XMFLOAT4 viewUpWorld;
+    DirectX::XMFLOAT4 viewForwardWorld;
     DirectX::XMMATRIX viewProjection;
     DirectX::XMFLOAT4 viewZ;
+    DirectX::XMMATRIX viewInverse;
+    DirectX::XMMATRIX projectionInverse;
 };
 
 struct PerFrameCB {
