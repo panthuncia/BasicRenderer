@@ -210,6 +210,9 @@ public:
                 auto shaderDefines = psoMgr.GetShaderDefines(0, flags);
                 shaderDefines.push_back({L"VISUTIL_SPECIALIZED_MATERIAL_EVAL", L"1"});
                 shaderDefines.push_back({L"VISUTIL_USE_COMPACT_MATERIAL_EVAL", L"1"});
+                if (flags & MaterialCompileFlags::MaterialCompileDoubleSided) {
+                    shaderDefines.push_back({ L"VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE", L"1" });
+                }
                 auto [newIter, _] = m_psoCache.emplace(
                     flags,
                     psoMgr.MakeComputePipeline(

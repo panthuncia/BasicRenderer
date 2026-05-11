@@ -142,6 +142,14 @@ BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNd
     return ret;
 }
 
+#if defined(VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE)
+bool ClodBarycentricDerivativesAreBackFacing(BarycentricDeriv bary)
+{
+    const float detBarycentricDxDy = bary.m_ddx.y * bary.m_ddy.z - bary.m_ddy.y * bary.m_ddx.z;
+    return detBarycentricDxDy > 0.0f;
+}
+#endif
+
 float3 InterpolateWithDeriv(BarycentricDeriv deriv, float v0, float v1, float v2)
 {
     float3 mergedV = float3(v0, v1, v2);
@@ -1163,7 +1171,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     float3 normalOS = CLodVoxelSampleSGGXVNDF(
         sggxDiagonal,
         sggxOffDiagonal,
-        -rayDirObject,
+        rayDirObject,
         CLodVoxelHashToUnitFloat(sampleSeed),
         CLodVoxelHashToUnitFloat(sampleSeed ^ 0xD1B54A35u));
     normalOS = dot(normalOS, -rayDirObject) >= 0.0f ? normalOS : -normalOS;
@@ -1458,6 +1466,10 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
         bary = ReyesComposeSourceBarycentrics(bary, sourcePatchBary0, sourcePatchBary1, sourcePatchBary2);
     }
 
+#if defined(VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE)
+    const bool clodGBufferResolveBackface = ClodBarycentricDerivativesAreBackFacing(bary);
+#endif
+
     float3 interpPosX = InterpolateWithDeriv(bary, evalPos0.x, evalPos1.x, evalPos2.x);
     float3 interpPosY = InterpolateWithDeriv(bary, evalPos0.y, evalPos1.y, evalPos2.y);
     float3 interpPosZ = InterpolateWithDeriv(bary, evalPos0.z, evalPos1.z, evalPos2.z);
@@ -1564,6 +1576,14 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
 #endif
     sample.materialFlags = materialFlags;
     sample.materialInputs = materialInputs;
+#if defined(VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE)
+    if (clodGBufferResolveBackface)
+    {
+        sample.normalWSBase = -sample.normalWSBase;
+        sample.normalOS = -sample.normalOS;
+        sample.materialInputs.normalWS = -sample.materialInputs.normalWS;
+    }
+#endif
     return true;
 }
 

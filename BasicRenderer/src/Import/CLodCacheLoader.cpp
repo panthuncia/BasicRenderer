@@ -54,7 +54,8 @@ namespace {
 			static std::mutex cacheMutexTableGuard;
 			static std::unordered_map<std::string, std::unique_ptr<std::mutex>> cacheMutexTable;
 
-			const std::string key = identity.sourceIdentifier + "|" + identity.primPath + "|" + identity.subsetName;
+			const std::string key = identity.sourceIdentifier + "|" + identity.primPath + "|" + identity.subsetName +
+				(identity.doubleSidedVoxelSourceNormals ? "|double-sided-voxel-normals" : "");
 
 			std::lock_guard<std::mutex> lock(cacheMutexTableGuard);
 			auto& mutexPtr = cacheMutexTable[key];
@@ -75,6 +76,9 @@ namespace {
 		key.sourceIdentifier = identity.sourceIdentifier;
 		key.primPath = identity.primPath;
 		key.subsetName = NormalizeSubsetName(identity.subsetName);
+		if (identity.doubleSidedVoxelSourceNormals) {
+			key.subsetName += "|double-sided-voxel-normals";
+		}
 		return key;
 	}
 
@@ -194,6 +198,20 @@ MeshCacheIdentity BuildIdentity(
 		identity.primPath = std::move(referencedGeometryIdentity->primPath);
 	}
 
+	return identity;
+}
+
+MeshCacheIdentity BuildIdentity(
+	const pxr::UsdGeomMesh& mesh,
+	const pxr::UsdStageRefPtr& stage,
+	const std::string& subsetName,
+	pxr::UsdTimeCode geomTimeCode,
+	const std::string& sourceIdentifierOverride)
+{
+	MeshCacheIdentity identity = BuildIdentity(mesh, stage, subsetName, geomTimeCode);
+	if (!sourceIdentifierOverride.empty()) {
+		identity.sourceIdentifier = NormalizeCacheSourcePath(sourceIdentifierOverride);
+	}
 	return identity;
 }
 

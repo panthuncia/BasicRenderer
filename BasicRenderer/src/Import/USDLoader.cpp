@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <vector>
 #include <cstring>
+#include <cctype>
 #include <unordered_set>
 #include <cmath>
 
@@ -17,6 +18,7 @@
 #include <pxr/usd/ar/packageUtils.h>
 //#include <pxr/usd/ar/packageResolver.h>
 
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/primFlags.h>
@@ -73,6 +75,83 @@ namespace USDLoader {
 
 	using namespace pxr;
 
+	namespace {
+
+		std::string NormalizeHeuristicName(const std::string& value) {
+			std::string normalized;
+			normalized.reserve(value.size());
+			for (unsigned char ch : value) {
+				if (std::isalnum(ch)) {
+					normalized.push_back(static_cast<char>(std::tolower(ch)));
+				}
+			}
+			return normalized;
+		}
+
+		std::vector<std::string> TokenizeHeuristicName(const std::string& value) {
+			std::vector<std::string> tokens;
+			std::string current;
+			for (unsigned char ch : value) {
+				if (std::isalnum(ch)) {
+					current.push_back(static_cast<char>(std::tolower(ch)));
+				}
+				else if (!current.empty()) {
+					tokens.push_back(std::move(current));
+					current.clear();
+				}
+			}
+			if (!current.empty()) {
+				tokens.push_back(std::move(current));
+			}
+			return tokens;
+		}
+
+		bool NameSuggestsDoubleSided(const std::string& value) {
+			const std::string normalized = NormalizeHeuristicName(value);
+			if (normalized.find("doublesided") != std::string::npos ||
+				normalized.find("doubleside") != std::string::npos ||
+				normalized.find("twosided") != std::string::npos ||
+				normalized.find("twoside") != std::string::npos ||
+				normalized.find("2sided") != std::string::npos ||
+				normalized.find("2side") != std::string::npos) {
+				return true;
+			}
+
+			const std::vector<std::string> tokens = TokenizeHeuristicName(value);
+			for (size_t tokenIndex = 0; tokenIndex + 1 < tokens.size(); ++tokenIndex) {
+				const std::string& first = tokens[tokenIndex];
+				const std::string& second = tokens[tokenIndex + 1];
+				const bool firstMatches = first == "double" || first == "two" || first == "2";
+				const bool secondMatches = second == "side" || second == "sided";
+				if (firstMatches && secondMatches) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		bool ShouldForceDoubleSidedByName(
+			const UsdShadeMaterial& material,
+			const std::optional<UsdGeomSubset>& subset,
+			const ImportSettings& settings) {
+			if (!settings.enableDoubleSidedNameHeuristic) {
+				return false;
+			}
+
+			if (subset && NameSuggestsDoubleSided(subset->GetPrim().GetName().GetString())) {
+				return true;
+			}
+
+			if (material && NameSuggestsDoubleSided(material.GetPrim().GetName().GetString())) {
+				return true;
+			}
+
+			return false;
+		}
+
+	}
+
     struct MaterialTemplateRecord {
         MaterialDescription desc;
         std::vector<std::string> referencedUvSetNames;
@@ -81,9 +160,10 @@ namespace USDLoader {
 	struct PreprocessedMeshSubset {
 		UsdShadeMaterial material;
 		MeshPreprocessResult result;
+		bool inferredDoubleSided = false;
 
-		PreprocessedMeshSubset(UsdShadeMaterial m, MeshPreprocessResult&& r)
-			: material(std::move(m)), result(std::move(r)) {}
+		PreprocessedMeshSubset(UsdShadeMaterial m, MeshPreprocessResult&& r, bool inferred)
+			: material(std::move(m)), result(std::move(r)), inferredDoubleSided(inferred) {}
 	};
 
 	struct PreprocessedMeshRecord {
@@ -1230,7 +1310,8 @@ namespace USDLoader {
 		const UsdStageRefPtr& stage,
 		double metersPerUnit,
 		const std::string& directory,
-		bool isUSDZ)
+		bool isUSDZ,
+		const ImportSettings& importSettings)
 	{
 		struct MeshPreprocessWorkItem {
 			std::string meshPath;
@@ -1242,6 +1323,7 @@ namespace USDLoader {
 			VtTokenArray skelJointOrderRaw;
 			VtTokenArray skelJointOrderMapped;
 			bool authoredDoubleSided = false;
+			bool inferredDoubleSided = false;
 		};
 
 		loadingCache.preprocessedMeshCache.clear();
@@ -1301,6 +1383,7 @@ namespace USDLoader {
 				if (subsets.empty()) {
 					auto mat = UsdShadeMaterialBindingAPI(mesh).ComputeBoundMaterial();
 					ProcessMaterial(mat, stage, isUSDZ, directory);
+					const bool inferredDoubleSided = ShouldForceDoubleSidedByName(mat, std::nullopt, importSettings);
 					workItems.push_back(MeshPreprocessWorkItem{
 						.meshPath = meshPath,
 						.mesh = mesh,
@@ -1310,13 +1393,15 @@ namespace USDLoader {
 						.skinQ = skinQ,
 						.skelJointOrderRaw = skelJointOrderRaw,
 						.skelJointOrderMapped = skelJointOrderMapped,
-						.authoredDoubleSided = authoredDoubleSided
+						.authoredDoubleSided = authoredDoubleSided,
+						.inferredDoubleSided = inferredDoubleSided
 						});
 				}
 				else {
 					for (const auto& subset : subsets) {
 						auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
 						ProcessMaterial(mat, stage, isUSDZ, directory);
+						const bool inferredDoubleSided = ShouldForceDoubleSidedByName(mat, subset, importSettings);
 						workItems.push_back(MeshPreprocessWorkItem{
 							.meshPath = meshPath,
 							.mesh = mesh,
@@ -1326,8 +1411,15 @@ namespace USDLoader {
 							.skinQ = skinQ,
 							.skelJointOrderRaw = skelJointOrderRaw,
 							.skelJointOrderMapped = skelJointOrderMapped,
-							.authoredDoubleSided = authoredDoubleSided
+							.authoredDoubleSided = authoredDoubleSided,
+							.inferredDoubleSided = inferredDoubleSided
 							});
+						if (inferredDoubleSided) {
+							spdlog::info("USD double-sided heuristic enabled for mesh '{}' subset '{}' material '{}'",
+								meshPath,
+								subset.GetPrim().GetName().GetString(),
+								mat ? mat.GetPrim().GetName().GetString() : std::string("<unbound>"));
+						}
 					}
 				}
 			}
@@ -1351,7 +1443,8 @@ namespace USDLoader {
 				workItem.requiredUvSetNames,
 				workItem.skinQ,
 				workItem.skelJointOrderRaw,
-				workItem.skelJointOrderMapped);
+				workItem.skelJointOrderMapped,
+				workItem.authoredDoubleSided || workItem.inferredDoubleSided);
 			});
 
 		for (size_t workIndex = 0; workIndex < workItems.size(); ++workIndex) {
@@ -1362,7 +1455,7 @@ namespace USDLoader {
 			const MeshPreprocessWorkItem& workItem = workItems[workIndex];
 			auto& record = loadingCache.preprocessedMeshCache[workItem.meshPath];
 			record.authoredDoubleSided = workItem.authoredDoubleSided;
-			record.subsets.emplace_back(workItem.material, std::move(preprocessed[workIndex].value()));
+			record.subsets.emplace_back(workItem.material, std::move(preprocessed[workIndex].value()), workItem.inferredDoubleSided);
 		}
 	}
 
@@ -1403,7 +1496,10 @@ namespace USDLoader {
 		outMeshes.reserve(record.subsets.size());
 		for (PreprocessedMeshSubset& subset : record.subsets) {
 			auto& result = subset.result;
-			auto material = ResolveMaterialForMesh(subset.material, result.ingest.GetUvSets(), record.authoredDoubleSided || result.forceDoubleSidedPreview);
+			auto material = ResolveMaterialForMesh(
+				subset.material,
+				result.ingest.GetUvSets(),
+				record.authoredDoubleSided || subset.inferredDoubleSided || result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			if (mPtr != nullptr) {
 				outMeshes.push_back(mPtr);
@@ -1903,11 +1999,12 @@ namespace USDLoader {
 
 	}
 
-	std::shared_ptr<Scene> LoadModel(std::string filePath) {
-
-		UsdStageRefPtr stage = UsdStage::Open(filePath);
+	std::shared_ptr<Scene> LoadModelFromStage(
+		const UsdStageRefPtr& stage,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
 		if (!stage) {
-			spdlog::error("USD stage open failed for {}", filePath);
+			spdlog::error("USD stage open failed for in-memory source '{}'", options.sourceIdentifier);
 			return nullptr;
 		}
 
@@ -1953,19 +2050,57 @@ namespace USDLoader {
 
 		UsdSkelCache skelCache;
 
-		// Check if this is a USDZ file
-		bool isUSDZ = false;
-		if (std::filesystem::path(filePath).extension() == ".usdz") {
-			isUSDZ = true;
-		}
+		const bool isUSDZ = options.isUsdPackage;
+		const std::string directory = options.sourceDirectory;
 
-		PreprocessAllMeshes(stage, metersPerUnit, std::filesystem::path(filePath).parent_path().string(), isUSDZ);
+		PreprocessAllMeshes(stage, metersPerUnit, directory, isUSDZ, importSettings);
 
-		ParseNodeHierarchy(scene, stage, metersPerUnit, upRot, std::filesystem::path(filePath).parent_path().string(), skelCache, isUSDZ);
+		ParseNodeHierarchy(scene, stage, metersPerUnit, upRot, directory, skelCache, isUSDZ);
 
 		loadingCache.Clear();
 
 		return scene;
+	}
+
+	std::shared_ptr<Scene> LoadModel(std::string filePath, const ImportSettings& importSettings) {
+
+		UsdStageRefPtr stage = UsdStage::Open(filePath);
+		if (!stage) {
+			spdlog::error("USD stage open failed for {}", filePath);
+			return nullptr;
+		}
+
+		InMemoryStageOptions options{};
+		options.sourceIdentifier = filePath;
+		options.sourceDirectory = std::filesystem::path(filePath).parent_path().string();
+		options.layerIdentifierHint = std::filesystem::path(filePath).filename().string();
+		options.isUsdPackage = std::filesystem::path(filePath).extension() == ".usdz";
+
+		return LoadModelFromStage(stage, options, importSettings);
+	}
+
+	std::shared_ptr<Scene> LoadModelFromUsdBytes(
+		const std::string& usdText,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
+		const std::string identifierHint = options.layerIdentifierHint.empty() ? std::string("in_memory.usda") : options.layerIdentifierHint;
+		SdfLayerRefPtr rootLayer = SdfLayer::CreateAnonymous(identifierHint);
+		if (!rootLayer || !rootLayer->ImportFromString(usdText)) {
+			spdlog::error("Failed to import in-memory USD layer '{}'.", identifierHint);
+			return nullptr;
+		}
+
+		UsdStageRefPtr stage = UsdStage::Open(rootLayer);
+		if (!stage) {
+			spdlog::error("Failed to open in-memory USD stage '{}'.", identifierHint);
+			return nullptr;
+		}
+
+		return LoadModelFromStage(stage, options, importSettings);
+	}
+
+	std::shared_ptr<Scene> LoadModel(std::string filePath) {
+		return LoadModel(std::move(filePath), ImportSettings{});
 	}
 
 }

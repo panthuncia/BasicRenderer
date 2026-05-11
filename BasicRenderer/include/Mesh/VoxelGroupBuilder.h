@@ -22,7 +22,8 @@ public:
 		const std::vector<uint32_t>* triangleIndices,
 		const std::vector<std::byte>* skinningVertices = nullptr,
 		size_t skinningVertexStrideBytes = 0,
-		const std::vector<int32_t>* triangleRefinedGroupIds = nullptr);
+		const std::vector<int32_t>* triangleRefinedGroupIds = nullptr,
+		bool doubleSidedTriangles = false);
 
 	bool IsValid() const;
 	void QueryAABB(
@@ -36,6 +37,7 @@ public:
 	size_t SkinningVertexStrideBytes() const { return m_skinningVertexStrideBytes; }
 	const std::vector<uint32_t>* TriangleIndices() const { return m_triangleIndices; }
 	const std::vector<int32_t>* TriangleRefinedGroupIds() const { return m_triangleRefinedGroupIds; }
+	bool DoubleSidedTriangles() const { return m_doubleSidedTriangles; }
 
 private:
 	struct Node
@@ -56,6 +58,7 @@ private:
 	size_t m_skinningVertexStrideBytes = 0;
 	const std::vector<uint32_t>* m_triangleIndices = nullptr;
 	const std::vector<int32_t>* m_triangleRefinedGroupIds = nullptr;
+	bool m_doubleSidedTriangles = false;
 	std::vector<uint32_t> m_triangleOrder;
 	std::vector<Node> m_nodes;
 };
@@ -72,6 +75,7 @@ struct VoxelizeTrianglesInput
 	// Source triangle indices into the vertex buffer (3 per triangle).
 	const std::vector<uint32_t>* triangleIndices = nullptr;
 	const std::vector<int32_t>* triangleRefinedGroupIds = nullptr;
+	bool doubleSidedTriangles = false;
 
 	// Optional authoritative original source geometry used only for per-cell
 	// coverage tracing. Candidate generation still uses triangleIndices and

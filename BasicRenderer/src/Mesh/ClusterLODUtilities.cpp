@@ -3455,7 +3455,8 @@ namespace
 					&coverageBuildInput.voxelTriangleIndices,
 					coverageBuildInput.voxelSkinningVertices.empty() ? nullptr : &coverageBuildInput.voxelSkinningVertices,
 					skinningVertexStrideBytes,
-					coverageBuildInput.voxelTriangleRefinedGroupIds.empty() ? nullptr : &coverageBuildInput.voxelTriangleRefinedGroupIds);
+					coverageBuildInput.voxelTriangleRefinedGroupIds.empty() ? nullptr : &coverageBuildInput.voxelTriangleRefinedGroupIds,
+					settings.doubleSidedVoxelSourceNormals);
 				if (groupCoverageSourceTriangles.IsValid())
 				{
 					voxelCoverageSourceTriangles = &groupCoverageSourceTriangles;
@@ -3516,6 +3517,7 @@ namespace
 				voxelInput.skinningVertexStrideBytes = skinningVertexStrideBytes;
 				voxelInput.triangleIndices = buildInput.voxelTriangleIndices.empty() ? nullptr : &buildInput.voxelTriangleIndices;
 				voxelInput.triangleRefinedGroupIds = buildInput.voxelTriangleRefinedGroupIds.empty() ? nullptr : &buildInput.voxelTriangleRefinedGroupIds;
+				voxelInput.doubleSidedTriangles = settings.doubleSidedVoxelSourceNormals;
 				voxelInput.coverageSourceTriangles = voxelCoverageSourceTriangles;
 				voxelInput.sourceVoxelPayloads = sourceVoxelPayloads.empty() ? nullptr : &sourceVoxelPayloads;
 				voxelInput.candidateVoxelPayloads = candidateVoxelPayloads.empty() ? nullptr : &candidateVoxelPayloads;
@@ -4972,7 +4974,9 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		vertexStrideBytes,
 		&indices,
 		skinningVertices,
-		skinningVertexSize);
+		skinningVertexSize,
+		nullptr,
+		settings.doubleSidedVoxelSourceNormals);
 
 	BuildVoxelFallbackCandidates(
 		state,

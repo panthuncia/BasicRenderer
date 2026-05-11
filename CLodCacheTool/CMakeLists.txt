@@ -20,6 +20,7 @@ set(CLOD_SHARED_SOURCES
     "${BR_SRC}/Import/GlTFGeometryExtractor.cpp"
     "${BR_SRC}/Import/AssimpGeometryExtractor.cpp"
     "${BR_SRC}/Import/USDGeometryExtractor.cpp"
+    "${BR_SRC}/Import/BRNiflyClient.cpp"
 
     # CLod build & cache infrastructure
     "${BR_SRC}/Import/CLodCache.cpp"

@@ -1938,7 +1938,7 @@ inline void Menu::DrawLoadModelButton() {
     if (ImGui::Button("Load Model"))
     {
         std::wstring selectedFile;
-        std::wstring customFilter = L"glTF Files\0*.glb;*.gltf\0All Files\0*.*\0";
+        std::wstring customFilter = L"Scene Files\0*.glb;*.gltf;*.usd;*.usda;*.usdc;*.usdz;*.nif\0All Files\0*.*\0";
         if (OpenFileDialog(selectedFile, customFilter))
         {
 			//auto exePath = GetExePath();

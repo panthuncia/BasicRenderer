@@ -5,6 +5,7 @@
 // Supported formats (auto-detected by extension):
 //   .usd / .usda / .usdc / .usdz    -> USD
 //   .gltf / .glb                     -> glTF
+//   .nif                             -> BRNifly -> USD
 //   anything else (fbx, obj, ...)    -> Assimp
 //
 // Caches are written to the same location the renderer would use,
@@ -26,6 +27,10 @@
 #include "Import/GlTFGeometryExtractor.h"
 #include "Import/AssimpGeometryExtractor.h"
 #include "Import/USDGeometryExtractor.h"
+#include "Import/BRNiflyClient.h"
+
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/usd/stage.h>
 
 namespace fs = std::filesystem;
 
@@ -37,7 +42,7 @@ static std::string ToLower(std::string s) {
     return s;
 }
 
-enum class AssetFormat { USD, GlTF, Assimp };
+enum class AssetFormat { USD, GlTF, Nif, Assimp };
 
 static AssetFormat DetectFormat(const fs::path& path) {
     auto ext = ToLower(path.extension().string());
@@ -45,6 +50,8 @@ static AssetFormat DetectFormat(const fs::path& path) {
         return AssetFormat::USD;
     if (ext == ".gltf" || ext == ".glb")
         return AssetFormat::GlTF;
+    if (ext == ".nif")
+        return AssetFormat::Nif;
     return AssetFormat::Assimp;   // fbx, obj, dae, ...
 }
 
@@ -52,6 +59,7 @@ static const char* FormatName(AssetFormat f) {
     switch (f) {
         case AssetFormat::USD:   return "USD";
         case AssetFormat::GlTF:  return "glTF";
+        case AssetFormat::Nif: return "NIF";
         case AssetFormat::Assimp: return "Assimp";
     }
     return "?";
@@ -131,6 +139,44 @@ static bool ProcessFile(const fs::path& path) {
                          result.primitives.size());
             if (result.primitives.empty())
                 spdlog::warn("  No primitives found in glTF file!");
+            break;
+        }
+        case AssetFormat::Nif: {
+            spdlog::info("  Converting NIF through BRNifly...");
+            std::string errorMessage;
+            auto package = BRNiflyClient::ConvertNifToUsd(pathStr, {}, &errorMessage);
+            if (!package) {
+                spdlog::error("  BRNifly conversion failed: {}", errorMessage);
+                return false;
+            }
+
+            for (const auto& diagnostic : package->diagnostics) {
+                if (diagnostic.level == "warning")
+                    spdlog::warn("  BRNifly: {}", diagnostic.message);
+                else if (diagnostic.level == "error")
+                    spdlog::error("  BRNifly: {}", diagnostic.message);
+                else
+                    spdlog::info("  BRNifly: {}", diagnostic.message);
+            }
+
+            auto layer = pxr::SdfLayer::CreateAnonymous("brnifly_clod.usda");
+            if (!layer || !layer->ImportFromString(package->rootLayerText)) {
+                spdlog::error("  Failed to import BRNifly USDA payload.");
+                return false;
+            }
+            auto stage = pxr::UsdStage::Open(layer);
+            if (!stage) {
+                spdlog::error("  Failed to open BRNifly USDA stage.");
+                return false;
+            }
+
+            auto result = USDGeometryExtractor::ExtractAllFromStage(stage, package->sourceIdentifier);
+            spdlog::info("  NIF/USD result: meshes={}, submeshes={}, caches_built={}",
+                         result.meshesProcessed,
+                         result.submeshesProcessed,
+                         result.cachesBuilt);
+            if (result.meshesProcessed == 0)
+                spdlog::warn("  No UsdGeomMesh prims found in converted NIF stage!");
             break;
         }
         case AssetFormat::Assimp: {

@@ -258,6 +258,15 @@ namespace
 		return (b - a).cross(c - a).normalized();
 	}
 
+	Float3 OrientHitNormalForSidedness(const Float3& normal, const Float3& geometricNormal, const Float3& rayDirection, bool doubleSided)
+	{
+		if (doubleSided)
+		{
+			return normal * -1.0f;
+		}
+		return normal;
+	}
+
 	struct TriangleBounds
 	{
 		Float3 boundsMin{};
@@ -994,7 +1003,8 @@ namespace
 		const std::vector<uint32_t>& cellTriangleIndices,
 		const Float3& cellWorldMin,
 		const Float3& cellWorldMax,
-		const std::vector<Ray>& rays)
+		const std::vector<Ray>& rays,
+		bool doubleSidedTriangles)
 	{
 		CellCoverageSample sample{};
 		if (rays.empty() || cellTriangleIndices.empty())
@@ -1038,6 +1048,7 @@ namespace
 					nearestNormal = interpolatedNormal.lengthSq() > 1.0e-20f
 						? interpolatedNormal.normalized()
 						: TriangleNormal(v0, v1, v2);
+					nearestNormal = OrientHitNormalForSidedness(nearestNormal, TriangleNormal(v0, v1, v2), dir, doubleSidedTriangles);
 				}
 			}
 
@@ -1091,6 +1102,7 @@ namespace
 		const std::vector<std::byte>* vertices = sourceTriangles.Vertices();
 		const std::vector<uint32_t>* meshTriangleIndices = sourceTriangles.TriangleIndices();
 		const std::vector<int32_t>* triangleRefinedGroupIds = sourceTriangles.TriangleRefinedGroupIds();
+		const bool doubleSidedTriangles = sourceTriangles.DoubleSidedTriangles();
 		if (vertices == nullptr || meshTriangleIndices == nullptr)
 		{
 			return sample;
@@ -1165,6 +1177,7 @@ namespace
 				nearestNormal = interpolatedNormal.lengthSq() > 1.0e-20f
 					? interpolatedNormal.normalized()
 					: TriangleNormal(v0, v1, v2);
+				nearestNormal = OrientHitNormalForSidedness(nearestNormal, TriangleNormal(v0, v1, v2), dir, doubleSidedTriangles);
 			}
 
 			if (nearestTriangleIndex != std::numeric_limits<uint32_t>::max())
@@ -1434,7 +1447,8 @@ void VoxelSourceTriangleBVH::Build(
 	const std::vector<uint32_t>* triangleIndices,
 	const std::vector<std::byte>* skinningVertices,
 	size_t skinningVertexStrideBytes,
-	const std::vector<int32_t>* triangleRefinedGroupIds)
+	const std::vector<int32_t>* triangleRefinedGroupIds,
+	bool doubleSidedTriangles)
 {
 	m_vertices = vertices;
 	m_vertexStrideBytes = vertexStrideBytes;
@@ -1442,6 +1456,7 @@ void VoxelSourceTriangleBVH::Build(
 	m_skinningVertexStrideBytes = skinningVertexStrideBytes;
 	m_triangleIndices = triangleIndices;
 	m_triangleRefinedGroupIds = triangleRefinedGroupIds;
+	m_doubleSidedTriangles = doubleSidedTriangles;
 	m_triangleOrder.clear();
 	m_nodes.clear();
 
@@ -1875,7 +1890,8 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 					*input.triangleIndices,
 					ownedTriangles,
 					cellMin, cellMax,
-					rays);
+					rays,
+					input.doubleSidedTriangles);
 				dominantBoneIndex = ComputeDominantBoneIndexForCell(input, ownedTriangles);
 			}
 

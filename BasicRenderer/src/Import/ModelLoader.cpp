@@ -9,6 +9,7 @@
 #include "Import/AssimpLoader.h"
 #include "Import/GlTFLoader.h"
 #include "Import/USDLoader.h"
+#include "Import/NifLoader.h"
 
 std::shared_ptr<Scene> LoadModel(std::string filePath) {
 
@@ -35,6 +36,9 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 			break;
 		case SceneLoader::OpenUSD:
 			scene = USDLoader::LoadModel(filePath);
+			break;
+		case SceneLoader::Nif:
+			scene = NifLoader::LoadModel(filePath);
 			break;
 	}
 

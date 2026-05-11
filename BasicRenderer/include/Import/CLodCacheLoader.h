@@ -15,6 +15,7 @@ struct MeshCacheIdentity {
 	std::string sourceIdentifier;
 	std::string primPath;
 	std::string subsetName;
+	bool doubleSidedVoxelSourceNormals = false;
 };
 
 MeshCacheIdentity BuildIdentity(
@@ -22,6 +23,13 @@ MeshCacheIdentity BuildIdentity(
 	const pxr::UsdStageRefPtr& stage,
 	const std::string& subsetName,
 	pxr::UsdTimeCode geomTimeCode = pxr::UsdTimeCode::Default());
+
+MeshCacheIdentity BuildIdentity(
+	const pxr::UsdGeomMesh& mesh,
+	const pxr::UsdStageRefPtr& stage,
+	const std::string& subsetName,
+	pxr::UsdTimeCode geomTimeCode,
+	const std::string& sourceIdentifierOverride);
 
 std::optional<ClusterLODPrebuiltData> TryLoadPrebuilt(const MeshCacheIdentity& identity);
 bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload);
