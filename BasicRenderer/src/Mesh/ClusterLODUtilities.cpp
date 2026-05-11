@@ -1771,6 +1771,8 @@ namespace
 		uint32_t triangleCount = 0;
 		uint32_t sourceVertexCount = 0;
 		float voxelBudget = 0.0f;
+		uint32_t sourcePrimitiveCountForCubeBudget = 0;
+		uint32_t cubeBudget = 0;
 	};
 
 	struct VoxelFallbackBuildStats
@@ -1795,6 +1797,7 @@ namespace
 		std::vector<int32_t> voxelTriangleRefinedGroupIds;
 		std::vector<uint32_t> sourceVoxelGroupIndices;
 		uint32_t voxelVertexCount = 0;
+		uint32_t sourcePrimitiveCountForCubeBudget = 0;
 		bool autoWouldFitBudget = false;
 		float autoAcceptanceErrorReference = 0.0f;
 	};
@@ -1826,6 +1829,16 @@ namespace
 		target.voxelBudget = std::max(1.0f, baseBudget / (safeScale * safeScale));
 		target.targetVoxelWidth = std::sqrt(std::max(surfaceArea, 1.0e-12f) / baseBudget) * safeScale;
 		return target;
+	}
+
+	uint32_t ComputeVoxelFallbackCubeBudget(uint32_t sourcePrimitiveCount)
+	{
+		if (sourcePrimitiveCount == 0u)
+		{
+			return 0u;
+		}
+
+		return std::max(1u, sourcePrimitiveCount / 2u + (sourcePrimitiveCount & 1u));
 	}
 
 	const VoxelGroupPayload* GetVoxelRenderPayloadForGroup(const ClusterLODBuildState& state, uint32_t groupIndex)
@@ -2115,6 +2128,8 @@ namespace
 		analysis.targetVoxelWidth = targetVoxelWidth;
 		analysis.targetResolution = targetResolution;
 		analysis.voxelBudget = voxelBudget;
+		analysis.sourcePrimitiveCountForCubeBudget = analysis.triangleCount;
+		analysis.cubeBudget = ComputeVoxelFallbackCubeBudget(analysis.sourcePrimitiveCountForCubeBudget);
 		return analysis;
 	}
 
@@ -2299,6 +2314,10 @@ namespace
 		analysis.targetVoxelWidth = targetVoxelWidth;
 		analysis.targetResolution = targetResolution;
 		analysis.voxelBudget = voxelBudget;
+		analysis.sourcePrimitiveCountForCubeBudget = buildInput.sourcePrimitiveCountForCubeBudget != 0u
+			? buildInput.sourcePrimitiveCountForCubeBudget
+			: triangleCount;
+		analysis.cubeBudget = ComputeVoxelFallbackCubeBudget(analysis.sourcePrimitiveCountForCubeBudget);
 		return analysis;
 	}
 
@@ -2598,6 +2617,57 @@ namespace
 		return state.voxelGroupMapping.packedGroupDescriptors[static_cast<size_t>(descriptorIndex)].cubeCount;
 	}
 
+	uint32_t CountGroupMeshTriangles(const ClusterLODBuildState& state, uint32_t groupIndex)
+	{
+		if (groupIndex >= state.groupMeshletChunks.size())
+		{
+			return 0u;
+		}
+
+		uint64_t triangleCount = 0u;
+		for (const meshopt_Meshlet& meshlet : state.groupMeshletChunks[groupIndex])
+		{
+			triangleCount += meshlet.triangle_count;
+		}
+
+		return static_cast<uint32_t>(std::min<uint64_t>(triangleCount, std::numeric_limits<uint32_t>::max()));
+	}
+
+	uint32_t ComputeVoxelFallbackSourcePrimitiveCount(
+		const ClusterLODBuildState& state,
+		uint32_t groupIndex,
+		const std::vector<uint32_t>& refinedChildren)
+	{
+		if (refinedChildren.empty())
+		{
+			return CountGroupMeshTriangles(state, groupIndex);
+		}
+
+		uint64_t sourcePrimitiveCount = 0u;
+		for (uint32_t childGroupIndex : refinedChildren)
+		{
+			if (childGroupIndex >= state.groups.size())
+			{
+				continue;
+			}
+
+			const ClusterLODGroup& childGroup = state.groups[childGroupIndex];
+			if ((childGroup.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+			{
+				const uint32_t cubeCount = GetVoxelPackedCubeCountForGroup(state, childGroupIndex);
+				if (cubeCount != 0u)
+				{
+					sourcePrimitiveCount += cubeCount;
+					continue;
+				}
+			}
+
+			sourcePrimitiveCount += CountGroupMeshTriangles(state, childGroupIndex);
+		}
+
+		return static_cast<uint32_t>(std::min<uint64_t>(sourcePrimitiveCount, std::numeric_limits<uint32_t>::max()));
+	}
+
 	uint32_t GetVoxelPackedClusterCountForGroup(const ClusterLODBuildState& state, uint32_t groupIndex)
 	{
 		if (groupIndex >= state.voxelGroupMapping.groupToPackedDescriptorIndex.size())
@@ -2662,10 +2732,16 @@ namespace
 			? sourceRepresentationError
 			: 0.0f;
 
-		// TODO: Voxel traversal error is kind of broken
-		// I don't think this scaling should be necessary.
+		// TODO: I don't think this scaling should be necessary- something is wrong with voxel traversal error
 		constexpr float kVoxelTraversalErrorScalingFactor = 6.0f;
-		return voxelWidth * kVoxelTraversalErrorScalingFactor + sourceError;
+		const float voxelError = voxelWidth * kVoxelTraversalErrorScalingFactor;
+		if (sourceError <= 0.0f)
+		{
+			return voxelError;
+		}
+
+		const float hierarchyFloor = std::nextafter(sourceError, std::numeric_limits<float>::infinity());
+		return std::max(voxelError, hierarchyFloor);
 	}
 
 	float GetFiniteVoxelErrorForGroup(const ClusterLODBuildState& state, uint32_t groupIndex)
@@ -2986,6 +3062,7 @@ namespace
 			buildInput.voxelTriangleRefinedGroupIds.clear();
 			buildInput.sourceVoxelGroupIndices.clear();
 			buildInput.voxelVertexCount = 0;
+			buildInput.sourcePrimitiveCountForCubeBudget = ComputeVoxelFallbackSourcePrimitiveCount(state, groupIndex, refinedChildren);
 			return AppendGroupTriangleSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes);
 		}
 
@@ -2995,6 +3072,7 @@ namespace
 		buildInput.voxelTriangleRefinedGroupIds.clear();
 		buildInput.sourceVoxelGroupIndices.clear();
 		buildInput.voxelVertexCount = 0;
+		buildInput.sourcePrimitiveCountForCubeBudget = ComputeVoxelFallbackSourcePrimitiveCount(state, groupIndex, refinedChildren);
 		if (!AppendTerminalSegmentSourceGeometry(state, groupIndex, buildInput, vertexStrideBytes, -1))
 		{
 			return false;
@@ -3043,6 +3121,7 @@ namespace
 		buildInput.voxelTriangleRefinedGroupIds.clear();
 		buildInput.sourceVoxelGroupIndices.clear();
 		buildInput.voxelVertexCount = 0;
+		buildInput.sourcePrimitiveCountForCubeBudget = 0;
 
 		const std::vector<uint32_t> refinedChildren = CollectUniqueRefinedChildren(state, groupIndex);
 
@@ -3209,6 +3288,11 @@ namespace
 			}
 
 			VoxelGroupPayload payload{};
+			const uint32_t payloadIndex = static_cast<uint32_t>(state.voxelGroupMapping.payloads.size());
+			const uint32_t descriptorIndex = static_cast<uint32_t>(state.voxelGroupMapping.packedGroupDescriptors.size());
+			const uint32_t firstCluster = static_cast<uint32_t>(state.voxelGroupMapping.packedClusterRecords.size());
+			const uint32_t firstCube = static_cast<uint32_t>(state.voxelGroupMapping.packedCubeRecords.size());
+			const uint32_t firstAttribute = static_cast<uint32_t>(state.voxelGroupMapping.packedAttributeSamples.size());
 			uint32_t resolution = buildInput.analysis.targetResolution;
 			uint32_t refinedChildErrorCount = 0u;
 			const float maxRefinedChildError = GetMaxRefinedChildTraversalError(state, groupIndex, &refinedChildErrorCount);
@@ -3235,6 +3319,29 @@ namespace
 			}
 			float voxelTraversalError = ComputeVoxelTraversalError(voxelWidth, sourceRepresentationError);
 			bool payloadFitsBudget = false;
+			PackedVoxelGroupBuildResult packed{};
+			float packedVoxelTraversalError = 0.0f;
+			auto packCurrentPayload = [&]() {
+				PackVoxelGroupInput packInput{};
+				packInput.payload = &payload;
+				packInput.voxelError = voxelTraversalError;
+				packInput.opacityThreshold = settings.voxelFallbackOpacityThreshold;
+				packInput.dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+				packInput.firstCube = firstCube;
+				packInput.firstAttribute = firstAttribute;
+				PackedVoxelGroupBuildResult result = PackVoxelGroupToCubes(packInput);
+				result.descriptor.firstCluster = firstCluster;
+				BuildVoxelClustersFromCubes(result, CLOD_VOXEL_MAX_CUBES_PER_CLUSTER);
+				return result;
+			};
+			auto computeMaxClusterCubeCount = [](const PackedVoxelGroupBuildResult& result) {
+				uint32_t maxClusterCubeCount = 0u;
+				for (const CLodVoxelClusterRecord& clusterRecord : result.clusterRecords)
+				{
+					maxClusterCubeCount = std::max(maxClusterCubeCount, clusterRecord.cubeCount);
+				}
+				return maxClusterCubeCount;
+			};
 			VoxelFallbackGroupBuildInput coverageBuildInput;
 			VoxelSourceTriangleBVH groupCoverageSourceTriangles;
 			const VoxelSourceTriangleBVH* voxelCoverageSourceTriangles = coverageSourceTriangles;
@@ -3321,7 +3428,7 @@ namespace
 				voxelInput.pruningMode = settings.voxelFallbackPruningMode;
 				VoxelizeTrianglesResult voxelResult = VoxelizeTrianglesDetailed(voxelInput);
 				spdlog::info(
-					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} traversal_error={} source_representation_error={} min_source_voxel_width={} hierarchy_error_floor={} pruning={} source_tris={} source_voxel_groups={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={} source_coverage_queries={} source_coverage_candidates={} source_coverage_tests={} source_coverage_out_of_cell={}",
+					"ClusterLOD voxel build detail: group={} depth={} attempt={} resolution={} voxel_width={} traversal_error={} source_representation_error={} min_source_voxel_width={} hierarchy_error_floor={} pruning={} source_tris={} source_voxel_groups={} source_primitives={} cube_budget={} tri_candidates={} voxel_candidates={} candidates={} positive_cells={} total_coverage={} max_coverage={} source_cells={} render_cells={} pruned={} source_coverage_queries={} source_coverage_candidates={} source_coverage_tests={} source_coverage_out_of_cell={}",
 					groupIndex,
 					group.depth,
 					attempt,
@@ -3334,6 +3441,8 @@ namespace
 					VoxelPruningModeName(settings.voxelFallbackPruningMode),
 					buildInput.voxelTriangleIndices.size() / 3ull,
 					buildInput.sourceVoxelGroupIndices.size(),
+					buildInput.analysis.sourcePrimitiveCountForCubeBudget,
+					buildInput.analysis.cubeBudget,
 					voxelResult.triangleCandidateCellCount,
 					voxelResult.voxelCandidateCellCount,
 					voxelResult.candidateCellCount,
@@ -3371,9 +3480,34 @@ namespace
 				LogVoxelPayloadRefinedGroupCells("render", groupIndex, group.depth, payload);
 				LogVoxelPayloadRefinedGroupCells("carry", groupIndex, group.depth, state.voxelCarryPayloads[groupIndex]);
 
-				if (!payload.activeCells.empty() && static_cast<float>(payload.activeCells.size()) <= buildInput.analysis.voxelBudget)
+				if (!payload.activeCells.empty())
 				{
-					payloadFitsBudget = true;
+					packed = packCurrentPayload();
+					packedVoxelTraversalError = voxelTraversalError;
+				}
+
+				const bool cellCountFits = !payload.activeCells.empty() &&
+					static_cast<float>(payload.activeCells.size()) <= buildInput.analysis.voxelBudget;
+				const bool cubeCountFits = !packed.cubeRecords.empty() &&
+					(buildInput.analysis.cubeBudget == 0u ||
+						static_cast<uint64_t>(packed.cubeRecords.size()) <= static_cast<uint64_t>(buildInput.analysis.cubeBudget));
+				payloadFitsBudget = cellCountFits && cubeCountFits;
+				spdlog::info(
+					"ClusterLOD voxel pack attempt: group={} depth={} attempt={} payload_cells={} voxel_budget={} source_primitives={} cube_budget={} packed_cubes={} packed_clusters={} max_cluster_cube_count={} cells_fit={} cubes_fit={}",
+					groupIndex,
+					group.depth,
+					attempt,
+					payload.activeCells.size(),
+					buildInput.analysis.voxelBudget,
+					buildInput.analysis.sourcePrimitiveCountForCubeBudget,
+					buildInput.analysis.cubeBudget,
+					packed.cubeRecords.size(),
+					packed.clusterRecords.size(),
+					computeMaxClusterCubeCount(packed),
+					cellCountFits,
+					cubeCountFits);
+				if (payloadFitsBudget)
+				{
 					break;
 				}
 
@@ -3388,43 +3522,26 @@ namespace
 					static_cast<uint32_t>(std::ceil(longestExtent / std::max(voxelWidth, 1.0e-8f))));
 			}
 
-			if (payload.activeCells.empty() || (requireBudgetFit && !payloadFitsBudget))
+			if (payload.activeCells.empty() || packed.cubeRecords.empty() || packed.clusterRecords.empty() || (requireBudgetFit && !payloadFitsBudget))
 			{
 				stats.failedBuilds++;
 				return false;
 			}
-
-			const uint32_t payloadIndex = static_cast<uint32_t>(state.voxelGroupMapping.payloads.size());
-			const uint32_t descriptorIndex = static_cast<uint32_t>(state.voxelGroupMapping.packedGroupDescriptors.size());
-			const uint32_t firstCluster = static_cast<uint32_t>(state.voxelGroupMapping.packedClusterRecords.size());
-			const uint32_t firstCube = static_cast<uint32_t>(state.voxelGroupMapping.packedCubeRecords.size());
-
-			PackVoxelGroupInput packInput{};
-			packInput.payload = &payload;
-			packInput.voxelError = voxelTraversalError;
-			packInput.opacityThreshold = settings.voxelFallbackOpacityThreshold;
-			packInput.dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
-			packInput.firstCube = firstCube;
-			packInput.firstAttribute = static_cast<uint32_t>(state.voxelGroupMapping.packedAttributeSamples.size());
-			PackedVoxelGroupBuildResult packed = PackVoxelGroupToCubes(packInput);
-			packed.descriptor.firstCluster = firstCluster;
-			BuildVoxelClustersFromCubes(packed, CLOD_VOXEL_MAX_CUBES_PER_CLUSTER);
-			uint32_t maxClusterCubeCount = 0u;
-			for (const CLodVoxelClusterRecord& clusterRecord : packed.clusterRecords)
-			{
-				maxClusterCubeCount = std::max(maxClusterCubeCount, clusterRecord.cubeCount);
-			}
+			const uint32_t maxClusterCubeCount = computeMaxClusterCubeCount(packed);
 			spdlog::info(
-				"ClusterLOD voxel pack detail: group={} depth={} payload_cells={} packed_cubes={} packed_clusters={} max_cluster_cube_count={} packed_attributes={} payload_voxel_width={} traversal_voxel_error={} opacity_threshold={}",
+				"ClusterLOD voxel pack detail: group={} depth={} payload_cells={} voxel_budget={} source_primitives={} cube_budget={} packed_cubes={} packed_clusters={} max_cluster_cube_count={} packed_attributes={} payload_voxel_width={} traversal_voxel_error={} opacity_threshold={}",
 				groupIndex,
 				group.depth,
 				payload.activeCells.size(),
+				buildInput.analysis.voxelBudget,
+				buildInput.analysis.sourcePrimitiveCountForCubeBudget,
+				buildInput.analysis.cubeBudget,
 				packed.cubeRecords.size(),
 				packed.clusterRecords.size(),
 				maxClusterCubeCount,
 				packed.attributeSamples.size(),
 				payload.voxelWidth,
-				voxelTraversalError,
+				packedVoxelTraversalError,
 				settings.voxelFallbackOpacityThreshold);
 			if (packed.cubeRecords.empty() || packed.clusterRecords.empty())
 			{
@@ -3524,7 +3641,7 @@ namespace
 				packed.clusterRecords,
 				packed.cubeRecords,
 				packed.attributeSamples,
-				packInput.firstAttribute);
+				firstAttribute);
 			state.voxelGroupMapping.packedClusterRecords.insert(
 				state.voxelGroupMapping.packedClusterRecords.end(),
 				packed.clusterRecords.begin(),
@@ -3541,7 +3658,7 @@ namespace
 			const float triangleError = group.bounds.error;
 			const bool terminalErrorSentinel = triangleError >= std::numeric_limits<float>::max() * 0.5f;
 			const bool replaceGroupWithVoxels = forceAllVoxels || group.terminalSegmentCount < group.segmentCount;
-			group.bounds.error = voxelTraversalError;
+			group.bounds.error = packedVoxelTraversalError;
 			if (replaceGroupWithVoxels)
 			{
 				group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
@@ -3561,11 +3678,11 @@ namespace
 				}
 			}
 			spdlog::info(
-				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_width={} traversal_error={} terminal_sentinel={} terminal_segments={}/{} refined_child_errors={} max_refined_child_error={} hierarchy_error_floor={} forced_budget_fit={} replaces_group={}",
+				"ClusterLOD voxel group error: group={} depth={} triangle_error={} voxel_width={} traversal_error={} terminal_sentinel={} terminal_segments={}/{} refined_child_errors={} max_refined_child_error={} hierarchy_error_floor={} source_primitives={} cube_budget={} packed_cubes={} forced_budget_fit={} replaces_group={}",
 				groupIndex,
 				group.depth,
 				triangleError,
-				voxelWidth,
+				payload.voxelWidth,
 				group.bounds.error,
 				terminalErrorSentinel,
 				group.terminalSegmentCount,
@@ -3573,6 +3690,9 @@ namespace
 				refinedChildErrorCount,
 				maxRefinedChildError,
 				hierarchyVoxelErrorFloor,
+				buildInput.analysis.sourcePrimitiveCountForCubeBudget,
+				buildInput.analysis.cubeBudget,
+				packed.cubeRecords.size(),
 				requireBudgetFit,
 				replaceGroupWithVoxels);
 			stats.generatedPayloads++;

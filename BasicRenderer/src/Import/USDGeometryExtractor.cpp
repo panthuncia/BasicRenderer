@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <set>
 #include <algorithm>
+#include <optional>
 
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdGeom/tokens.h>
@@ -25,6 +26,7 @@
 #include <spdlog/spdlog.h>
 
 #include "Import/CLodCacheLoader.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
@@ -866,18 +868,23 @@ StageExtractionResult ExtractAll(const std::string& filePath) {
 
 	UsdSkelCache skelCache;
 
-	size_t totalPrims = 0;
-	for (auto const& prim : UsdPrimRange(stage->GetPseudoRoot()))
-		++totalPrims;
-	spdlog::info("  Stage has {} total prims.", totalPrims);
+	struct MeshWorkItem {
+		UsdGeomMesh mesh;
+		std::optional<UsdSkelSkinningQuery> skinQ;
+		VtTokenArray skelJointOrderRaw;
+		VtTokenArray skelJointOrderMapped;
+		std::vector<UsdGeomSubset> subsets;
+		std::string primPath;
+	};
 
-	for (auto const& prim : UsdPrimRange(stage->GetPseudoRoot())) {
-		UsdGeomMesh mesh(prim);
+	size_t totalPrims = 0;
+	std::vector<MeshWorkItem> meshWorkItems;
+	auto primRange = UsdPrimRange(stage->GetPseudoRoot());
+	for (auto primIt = primRange.begin(); primIt != primRange.end(); ++primIt) {
+		++totalPrims;
+		UsdGeomMesh mesh(*primIt);
 		if (!mesh)
 			continue;
-
-		result.meshesProcessed++;
-		spdlog::info("  Found mesh #{}: '{}'", result.meshesProcessed, prim.GetPath().GetString());
 
 		// Attempt skinning query TODO: CLod skinning
 		auto skinQ = GetSkinningQuery(mesh, skelCache);
@@ -903,27 +910,44 @@ StageExtractionResult ExtractAll(const std::string& filePath) {
 		UsdShadeMaterialBindingAPI bindAPI(mesh);
 		auto subsets = bindAPI.GetMaterialBindSubsets();
 		spdlog::info("    {} material subset(s) for mesh '{}'",
-			subsets.size(), prim.GetPath().GetString());
+			subsets.size(), mesh.GetPrim().GetPath().GetString());
 
-		// Default UV set for CLI
-		const std::vector<std::string> requiredUvSetNames = { "st" };
-		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
+		meshWorkItems.push_back(MeshWorkItem{
+			.mesh = mesh,
+			.skinQ = std::move(skinQ),
+			.skelJointOrderRaw = std::move(skelJointOrderRaw),
+			.skelJointOrderMapped = std::move(skelJointOrderMapped),
+			.subsets = std::move(subsets),
+			.primPath = mesh.GetPrim().GetPath().GetString()
+			});
+	}
 
-		if (subsets.empty()) {
-			ExtractSubMesh(mesh, std::nullopt, stage, geomTimeCode, metersPerUnit,
-				requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
-			result.submeshesProcessed++;
-			result.cachesBuilt++;
+	spdlog::info("  Stage has {} total prims.", totalPrims);
+	result.meshesProcessed = meshWorkItems.size();
+
+	const std::vector<std::string> requiredUvSetNames = { "st" };
+	const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
+
+	TaskSchedulerManager::GetInstance().ParallelFor("USDGeometryExtractor::PreprocessMeshes", meshWorkItems.size(), [&](size_t meshIndex) {
+		const MeshWorkItem& workItem = meshWorkItems[meshIndex];
+		spdlog::info("  Found mesh #{}: '{}'", meshIndex + 1, workItem.primPath);
+
+		if (workItem.subsets.empty()) {
+			ExtractSubMesh(workItem.mesh, std::nullopt, stage, geomTimeCode, metersPerUnit,
+				requiredUvSetNames, workItem.skinQ, workItem.skelJointOrderRaw, workItem.skelJointOrderMapped);
 		}
 		else {
-			for (auto const& subset : subsets) {
-				ExtractSubMesh(mesh, std::make_optional(subset), stage, geomTimeCode, metersPerUnit,
-					requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
-				result.submeshesProcessed++;
-				result.cachesBuilt++;
-			}
+			TaskSchedulerManager::GetInstance().ParallelFor("USDGeometryExtractor::PreprocessSubsets", workItem.subsets.size(), [&](size_t subsetIndex) {
+				ExtractSubMesh(workItem.mesh, std::make_optional(workItem.subsets[subsetIndex]), stage, geomTimeCode, metersPerUnit,
+					requiredUvSetNames, workItem.skinQ, workItem.skelJointOrderRaw, workItem.skelJointOrderMapped);
+				});
 		}
+		});
+
+	for (const MeshWorkItem& workItem : meshWorkItems) {
+		result.submeshesProcessed += workItem.subsets.empty() ? 1 : workItem.subsets.size();
 	}
+	result.cachesBuilt = result.submeshesProcessed;
 
 	return result;
 }

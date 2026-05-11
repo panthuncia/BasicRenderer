@@ -2,6 +2,9 @@
 #include <DirectXMath.h>
 #include <array>
 #include <filesystem>
+#include <functional>
+#include <optional>
+#include <stdexcept>
 #include <vector>
 #include <cstring>
 #include <unordered_set>
@@ -59,6 +62,7 @@
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Managers/Singletons/TextureProcessingManager.h"
 
 #include "Import/USDLoader.h"
@@ -74,10 +78,24 @@ namespace USDLoader {
         std::vector<std::string> referencedUvSetNames;
     };
 
+	struct PreprocessedMeshSubset {
+		UsdShadeMaterial material;
+		MeshPreprocessResult result;
+
+		PreprocessedMeshSubset(UsdShadeMaterial m, MeshPreprocessResult&& r)
+			: material(std::move(m)), result(std::move(r)) {}
+	};
+
+	struct PreprocessedMeshRecord {
+		bool authoredDoubleSided = false;
+		std::vector<PreprocessedMeshSubset> subsets;
+	};
+
 	struct LoadingCaches {
 		std::unordered_map<std::string, MaterialTemplateRecord> materialTemplateCache;
         std::unordered_map<std::string, std::shared_ptr<Material>> resolvedMaterialCache;
 		std::unordered_map<std::string, std::vector<std::shared_ptr<Mesh>>> meshCache;
+		std::unordered_map<std::string, PreprocessedMeshRecord> preprocessedMeshCache;
 		std::unordered_map<std::string, std::shared_ptr<TextureAsset>> textureCache;
 		//std::unordered_map<std::string, std::shared_ptr<UsdSkelSkeleton>> unprocessedSkeletons;
 		std::unordered_map<std::string, UsdPrim> primsWithSkeletons;
@@ -90,6 +108,7 @@ namespace USDLoader {
 			materialTemplateCache.clear();
             resolvedMaterialCache.clear();
 			meshCache.clear();
+			preprocessedMeshCache.clear();
 			textureCache.clear();
 			primsWithSkeletons.clear();
 			skeletonMap.clear();
@@ -1207,6 +1226,146 @@ namespace USDLoader {
         return runtimeMaterial;
     }
 
+	void PreprocessAllMeshes(
+		const UsdStageRefPtr& stage,
+		double metersPerUnit,
+		const std::string& directory,
+		bool isUSDZ)
+	{
+		struct MeshPreprocessWorkItem {
+			std::string meshPath;
+			UsdGeomMesh mesh;
+			std::optional<UsdGeomSubset> subset;
+			UsdShadeMaterial material;
+			std::vector<std::string> requiredUvSetNames;
+			std::optional<UsdSkelSkinningQuery> skinQ;
+			VtTokenArray skelJointOrderRaw;
+			VtTokenArray skelJointOrderMapped;
+			bool authoredDoubleSided = false;
+		};
+
+		loadingCache.preprocessedMeshCache.clear();
+
+		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
+		UsdSkelCache preprocessSkelCache;
+		std::vector<MeshPreprocessWorkItem> workItems;
+
+		std::function<void(const UsdPrim&)> gatherMeshJobs = [&](const UsdPrim& prim) {
+			if (prim.IsA<UsdGeomImageable>()) {
+				UsdGeomImageable imageable(prim);
+				if (imageable.ComputeVisibility(geomTimeCode) == UsdGeomTokens->invisible) {
+					return;
+				}
+			}
+
+			UsdGeomMesh mesh(prim);
+			if (mesh) {
+				auto skinQ = USDGeometryExtractor::GetSkinningQuery(mesh, preprocessSkelCache);
+				VtTokenArray skelJointOrderRaw;
+				VtTokenArray skelJointOrderMapped;
+				if (skinQ) {
+					UsdSkelBindingAPI bindAPI(mesh.GetPrim());
+					UsdSkelSkeleton skel = bindAPI.GetInheritedSkeleton();
+					if (skel) {
+						preprocessSkelCache.Populate(UsdSkelRoot(skel.GetPrim()), UsdPrimDefaultPredicate);
+						auto skelQuery = preprocessSkelCache.GetSkelQuery(skel);
+						skelJointOrderRaw = skelQuery.GetJointOrder();
+
+						auto& mapper = skinQ->GetJointMapper();
+						if (mapper && !mapper->IsIdentity()) {
+							mapper->Remap(skelJointOrderRaw, &skelJointOrderMapped);
+						}
+						else {
+							skelJointOrderMapped = skelJointOrderRaw;
+						}
+					}
+				}
+
+				bool authoredDoubleSided = false;
+				UsdGeomGprim gprim(mesh.GetPrim());
+				if (gprim) {
+					gprim.GetDoubleSidedAttr().Get(&authoredDoubleSided, geomTimeCode);
+				}
+
+				const std::string meshPath = mesh.GetPrim().GetPath().GetString();
+				UsdShadeMaterialBindingAPI bindAPI(mesh);
+				auto subsets = bindAPI.GetMaterialBindSubsets();
+
+				const auto getRequiredUvSetNames = [](const UsdShadeMaterial& material) {
+					const auto templateIt = loadingCache.materialTemplateCache.find(material.GetPrim().GetPath().GetString());
+					return templateIt != loadingCache.materialTemplateCache.end()
+						? templateIt->second.referencedUvSetNames
+						: std::vector<std::string>{};
+				};
+
+				if (subsets.empty()) {
+					auto mat = UsdShadeMaterialBindingAPI(mesh).ComputeBoundMaterial();
+					ProcessMaterial(mat, stage, isUSDZ, directory);
+					workItems.push_back(MeshPreprocessWorkItem{
+						.meshPath = meshPath,
+						.mesh = mesh,
+						.subset = std::nullopt,
+						.material = mat,
+						.requiredUvSetNames = getRequiredUvSetNames(mat),
+						.skinQ = skinQ,
+						.skelJointOrderRaw = skelJointOrderRaw,
+						.skelJointOrderMapped = skelJointOrderMapped,
+						.authoredDoubleSided = authoredDoubleSided
+						});
+				}
+				else {
+					for (const auto& subset : subsets) {
+						auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
+						ProcessMaterial(mat, stage, isUSDZ, directory);
+						workItems.push_back(MeshPreprocessWorkItem{
+							.meshPath = meshPath,
+							.mesh = mesh,
+							.subset = subset,
+							.material = mat,
+							.requiredUvSetNames = getRequiredUvSetNames(mat),
+							.skinQ = skinQ,
+							.skelJointOrderRaw = skelJointOrderRaw,
+							.skelJointOrderMapped = skelJointOrderMapped,
+							.authoredDoubleSided = authoredDoubleSided
+							});
+					}
+				}
+			}
+
+			for (auto child : prim.GetFilteredChildren(UsdTraverseInstanceProxies())) {
+				gatherMeshJobs(child);
+			}
+		};
+		gatherMeshJobs(stage->GetPseudoRoot());
+
+		spdlog::info("USD mesh preprocessing: gathered {} mesh/subset job(s).", workItems.size());
+		std::vector<std::optional<MeshPreprocessResult>> preprocessed(workItems.size());
+		TaskSchedulerManager::GetInstance().ParallelFor("USDLoader::PreprocessMeshes", workItems.size(), [&](size_t workIndex) {
+			const MeshPreprocessWorkItem& workItem = workItems[workIndex];
+			preprocessed[workIndex] = USDGeometryExtractor::ExtractSubMesh(
+				workItem.mesh,
+				workItem.subset,
+				stage,
+				geomTimeCode,
+				metersPerUnit,
+				workItem.requiredUvSetNames,
+				workItem.skinQ,
+				workItem.skelJointOrderRaw,
+				workItem.skelJointOrderMapped);
+			});
+
+		for (size_t workIndex = 0; workIndex < workItems.size(); ++workIndex) {
+			if (!preprocessed[workIndex].has_value()) {
+				throw std::runtime_error("Missing preprocessed USD mesh data");
+			}
+
+			const MeshPreprocessWorkItem& workItem = workItems[workIndex];
+			auto& record = loadingCache.preprocessedMeshCache[workItem.meshPath];
+			record.authoredDoubleSided = workItem.authoredDoubleSided;
+			record.subsets.emplace_back(workItem.material, std::move(preprocessed[workIndex].value()));
+		}
+	}
+
 	std::vector<std::shared_ptr<Mesh>> ProcessMesh(
 		const UsdGeomMesh& mesh,
 		const pxr::UsdStageRefPtr& stage,
@@ -1218,72 +1377,36 @@ namespace USDLoader {
 		VtTokenArray& skelJointOrderRaw,
 		VtTokenArray& skelJointOrderMapped)
 	{
+		(void)stage;
+		(void)metersPerUnit;
+		(void)upRot;
+		(void)directory;
+		(void)isUSDZ;
+		(void)skelCache;
+		(void)skelJointOrderRaw;
+		(void)skelJointOrderMapped;
+
 		auto& cacheKey = mesh.GetPrim().GetPath().GetString();
 		if (loadingCache.meshCache.contains(cacheKey)) {
 			return loadingCache.meshCache[cacheKey];
 		}
 
-		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
-
-		// Extract skin once
-		auto skinQ = USDGeometryExtractor::GetSkinningQuery(mesh, skelCache);
-
-		// Gather subsets
-		UsdShadeMaterialBindingAPI  bindAPI(mesh);
-		auto                        subsets = bindAPI.GetMaterialBindSubsets();
-        bool authoredDoubleSided = false;
-        UsdGeomGprim gprim(mesh.GetPrim());
-        if (gprim) {
-            gprim.GetDoubleSidedAttr().Get(&authoredDoubleSided, geomTimeCode);
-        }
-
 		std::vector<std::shared_ptr<Mesh>> outMeshes;
+		auto preprocessedIt = loadingCache.preprocessedMeshCache.find(cacheKey);
+		if (preprocessedIt == loadingCache.preprocessedMeshCache.end()) {
+			spdlog::warn("USD mesh '{}' was not present in the preprocessed mesh cache.", cacheKey);
+			loadingCache.meshCache[cacheKey] = outMeshes;
+			return outMeshes;
+		}
 
-		// If no subsets: one full mesh with ComputeBoundMaterial()
-		if (subsets.empty()) {
-			auto matAPI = UsdShadeMaterialBindingAPI(mesh);
-			auto mat = matAPI.ComputeBoundMaterial();
-			ProcessMaterial(mat, stage, isUSDZ, directory);
-            const auto templateIt = loadingCache.materialTemplateCache.find(mat.GetPrim().GetPath().GetString());
-            const std::vector<std::string> requiredUvSetNames =
-                templateIt != loadingCache.materialTemplateCache.end()
-                ? templateIt->second.referencedUvSetNames
-                : std::vector<std::string>{};
-
-			// Phase 1: geometry extraction + CLod cache
-			auto result = USDGeometryExtractor::ExtractSubMesh(
-				mesh, std::nullopt, stage, geomTimeCode, metersPerUnit, requiredUvSetNames,
-				skinQ, skelJointOrderRaw, skelJointOrderMapped);
-
-			// Phase 2: GPU mesh creation
-			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
+		PreprocessedMeshRecord& record = preprocessedIt->second;
+		outMeshes.reserve(record.subsets.size());
+		for (PreprocessedMeshSubset& subset : record.subsets) {
+			auto& result = subset.result;
+			auto material = ResolveMaterialForMesh(subset.material, result.ingest.GetUvSets(), record.authoredDoubleSided || result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			if (mPtr != nullptr) {
 				outMeshes.push_back(mPtr);
-			}
-		}
-		else {
-			// Otherwise: one mesh per subset
-			for (auto const& subset : subsets) {
-				auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
-				ProcessMaterial(mat, stage, isUSDZ, directory);
-                const auto templateIt = loadingCache.materialTemplateCache.find(mat.GetPrim().GetPath().GetString());
-                const std::vector<std::string> requiredUvSetNames =
-                    templateIt != loadingCache.materialTemplateCache.end()
-                    ? templateIt->second.referencedUvSetNames
-                    : std::vector<std::string>{};
-
-				// Phase 1: geometry extraction + CLod cache
-				auto result = USDGeometryExtractor::ExtractSubMesh(
-					mesh, std::make_optional(subset), stage, geomTimeCode, metersPerUnit, requiredUvSetNames,
-					skinQ, skelJointOrderRaw, skelJointOrderMapped);
-
-				// Phase 2: GPU mesh creation
-				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
-				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-				if (mPtr != nullptr) {
-					outMeshes.push_back(mPtr);
-				}
 			}
 		}
 
@@ -1835,6 +1958,8 @@ namespace USDLoader {
 		if (std::filesystem::path(filePath).extension() == ".usdz") {
 			isUSDZ = true;
 		}
+
+		PreprocessAllMeshes(stage, metersPerUnit, std::filesystem::path(filePath).parent_path().string(), isUSDZ);
 
 		ParseNodeHierarchy(scene, stage, metersPerUnit, upRot, std::filesystem::path(filePath).parent_path().string(), skelCache, isUSDZ);
 

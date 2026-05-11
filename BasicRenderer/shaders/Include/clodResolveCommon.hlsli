@@ -997,7 +997,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     const CLodMeshMetadata metadata = metadataBuffer[offsets.clodMeshMetadataIndex];
 
     CLodVoxelGroupDescriptor descriptor;
-    if (!CLodTryLoadVoxelGroupDescriptor(metadata, localGroupId, descriptor) || localVoxelClusterIndex >= descriptor.clusterCount)
+    if (!CLodTryLoadVoxelDescriptorByClusterIndex(metadata, localGroupId, localVoxelClusterIndex, descriptor))
     {
         return false;
     }

@@ -12,11 +12,13 @@ uint64_t PackVisKey(float depth, uint clusterId, uint triId)
 {
     // Raw IEEE-754 bits (order-preserving for [0,1] non-NaN floats)
     uint depthBits = asuint(depth) >> 1u;
+    const uint triMask = (1u << TRI_BITS) - 1u;
+    const uint clusterMask = (1u << CLUSTER_BITS) - 1u;
 
     uint64_t key =
         ((uint64_t) depthBits << META_BITS) |
-        ((uint64_t) clusterId << TRI_BITS) |
-        ((uint64_t) triId);
+        ((uint64_t) (clusterId & clusterMask) << TRI_BITS) |
+        ((uint64_t) (triId & triMask));
 
     return key;
 }

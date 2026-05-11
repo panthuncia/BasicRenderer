@@ -12,7 +12,17 @@
 #define CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW 0
 #endif
 
-static const uint VOXEL_RASTER_THREADS_PER_GROUP = 32u;
+#ifndef CLOD_MAX_DDA_STEPS
+#define CLOD_MAX_DDA_STEPS 16u
+#endif
+
+static const uint VOXEL_RASTER_THREADS_PER_GROUP = 64u;
+static const uint VOXEL_RASTER_PIXEL_QUEUE_CAPACITY = 256u;
+static const uint64_t VOXEL_RASTER_VISIBILITY_EMPTY = 0xFFFFFFFFFFFFFFFF;
+
+groupshared uint gs_voxelRasterQueueCount;
+groupshared uint gs_voxelRasterQueueReadCursor;
+groupshared uint2 gs_voxelRasterPixelQueue[VOXEL_RASTER_PIXEL_QUEUE_CAPACITY];
 
 bool VoxelMaskTest(uint2 mask, uint bitIndex)
 {
@@ -24,7 +34,7 @@ bool RayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxM
     tEnter = 0.0f;
     tExit = 3.402823e+38f;
 
-    //[unroll]
+    [unroll]
     for (uint axis = 0u; axis < 3u; ++axis)
     {
         const float origin = rayOrigin[axis];
@@ -93,7 +103,7 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, uint2 occupancyMask, o
         abs(rayDir.z) > 1.0e-8f ? abs(1.0f / rayDir.z) : largeT);
 
     [loop]
-    for (uint iter = 0u; iter < 16u; ++iter)
+    for (uint iter = 0u; iter < CLOD_MAX_DDA_STEPS; ++iter)
     {
         if (any(cell < 0) || any(cell >= 4))
         {
@@ -215,7 +225,7 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
     const ClodViewRasterInfo rasterInfo = viewRasterInfoBuffer[viewId];
 
     CLodVoxelGroupDescriptor descriptor;
-    if (!CLodTryLoadVoxelGroupDescriptor(metadata, localGroupId, descriptor) || localVoxelClusterIndex >= descriptor.clusterCount)
+    if (!CLodTryLoadVoxelDescriptorByClusterIndex(metadata, localGroupId, localVoxelClusterIndex, descriptor))
     {
         return;
     }
@@ -292,14 +302,20 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
 
         float2 screenMin = float2(3.402823e+38f, 3.402823e+38f);
         float2 screenMax = float2(-3.402823e+38f, -3.402823e+38f);
+        float cubeMaxLinearDepth = 0.0f;
         bool validProjection = false;
-        //[unroll]
+        [unroll]
         for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex)
         {
             const float3 corner = float3(
                 (cornerIndex & 1u) ? cubeMaxObject.x : cubeMinObject.x,
                 (cornerIndex & 2u) ? cubeMaxObject.y : cubeMinObject.y,
                 (cornerIndex & 4u) ? cubeMaxObject.z : cubeMinObject.z);
+            const float cornerLinearDepth = -dot(float4(corner, 1.0f), localViewZ);
+            if (cornerLinearDepth > 0.0f)
+            {
+                cubeMaxLinearDepth = max(cubeMaxLinearDepth, cornerLinearDepth);
+            }
             const float4 clip = mul(float4(corner, 1.0f), localToClip);
             if (clip.w <= 0.0f)
             {
@@ -313,7 +329,7 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
             screenMax = max(screenMax, screen);
             validProjection = true;
         }
-        if (!validProjection)
+        if (!validProjection || cubeMaxLinearDepth <= 0.0f)
         {
             continue;
         }
@@ -333,47 +349,102 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
         const uint pixelWidth = uint(maxPx.x - minPx.x + 1);
         const uint pixelHeight = uint(maxPx.y - minPx.y + 1);
         const uint pixelCount = pixelWidth * pixelHeight;
-        for (uint pixelLinear = GI; pixelLinear < pixelCount; pixelLinear += VOXEL_RASTER_THREADS_PER_GROUP)
+        for (uint queueBase = 0u; queueBase < pixelCount; queueBase += VOXEL_RASTER_PIXEL_QUEUE_CAPACITY)
         {
-            const int px = minPx.x + int(pixelLinear % pixelWidth);
-            const int py = minPx.y + int(pixelLinear / pixelWidth);
-            const float2 uv = (float2(px, py) + 0.5f) * targetDimsInv;
-            const float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
-            float4 viewNear = mul(float4(ndc, 0.0f, 1.0f), camera.projectionInverse);
-            viewNear.xyz /= max(viewNear.w, 1.0e-6f);
-            float4 worldNear = mul(float4(viewNear.xyz, 1.0f), camera.viewInverse);
-            const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1.0e-6f);
-            const float3 localPoint = mul(float4(worldPoint, 1.0f), worldToLocal).xyz;
-            const float3 rayOriginObject = cameraOriginLocal;
-            const float3 rayDirObject = normalize(localPoint - rayOriginObject);
-
-            const float3 rayOriginCube = (rayOriginObject - cubeMinObject) / voxelWidth;
-            const float3 rayDirCube = rayDirObject / voxelWidth;
-
-            float tHitCube = 0.0f;
-            if (!RaycastVoxelCubeDDA(rayOriginCube, rayDirCube, cube.occupancyMask, tHitCube))
+            if (GI == 0u)
             {
-                continue;
+                gs_voxelRasterQueueCount = 0u;
+            }
+            GroupMemoryBarrierWithGroupSync();
+
+            const uint queueEnd = min(queueBase + VOXEL_RASTER_PIXEL_QUEUE_CAPACITY, pixelCount);
+            for (uint pixelLinear = queueBase + GI; pixelLinear < queueEnd; pixelLinear += VOXEL_RASTER_THREADS_PER_GROUP)
+            {
+                const int px = minPx.x + int(pixelLinear % pixelWidth);
+                const int py = minPx.y + int(pixelLinear / pixelWidth);
+                bool enqueuePixel = true;
+
+#if !CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                const uint64_t currentVisKey = visibilityBuffer[uint2(px, py)];
+                if (currentVisKey != VOXEL_RASTER_VISIBILITY_EMPTY)
+                {
+                    float currentDepth = 0.0f;
+                    uint currentClusterId = 0u;
+                    uint currentPrimId = 0u;
+                    UnpackVisKey(currentVisKey, currentDepth, currentClusterId, currentPrimId);
+                    enqueuePixel = currentDepth >= cubeMaxLinearDepth;
+                }
+#endif
+
+                if (enqueuePixel)
+                {
+                    uint queueSlot = 0u;
+                    InterlockedAdd(gs_voxelRasterQueueCount, 1u, queueSlot);
+                    gs_voxelRasterPixelQueue[queueSlot] = uint2(px, py);
+                }
             }
 
-            const float3 hitObject = rayOriginObject + rayDirObject * tHitCube;
-            const float linearDepth = -dot(float4(hitObject, 1.0f), localViewZ);
-            if (linearDepth <= 0.0f)
-            {
-                continue;
-            }
+            GroupMemoryBarrierWithGroupSync();
 
-            if (debugMode)
+            if (GI == 0u)
             {
-                WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(2u));
+                gs_voxelRasterQueueReadCursor = 0u;
             }
+            GroupMemoryBarrierWithGroupSync();
+
+            [loop]
+            while (true)
+            {
+                uint queueSlot = 0u;
+                InterlockedAdd(gs_voxelRasterQueueReadCursor, 1u, queueSlot);
+                if (queueSlot >= gs_voxelRasterQueueCount)
+                {
+                    break;
+                }
+
+                const uint2 pixel = gs_voxelRasterPixelQueue[queueSlot];
+                const uint px = pixel.x;
+                const uint py = pixel.y;
+                const float2 uv = (float2(px, py) + 0.5f) * targetDimsInv;
+                const float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+                float4 viewNear = mul(float4(ndc, 0.0f, 1.0f), camera.projectionInverse);
+                viewNear.xyz /= max(viewNear.w, 1.0e-6f);
+                float4 worldNear = mul(float4(viewNear.xyz, 1.0f), camera.viewInverse);
+                const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1.0e-6f);
+                const float3 localPoint = mul(float4(worldPoint, 1.0f), worldToLocal).xyz;
+                const float3 rayOriginObject = cameraOriginLocal;
+                const float3 rayDirObject = normalize(localPoint - rayOriginObject);
+
+                const float3 rayOriginCube = (rayOriginObject - cubeMinObject) / voxelWidth;
+                const float3 rayDirCube = rayDirObject / voxelWidth;
+
+                float tHitCube = 0.0f;
+                if (!RaycastVoxelCubeDDA(rayOriginCube, rayDirCube, cube.occupancyMask, tHitCube))
+                {
+                    continue;
+                }
+
+                const float3 hitObject = rayOriginObject + rayDirObject * tHitCube;
+                const float linearDepth = -dot(float4(hitObject, 1.0f), localViewZ);
+                if (linearDepth <= 0.0f)
+                {
+                    continue;
+                }
+
+                if (debugMode)
+                {
+                    WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(2u));
+                }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-            VoxelRasterWriteVirtualShadow(uint2(px, py), linearDepth, clipmapInfo, pageTable, physicalPages);
+                VoxelRasterWriteVirtualShadow(uint2(px, py), linearDepth, clipmapInfo, pageTable, physicalPages);
 #else
-            const uint64_t visKey = PackVisKey(linearDepth, work.visibleClusterIndex, cubeOffset);
-            InterlockedMin(visibilityBuffer[uint2(px, py)], visKey);
+                const uint64_t visKey = PackVisKey(linearDepth, work.visibleClusterIndex, cubeOffset);
+                InterlockedMin(visibilityBuffer[uint2(px, py)], visKey);
 #endif
+            }
+
+            GroupMemoryBarrierWithGroupSync();
         }
     }
 }

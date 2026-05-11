@@ -18,7 +18,7 @@ ClusterLODBuilderSettings GetDefaultBuilderSettings()
     settings.voxelGridBaseResolution = 32u;
     settings.voxelMinResolution = 0u;
     settings.voxelRaysPerCell = 64u;
-    settings.voxelFallbackScalingFactor = 0.75f;
+    settings.voxelFallbackScalingFactor = 2.f;
     settings.voxelFallbackMaxRetryCount = 10u;
     settings.voxelFallbackGrowthFactor = 1.1f;
     settings.voxelFallbackAcceptanceBias = 1.0f;

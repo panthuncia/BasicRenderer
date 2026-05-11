@@ -2675,13 +2675,6 @@ void Renderer::CreateRenderGraph() {
     newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
     newGraph->SetPassTechnique("LuminanceAveragePass", "Post Process::Exposure");
 
-    newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
-    newGraph->SetPassTechnique("UpscalingPass", "Post Process::Upscaling");
-
-    if (m_bloom) {
-        BuildBloomPipeline(newGraph.get());
-    }
-
     DebugGridPass::Params params;
     params.planeY = 0.0f;
     params.minorCellSize = 1.0;
@@ -2696,6 +2689,13 @@ void Renderer::CreateRenderGraph() {
 
 	newGraph->BuildComputePass<DebugGridPass>("DebugGridPass", params);
     newGraph->SetPassTechnique("DebugGridPass", "Debug::Overlays");
+
+    newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
+    newGraph->SetPassTechnique("UpscalingPass", "Post Process::Upscaling");
+
+    if (m_bloom) {
+        BuildBloomPipeline(newGraph.get());
+    }
 
     newGraph->BuildRenderPass<TonemappingPass>("TonemappingPass");
     newGraph->SetPassTechnique("TonemappingPass", "Post Process::Tonemapping");

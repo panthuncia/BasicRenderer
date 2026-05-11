@@ -39,12 +39,11 @@ constexpr uint32_t kPureComputeClusterThreadsPerGroup = 32u;
 constexpr uint32_t kPureComputeDenseClusterThreadsPerGroup = 64u;
 constexpr uint32_t kPureComputeDenseClusterExpansionFactor = 64u;
 constexpr uint32_t kPureComputeMaxTraversalLevels = 64u;
-constexpr float kPureComputeFrontierCapacityMultiplier = 0.5f;
 constexpr bool kDisableVirtualShadowDirtyPageCulling = false; 
 
 uint32_t GetPureComputeDenseClusterWorkCapacity(uint32_t maxVisibleClusters)
 {
-	return static_cast<uint32_t>(maxVisibleClusters * kPureComputeFrontierCapacityMultiplier);
+	return std::max(1u, maxVisibleClusters);
 }
 
 bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)

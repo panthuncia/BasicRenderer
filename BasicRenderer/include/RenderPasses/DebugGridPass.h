@@ -55,7 +55,7 @@ public:
             ->WithShaderResource(Builtin::CameraBuffer,
                 Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
             // Needs UAV, since compute will read-modify-write (manual blend)
-            .WithUnorderedAccess(Builtin::PostProcessing::UpscaledHDR);
+            .WithUnorderedAccess(Builtin::Color::HDRColorTarget);
 		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
@@ -93,8 +93,8 @@ public:
 
         cmd.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
 
-        uint32_t w = context.outputResolution.x;
-        uint32_t h = context.outputResolution.y;
+        uint32_t w = context.renderResolution.x;
+        uint32_t h = context.renderResolution.y;
 
         constexpr uint32_t groupSizeX = 8;
         constexpr uint32_t groupSizeY = 8;

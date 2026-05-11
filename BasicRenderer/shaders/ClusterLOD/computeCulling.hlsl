@@ -666,6 +666,7 @@ void PureComputeExpandClusterFrontierCS(
         meshletCount = UnpackMeshletCount(bucket.meshletIndexAndCount);
     }
 
+    uint writableMeshletCount = 0u;
     if (GI == 0u) {
         gs_denseBaseIndex = 0u;
         if (hasBucket && meshletCount > 0u) {
@@ -679,7 +680,12 @@ void PureComputeExpandClusterFrontierCS(
     }
     GroupMemoryBarrierWithGroupSync();
 
-    if (hasBucket && GI < meshletCount) {
+    if (hasBucket && gs_denseBaseIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY)
+    {
+        writableMeshletCount = min(meshletCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY - gs_denseBaseIndex);
+    }
+
+    if (hasBucket && GI < writableMeshletCount) {
         const uint denseIndex = gs_denseBaseIndex + GI;
         CLodDenseClusterWorkRecord work = (CLodDenseClusterWorkRecord)0;
         work.instanceIndex = bucket.instanceIndex;

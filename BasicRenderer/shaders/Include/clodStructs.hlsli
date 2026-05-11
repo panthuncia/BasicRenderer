@@ -475,6 +475,50 @@ bool CLodTryLoadVoxelDescriptorByLocalIndex(
     return descriptor.clusterCount > 0u;
 }
 
+bool CLodVoxelDescriptorContainsCluster(CLodVoxelGroupDescriptor descriptor, uint localClusterIndex)
+{
+    return localClusterIndex >= descriptor.firstCluster &&
+        localClusterIndex < descriptor.firstCluster + descriptor.clusterCount;
+}
+
+bool CLodTryLoadVoxelDescriptorByClusterIndex(
+    CLodMeshMetadata metadata,
+    uint localGroupId,
+    uint localClusterIndex,
+    out CLodVoxelGroupDescriptor descriptor)
+{
+    descriptor = (CLodVoxelGroupDescriptor)0;
+    StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    const ClusterLODGroup group = groups[metadata.groupsBase + localGroupId];
+    if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u || group.pageCount == 0u)
+    {
+        return false;
+    }
+
+    GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, 0u);
+    CLodVoxelPageHeader pageHeader = CLodLoadVoxelPageHeader(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset);
+    if (pageHeader.magic != CLOD_VOXEL_PAGE_MAGIC || pageHeader.version != CLOD_VOXEL_PAGE_VERSION)
+    {
+        return false;
+    }
+
+    for (uint sectionIndex = 0u; sectionIndex < pageHeader.sectionDescriptorCount; ++sectionIndex)
+    {
+        CLodVoxelGroupDescriptor sectionDescriptor = CLodLoadVoxelDescriptorFromPage(
+            pageEntry.slabDescriptorIndex,
+            pageEntry.slabByteOffset,
+            pageHeader.sectionDescriptorOffset + sectionIndex * 64u);
+        if (sectionDescriptor.clusterCount != 0u && CLodVoxelDescriptorContainsCluster(sectionDescriptor, localClusterIndex))
+        {
+            descriptor = sectionDescriptor;
+            return true;
+        }
+    }
+
+    descriptor = CLodLoadVoxelDescriptorFromPage(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset, pageHeader.groupDescriptorOffset);
+    return descriptor.clusterCount > 0u && CLodVoxelDescriptorContainsCluster(descriptor, localClusterIndex);
+}
+
 CLodVoxelClusterRecord CLodLoadVoxelCluster(CLodMeshMetadata metadata, CLodVoxelGroupDescriptor descriptor, uint localGroupId, uint localClusterIndex, out GroupPageMapEntry pageEntry, out CLodVoxelPageHeader pageHeader)
 {
     pageEntry = (GroupPageMapEntry)0;
