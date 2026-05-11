@@ -321,11 +321,18 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
                     rec.viewId,
                     node.range.ownerGroupId,
                     leaf.group,
+                    seg,
                     voxelDescriptor,
                     objectModelMatrix,
                     lodUniformScale,
+                    cullCamera,
                     lodCam,
                     lodCamera.isOrtho,
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                    dirtyPageCullingEnabled,
+#else
+                    false,
+#endif
                     instanceData.perMeshBufferIndex,
                     leaf.errorOverDistance);
             }

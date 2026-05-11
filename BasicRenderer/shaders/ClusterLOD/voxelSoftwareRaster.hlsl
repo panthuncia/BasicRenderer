@@ -143,6 +143,23 @@ bool RaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, uint2 occupancyMask, o
     return false;
 }
 
+void VoxelRasterLoadCubeHeader(
+    uint slabDescriptorIndex,
+    uint pageByteOffset,
+    uint cubeRecordsOffset,
+    uint pageLocalCubeIndex,
+    out uint cubeCoord,
+    out uint dominantBoneIndex,
+    out uint2 occupancyMask)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
+    const uint addr = pageByteOffset + cubeRecordsOffset + pageLocalCubeIndex * CLOD_VOXEL_CUBE_RECORD_STRIDE;
+    const uint4 d0 = slab.Load4(addr + 0u);
+    cubeCoord = d0.x;
+    dominantBoneIndex = d0.y;
+    occupancyMask = d0.zw;
+}
+
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
 bool VoxelRasterWriteVirtualShadow(
     uint2 pixel,
@@ -273,30 +290,37 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
 
     for (uint cubeOffset = 0u; cubeOffset < voxelCluster.cubeCount; ++cubeOffset)
     {
-        const CLodVoxelCubeRecord cube = CLodLoadVoxelCubeFromPage(
+        uint cubeCoordPacked = 0u;
+        uint dominantBoneIndex = 0u;
+        uint2 occupancyMask = uint2(0u, 0u);
+        VoxelRasterLoadCubeHeader(
             pageEntry.slabDescriptorIndex,
             pageEntry.slabByteOffset,
             pageHeader.cubeRecordsOffset,
-            voxelCluster.firstCube + cubeOffset);
-        if (cube.occupancyMask.x == 0u && cube.occupancyMask.y == 0u)
+            voxelCluster.firstCube + cubeOffset,
+            cubeCoordPacked,
+            dominantBoneIndex,
+            occupancyMask);
+        if (occupancyMask.x == 0u && occupancyMask.y == 0u)
         {
             continue;
         }
 
-        const uint3 cubeCoord = CLodVoxelDecodeCubeCoord(cube.cubeCoord);
+        const uint3 cubeCoord = CLodVoxelDecodeCubeCoord(cubeCoordPacked);
         const float cubeObjectWidth = voxelWidth * 4.0f;
         const float3 cubeMinObject = descriptor.aabbMinAndVoxelWidth.xyz + float3(cubeCoord) * cubeObjectWidth;
         const float3 cubeMaxObject = cubeMinObject + cubeObjectWidth;
+        const float invVoxelWidth = rcp(voxelWidth);
 
-        float4x4 skinMatrix = IdentitySkinMatrix();
-        float4x4 inverseSkinMatrix = IdentitySkinMatrix();
-        if (cube.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
+        row_major matrix localToWorld = objectModel;
+        row_major matrix worldToLocal = objectData.modelInverse;
+        if (dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
         {
-            skinMatrix = LoadBoneSkinMatrix(meshInstance.skinningInstanceSlot, cube.dominantBoneIndex);
-            inverseSkinMatrix = LoadBoneInverseSkinMatrix(meshInstance.skinningInstanceSlot, cube.dominantBoneIndex);
+            const float4x4 skinMatrix = LoadBoneSkinMatrix(meshInstance.skinningInstanceSlot, dominantBoneIndex);
+            const float4x4 inverseSkinMatrix = LoadBoneInverseSkinMatrix(meshInstance.skinningInstanceSlot, dominantBoneIndex);
+            localToWorld = mul(skinMatrix, objectModel);
+            worldToLocal = mul(objectData.modelInverse, inverseSkinMatrix);
         }
-        const row_major matrix localToWorld = mul(skinMatrix, objectModel);
-        const row_major matrix worldToLocal = mul(objectData.modelInverse, inverseSkinMatrix);
         const row_major matrix localToClip = mul(localToWorld, camera.viewProjection);
         const float4 localViewZ = mul(localToWorld, camera.viewZ);
 
@@ -345,7 +369,13 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
             continue;
         }
 
+        const row_major matrix clipToLocalMatrix = mul(mul(camera.projectionInverse, camera.viewInverse), worldToLocal);
+        const float4 clipToLocalX = clipToLocalMatrix[0];
+        const float4 clipToLocalY = clipToLocalMatrix[1];
+        const float4 clipToLocalW = clipToLocalMatrix[3];
         const float3 cameraOriginLocal = mul(float4(camera.positionWorldSpace.xyz, 1.0f), worldToLocal).xyz;
+        const float rayOriginViewZ = dot(float4(cameraOriginLocal, 1.0f), localViewZ);
+        const float3 rayOriginCube = (cameraOriginLocal - cubeMinObject) * invVoxelWidth;
         const uint pixelWidth = uint(maxPx.x - minPx.x + 1);
         const uint pixelHeight = uint(maxPx.y - minPx.y + 1);
         const uint pixelCount = pixelWidth * pixelHeight;
@@ -407,25 +437,18 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
                 const uint py = pixel.y;
                 const float2 uv = (float2(px, py) + 0.5f) * targetDimsInv;
                 const float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
-                float4 viewNear = mul(float4(ndc, 0.0f, 1.0f), camera.projectionInverse);
-                viewNear.xyz /= max(viewNear.w, 1.0e-6f);
-                float4 worldNear = mul(float4(viewNear.xyz, 1.0f), camera.viewInverse);
-                const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1.0e-6f);
-                const float3 localPoint = mul(float4(worldPoint, 1.0f), worldToLocal).xyz;
-                const float3 rayOriginObject = cameraOriginLocal;
-                const float3 rayDirObject = normalize(localPoint - rayOriginObject);
-
-                const float3 rayOriginCube = (rayOriginObject - cubeMinObject) / voxelWidth;
-                const float3 rayDirCube = rayDirObject / voxelWidth;
+                const float4 localNear = ndc.x * clipToLocalX + ndc.y * clipToLocalY + clipToLocalW;
+                const float3 localPoint = localNear.xyz / max(localNear.w, 1.0e-6f);
+                const float3 rayDirObject = normalize(localPoint - cameraOriginLocal);
+                const float3 rayDirCube = rayDirObject * invVoxelWidth;
 
                 float tHitCube = 0.0f;
-                if (!RaycastVoxelCubeDDA(rayOriginCube, rayDirCube, cube.occupancyMask, tHitCube))
+                if (!RaycastVoxelCubeDDA(rayOriginCube, rayDirCube, occupancyMask, tHitCube))
                 {
                     continue;
                 }
 
-                const float3 hitObject = rayOriginObject + rayDirObject * tHitCube;
-                const float linearDepth = -dot(float4(hitObject, 1.0f), localViewZ);
+                const float linearDepth = -(rayOriginViewZ + tHitCube * dot(rayDirObject, localViewZ.xyz));
                 if (linearDepth <= 0.0f)
                 {
                     continue;

@@ -1015,30 +1015,40 @@ float ProjectedGeometricError(
     float zNear,
     bool isOrtho);
 
+bool SphereOutsideFrustumViewSpace(float3 viewSpaceCenter, float radius, Camera camera);
+
 void CLodAppendVoxelRasterClusterWork(
     CLodMeshMetadata clodMeshMetadata,
     uint instanceIndex,
     uint viewId,
     uint localGroupId,
     ClusterLODGroup voxelGroup,
+    ClusterLODGroupSegment voxelSegment,
     CLodVoxelGroupDescriptor voxelDescriptor,
     float4x4 objectModelMatrix,
     float lodUniformScale,
+    Camera cullCamera,
     CullingCameraInfo lodCam,
     bool lodCameraIsOrtho,
+    bool clusterDirtyPageCullingEnabled,
     uint meshBufferIndex,
     float ownGroupErrorOverDistance)
 {
-    (void)clodMeshMetadata;
-    (void)voxelGroup;
-    (void)objectModelMatrix;
-    (void)lodUniformScale;
     (void)lodCam;
     (void)lodCameraIsOrtho;
     (void)meshBufferIndex;
     (void)ownGroupErrorOverDistance;
 
     if (voxelDescriptor.clusterCount == 0u)
+    {
+        return;
+    }
+
+    GroupPageMapEntry voxelPageEntry = CLodLoadVoxelPageMapEntry(clodMeshMetadata, voxelGroup, voxelSegment.pageIndex);
+    CLodVoxelPageHeader voxelPageHeader = CLodLoadVoxelPageHeader(voxelPageEntry.slabDescriptorIndex, voxelPageEntry.slabByteOffset);
+    if (voxelPageHeader.magic != CLOD_VOXEL_PAGE_MAGIC ||
+        voxelPageHeader.version != CLOD_VOXEL_PAGE_VERSION ||
+        voxelSegment.firstMeshletInPage + voxelDescriptor.clusterCount > voxelPageHeader.clusterCount)
     {
         return;
     }
@@ -1066,45 +1076,62 @@ void CLodAppendVoxelRasterClusterWork(
     StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
 
+    uint appendedCount = 0u;
+    uint droppedCount = 0u;
     const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
-    uint combinedBase = 0u;
-    InterlockedAdd(replayState[0].visibleClusterCombinedCount, voxelDescriptor.clusterCount, combinedBase);
-    const uint visibleWritableCount =
-        (combinedBase < visibleClusterCapacity)
-            ? min(voxelDescriptor.clusterCount, visibleClusterCapacity - combinedBase)
-            : 0u;
-    if (combinedBase + voxelDescriptor.clusterCount > visibleClusterCapacity)
-    {
-        InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
-    }
 
-    uint baseSlot = 0u;
-    InterlockedAdd(workRecordCounter[0], visibleWritableCount, baseSlot);
-    const uint writableCount =
-        (baseSlot < queueDescriptors.workRecordCapacity)
-            ? min(visibleWritableCount, queueDescriptors.workRecordCapacity - baseSlot)
-            : 0u;
-    if (baseSlot + visibleWritableCount > queueDescriptors.workRecordCapacity)
+    for (uint clusterIndex = 0u; clusterIndex < voxelDescriptor.clusterCount; ++clusterIndex)
     {
-        InterlockedMin(workRecordCounter[0], queueDescriptors.workRecordCapacity);
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, visibleWritableCount - writableCount);
-    }
-    if (visibleWritableCount < voxelDescriptor.clusterCount)
-    {
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, voxelDescriptor.clusterCount - visibleWritableCount);
-    }
-
-    uint visibleBase = 0u;
-    if (writableCount != 0u)
-    {
-        InterlockedAdd(visibleClusterCounter[0], writableCount, visibleBase);
-    }
-    WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS, writableCount);
-
-    for (uint clusterIndex = 0u; clusterIndex < writableCount; ++clusterIndex)
-    {
-        const uint visibleClusterIndex = phase1HWBase + visibleBase + clusterIndex;
         const uint localVoxelClusterIndex = voxelDescriptor.firstCluster + clusterIndex;
+        const uint pageLocalClusterIndex = voxelSegment.firstMeshletInPage + clusterIndex;
+        const CLodVoxelClusterRecord voxelCluster = CLodLoadVoxelClusterFromPage(
+            voxelPageEntry.slabDescriptorIndex,
+            voxelPageEntry.slabByteOffset,
+            voxelPageHeader.clusterRecordsOffset,
+            pageLocalClusterIndex);
+        if (voxelCluster.cubeCount == 0u || voxelCluster.cubeCount > CLOD_VOXEL_MAX_CUBES_PER_CLUSTER)
+        {
+            continue;
+        }
+
+        const float3 clusterWorldCenter = mul(float4(voxelCluster.bounds.xyz, 1.0f), objectModelMatrix).xyz;
+        const float clusterWorldRadius = voxelCluster.bounds.w * lodUniformScale;
+        const float3 clusterViewCenter = mul(float4(clusterWorldCenter, 1.0f), cullCamera.view).xyz;
+        if (SphereOutsideFrustumViewSpace(clusterViewCenter, clusterWorldRadius, cullCamera))
+        {
+            continue;
+        }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (clusterDirtyPageCullingEnabled && !CLodVirtualShadowBoundsTouchDirtyPages(clusterWorldCenter, clusterWorldRadius, viewId))
+        {
+            continue;
+        }
+#else
+        (void)clusterDirtyPageCullingEnabled;
+#endif
+
+        uint combinedSlot = 0u;
+        InterlockedAdd(replayState[0].visibleClusterCombinedCount, 1u, combinedSlot);
+        if (combinedSlot >= visibleClusterCapacity)
+        {
+            InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+            ++droppedCount;
+            continue;
+        }
+
+        uint baseSlot = 0u;
+        InterlockedAdd(workRecordCounter[0], 1u, baseSlot);
+        if (baseSlot >= queueDescriptors.workRecordCapacity)
+        {
+            InterlockedMin(workRecordCounter[0], queueDescriptors.workRecordCapacity);
+            ++droppedCount;
+            continue;
+        }
+
+        uint visibleBase = 0u;
+        InterlockedAdd(visibleClusterCounter[0], 1u, visibleBase);
+        const uint visibleClusterIndex = phase1HWBase + visibleBase;
         CLodStoreVisibleClusterWithVsmPayloadGloballyCoherent(
             visibleClusters,
             visibleClusterIndex,
@@ -1121,7 +1148,17 @@ void CLodAppendVoxelRasterClusterWork(
         record.pad0 = 0u;
         record.pad1 = 0u;
         record.pad2 = 0u;
-        workRecords[baseSlot + clusterIndex] = record;
+        workRecords[baseSlot] = record;
+        ++appendedCount;
+    }
+
+    if (appendedCount != 0u)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS, appendedCount);
+    }
+    if (droppedCount != 0u)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, droppedCount);
     }
 }
 
@@ -1974,11 +2011,18 @@ void WG_TraverseNodes(
                                 rec.viewId,
                                 node.range.ownerGroupId,
                                 leaf.group,
+                                seg,
                                 voxelDescriptor,
                                 objectModelMatrix,
                                 lodUniformScale,
+                                cullCamera,
                                 lodCam,
                                 lodCamera.isOrtho,
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                                dirtyPageCullingEnabled,
+#else
+                                false,
+#endif
                                 instanceData.perMeshBufferIndex,
                                 leaf.errorOverDistance);
                         }
