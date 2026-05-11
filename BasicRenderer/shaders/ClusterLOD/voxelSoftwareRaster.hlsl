@@ -13,16 +13,42 @@
 #endif
 
 #ifndef CLOD_MAX_DDA_STEPS
-#define CLOD_MAX_DDA_STEPS 16u
+#define CLOD_MAX_DDA_STEPS 5u
 #endif
 
-static const uint VOXEL_RASTER_THREADS_PER_GROUP = 64u;
-static const uint VOXEL_RASTER_PIXEL_QUEUE_CAPACITY = 256u;
+#define CLOD_VOXEL_RASTER_USE_PIXEL_QUEUE 1
+
+#ifndef CLOD_VOXEL_RASTER_USE_PIXEL_QUEUE
+#define CLOD_VOXEL_RASTER_USE_PIXEL_QUEUE 0
+#endif
+
+#if CLOD_VOXEL_RASTER_USE_PIXEL_QUEUE
+#ifndef CLOD_VOXEL_RASTER_THREADS_PER_GROUP
+#define CLOD_VOXEL_RASTER_THREADS_PER_GROUP 64u
+#endif
+
+#ifndef CLOD_VOXEL_RASTER_PIXEL_QUEUE_CAPACITY
+#define CLOD_VOXEL_RASTER_PIXEL_QUEUE_CAPACITY 256u
+#endif
+#else
+#ifndef CLOD_VOXEL_RASTER_THREADS_PER_GROUP
+#define CLOD_VOXEL_RASTER_THREADS_PER_GROUP 128u
+#endif
+
+#ifndef CLOD_VOXEL_RASTER_PIXEL_QUEUE_CAPACITY
+#define CLOD_VOXEL_RASTER_PIXEL_QUEUE_CAPACITY 128u
+#endif
+#endif
+
+static const uint VOXEL_RASTER_THREADS_PER_GROUP = CLOD_VOXEL_RASTER_THREADS_PER_GROUP;
+static const uint VOXEL_RASTER_PIXEL_QUEUE_CAPACITY = CLOD_VOXEL_RASTER_PIXEL_QUEUE_CAPACITY;
 static const uint64_t VOXEL_RASTER_VISIBILITY_EMPTY = 0xFFFFFFFFFFFFFFFF;
 
+#if CLOD_VOXEL_RASTER_USE_PIXEL_QUEUE
 groupshared uint gs_voxelRasterQueueCount;
 groupshared uint gs_voxelRasterQueueReadCursor;
 groupshared uint2 gs_voxelRasterPixelQueue[VOXEL_RASTER_PIXEL_QUEUE_CAPACITY];
+#endif
 
 bool VoxelMaskTest(uint2 mask, uint bitIndex)
 {
@@ -379,6 +405,60 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
         const uint pixelWidth = uint(maxPx.x - minPx.x + 1);
         const uint pixelHeight = uint(maxPx.y - minPx.y + 1);
         const uint pixelCount = pixelWidth * pixelHeight;
+
+#if !CLOD_VOXEL_RASTER_USE_PIXEL_QUEUE
+        for (uint pixelLinear = GI; pixelLinear < pixelCount; pixelLinear += VOXEL_RASTER_THREADS_PER_GROUP)
+        {
+            const uint px = uint(minPx.x + int(pixelLinear % pixelWidth));
+            const uint py = uint(minPx.y + int(pixelLinear / pixelWidth));
+
+#if !CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+            const uint64_t currentVisKey = visibilityBuffer[uint2(px, py)];
+            if (currentVisKey != VOXEL_RASTER_VISIBILITY_EMPTY)
+            {
+                float currentDepth = 0.0f;
+                uint currentClusterId = 0u;
+                uint currentPrimId = 0u;
+                UnpackVisKey(currentVisKey, currentDepth, currentClusterId, currentPrimId);
+                if (currentDepth < cubeMaxLinearDepth)
+                {
+                    continue;
+                }
+            }
+#endif
+
+            const float2 uv = (float2(px, py) + 0.5f) * targetDimsInv;
+            const float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+            const float4 localNear = ndc.x * clipToLocalX + ndc.y * clipToLocalY + clipToLocalW;
+            const float3 localPoint = localNear.xyz / max(localNear.w, 1.0e-6f);
+            const float3 rayDirObject = normalize(localPoint - cameraOriginLocal);
+            const float3 rayDirCube = rayDirObject * invVoxelWidth;
+
+            float tHitCube = 0.0f;
+            if (!RaycastVoxelCubeDDA(rayOriginCube, rayDirCube, occupancyMask, tHitCube))
+            {
+                continue;
+            }
+
+            const float linearDepth = -(rayOriginViewZ + tHitCube * dot(rayDirObject, localViewZ.xyz));
+            if (linearDepth <= 0.0f)
+            {
+                continue;
+            }
+
+            if (debugMode)
+            {
+                WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(2u));
+            }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+            VoxelRasterWriteVirtualShadow(uint2(px, py), linearDepth, clipmapInfo, pageTable, physicalPages);
+#else
+            const uint64_t visKey = PackVisKey(linearDepth, work.visibleClusterIndex, cubeOffset);
+            InterlockedMin(visibilityBuffer[uint2(px, py)], visKey);
+#endif
+        }
+#else
         for (uint queueBase = 0u; queueBase < pixelCount; queueBase += VOXEL_RASTER_PIXEL_QUEUE_CAPACITY)
         {
             if (GI == 0u)
@@ -469,5 +549,6 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
 
             GroupMemoryBarrierWithGroupSync();
         }
+#endif
     }
 }
