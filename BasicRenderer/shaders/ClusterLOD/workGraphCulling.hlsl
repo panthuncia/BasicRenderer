@@ -1644,7 +1644,7 @@ bool CLodPrepareRenderableLeaf(
     StructuredBuffer<ClusterLODGroup> groups =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
     leaf.group = groups[leaf.groupGlobalIndex];
-    leaf.isVoxel = (node.range.isLeaf == CLOD_NODE_VOXEL_GROUP_LEAF);
+    leaf.isVoxel = (leaf.group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u;
 
     if (leaf.isVoxel)
     {
@@ -1960,8 +1960,12 @@ void WG_TraverseNodes(
                     }
                     else if (leaf.isVoxel)
                     {
+                        StructuredBuffer<ClusterLODGroupSegment> segments =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+                        const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
+                        const ClusterLODGroupSegment seg = segments[segGlobalIndex];
                         CLodVoxelGroupDescriptor voxelDescriptor;
-                        if (CLodTryLoadVoxelDescriptorByLocalIndex(clodMeshMetadata, node.range.ownerGroupId, node.range.indexOrOffset, voxelDescriptor))
+                        if (CLodTryLoadVoxelDescriptorForSegment(clodMeshMetadata, leaf.group, seg, voxelDescriptor))
                         {
                             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
                             CLodAppendVoxelRasterClusterWork(

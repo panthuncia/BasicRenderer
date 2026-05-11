@@ -51,6 +51,169 @@ namespace
 		}
 	};
 
+	struct SymmetricMatrix3
+	{
+		float xx = 0.0f;
+		float yy = 0.0f;
+		float zz = 0.0f;
+		float xy = 0.0f;
+		float xz = 0.0f;
+		float yz = 0.0f;
+
+		SymmetricMatrix3 operator+(const SymmetricMatrix3& o) const
+		{
+			return { xx + o.xx, yy + o.yy, zz + o.zz, xy + o.xy, xz + o.xz, yz + o.yz };
+		}
+
+		SymmetricMatrix3 operator*(float s) const
+		{
+			return { xx * s, yy * s, zz * s, xy * s, xz * s, yz * s };
+		}
+	};
+
+	Float3 Mul(const SymmetricMatrix3& m, const Float3& v)
+	{
+		return {
+			m.xx * v.x + m.xy * v.y + m.xz * v.z,
+			m.xy * v.x + m.yy * v.y + m.yz * v.z,
+			m.xz * v.x + m.yz * v.y + m.zz * v.z
+		};
+	}
+
+	SymmetricMatrix3 Outer(const Float3& v, float weight = 1.0f)
+	{
+		return {
+			v.x * v.x * weight,
+			v.y * v.y * weight,
+			v.z * v.z * weight,
+			v.x * v.y * weight,
+			v.x * v.z * weight,
+			v.y * v.z * weight
+		};
+	}
+
+	Float3 SafeNormalizeNormal(const Float3& n)
+	{
+		return n.lengthSq() > 1.0e-20f ? n.normalized() : Float3(0.0f, 0.0f, 1.0f);
+	}
+
+	void BuildFallbackBasis(const Float3& n, Float3& t, Float3& b)
+	{
+		const Float3 up = std::abs(n.z) < 0.999f ? Float3(0.0f, 0.0f, 1.0f) : Float3(0.0f, 1.0f, 0.0f);
+		t = up.cross(n).normalized();
+		b = n.cross(t).normalized();
+	}
+
+	SymmetricMatrix3 SGGXFromNormal(const Float3& normal)
+	{
+		const Float3 n = SafeNormalizeNormal(normal);
+		Float3 t, b;
+		BuildFallbackBasis(n, t, b);
+		constexpr float kMinSigma = 1.0e-4f;
+		const float minS = kMinSigma * kMinSigma;
+		return Outer(n, 0.25f) + Outer(t, minS) + Outer(b, minS);
+	}
+
+	void JacobiRotate(float a[3][3], float v[3][3], int p, int q)
+	{
+		if (std::abs(a[p][q]) <= 1.0e-12f)
+		{
+			return;
+		}
+
+		const float tau = (a[q][q] - a[p][p]) / (2.0f * a[p][q]);
+		const float t = (tau >= 0.0f ? 1.0f : -1.0f) / (std::abs(tau) + std::sqrt(1.0f + tau * tau));
+		const float c = 1.0f / std::sqrt(1.0f + t * t);
+		const float s = t * c;
+		const float app = a[p][p];
+		const float aqq = a[q][q];
+		const float apq = a[p][q];
+		a[p][p] = app - t * apq;
+		a[q][q] = aqq + t * apq;
+		a[p][q] = 0.0f;
+		a[q][p] = 0.0f;
+
+		for (int r = 0; r < 3; ++r)
+		{
+			if (r == p || r == q)
+			{
+				continue;
+			}
+			const float arp = a[r][p];
+			const float arq = a[r][q];
+			a[r][p] = c * arp - s * arq;
+			a[p][r] = a[r][p];
+			a[r][q] = s * arp + c * arq;
+			a[q][r] = a[r][q];
+		}
+
+		for (int r = 0; r < 3; ++r)
+		{
+			const float vrp = v[r][p];
+			const float vrq = v[r][q];
+			v[r][p] = c * vrp - s * vrq;
+			v[r][q] = s * vrp + c * vrq;
+		}
+	}
+
+	std::array<Float3, 3> EigenvectorsSymmetric(const SymmetricMatrix3& m)
+	{
+		float a[3][3] = {
+			{ m.xx, m.xy, m.xz },
+			{ m.xy, m.yy, m.yz },
+			{ m.xz, m.yz, m.zz }
+		};
+		float v[3][3] = {
+			{ 1.0f, 0.0f, 0.0f },
+			{ 0.0f, 1.0f, 0.0f },
+			{ 0.0f, 0.0f, 1.0f }
+		};
+
+		for (int iter = 0; iter < 10; ++iter)
+		{
+			JacobiRotate(a, v, 0, 1);
+			JacobiRotate(a, v, 0, 2);
+			JacobiRotate(a, v, 1, 2);
+		}
+
+		return {
+			SafeNormalizeNormal(Float3(v[0][0], v[1][0], v[2][0])),
+			SafeNormalizeNormal(Float3(v[0][1], v[1][1], v[2][1])),
+			SafeNormalizeNormal(Float3(v[0][2], v[1][2], v[2][2]))
+		};
+	}
+
+	SymmetricMatrix3 BuildSGGXFromNormals(const std::vector<Float3>& normals)
+	{
+		if (normals.empty())
+		{
+			return SGGXFromNormal(Float3(0.0f, 0.0f, 1.0f));
+		}
+
+		SymmetricMatrix3 moment{};
+		for (const Float3& sampleNormal : normals)
+		{
+			moment = moment + Outer(SafeNormalizeNormal(sampleNormal));
+		}
+		const float invCount = 1.0f / static_cast<float>(normals.size());
+		moment = moment * invCount;
+
+		const std::array<Float3, 3> axes = EigenvectorsSymmetric(moment);
+		SymmetricMatrix3 sggx{};
+		constexpr float kMinSigma = 1.0e-4f;
+		for (const Float3& axis : axes)
+		{
+			float sigma = 0.0f;
+			for (const Float3& sampleNormal : normals)
+			{
+				sigma += std::abs(axis.dot(SafeNormalizeNormal(sampleNormal)));
+			}
+			sigma = std::max(kMinSigma, 0.5f * sigma * invCount);
+			sggx = sggx + Outer(axis, sigma * sigma);
+		}
+		return sggx;
+	}
+
 	Float3 ReadPosition(const std::vector<std::byte>& vertices, size_t stride, uint32_t index)
 	{
 		Float3 p;
@@ -818,6 +981,9 @@ namespace
 		uint32_t hitCount = 0;
 		uint32_t representativeTriangleIndex = std::numeric_limits<uint32_t>::max();
 		Float3 accumulatedNormal{};
+		SymmetricMatrix3 accumulatedSGGX{};
+		float sggxWeight = 0.0f;
+		std::vector<Float3> normalSamples;
 	};
 
 	// Per-cell coverage sampling via ray tracing against triangles.
@@ -883,10 +1049,16 @@ namespace
 					sample.representativeTriangleIndex = nearestTriangleIndex;
 				}
 				sample.accumulatedNormal = sample.accumulatedNormal + nearestNormal;
+				sample.normalSamples.push_back(nearestNormal);
 			}
 		}
 
 		sample.coverage = static_cast<float>(sample.hitCount) / static_cast<float>(rays.size());
+		if (!sample.normalSamples.empty())
+		{
+			sample.accumulatedSGGX = BuildSGGXFromNormals(sample.normalSamples);
+			sample.sggxWeight = 1.0f;
+		}
 		return sample;
 	}
 
@@ -1003,10 +1175,16 @@ namespace
 					sample.representativeTriangleIndex = nearestTriangleIndex;
 				}
 				sample.accumulatedNormal = sample.accumulatedNormal + nearestNormal;
+				sample.normalSamples.push_back(nearestNormal);
 			}
 		}
 
 		sample.coverage = static_cast<float>(sample.hitCount) / static_cast<float>(rays.size());
+		if (!sample.normalSamples.empty())
+		{
+			sample.accumulatedSGGX = BuildSGGXFromNormals(sample.normalSamples);
+			sample.sggxWeight = 1.0f;
+		}
 		return sample;
 	}
 
@@ -1060,6 +1238,15 @@ namespace
 
 			sample.coverage += weightedCoverage;
 			sample.accumulatedNormal = sample.accumulatedNormal + ToFloat3(sourceCell.normal) * weightedCoverage;
+			sample.accumulatedSGGX = sample.accumulatedSGGX + SymmetricMatrix3{
+				sourceCell.sggxDiagonal.x,
+				sourceCell.sggxDiagonal.y,
+				sourceCell.sggxDiagonal.z,
+				sourceCell.sggxOffDiagonal.x,
+				sourceCell.sggxOffDiagonal.y,
+				sourceCell.sggxOffDiagonal.z
+			} * weightedCoverage;
+			sample.sggxWeight += weightedCoverage;
 			if (sourceCell.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
 			{
 				boneWeights[sourceCell.dominantBoneIndex] += weightedCoverage;
@@ -1709,6 +1896,8 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 				else
 				{
 					coverage.accumulatedNormal = coverage.accumulatedNormal + voxelCoverage.accumulatedNormal;
+					coverage.accumulatedSGGX = coverage.accumulatedSGGX + voxelCoverage.accumulatedSGGX;
+					coverage.sggxWeight += voxelCoverage.sggxWeight;
 				}
 			}
 
@@ -1748,6 +1937,11 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			vc.z = cz;
 			vc.opacity = coverage.coverage;
 			vc.normal = ToXM(normalSum.normalized());
+			SymmetricMatrix3 sggx = coverage.sggxWeight > 0.0f
+				? coverage.accumulatedSGGX * (1.0f / coverage.sggxWeight)
+				: SGGXFromNormal(normalSum);
+			vc.sggxDiagonal = DirectX::XMFLOAT3(sggx.xx, sggx.yy, sggx.zz);
+			vc.sggxOffDiagonal = DirectX::XMFLOAT3(sggx.xy, sggx.xz, sggx.yz);
 			vc.dominantBoneIndex = dominantBoneIndex;
 			vc.refinedGroup = refinedGroup;
 
@@ -1872,7 +2066,16 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		accum.refinedGroup = cell.refinedGroup;
 		accum.mask |= (uint64_t{ 1 } << localBit);
 		accum.opacitySum += cell.opacity;
-		accum.attributes[localBit].normalAndOpacity = DirectX::XMFLOAT4(cell.normal.x, cell.normal.y, cell.normal.z, cell.opacity);
+		accum.attributes[localBit].sggxDiagonalAndOpacity = DirectX::XMFLOAT4(
+			cell.sggxDiagonal.x,
+			cell.sggxDiagonal.y,
+			cell.sggxDiagonal.z,
+			cell.opacity);
+		accum.attributes[localBit].sggxOffDiagonal = DirectX::XMFLOAT4(
+			cell.sggxOffDiagonal.x,
+			cell.sggxOffDiagonal.y,
+			cell.sggxOffDiagonal.z,
+			0.0f);
 		if (cell.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
 		{
 			accum.boneWeights[cell.dominantBoneIndex] += std::max(cell.opacity, 1.0e-6f);

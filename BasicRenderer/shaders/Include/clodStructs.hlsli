@@ -166,7 +166,6 @@ struct ClusterLODGroup
 };
 
 static const uint CLOD_NODE_INTERNAL = 0u;
-static const uint CLOD_NODE_VOXEL_GROUP_LEAF = 1u;
 static const uint CLOD_NODE_SEGMENT_LEAF = 2u;
 
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
@@ -218,7 +217,8 @@ uint3 CLodVoxelDecodeCubeCoord(uint packedCoord)
 
 struct CLodVoxelAttributeSample
 {
-    float4 normalAndOpacity;
+    float4 sggxDiagonalAndOpacity;
+    float4 sggxOffDiagonal;
 };
 
 struct CLodVoxelRasterQueueDescriptors
@@ -245,10 +245,10 @@ struct CLodVoxelRasterDispatchCommand
 };
 
 static const uint CLOD_VOXEL_PAGE_MAGIC = 0x4C435856u;
-static const uint CLOD_VOXEL_PAGE_VERSION = 4u;
+static const uint CLOD_VOXEL_PAGE_VERSION = 7u;
 static const uint CLOD_VOXEL_CLUSTER_RECORD_STRIDE = 32u;
 static const uint CLOD_VOXEL_CUBE_RECORD_STRIDE = 32u;
-static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 16u;
+static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 32u;
 
 struct CLodVoxelPageHeader
 {
@@ -259,8 +259,8 @@ struct CLodVoxelPageHeader
     uint firstCube;
     uint cubeCount;
     uint groupDescriptorOffset;
-    uint sectionDescriptorOffset;
-    uint sectionDescriptorCount;
+    uint reserved0;
+    uint reserved1;
     uint clusterRecordsOffset;
     uint cubeRecordsOffset;
     uint attributeSamplesOffset;
@@ -290,8 +290,8 @@ CLodVoxelPageHeader CLodLoadVoxelPageHeader(uint slabDescriptorIndex, uint pageB
     header.firstCube = d1.x;
     header.cubeCount = d1.y;
     header.groupDescriptorOffset = d1.z;
-    header.sectionDescriptorOffset = d1.w;
-    header.sectionDescriptorCount = d2.x;
+    header.reserved0 = d1.w;
+    header.reserved1 = d2.x;
     header.clusterRecordsOffset = d2.y;
     header.cubeRecordsOffset = d2.z;
     header.attributeSamplesOffset = d2.w;
@@ -442,36 +442,50 @@ bool CLodTryLoadVoxelGroupDescriptor(
     }
 
     descriptor = CLodLoadVoxelDescriptorFromPage(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset, pageHeader.groupDescriptorOffset);
+    descriptor.firstCluster = 0u;
     return descriptor.clusterCount > 0u;
 }
 
-bool CLodTryLoadVoxelDescriptorByLocalIndex(
+bool CLodTryLoadVoxelDescriptorForSegment(
     CLodMeshMetadata metadata,
-    uint localGroupId,
-    uint sectionIndex,
+    ClusterLODGroup group,
+    ClusterLODGroupSegment segment,
     out CLodVoxelGroupDescriptor descriptor)
 {
     descriptor = (CLodVoxelGroupDescriptor)0;
-    StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-    const ClusterLODGroup group = groups[metadata.groupsBase + localGroupId];
-    if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u || group.pageCount == 0u)
+    if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u ||
+        group.pageCount == 0u ||
+        segment.meshletCount == 0u ||
+        segment.pageIndex >= group.pageCount)
     {
         return false;
     }
 
-    GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, 0u);
+    GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, segment.pageIndex);
     CLodVoxelPageHeader pageHeader = CLodLoadVoxelPageHeader(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset);
     if (pageHeader.magic != CLOD_VOXEL_PAGE_MAGIC ||
         pageHeader.version != CLOD_VOXEL_PAGE_VERSION ||
-        sectionIndex >= pageHeader.sectionDescriptorCount)
+        segment.firstMeshletInPage + segment.meshletCount > pageHeader.clusterCount)
     {
         return false;
     }
 
-    descriptor = CLodLoadVoxelDescriptorFromPage(
+    descriptor = CLodLoadVoxelDescriptorFromPage(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset, pageHeader.groupDescriptorOffset);
+    const CLodVoxelClusterRecord firstCluster = CLodLoadVoxelClusterFromPage(
         pageEntry.slabDescriptorIndex,
         pageEntry.slabByteOffset,
-        pageHeader.sectionDescriptorOffset + sectionIndex * 64u);
+        pageHeader.clusterRecordsOffset,
+        segment.firstMeshletInPage);
+    const CLodVoxelClusterRecord lastCluster = CLodLoadVoxelClusterFromPage(
+        pageEntry.slabDescriptorIndex,
+        pageEntry.slabByteOffset,
+        pageHeader.clusterRecordsOffset,
+        segment.firstMeshletInPage + segment.meshletCount - 1u);
+
+    descriptor.firstCluster = pageHeader.firstCluster + segment.firstMeshletInPage;
+    descriptor.clusterCount = segment.meshletCount;
+    descriptor.firstCube = pageHeader.firstCube + firstCluster.firstCube;
+    descriptor.cubeCount = (lastCluster.firstCube + lastCluster.cubeCount) - firstCluster.firstCube;
     return descriptor.clusterCount > 0u;
 }
 
@@ -502,20 +516,9 @@ bool CLodTryLoadVoxelDescriptorByClusterIndex(
         return false;
     }
 
-    for (uint sectionIndex = 0u; sectionIndex < pageHeader.sectionDescriptorCount; ++sectionIndex)
-    {
-        CLodVoxelGroupDescriptor sectionDescriptor = CLodLoadVoxelDescriptorFromPage(
-            pageEntry.slabDescriptorIndex,
-            pageEntry.slabByteOffset,
-            pageHeader.sectionDescriptorOffset + sectionIndex * 64u);
-        if (sectionDescriptor.clusterCount != 0u && CLodVoxelDescriptorContainsCluster(sectionDescriptor, localClusterIndex))
-        {
-            descriptor = sectionDescriptor;
-            return true;
-        }
-    }
-
     descriptor = CLodLoadVoxelDescriptorFromPage(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset, pageHeader.groupDescriptorOffset);
+    descriptor.firstCluster = 0u;
+    descriptor.firstCube = 0u;
     return descriptor.clusterCount > 0u && CLodVoxelDescriptorContainsCluster(descriptor, localClusterIndex);
 }
 
@@ -572,7 +575,8 @@ CLodVoxelAttributeSample CLodLoadVoxelAttributeSample(CLodMeshMetadata metadata,
             const uint attributeIndex = cube.firstAttribute + localCellIndex;
             const uint addr = pageEntry.slabByteOffset + pageHeader.attributeSamplesOffset + attributeIndex * CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE;
             CLodVoxelAttributeSample sample;
-            sample.normalAndOpacity = asfloat(slab.Load4(addr));
+            sample.sggxDiagonalAndOpacity = asfloat(slab.Load4(addr));
+            sample.sggxOffDiagonal = asfloat(slab.Load4(addr + 16u));
             return sample;
         }
 
@@ -588,7 +592,8 @@ CLodVoxelAttributeSample CLodLoadVoxelAttributeSampleFromPage(GroupPageMapEntry 
     const uint attributeIndex = cube.firstAttribute + localCellIndex;
     const uint addr = pageEntry.slabByteOffset + pageHeader.attributeSamplesOffset + attributeIndex * CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE;
     CLodVoxelAttributeSample sample;
-    sample.normalAndOpacity = asfloat(slab.Load4(addr));
+    sample.sggxDiagonalAndOpacity = asfloat(slab.Load4(addr));
+    sample.sggxOffDiagonal = asfloat(slab.Load4(addr + 16u));
     return sample;
 }
 

@@ -307,8 +307,12 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
 
         if (leaf.isVoxel)
         {
+            StructuredBuffer<ClusterLODGroupSegment> segments =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+            const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
+            const ClusterLODGroupSegment seg = segments[segGlobalIndex];
             CLodVoxelGroupDescriptor voxelDescriptor;
-            if (CLodTryLoadVoxelDescriptorByLocalIndex(clodMeshMetadata, node.range.ownerGroupId, node.range.indexOrOffset, voxelDescriptor))
+            if (CLodTryLoadVoxelDescriptorForSegment(clodMeshMetadata, leaf.group, seg, voxelDescriptor))
             {
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
                 CLodAppendVoxelRasterClusterWork(
