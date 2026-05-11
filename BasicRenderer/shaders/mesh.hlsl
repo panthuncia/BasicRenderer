@@ -17,6 +17,32 @@
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_NORMALS 4u
 
+static const uint CLOD_TELEMETRY_DISABLED_DESCRIPTOR = 0xFFFFFFFFu;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_GROUPS = 117u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_IN_RANGE = 118u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED = 119u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_OUTPUT_TRIANGLES = 120u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_ZERO_TRIANGLE_OUTPUTS = 121u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB = 122u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_MESHLET_OOB = 123u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_INVALID_OUTPUT_COUNTS = 124u;
+
+static const uint CLOD_RASTER_INIT_FAILURE_NONE = 0u;
+static const uint CLOD_RASTER_INIT_FAILURE_ZERO_PAGE_SLAB = 1u;
+static const uint CLOD_RASTER_INIT_FAILURE_MESHLET_OOB = 2u;
+static const uint CLOD_RASTER_INIT_FAILURE_INVALID_OUTPUT_COUNTS = 3u;
+
+void CLodRasterTelemetryAdd(uint counterIndex, uint value)
+{
+    if (CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX == CLOD_TELEMETRY_DISABLED_DESCRIPTOR || value == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
+    InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
 #ifndef CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
 #define CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW 0
 #endif
@@ -931,9 +957,10 @@ void VisibilityBufferMSMain(
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }
 
-bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
+bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup setup, out uint failureReason, in uint bucketMeshletIndex, in uint bucketCount)
 {
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    failureReason = CLOD_RASTER_INIT_FAILURE_NONE;
 
     setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
     setup.meshInstanceBuffer = meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
@@ -952,6 +979,7 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     const uint pageSlabOff  = CLodVisibleClusterPageSlabByteOffset(packedCluster);
     if (pageSlabDesc == 0)
     {
+        failureReason = CLOD_RASTER_INIT_FAILURE_ZERO_PAGE_SLAB;
         return false;
     }
 
@@ -960,6 +988,7 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     // meshletIndex is now page-local
     if (setup.meshletIndex >= hdr.meshletCount)
     {
+        failureReason = CLOD_RASTER_INIT_FAILURE_MESHLET_OOB;
         return false;
     }
 
@@ -972,6 +1001,7 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     setup.triCount = CLodDescTriangleCount(desc);
     if (!HasValidMeshShaderOutputCounts(setup.vertCount, setup.triCount))
     {
+        failureReason = CLOD_RASTER_INIT_FAILURE_INVALID_OUTPUT_COUNTS;
         return false;
     }
     setup.vertOffset = 0;
@@ -1043,15 +1073,41 @@ void ClusterLODBucketMSMain(
     uint outputVertCount = 0;
     uint outputTriCount = 0;
     ClodViewRasterInfo viewRasterInfo = (ClodViewRasterInfo)0;
+    uint initFailureReason = CLOD_RASTER_INIT_FAILURE_NONE;
 
     if (draw) {
         ByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         packedCluster = CLodLoadVisibleClusterPacked(compactedClusters, visibleClusterIndex);
         unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
-        draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, linearizedID, count);
+        draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, initFailureReason, linearizedID, count);
         if (!draw)
         {
             setup = (MeshletSetup)0;
+        }
+    }
+
+    if (uGroupThreadID == 0u)
+    {
+        CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_GROUPS, 1u);
+        if (linearizedID < count)
+        {
+            CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_IN_RANGE, 1u);
+            if (!draw)
+            {
+                CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED, 1u);
+                if (initFailureReason == CLOD_RASTER_INIT_FAILURE_ZERO_PAGE_SLAB)
+                {
+                    CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB, 1u);
+                }
+                else if (initFailureReason == CLOD_RASTER_INIT_FAILURE_MESHLET_OOB)
+                {
+                    CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_MESHLET_OOB, 1u);
+                }
+                else if (initFailureReason == CLOD_RASTER_INIT_FAILURE_INVALID_OUTPUT_COUNTS)
+                {
+                    CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_INVALID_OUTPUT_COUNTS, 1u);
+                }
+            }
         }
     }
 
@@ -1125,6 +1181,14 @@ void ClusterLODBucketMSMain(
     }
 
     SetMeshOutputCounts(outputVertCount, outputTriCount);
+    if (uGroupThreadID == 0u && draw)
+    {
+        CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_OUTPUT_TRIANGLES, outputTriCount);
+        if (outputTriCount == 0u)
+        {
+            CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_ZERO_TRIANGLE_OUTPUTS, 1u);
+        }
+    }
     EmitCachedMeshletVisBufferVerticesForViewCLod(
         uGroupThreadID,
         setup,
@@ -1143,6 +1207,14 @@ void ClusterLODBucketMSMain(
     }
 
     SetMeshOutputCounts(outputVertCount, outputTriCount);
+    if (uGroupThreadID == 0u && draw)
+    {
+        CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_OUTPUT_TRIANGLES, outputTriCount);
+        if (outputTriCount == 0u)
+        {
+            CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_ZERO_TRIANGLE_OUTPUTS, 1u);
+        }
+    }
     EmitMeshletVisBufferForViewCLod(
         uGroupThreadID,
         setup,
@@ -1250,7 +1322,8 @@ void ClusterLODReyesVirtualShadowMSMain(
                 ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
                 const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, gs_reyesShadowDiceEntry.visibleClusterIndex);
 
-                if (InitializeMeshletFromCompactedCluster(packedCluster, gs_reyesShadowSetup, compactedWorkIndex, gs_reyesShadowPackedWorkGroup.rasterWorkEntryCount))
+                uint initFailureReason = CLOD_RASTER_INIT_FAILURE_NONE;
+                if (InitializeMeshletFromCompactedCluster(packedCluster, gs_reyesShadowSetup, initFailureReason, compactedWorkIndex, gs_reyesShadowPackedWorkGroup.rasterWorkEntryCount))
                 {
                     const uint shadowClipmapIndex = CLodVisibleClusterShadowClipmapIndex(packedCluster);
                     if (shadowClipmapIndex < kCLodVirtualShadowClipmapCount)

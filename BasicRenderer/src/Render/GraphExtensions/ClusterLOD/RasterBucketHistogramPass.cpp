@@ -6,6 +6,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
@@ -19,6 +20,7 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
     std::shared_ptr<Buffer> histogramIndirectCommand,
     std::shared_ptr<Buffer> histogramBuffer,
     std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer,
+    std::shared_ptr<Buffer> telemetryBuffer,
     std::shared_ptr<Buffer> readBaseCounterBuffer,
     bool readReverse,
     uint32_t visibleClustersCapacity,
@@ -44,6 +46,7 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
     m_histogramIndirectCommand = std::move(histogramIndirectCommand);
     m_histogramBuffer = std::move(histogramBuffer);
     m_reyesOwnershipBitsetBuffer = std::move(reyesOwnershipBitsetBuffer);
+    m_telemetryBuffer = std::move(telemetryBuffer);
     m_readBaseCounterBuffer = std::move(readBaseCounterBuffer);
     m_readReverse = readReverse;
     m_visibleClustersCapacity = visibleClustersCapacity;
@@ -65,6 +68,9 @@ void RasterBucketHistogramPass::DeclareResourceUsages(ComputePassBuilder* builde
     		.WithUnorderedAccess(m_histogramBuffer, Builtin::Material::TextureStreamingFeedbackBuffer);
     if (m_reyesOwnershipBitsetBuffer) {
         builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
+    }
+    if (m_telemetryBuffer) {
+        builder->WithUnorderedAccess(m_telemetryBuffer);
     }
     if (m_readBaseCounterBuffer) {
         builder->WithShaderResource(m_readBaseCounterBuffer);
@@ -127,8 +133,12 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
     uintRootConstants[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     if (m_reyesOwnershipBitsetBuffer) {
         uintRootConstants[CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index;
+    }
+    if (m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled()) {
+        uintRootConstants[CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     }
     if (m_readBaseCounterBuffer) {
         uintRootConstants[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer->GetSRVInfo(0).slot.index;

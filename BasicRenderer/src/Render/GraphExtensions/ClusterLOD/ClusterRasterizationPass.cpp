@@ -8,6 +8,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/ViewManager.h"
+#include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/MemoryIntrospectionAPI.h"
@@ -45,7 +46,8 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
     std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
     std::shared_ptr<PixelBuffer> AVBOITOccupancySliceMaskTexture,
-    std::shared_ptr<PixelBuffer> AVBOITEarlyDepthTexture)
+    std::shared_ptr<PixelBuffer> AVBOITEarlyDepthTexture,
+    std::shared_ptr<Buffer> telemetryBuffer)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
@@ -68,6 +70,7 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
     , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
     , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
+    , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_wireframe = inputs.wireframe;
     m_clearGbuffer = inputs.clearGbuffer;
@@ -125,6 +128,10 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
         .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .IsGeometryPass();
+
+    if (m_telemetryBuffer) {
+        builder->WithUnorderedAccess(m_telemetryBuffer);
+    }
 
     if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
         for (auto& vb : m_visibilityBuffers) {
@@ -444,6 +451,10 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    if (m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled()) {
+        misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    }
     if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
         const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;

@@ -7,6 +7,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
@@ -26,6 +27,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
     std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer,
+    std::shared_ptr<Buffer> telemetryBuffer,
     uint64_t maxVisibleClusters,
     bool appendToExisting,
     bool readReverse,
@@ -42,6 +44,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
     , m_reyesOwnershipBitsetBuffer(std::move(reyesOwnershipBitsetBuffer))
+    , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_maxVisibleClusters(maxVisibleClusters)
     , m_appendToExisting(appendToExisting)
     , m_readReverse(readReverse)
@@ -94,6 +97,9 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
         .WithIndirectArguments(m_indirectCommand);
     if (m_reyesOwnershipBitsetBuffer) {
         builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
+    }
+    if (m_telemetryBuffer) {
+        builder->WithUnorderedAccess(m_telemetryBuffer);
     }
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
@@ -165,8 +171,12 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     rc[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_COMPACTION_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     if (m_reyesOwnershipBitsetBuffer) {
         rc[CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index;
+    }
+    if (m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled()) {
+        rc[CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     }
     rc[CLOD_COMPACTION_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
     if (m_appendToExisting) {

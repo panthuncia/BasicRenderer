@@ -1538,6 +1538,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_histogramIndirectCommand,
                     histogramBuffer,
                     reyesOwnershipBitsetBuffer,
+                    m_workGraphTelemetryBuffer,
                     isPhase1 ? nullptr : m_visibleClustersCounterBuffer)));
 
         outPasses.push_back(
@@ -1572,6 +1573,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     indirectArgsBuffer,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBuffer,
+                    m_workGraphTelemetryBuffer,
                     m_visibleClusterCapacity,
                     !isPhase1)));
     };
@@ -1617,7 +1619,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 slabGroup,
                 shadowPageTable,
                 shadowPhysicalPages,
-                shadowClipmapInfo));
+                shadowClipmapInfo,
+                nullptr,
+                nullptr,
+                m_workGraphTelemetryBuffer));
         if (!isPhase1) {
             rasterizePassDesc.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
         }
@@ -1665,6 +1670,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_histogramIndirectCommand,
                     swHistogramBuffer,
                     reyesOwnershipBitsetBuffer,
+                    m_workGraphTelemetryBuffer,
                     previousSwVisibleClustersCounterBuffer,
                     true,
                     m_visibleClusterCapacity,
@@ -1704,6 +1710,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     swIndirectArgsBuffer,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBuffer,
+                    m_workGraphTelemetryBuffer,
                     m_visibleClusterCapacity,
                     !isPhase1,
                     true,

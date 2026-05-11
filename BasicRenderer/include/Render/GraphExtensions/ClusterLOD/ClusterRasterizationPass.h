@@ -53,7 +53,8 @@ public:
         std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture = nullptr,
         std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer = nullptr,
         std::shared_ptr<PixelBuffer> AVBOITOccupancySliceMaskTexture = nullptr,
-        std::shared_ptr<PixelBuffer> AVBOITEarlyDepthTexture = nullptr);
+        std::shared_ptr<PixelBuffer> AVBOITEarlyDepthTexture = nullptr,
+        std::shared_ptr<Buffer> telemetryBuffer = nullptr);
     ~ClusterRasterizationPass();
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override;
@@ -95,6 +96,7 @@ private:
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_virtualShadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
+    std::shared_ptr<Buffer> m_telemetryBuffer;
 
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 

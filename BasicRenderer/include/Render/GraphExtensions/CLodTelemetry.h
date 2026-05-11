@@ -134,6 +134,31 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     TraverseNodesVoxelRasterWorkRecords,
     TraverseNodesVoxelRasterWorkDropped,
 
+    RasterSortHistogramInputs,
+    RasterSortHistogramVoxelSkipped,
+    RasterSortHistogramReyesSkipped,
+    RasterSortHistogramTriangleContributors,
+    RasterSortCompactionInputs,
+    RasterSortCompactionVoxelSkipped,
+    RasterSortCompactionReyesSkipped,
+    RasterSortCompactionTriangleEmitted,
+
+    RasterMeshShaderGroups,
+    RasterMeshShaderInRange,
+    RasterMeshShaderInitFailed,
+    RasterMeshShaderOutputTriangles,
+    RasterMeshShaderZeroTriangleOutputs,
+    RasterMeshShaderInitFailedZeroPageSlab,
+    RasterMeshShaderInitFailedMeshletOutOfBounds,
+    RasterMeshShaderInitFailedInvalidOutputCounts,
+    RasterPixelShaderInvocations,
+    RasterPixelScissorRejected,
+    RasterPixelTargetBoundsRejected,
+    RasterPixelVisibilityWrites,
+    RasterPixelVirtualShadowClipmapRejected,
+    RasterPixelVirtualShadowPageRejected,
+    RasterPixelVirtualShadowWrites,
+
     Count
 };
 

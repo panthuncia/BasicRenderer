@@ -38,6 +38,27 @@ struct RasterBucketsHistogramIndirectCommand
     uint dispatchX, dispatchY, dispatchZ;
 };
 
+static const uint CLOD_TELEMETRY_DISABLED_DESCRIPTOR = 0xFFFFFFFFu;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_INPUTS = 109u;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_VOXEL_SKIPPED = 110u;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_REYES_SKIPPED = 111u;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_TRIANGLE_CONTRIBUTORS = 112u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_INPUTS = 113u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_VOXEL_SKIPPED = 114u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_REYES_SKIPPED = 115u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_TRIANGLE_EMITTED = 116u;
+
+void CLodSortTelemetryAdd(uint descriptorIndex, uint counterIndex, uint value)
+{
+    if (descriptorIndex == CLOD_TELEMETRY_DISABLED_DESCRIPTOR || value == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[descriptorIndex];
+    InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
 struct CLodVirtualShadowInvalidationInput
 {
     uint perMeshInstanceBufferIndex;
@@ -2617,8 +2638,10 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     }
 
     const uint visibleClusterReadIndex = CLodGetHistogramVisibleClusterReadIndex(linearizedID);
+    CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_INPUTS, 1u);
     if ((CLOD_HISTOGRAM_READ_MODE_FLAGS & CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
         CLodIsVisibleClusterOwnedByReyes(visibleClusterReadIndex, CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX)) {
+        CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_REYES_SKIPPED, 1u);
         return;
     }
 
@@ -2626,6 +2649,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, visibleClusterReadIndex);
     if (CLodVisibleClusterIsVoxel(packedCluster))
     {
+        CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_VOXEL_SKIPPED, 1u);
         return;
     }
 
@@ -2644,6 +2668,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
         uint groupSize = CountBits128(mask);
         RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
         InterlockedAdd(histogramBuffer[rasterBucketIndex], groupSize);
+        CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_TRIANGLE_CONTRIBUTORS, groupSize);
     }
 }
 
@@ -2852,9 +2877,11 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     if (linearizedID < clusterCount)
     {
         const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
+        CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_INPUTS, 1u);
         if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
             CLodIsVisibleClusterOwnedByReyes(sourceClusterIndex, CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX))
         {
+            CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_REYES_SKIPPED, 1u);
             return;
         }
 
@@ -2866,6 +2893,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
         if (CLodVisibleClusterIsVoxel(packedCluster))
         {
+            CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_VOXEL_SKIPPED, 1u);
             return;
         }
         uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
@@ -2876,6 +2904,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
         CLodStoreVisibleClusterPackedWordsRW(compactedClusters, dst, packedCluster);
         sortedToUnsortedMapping[dst] = sourceClusterIndex;
+        CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_TRIANGLE_EMITTED, 1u);
     }
 
     if (linearizedID < numBuckets)

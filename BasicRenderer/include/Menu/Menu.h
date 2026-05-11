@@ -2553,7 +2553,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodOpaque::HierarchicalCullingPass2",
+                "CLodOpaque::RasterizeClustersPass2",
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2596,12 +2596,22 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t voxelMisses = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses);
                 const uint32_t voxelRasterWork = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkRecords);
                 const uint32_t voxelRasterDropped = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkDropped);
+                const uint32_t sortHistInputs = counter(CLodWorkGraphCounterIndex::RasterSortHistogramInputs);
+                const uint32_t sortHistVoxels = counter(CLodWorkGraphCounterIndex::RasterSortHistogramVoxelSkipped);
+                const uint32_t sortHistTriangles = counter(CLodWorkGraphCounterIndex::RasterSortHistogramTriangleContributors);
+                const uint32_t sortCompactInputs = counter(CLodWorkGraphCounterIndex::RasterSortCompactionInputs);
+                const uint32_t sortCompactVoxels = counter(CLodWorkGraphCounterIndex::RasterSortCompactionVoxelSkipped);
+                const uint32_t sortCompactTriangles = counter(CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+                const uint32_t rasterGroups = counter(CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+                const uint32_t rasterInRange = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInRange);
+                const uint32_t rasterInitFailed = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed);
+                const uint32_t rasterOutputTris = counter(CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
                 const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
                     ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
                     : "bucketed";
 
                 spdlog::info(
-                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}, rasterWork={}, rasterDrop={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}, rasterWork={}, rasterDrop={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={}), sort(hist input={}, hist voxels={}, hist tris={}, compact input={}, compact voxels={}, compact tris={}), raster(groups={}, inRange={}, initFail={}, outTris={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
@@ -2620,7 +2630,17 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     denseExpansionBuckets,
                     denseClustersDispatched,
                     replayNodeInput,
-                    replayMeshletInput);
+                    replayMeshletInput,
+                    sortHistInputs,
+                    sortHistVoxels,
+                    sortHistTriangles,
+                    sortCompactInputs,
+                    sortCompactVoxels,
+                    sortCompactTriangles,
+                    rasterGroups,
+                    rasterInRange,
+                    rasterInitFailed,
+                    rasterOutputTris);
                 });
 
         }
@@ -2702,7 +2722,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodShadow::HierarchicalCullingPass1",
+                "CLodShadow::RasterizeClustersPass1",
                 shadowClodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2745,12 +2765,22 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t voxelMisses = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses);
                 const uint32_t voxelRasterWork = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkRecords);
                 const uint32_t voxelRasterDropped = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkDropped);
+                const uint32_t sortHistInputs = counter(CLodWorkGraphCounterIndex::RasterSortHistogramInputs);
+                const uint32_t sortHistVoxels = counter(CLodWorkGraphCounterIndex::RasterSortHistogramVoxelSkipped);
+                const uint32_t sortHistTriangles = counter(CLodWorkGraphCounterIndex::RasterSortHistogramTriangleContributors);
+                const uint32_t sortCompactInputs = counter(CLodWorkGraphCounterIndex::RasterSortCompactionInputs);
+                const uint32_t sortCompactVoxels = counter(CLodWorkGraphCounterIndex::RasterSortCompactionVoxelSkipped);
+                const uint32_t sortCompactTriangles = counter(CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+                const uint32_t rasterGroups = counter(CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+                const uint32_t rasterInRange = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInRange);
+                const uint32_t rasterInitFailed = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed);
+                const uint32_t rasterOutputTris = counter(CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
                 const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
                     ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
                     : "bucketed";
 
                 spdlog::info(
-                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}, rasterWork={}, rasterDrop={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
+                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}, rasterWork={}, rasterDrop={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={}), sort(hist input={}, hist voxels={}, hist tris={}, compact input={}, compact voxels={}, compact tris={}), raster(groups={}, inRange={}, initFail={}, outTris={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
@@ -2769,7 +2799,17 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     denseExpansionBuckets,
                     denseClustersDispatched,
                     replayNodeInput,
-                    replayMeshletInput);
+                    replayMeshletInput,
+                    sortHistInputs,
+                    sortHistVoxels,
+                    sortHistTriangles,
+                    sortCompactInputs,
+                    sortCompactVoxels,
+                    sortCompactTriangles,
+                    rasterGroups,
+                    rasterInRange,
+                    rasterInitFailed,
+                    rasterOutputTris);
                 });
 
         }
@@ -3358,6 +3398,63 @@ inline void Menu::DrawCLodTelemetryWindow() {
             drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
 
             ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Raster bucket sort/compaction");
+            {
+                const uint32_t histInputs = counter(CLodWorkGraphCounterIndex::RasterSortHistogramInputs);
+                const uint32_t histVoxels = counter(CLodWorkGraphCounterIndex::RasterSortHistogramVoxelSkipped);
+                const uint32_t histReyes = counter(CLodWorkGraphCounterIndex::RasterSortHistogramReyesSkipped);
+                const uint32_t histTriangles = counter(CLodWorkGraphCounterIndex::RasterSortHistogramTriangleContributors);
+                const uint32_t compactInputs = counter(CLodWorkGraphCounterIndex::RasterSortCompactionInputs);
+                const uint32_t compactVoxels = counter(CLodWorkGraphCounterIndex::RasterSortCompactionVoxelSkipped);
+                const uint32_t compactReyes = counter(CLodWorkGraphCounterIndex::RasterSortCompactionReyesSkipped);
+                const uint32_t compactTriangles = counter(CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+                const uint32_t rasterGroups = counter(CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+                const uint32_t rasterInRange = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInRange);
+                const uint32_t rasterInitFailed = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed);
+                const uint32_t rasterOutputTriangles = counter(CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
+                const uint32_t rasterZeroTriangleOutputs = counter(CLodWorkGraphCounterIndex::RasterMeshShaderZeroTriangleOutputs);
+                const uint32_t rasterInitZeroPage = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedZeroPageSlab);
+                const uint32_t rasterInitMeshletOob = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedMeshletOutOfBounds);
+                const uint32_t rasterInitInvalidOutput = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedInvalidOutputCounts);
+                const uint32_t pixelInvocations = counter(CLodWorkGraphCounterIndex::RasterPixelShaderInvocations);
+                const uint32_t pixelScissorRejected = counter(CLodWorkGraphCounterIndex::RasterPixelScissorRejected);
+                const uint32_t pixelBoundsRejected = counter(CLodWorkGraphCounterIndex::RasterPixelTargetBoundsRejected);
+                const uint32_t pixelVisibilityWrites = counter(CLodWorkGraphCounterIndex::RasterPixelVisibilityWrites);
+                const uint32_t pixelVsmClipmapRejected = counter(CLodWorkGraphCounterIndex::RasterPixelVirtualShadowClipmapRejected);
+                const uint32_t pixelVsmPageRejected = counter(CLodWorkGraphCounterIndex::RasterPixelVirtualShadowPageRejected);
+                const uint32_t pixelVsmWrites = counter(CLodWorkGraphCounterIndex::RasterPixelVirtualShadowWrites);
+                ImGui::Text("Histogram: input=%u triangles=%u voxelsSkipped=%u reyesSkipped=%u",
+                    histInputs,
+                    histTriangles,
+                    histVoxels,
+                    histReyes);
+                ImGui::Text("Compaction: input=%u emittedTriangles=%u voxelsSkipped=%u reyesSkipped=%u",
+                    compactInputs,
+                    compactTriangles,
+                    compactVoxels,
+                    compactReyes);
+                ImGui::Text("Raster MS: groups=%u inRange=%u initFailed=%u outputTriangles=%u zeroTriOutputs=%u",
+                    rasterGroups,
+                    rasterInRange,
+                    rasterInitFailed,
+                    rasterOutputTriangles,
+                    rasterZeroTriangleOutputs);
+                ImGui::Text("Raster MS init failures: zeroPageSlab=%u meshletOOB=%u invalidOutputCounts=%u",
+                    rasterInitZeroPage,
+                    rasterInitMeshletOob,
+                    rasterInitInvalidOutput);
+                ImGui::Text("Raster PS: invocations=%u scissorRejected=%u boundsRejected=%u visibilityWrites=%u",
+                    pixelInvocations,
+                    pixelScissorRejected,
+                    pixelBoundsRejected,
+                    pixelVisibilityWrites);
+                ImGui::Text("Raster PS VSM: clipmapRejected=%u pageRejected=%u writes=%u",
+                    pixelVsmClipmapRejected,
+                    pixelVsmPageRejected,
+                    pixelVsmWrites);
+            }
 
             ImGui::Separator();
             ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");

@@ -6,9 +6,12 @@
 #include <functional>
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -17,16 +20,21 @@
 #include <pxr/pxr.h>
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/base/gf/vec4f.h>
+#include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/vt/array.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/metrics.h>
+#include <pxr/usd/usdGeom/points.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
+#include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
+#include <pxr/usd/usdShade/shader.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -88,6 +96,42 @@ std::string HexHash(uint64_t hash)
     return stream.str();
 }
 
+std::string HexBytes(const std::vector<char>& bytes)
+{
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string text;
+    text.reserve(bytes.size() * 2u);
+    for (unsigned char byte : bytes) {
+        text.push_back(kHex[(byte >> 4u) & 0xfu]);
+        text.push_back(kHex[byte & 0xfu]);
+    }
+    return text;
+}
+
+std::vector<std::string> SplitLines(const std::string& text)
+{
+    std::vector<std::string> lines;
+    std::stringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty()) {
+            lines.push_back(line);
+        }
+    }
+    return lines;
+}
+
+std::string MakeUniqueName(const std::string& baseName, std::set<std::string>& usedNames)
+{
+    std::string name = SanitizePrimName(baseName);
+    std::string candidate = name;
+    int suffix = 1;
+    while (!usedNames.insert(candidate).second) {
+        candidate = name + "_" + std::to_string(suffix++);
+    }
+    return candidate;
+}
+
 std::vector<std::string> ServiceList()
 {
     return {
@@ -124,13 +168,123 @@ using GetVersionFn = const int* (*)();
 using GetGameNameFn = int (*)(void*, char*, int);
 using GetShapesFn = int (*)(void*, void**, int, int);
 using GetShapeNameFn = int (*)(void*, char*, int);
+using GetShapeBlockNameFn = int (*)(void*, char*, int);
+using GetBlockIdFn = int (*)(void*, void*);
 using GetVertsForShapeFn = int (*)(void*, void*, float*, int, int);
 using GetNormalsForShapeFn = int (*)(void*, void*, float*, int, int);
 using GetTrianglesFn = int (*)(void*, void*, uint16_t*, int, int);
 using GetUVsFn = int (*)(void*, void*, float*, int, int);
+using GetColorsForShapeFn = int (*)(void*, void*, float*, int);
 using GetShaderTextureSlotFn = int (*)(void*, void*, int, char*, int);
+using GetShaderBlockNameFn = const char* (*)(void*, void*);
+using GetShaderTypeFn = uint32_t (*)(void*, void*);
+using GetShaderFlagsFn = uint32_t (*)(void*, void*);
 using GetMessageLogFn = int (*)(char*, int);
 using ClearMessageLogFn = void (*)();
+
+struct TransformBuf {
+    float translation[3] = {0.0f, 0.0f, 0.0f};
+    float rotation[9] = {
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 1.0f};
+    float scale = 1.0f;
+};
+
+struct VertexWeightPair {
+    uint16_t vertex = 0;
+    float weight = 0.0f;
+};
+
+struct BSLSPAttrs {
+    uint32_t shaderType = 0;
+    uint32_t shaderFlags1 = 0;
+    uint32_t shaderFlags2 = 0;
+    float uvOffsetU = 0.0f;
+    float uvOffsetV = 0.0f;
+    float uvScaleU = 1.0f;
+    float uvScaleV = 1.0f;
+    float emissiveColorR = 0.0f;
+    float emissiveColorG = 0.0f;
+    float emissiveColorB = 0.0f;
+    float emissiveColorA = 1.0f;
+    float emissiveMult = 1.0f;
+    float environmentMapScale = 0.0f;
+    uint32_t texClampMode = 0;
+    float alpha = 1.0f;
+    float refractionStrength = 0.0f;
+    float glossiness = 0.0f;
+    float specColorR = 0.0f;
+    float specColorG = 0.0f;
+    float specColorB = 0.0f;
+    float specStrength = 0.0f;
+    float softLighting = 0.0f;
+    float rimLightPower = 0.0f;
+    float skinTintAlpha = 0.0f;
+    float skinTintColorR = 0.0f;
+    float skinTintColorG = 0.0f;
+    float skinTintColorB = 0.0f;
+};
+
+struct BSESPAttrs {
+    uint32_t shaderFlags1 = 0;
+    uint32_t shaderFlags2 = 0;
+    float uvOffsetU = 0.0f;
+    float uvOffsetV = 0.0f;
+    float uvScaleU = 1.0f;
+    float uvScaleV = 1.0f;
+    uint32_t texClampMode = 0;
+    unsigned char lightingInfluence = 0;
+    unsigned char envMapMinLod = 0;
+    float falloffStartAngle = 0.0f;
+    float falloffStopAngle = 0.0f;
+    float falloffStartOpacity = 0.0f;
+    float falloffStopOpacity = 0.0f;
+    float emissiveColorR = 0.0f;
+    float emissiveColorG = 0.0f;
+    float emissiveColorB = 0.0f;
+    float emissiveColorA = 1.0f;
+    float emissiveMult = 1.0f;
+    float softFalloffDepth = 0.0f;
+    float envMapScale = 0.0f;
+};
+
+struct AlphaPropertyBuf {
+    uint16_t flags = 0;
+    uint8_t threshold = 0;
+};
+
+using GetTransformFn = void (*)(void*, TransformBuf*);
+using GetNodeCountFn = int (*)(void*);
+using GetNodesFn = void (*)(void*, void**);
+using GetNodeNameFn = int (*)(void*, char*, int);
+using GetNodeBlocknameFn = int (*)(void*, char*, int);
+using GetNodeFlagsFn = int (*)(void*);
+using GetNodeParentFn = void* (*)(void*, void*);
+using GetShapeBoneCountFn = int (*)(void*, void*);
+using GetShapeBoneNamesFn = int (*)(void*, void*, char*, int);
+using GetShapeBoneWeightsCountFn = int (*)(void*, void*, int);
+using GetShapeBoneWeightsFn = int (*)(void*, void*, int, VertexWeightPair*, int);
+using SegmentCountFn = int (*)(void*, void*);
+using GetSegmentFileFn = int (*)(void*, void*, char*, int);
+using GetSegmentsFn = int (*)(void*, void*, int*, int);
+using GetSubsegmentsFn = int (*)(void*, void*, int, uint32_t*, int);
+using GetPartitionsFn = int (*)(void*, void*, uint16_t*, int);
+using GetPartitionTrisFn = int (*)(void*, void*, uint16_t*, int);
+using GetShaderAttrsFn = int (*)(void*, void*, BSLSPAttrs*);
+using GetEffectShaderAttrsFn = int (*)(void*, void*, BSESPAttrs*);
+using GetAlphaPropertyFn = int (*)(void*, void*, AlphaPropertyBuf*);
+using GetExtraDataLenFn = int (*)(void*, void*, int, int*, int*);
+using GetStringExtraDataFn = int (*)(void*, void*, int, char*, int, char*, int);
+using GetBGExtraDataFn = int (*)(void*, void*, int, char*, int, char*, int, uint16_t*);
+using GetCollisionFn = void* (*)(void*, void*);
+using GetCollBodyIdFn = int (*)(void*, void*);
+using GetCollShapeIdFn = int (*)(void*, int);
+using GetCollShapeBlockNameFn = int (*)(void*, int, char*, int);
+using GetCollShapeVertsFn = int (*)(void*, int, float*, int);
+using GetCollShapeNormalsFn = int (*)(void*, int, float*, int);
+using GetCollDataIdFn = int (*)(void*, int);
+using GetCollShapeTrisFn = int (*)(void*, int, uint16_t*, int);
 
 struct NiflyApi {
     HMODULE module = nullptr;
@@ -140,13 +294,59 @@ struct NiflyApi {
     GetGameNameFn getGameName = nullptr;
     GetShapesFn getShapes = nullptr;
     GetShapeNameFn getShapeName = nullptr;
+    GetShapeBlockNameFn getShapeBlockName = nullptr;
+    GetBlockIdFn getBlockId = nullptr;
     GetVertsForShapeFn getVertsForShape = nullptr;
     GetNormalsForShapeFn getNormalsForShape = nullptr;
     GetTrianglesFn getTriangles = nullptr;
     GetUVsFn getUVs = nullptr;
+    GetColorsForShapeFn getColorsForShape = nullptr;
     GetShaderTextureSlotFn getShaderTextureSlot = nullptr;
+    GetShaderBlockNameFn getShaderBlockName = nullptr;
+    GetShaderTypeFn getShaderType = nullptr;
+    GetShaderFlagsFn getShaderFlags1 = nullptr;
+    GetShaderFlagsFn getShaderFlags2 = nullptr;
     GetMessageLogFn getMessageLog = nullptr;
     ClearMessageLogFn clearMessageLog = nullptr;
+    GetTransformFn getTransform = nullptr;
+    GetTransformFn getNodeTransform = nullptr;
+    GetNodeCountFn getNodeCount = nullptr;
+    GetNodesFn getNodes = nullptr;
+    GetNodeNameFn getNodeName = nullptr;
+    GetNodeBlocknameFn getNodeBlockname = nullptr;
+    GetNodeFlagsFn getNodeFlags = nullptr;
+    GetNodeParentFn getNodeParent = nullptr;
+    GetShapeBoneCountFn getShapeBoneCount = nullptr;
+    GetShapeBoneNamesFn getShapeBoneNames = nullptr;
+    GetShapeBoneWeightsCountFn getShapeBoneWeightsCount = nullptr;
+    GetShapeBoneWeightsFn getShapeBoneWeights = nullptr;
+    SegmentCountFn segmentCount = nullptr;
+    GetSegmentFileFn getSegmentFile = nullptr;
+    GetSegmentsFn getSegments = nullptr;
+    GetSubsegmentsFn getSubsegments = nullptr;
+    GetPartitionsFn getPartitions = nullptr;
+    GetPartitionTrisFn getPartitionTris = nullptr;
+    GetShaderAttrsFn getShaderAttrs = nullptr;
+    GetEffectShaderAttrsFn getEffectShaderAttrs = nullptr;
+    GetAlphaPropertyFn getAlphaProperty = nullptr;
+    GetExtraDataLenFn getStringExtraDataLen = nullptr;
+    GetStringExtraDataFn getStringExtraData = nullptr;
+    GetExtraDataLenFn getBGExtraDataLen = nullptr;
+    GetBGExtraDataFn getBGExtraData = nullptr;
+    GetExtraDataLenFn getClothExtraDataLen = nullptr;
+    GetStringExtraDataFn getClothExtraData = nullptr;
+    GetCollisionFn getCollision = nullptr;
+    GetCollBodyIdFn getCollBodyId = nullptr;
+    GetCollShapeIdFn getRigidBodyShapeId = nullptr;
+    GetCollShapeBlockNameFn getCollShapeBlockname = nullptr;
+    GetCollShapeVertsFn getCollShapeVerts = nullptr;
+    GetCollShapeNormalsFn getCollShapeNormals = nullptr;
+    GetCollDataIdFn getCollCompressedMeshShapeDataId = nullptr;
+    GetCollShapeVertsFn getCollCompressedMeshShapeVerts = nullptr;
+    GetCollShapeTrisFn getCollCompressedMeshShapeTris = nullptr;
+    GetCollDataIdFn getCollPackedStripsDataId = nullptr;
+    GetCollShapeVertsFn getCollPackedStripsShapeVerts = nullptr;
+    GetCollShapeTrisFn getCollPackedStripsShapeTris = nullptr;
 
     NiflyApi() = default;
     NiflyApi(const NiflyApi&) = delete;
@@ -159,13 +359,59 @@ struct NiflyApi {
           getGameName(other.getGameName),
           getShapes(other.getShapes),
           getShapeName(other.getShapeName),
+          getShapeBlockName(other.getShapeBlockName),
+          getBlockId(other.getBlockId),
           getVertsForShape(other.getVertsForShape),
           getNormalsForShape(other.getNormalsForShape),
           getTriangles(other.getTriangles),
           getUVs(other.getUVs),
+          getColorsForShape(other.getColorsForShape),
           getShaderTextureSlot(other.getShaderTextureSlot),
+          getShaderBlockName(other.getShaderBlockName),
+          getShaderType(other.getShaderType),
+          getShaderFlags1(other.getShaderFlags1),
+          getShaderFlags2(other.getShaderFlags2),
           getMessageLog(other.getMessageLog),
-          clearMessageLog(other.clearMessageLog)
+          clearMessageLog(other.clearMessageLog),
+          getTransform(other.getTransform),
+          getNodeTransform(other.getNodeTransform),
+          getNodeCount(other.getNodeCount),
+          getNodes(other.getNodes),
+          getNodeName(other.getNodeName),
+          getNodeBlockname(other.getNodeBlockname),
+          getNodeFlags(other.getNodeFlags),
+          getNodeParent(other.getNodeParent),
+          getShapeBoneCount(other.getShapeBoneCount),
+          getShapeBoneNames(other.getShapeBoneNames),
+          getShapeBoneWeightsCount(other.getShapeBoneWeightsCount),
+          getShapeBoneWeights(other.getShapeBoneWeights),
+          segmentCount(other.segmentCount),
+          getSegmentFile(other.getSegmentFile),
+          getSegments(other.getSegments),
+          getSubsegments(other.getSubsegments),
+          getPartitions(other.getPartitions),
+          getPartitionTris(other.getPartitionTris),
+          getShaderAttrs(other.getShaderAttrs),
+          getEffectShaderAttrs(other.getEffectShaderAttrs),
+          getAlphaProperty(other.getAlphaProperty),
+          getStringExtraDataLen(other.getStringExtraDataLen),
+          getStringExtraData(other.getStringExtraData),
+          getBGExtraDataLen(other.getBGExtraDataLen),
+          getBGExtraData(other.getBGExtraData),
+          getClothExtraDataLen(other.getClothExtraDataLen),
+          getClothExtraData(other.getClothExtraData),
+          getCollision(other.getCollision),
+          getCollBodyId(other.getCollBodyId),
+          getRigidBodyShapeId(other.getRigidBodyShapeId),
+          getCollShapeBlockname(other.getCollShapeBlockname),
+          getCollShapeVerts(other.getCollShapeVerts),
+          getCollShapeNormals(other.getCollShapeNormals),
+          getCollCompressedMeshShapeDataId(other.getCollCompressedMeshShapeDataId),
+          getCollCompressedMeshShapeVerts(other.getCollCompressedMeshShapeVerts),
+          getCollCompressedMeshShapeTris(other.getCollCompressedMeshShapeTris),
+          getCollPackedStripsDataId(other.getCollPackedStripsDataId),
+          getCollPackedStripsShapeVerts(other.getCollPackedStripsShapeVerts),
+          getCollPackedStripsShapeTris(other.getCollPackedStripsShapeTris)
     {
         other.module = nullptr;
     }
@@ -183,13 +429,59 @@ struct NiflyApi {
             getGameName = other.getGameName;
             getShapes = other.getShapes;
             getShapeName = other.getShapeName;
+            getShapeBlockName = other.getShapeBlockName;
+            getBlockId = other.getBlockId;
             getVertsForShape = other.getVertsForShape;
             getNormalsForShape = other.getNormalsForShape;
             getTriangles = other.getTriangles;
             getUVs = other.getUVs;
+            getColorsForShape = other.getColorsForShape;
             getShaderTextureSlot = other.getShaderTextureSlot;
+            getShaderBlockName = other.getShaderBlockName;
+            getShaderType = other.getShaderType;
+            getShaderFlags1 = other.getShaderFlags1;
+            getShaderFlags2 = other.getShaderFlags2;
             getMessageLog = other.getMessageLog;
             clearMessageLog = other.clearMessageLog;
+            getTransform = other.getTransform;
+            getNodeTransform = other.getNodeTransform;
+            getNodeCount = other.getNodeCount;
+            getNodes = other.getNodes;
+            getNodeName = other.getNodeName;
+            getNodeBlockname = other.getNodeBlockname;
+            getNodeFlags = other.getNodeFlags;
+            getNodeParent = other.getNodeParent;
+            getShapeBoneCount = other.getShapeBoneCount;
+            getShapeBoneNames = other.getShapeBoneNames;
+            getShapeBoneWeightsCount = other.getShapeBoneWeightsCount;
+            getShapeBoneWeights = other.getShapeBoneWeights;
+            segmentCount = other.segmentCount;
+            getSegmentFile = other.getSegmentFile;
+            getSegments = other.getSegments;
+            getSubsegments = other.getSubsegments;
+            getPartitions = other.getPartitions;
+            getPartitionTris = other.getPartitionTris;
+            getShaderAttrs = other.getShaderAttrs;
+            getEffectShaderAttrs = other.getEffectShaderAttrs;
+            getAlphaProperty = other.getAlphaProperty;
+            getStringExtraDataLen = other.getStringExtraDataLen;
+            getStringExtraData = other.getStringExtraData;
+            getBGExtraDataLen = other.getBGExtraDataLen;
+            getBGExtraData = other.getBGExtraData;
+            getClothExtraDataLen = other.getClothExtraDataLen;
+            getClothExtraData = other.getClothExtraData;
+            getCollision = other.getCollision;
+            getCollBodyId = other.getCollBodyId;
+            getRigidBodyShapeId = other.getRigidBodyShapeId;
+            getCollShapeBlockname = other.getCollShapeBlockname;
+            getCollShapeVerts = other.getCollShapeVerts;
+            getCollShapeNormals = other.getCollShapeNormals;
+            getCollCompressedMeshShapeDataId = other.getCollCompressedMeshShapeDataId;
+            getCollCompressedMeshShapeVerts = other.getCollCompressedMeshShapeVerts;
+            getCollCompressedMeshShapeTris = other.getCollCompressedMeshShapeTris;
+            getCollPackedStripsDataId = other.getCollPackedStripsDataId;
+            getCollPackedStripsShapeVerts = other.getCollPackedStripsShapeVerts;
+            getCollPackedStripsShapeTris = other.getCollPackedStripsShapeTris;
             other.module = nullptr;
         }
         return *this;
@@ -256,13 +548,65 @@ std::optional<NiflyApi> LoadNiflyApi(const char* argv0, std::vector<Diagnostic>&
     api.getGameName = LoadProc<GetGameNameFn>(module, "getGameName");
     api.getShapes = LoadProc<GetShapesFn>(module, "getShapes");
     api.getShapeName = LoadProc<GetShapeNameFn>(module, "getShapeName");
+    api.getShapeBlockName = LoadProc<GetShapeBlockNameFn>(module, "getShapeBlockName");
+    api.getBlockId = LoadProc<GetBlockIdFn>(module, "getBlockID");
+    if (!api.getBlockId) {
+        api.getBlockId = LoadProc<GetBlockIdFn>(module, "getBlockId");
+    }
     api.getVertsForShape = LoadProc<GetVertsForShapeFn>(module, "getVertsForShape");
     api.getNormalsForShape = LoadProc<GetNormalsForShapeFn>(module, "getNormalsForShape");
     api.getTriangles = LoadProc<GetTrianglesFn>(module, "getTriangles");
     api.getUVs = LoadProc<GetUVsFn>(module, "getUVs");
+    api.getColorsForShape = LoadProc<GetColorsForShapeFn>(module, "getColorsForShape");
     api.getShaderTextureSlot = LoadProc<GetShaderTextureSlotFn>(module, "getShaderTextureSlot");
+    api.getShaderBlockName = LoadProc<GetShaderBlockNameFn>(module, "getShaderBlockName");
+    api.getShaderType = LoadProc<GetShaderTypeFn>(module, "getShaderType");
+    api.getShaderFlags1 = LoadProc<GetShaderFlagsFn>(module, "getShaderFlags1");
+    api.getShaderFlags2 = LoadProc<GetShaderFlagsFn>(module, "getShaderFlags2");
     api.getMessageLog = LoadProc<GetMessageLogFn>(module, "getMessageLog");
     api.clearMessageLog = LoadProc<ClearMessageLogFn>(module, "clearMessageLog");
+    api.getTransform = LoadProc<GetTransformFn>(module, "getTransform");
+    api.getNodeTransform = LoadProc<GetTransformFn>(module, "getNodeTransform");
+    api.getNodeCount = LoadProc<GetNodeCountFn>(module, "getNodeCount");
+    api.getNodes = LoadProc<GetNodesFn>(module, "getNodes");
+    api.getNodeName = LoadProc<GetNodeNameFn>(module, "getNodeName");
+    api.getNodeBlockname = LoadProc<GetNodeBlocknameFn>(module, "getNodeBlockname");
+    api.getNodeFlags = LoadProc<GetNodeFlagsFn>(module, "getNodeFlags");
+    api.getNodeParent = LoadProc<GetNodeParentFn>(module, "getNodeParent");
+    api.getShapeBoneCount = LoadProc<GetShapeBoneCountFn>(module, "getShapeBoneCount");
+    api.getShapeBoneNames = LoadProc<GetShapeBoneNamesFn>(module, "getShapeBoneNames");
+    api.getShapeBoneWeightsCount = LoadProc<GetShapeBoneWeightsCountFn>(module, "getShapeBoneWeightsCount");
+    api.getShapeBoneWeights = LoadProc<GetShapeBoneWeightsFn>(module, "getShapeBoneWeights");
+    api.segmentCount = LoadProc<SegmentCountFn>(module, "segmentCount");
+    api.getSegmentFile = LoadProc<GetSegmentFileFn>(module, "getSegmentFile");
+    api.getSegments = LoadProc<GetSegmentsFn>(module, "getSegments");
+    api.getSubsegments = LoadProc<GetSubsegmentsFn>(module, "getSubsegments");
+    api.getPartitions = LoadProc<GetPartitionsFn>(module, "getPartitions");
+    api.getPartitionTris = LoadProc<GetPartitionTrisFn>(module, "getPartitionTris");
+    api.getShaderAttrs = LoadProc<GetShaderAttrsFn>(module, "getShaderAttrs");
+    api.getEffectShaderAttrs = LoadProc<GetEffectShaderAttrsFn>(module, "getEffectShaderAttrs");
+    api.getAlphaProperty = LoadProc<GetAlphaPropertyFn>(module, "getAlphaProperty");
+    api.getStringExtraDataLen = LoadProc<GetExtraDataLenFn>(module, "getStringExtraDataLen");
+    api.getStringExtraData = LoadProc<GetStringExtraDataFn>(module, "getStringExtraData");
+    api.getBGExtraDataLen = LoadProc<GetExtraDataLenFn>(module, "getBGExtraDataLen");
+    api.getBGExtraData = LoadProc<GetBGExtraDataFn>(module, "getBGExtraData");
+    api.getClothExtraDataLen = LoadProc<GetExtraDataLenFn>(module, "getClothExtraDataLen");
+    api.getClothExtraData = LoadProc<GetStringExtraDataFn>(module, "getClothExtraData");
+    api.getCollision = LoadProc<GetCollisionFn>(module, "getCollTarget");
+    if (!api.getCollision) {
+        api.getCollision = LoadProc<GetCollisionFn>(module, "getCollision");
+    }
+    api.getCollBodyId = LoadProc<GetCollBodyIdFn>(module, "getCollBodyID");
+    api.getRigidBodyShapeId = LoadProc<GetCollShapeIdFn>(module, "getRigidBodyShapeID");
+    api.getCollShapeBlockname = LoadProc<GetCollShapeBlockNameFn>(module, "getCollShapeBlockname");
+    api.getCollShapeVerts = LoadProc<GetCollShapeVertsFn>(module, "getCollShapeVerts");
+    api.getCollShapeNormals = LoadProc<GetCollShapeNormalsFn>(module, "getCollShapeNormals");
+    api.getCollCompressedMeshShapeDataId = LoadProc<GetCollDataIdFn>(module, "getCollCompressedMeshShapeDataID");
+    api.getCollCompressedMeshShapeVerts = LoadProc<GetCollShapeVertsFn>(module, "getCollCompressedMeshShapeVerts");
+    api.getCollCompressedMeshShapeTris = LoadProc<GetCollShapeTrisFn>(module, "getCollCompressedMeshShapeTris");
+    api.getCollPackedStripsDataId = LoadProc<GetCollDataIdFn>(module, "getCollPackedStripsDataID");
+    api.getCollPackedStripsShapeVerts = LoadProc<GetCollShapeVertsFn>(module, "getCollPackedStripsShapeVerts");
+    api.getCollPackedStripsShapeTris = LoadProc<GetCollShapeTrisFn>(module, "getCollPackedStripsShapeTris");
 
     if (!api.load || !api.destroy || !api.getShapes || !api.getShapeName || !api.getVertsForShape || !api.getTriangles) {
         AddDiagnostic(diagnostics, "error", "NiflyDLL.dll is missing required geometry entry points.");
@@ -341,12 +685,47 @@ json DescribeServicesJson(const char* argv0)
 }
 
 struct ShapeData {
+    void* handle = nullptr;
+    int blockId = -1;
+    int parentBlockId = -1;
     std::string name;
+    std::string blockName;
+    TransformBuf transform;
     std::vector<float> positions;
     std::vector<float> normals;
     std::vector<float> uvs;
+    std::vector<float> colors;
     std::vector<uint16_t> triangles;
     std::vector<std::string> textures;
+    std::vector<std::string> boneNames;
+    std::vector<int> jointIndices;
+    std::vector<float> jointWeights;
+    json shader = json::object();
+    json alpha = json::object();
+    json segmentation = json::object();
+    json extraData = json::array();
+};
+
+struct NodeData {
+    void* handle = nullptr;
+    int blockId = -1;
+    int parentBlockId = -1;
+    std::string name;
+    std::string blockName;
+    int flags = 0;
+    TransformBuf transform;
+    SdfPath path;
+};
+
+struct CollisionProxyData {
+    std::string name;
+    std::string blockName;
+    int sourceNodeId = -1;
+    int bodyId = -1;
+    int shapeId = -1;
+    std::vector<float> positions;
+    std::vector<float> normals;
+    std::vector<uint16_t> triangles;
 };
 
 std::optional<std::string> ReadCString(std::function<int(char*, int)> reader)
@@ -359,7 +738,426 @@ std::optional<std::string> ReadCString(std::function<int(char*, int)> reader)
     return std::string(buffer.data());
 }
 
+GfMatrix4d ToUsdMatrix(const TransformBuf& transform)
+{
+    GfMatrix4d matrix(1.0);
+    matrix[0][0] = transform.rotation[0] * transform.scale;
+    matrix[0][1] = transform.rotation[1] * transform.scale;
+    matrix[0][2] = transform.rotation[2] * transform.scale;
+    matrix[1][0] = transform.rotation[3] * transform.scale;
+    matrix[1][1] = transform.rotation[4] * transform.scale;
+    matrix[1][2] = transform.rotation[5] * transform.scale;
+    matrix[2][0] = transform.rotation[6] * transform.scale;
+    matrix[2][1] = transform.rotation[7] * transform.scale;
+    matrix[2][2] = transform.rotation[8] * transform.scale;
+    matrix[3][0] = transform.translation[0];
+    matrix[3][1] = transform.translation[1];
+    matrix[3][2] = transform.translation[2];
+    return matrix;
+}
+
+void ApplyTransform(const UsdPrim& prim, const TransformBuf& transform)
+{
+    UsdGeomXformable xformable(prim);
+    if (!xformable) {
+        return;
+    }
+    xformable.AddTransformOp().Set(ToUsdMatrix(transform));
+}
+
+json TransformJson(const TransformBuf& transform)
+{
+    return json{
+        {"translation", {transform.translation[0], transform.translation[1], transform.translation[2]}},
+        {"rotation", {
+            transform.rotation[0], transform.rotation[1], transform.rotation[2],
+            transform.rotation[3], transform.rotation[4], transform.rotation[5],
+            transform.rotation[6], transform.rotation[7], transform.rotation[8]}},
+        {"scale", transform.scale}
+    };
+}
+
+std::string ReadCStringDynamic(std::function<int(char*, int)> reader)
+{
+    const int required = reader(nullptr, 0);
+    const int capacity = std::max(required + 1, 1024);
+    std::vector<char> buffer(static_cast<size_t>(capacity));
+    const int written = reader(buffer.data(), capacity);
+    if (written <= 0) {
+        return {};
+    }
+    return std::string(buffer.data());
+}
+
+json ReadExtraDataList(
+    const NiflyApi& api,
+    void* nifHandle,
+    void* ownerHandle)
+{
+    json entries = json::array();
+    auto readTextEntries = [&](const char* kind, GetExtraDataLenFn getLen, GetStringExtraDataFn getValue) {
+        if (!getLen || !getValue) {
+            return;
+        }
+        for (int index = 0; index < 256; ++index) {
+            int nameLen = 0;
+            int valueLen = 0;
+            if (!getLen(nifHandle, ownerHandle, index, &nameLen, &valueLen)) {
+                break;
+            }
+            std::vector<char> name(static_cast<size_t>(std::max(nameLen + 1, 1)));
+            std::vector<char> value(static_cast<size_t>(std::max(valueLen + 1, 1)));
+            if (getValue(nifHandle, ownerHandle, index, name.data(), static_cast<int>(name.size()), value.data(), static_cast<int>(value.size()))) {
+                entries.push_back(json{{"kind", kind}, {"name", std::string(name.data())}, {"value", std::string(value.data())}});
+            }
+        }
+    };
+
+    readTextEntries("NiStringExtraData", api.getStringExtraDataLen, api.getStringExtraData);
+
+    if (api.getBGExtraDataLen && api.getBGExtraData) {
+        for (int index = 0; index < 256; ++index) {
+            int nameLen = 0;
+            int valueLen = 0;
+            if (!api.getBGExtraDataLen(nifHandle, ownerHandle, index, &nameLen, &valueLen)) {
+                break;
+            }
+            std::vector<char> name(static_cast<size_t>(std::max(nameLen + 1, 1)));
+            std::vector<char> value(static_cast<size_t>(std::max(valueLen + 1, 1)));
+            uint16_t controlsBaseSkeleton = 0;
+            if (api.getBGExtraData(nifHandle, ownerHandle, index, name.data(), static_cast<int>(name.size()), value.data(), static_cast<int>(value.size()), &controlsBaseSkeleton)) {
+                entries.push_back(json{{"kind", "BSBehaviorGraphExtraData"}, {"name", std::string(name.data())}, {"value", std::string(value.data())}, {"controlsBaseSkeleton", controlsBaseSkeleton != 0}});
+            }
+        }
+    }
+
+    if (api.getClothExtraDataLen && api.getClothExtraData) {
+        for (int index = 0; index < 256; ++index) {
+            int nameLen = 0;
+            int valueLen = 0;
+            if (!api.getClothExtraDataLen(nifHandle, ownerHandle, index, &nameLen, &valueLen)) {
+                break;
+            }
+            std::vector<char> name(static_cast<size_t>(std::max(nameLen + 1, 1)));
+            std::vector<char> value(static_cast<size_t>(std::max(valueLen, 1)));
+            if (api.getClothExtraData(nifHandle, ownerHandle, index, name.data(), static_cast<int>(name.size()), value.data(), static_cast<int>(value.size()))) {
+                entries.push_back(json{{"kind", "BSClothExtraData"}, {"name", std::string(name.data())}, {"encoding", "hex"}, {"value", HexBytes(value)}});
+            }
+        }
+    }
+
+    return entries;
+}
+
 #ifdef _WIN32
+std::vector<NodeData> ReadNodes(const NiflyApi& api, void* nifHandle)
+{
+    if (!api.getNodeCount || !api.getNodes || !api.getBlockId) {
+        return {};
+    }
+
+    const int nodeCount = api.getNodeCount(nifHandle);
+    if (nodeCount <= 0) {
+        return {};
+    }
+
+    std::vector<void*> nodeHandles(static_cast<size_t>(nodeCount));
+    api.getNodes(nifHandle, nodeHandles.data());
+
+    std::vector<NodeData> nodes;
+    nodes.reserve(nodeHandles.size());
+    for (size_t index = 0; index < nodeHandles.size(); ++index) {
+        void* nodeHandle = nodeHandles[index];
+        if (!nodeHandle) {
+            continue;
+        }
+
+        NodeData node{};
+        node.handle = nodeHandle;
+        node.blockId = api.getBlockId(nifHandle, nodeHandle);
+        node.name = api.getNodeName
+            ? ReadCString([&](char* buffer, int size) { return api.getNodeName(nodeHandle, buffer, size); }).value_or("Node_" + std::to_string(index))
+            : "Node_" + std::to_string(index);
+        node.blockName = api.getNodeBlockname
+            ? ReadCString([&](char* buffer, int size) { return api.getNodeBlockname(nodeHandle, buffer, size); }).value_or("")
+            : std::string();
+        node.flags = api.getNodeFlags ? api.getNodeFlags(nodeHandle) : 0;
+        if (api.getNodeTransform) {
+            api.getNodeTransform(nodeHandle, &node.transform);
+        }
+        if (api.getNodeParent) {
+            if (void* parent = api.getNodeParent(nifHandle, nodeHandle)) {
+                node.parentBlockId = api.getBlockId(nifHandle, parent);
+            }
+        }
+        nodes.push_back(std::move(node));
+    }
+    return nodes;
+}
+
+void ReadShapeSkinning(const NiflyApi& api, void* nifHandle, void* shapeHandle, int vertexCount, ShapeData& shape)
+{
+    if (!api.getShapeBoneCount || !api.getShapeBoneNames || !api.getShapeBoneWeightsCount || !api.getShapeBoneWeights) {
+        return;
+    }
+
+    const int boneCount = api.getShapeBoneCount(nifHandle, shapeHandle);
+    if (boneCount <= 0 || vertexCount <= 0) {
+        return;
+    }
+
+    const std::string namesText = ReadCStringDynamic([&](char* buffer, int size) { return api.getShapeBoneNames(nifHandle, shapeHandle, buffer, size); });
+    shape.boneNames = SplitLines(namesText);
+    if (shape.boneNames.empty()) {
+        for (int i = 0; i < boneCount; ++i) {
+            shape.boneNames.push_back("bone_" + std::to_string(i));
+        }
+    }
+
+    struct Influence { int joint = 0; float weight = 0.0f; };
+    std::vector<std::vector<Influence>> influences(static_cast<size_t>(vertexCount));
+    for (int boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
+        const int weightCount = api.getShapeBoneWeightsCount(nifHandle, shapeHandle, boneIndex);
+        if (weightCount <= 0) {
+            continue;
+        }
+        std::vector<VertexWeightPair> weights(static_cast<size_t>(weightCount));
+        const int written = api.getShapeBoneWeights(nifHandle, shapeHandle, boneIndex, weights.data(), weightCount);
+        for (int i = 0; i < written && i < weightCount; ++i) {
+            const uint16_t vertex = weights[static_cast<size_t>(i)].vertex;
+            if (vertex < influences.size() && weights[static_cast<size_t>(i)].weight > 0.0f) {
+                influences[vertex].push_back(Influence{boneIndex, weights[static_cast<size_t>(i)].weight});
+            }
+        }
+    }
+
+    shape.jointIndices.assign(static_cast<size_t>(vertexCount) * 4u, 0);
+    shape.jointWeights.assign(static_cast<size_t>(vertexCount) * 4u, 0.0f);
+    bool hasAnyWeights = false;
+    for (size_t vertex = 0; vertex < influences.size(); ++vertex) {
+        auto& vertexInfluences = influences[vertex];
+        std::sort(vertexInfluences.begin(), vertexInfluences.end(), [](const Influence& a, const Influence& b) { return a.weight > b.weight; });
+        const size_t count = std::min<size_t>(4, vertexInfluences.size());
+        float total = 0.0f;
+        for (size_t i = 0; i < count; ++i) {
+            total += vertexInfluences[i].weight;
+        }
+        if (total <= 0.0f) {
+            continue;
+        }
+        hasAnyWeights = true;
+        for (size_t i = 0; i < count; ++i) {
+            shape.jointIndices[vertex * 4u + i] = vertexInfluences[i].joint;
+            shape.jointWeights[vertex * 4u + i] = vertexInfluences[i].weight / total;
+        }
+    }
+    if (!hasAnyWeights) {
+        shape.jointIndices.clear();
+        shape.jointWeights.clear();
+    }
+}
+
+json ReadShapeSegmentation(const NiflyApi& api, void* nifHandle, void* shapeHandle)
+{
+    json segmentation = json::object();
+    if (api.getSegmentFile) {
+        const std::string segmentFile = ReadCStringDynamic([&](char* buffer, int size) { return api.getSegmentFile(nifHandle, shapeHandle, buffer, size); });
+        if (!segmentFile.empty()) {
+            segmentation["segmentFile"] = segmentFile;
+        }
+    }
+
+    if (api.segmentCount && api.getSegments) {
+        const int segmentCount = api.segmentCount(nifHandle, shapeHandle);
+        if (segmentCount > 0) {
+            std::vector<int> segmentData(static_cast<size_t>(segmentCount) * 2u);
+            const int written = api.getSegments(nifHandle, shapeHandle, segmentData.data(), segmentCount);
+            json segments = json::array();
+            for (int i = 0; i < written; ++i) {
+                json segment{{"id", segmentData[static_cast<size_t>(i) * 2u]}, {"subsegmentCount", segmentData[static_cast<size_t>(i) * 2u + 1u]}};
+                if (api.getSubsegments && segment["subsegmentCount"].get<int>() > 0) {
+                    std::vector<uint32_t> subsegments(static_cast<size_t>(segment["subsegmentCount"].get<int>()) * 3u);
+                    const int subCount = api.getSubsegments(nifHandle, shapeHandle, segment["id"].get<int>(), subsegments.data(), segment["subsegmentCount"].get<int>());
+                    json subJson = json::array();
+                    for (int sub = 0; sub < subCount; ++sub) {
+                        subJson.push_back(json{{"partId", subsegments[static_cast<size_t>(sub) * 3u]}, {"userSlot", subsegments[static_cast<size_t>(sub) * 3u + 1u]}, {"material", subsegments[static_cast<size_t>(sub) * 3u + 2u]}});
+                    }
+                    segment["subsegments"] = subJson;
+                }
+                segments.push_back(segment);
+            }
+            segmentation["segments"] = segments;
+        }
+    }
+
+    if (api.getPartitions) {
+        const int partitionCount = api.getPartitions(nifHandle, shapeHandle, nullptr, 0);
+        if (partitionCount > 0) {
+            std::vector<uint16_t> partitions(static_cast<size_t>(partitionCount) * 2u);
+            const int written = api.getPartitions(nifHandle, shapeHandle, partitions.data(), partitionCount);
+            json partitionJson = json::array();
+            for (int i = 0; i < written; ++i) {
+                partitionJson.push_back(json{{"bodyPart", partitions[static_cast<size_t>(i) * 2u]}, {"flags", partitions[static_cast<size_t>(i) * 2u + 1u]}});
+            }
+            segmentation["partitions"] = partitionJson;
+        }
+    }
+
+    if (api.getPartitionTris) {
+        const int triPartCount = api.getPartitionTris(nifHandle, shapeHandle, nullptr, 0);
+        if (triPartCount > 0) {
+            std::vector<uint16_t> triParts(static_cast<size_t>(triPartCount));
+            const int written = api.getPartitionTris(nifHandle, shapeHandle, triParts.data(), triPartCount);
+            json triJson = json::array();
+            for (int i = 0; i < written; ++i) {
+                triJson.push_back(triParts[static_cast<size_t>(i)]);
+            }
+            segmentation["trianglePartitionIndices"] = triJson;
+        }
+    }
+    return segmentation;
+}
+
+std::vector<CollisionProxyData> ReadCollisionProxies(const NiflyApi& api, void* nifHandle, const std::vector<NodeData>& nodes)
+{
+    std::vector<CollisionProxyData> proxies;
+    if (!api.getCollision || !api.getBlockId) {
+        return proxies;
+    }
+
+    for (const NodeData& node : nodes) {
+        void* collisionHandle = api.getCollision(nifHandle, node.handle);
+        if (!collisionHandle) {
+            continue;
+        }
+
+        const int collisionId = api.getBlockId(nifHandle, collisionHandle);
+        auto appendProxy = [&](std::string name, int shapeId, std::vector<float> positions, std::vector<uint16_t> triangles) {
+            if (positions.empty()) {
+                return;
+            }
+            CollisionProxyData proxy{};
+            proxy.name = std::move(name);
+            proxy.sourceNodeId = node.blockId;
+            proxy.bodyId = collisionId;
+            proxy.shapeId = shapeId;
+            proxy.positions = std::move(positions);
+            proxy.triangles = std::move(triangles);
+            if (api.getCollShapeBlockname && shapeId >= 0) {
+                proxy.blockName = ReadCString([&](char* buffer, int size) { return api.getCollShapeBlockname(nifHandle, shapeId, buffer, size); }).value_or("");
+            }
+            proxies.push_back(std::move(proxy));
+        };
+
+        if (api.getCollShapeVerts) {
+            const int vertexCount = api.getCollShapeVerts(nifHandle, collisionId, nullptr, 0);
+            if (vertexCount > 0) {
+                std::vector<float> verts(static_cast<size_t>(vertexCount) * 3u);
+                api.getCollShapeVerts(nifHandle, collisionId, verts.data(), static_cast<int>(verts.size()));
+                appendProxy(node.name + "_Collision", collisionId, std::move(verts), {});
+            }
+        }
+
+        if (api.getCollCompressedMeshShapeDataId && api.getCollCompressedMeshShapeVerts && api.getCollCompressedMeshShapeTris) {
+            const int dataId = api.getCollCompressedMeshShapeDataId(nifHandle, collisionId);
+            if (dataId >= 0) {
+                const int vertexCount = api.getCollCompressedMeshShapeVerts(nifHandle, dataId, nullptr, 0);
+                const int triCount = api.getCollCompressedMeshShapeTris(nifHandle, dataId, nullptr, 0);
+                if (vertexCount > 0) {
+                    std::vector<float> verts(static_cast<size_t>(vertexCount) * 3u);
+                    api.getCollCompressedMeshShapeVerts(nifHandle, dataId, verts.data(), static_cast<int>(verts.size()));
+                    std::vector<uint16_t> tris;
+                    if (triCount > 0) {
+                        tris.resize(static_cast<size_t>(triCount) * 3u);
+                        api.getCollCompressedMeshShapeTris(nifHandle, dataId, tris.data(), static_cast<int>(tris.size()));
+                    }
+                    appendProxy(node.name + "_CompressedCollision", dataId, std::move(verts), std::move(tris));
+                }
+            }
+        }
+
+        if (api.getCollPackedStripsDataId && api.getCollPackedStripsShapeVerts && api.getCollPackedStripsShapeTris) {
+            const int dataId = api.getCollPackedStripsDataId(nifHandle, collisionId);
+            if (dataId >= 0) {
+                const int vertexCount = api.getCollPackedStripsShapeVerts(nifHandle, dataId, nullptr, 0);
+                const int triCount = api.getCollPackedStripsShapeTris(nifHandle, dataId, nullptr, 0);
+                if (vertexCount > 0) {
+                    std::vector<float> verts(static_cast<size_t>(vertexCount) * 3u);
+                    api.getCollPackedStripsShapeVerts(nifHandle, dataId, verts.data(), static_cast<int>(verts.size()));
+                    std::vector<uint16_t> tris;
+                    if (triCount > 0) {
+                        tris.resize(static_cast<size_t>(triCount) * 3u);
+                        api.getCollPackedStripsShapeTris(nifHandle, dataId, tris.data(), static_cast<int>(tris.size()));
+                    }
+                    appendProxy(node.name + "_PackedCollision", dataId, std::move(verts), std::move(tris));
+                }
+            }
+        }
+    }
+
+    return proxies;
+}
+
+void ReadShapeMaterial(const NiflyApi& api, void* nifHandle, void* shapeHandle, ShapeData& shape)
+{
+    if (api.getShaderBlockName) {
+        if (const char* blockName = api.getShaderBlockName(nifHandle, shapeHandle)) {
+            shape.shader["blockName"] = blockName;
+        }
+    }
+    if (api.getShaderType) {
+        shape.shader["shaderType"] = api.getShaderType(nifHandle, shapeHandle);
+    }
+    if (api.getShaderFlags1) {
+        shape.shader["shaderFlags1"] = api.getShaderFlags1(nifHandle, shapeHandle);
+    }
+    if (api.getShaderFlags2) {
+        shape.shader["shaderFlags2"] = api.getShaderFlags2(nifHandle, shapeHandle);
+    }
+    if (api.getShaderAttrs) {
+        BSLSPAttrs attrs{};
+        if (api.getShaderAttrs(nifHandle, shapeHandle, &attrs) == 0) {
+            shape.shader["lightingShader"] = json{
+                {"uvOffset", {attrs.uvOffsetU, attrs.uvOffsetV}},
+                {"uvScale", {attrs.uvScaleU, attrs.uvScaleV}},
+                {"emissiveColor", {attrs.emissiveColorR, attrs.emissiveColorG, attrs.emissiveColorB, attrs.emissiveColorA}},
+                {"emissiveMult", attrs.emissiveMult},
+                {"environmentMapScale", attrs.environmentMapScale},
+                {"alpha", attrs.alpha},
+                {"glossiness", attrs.glossiness},
+                {"specularColor", {attrs.specColorR, attrs.specColorG, attrs.specColorB}},
+                {"specularStrength", attrs.specStrength},
+                {"refractionStrength", attrs.refractionStrength},
+                {"rimLightPower", attrs.rimLightPower},
+                {"skinTintColor", {attrs.skinTintColorR, attrs.skinTintColorG, attrs.skinTintColorB, attrs.skinTintAlpha}}
+            };
+        }
+    }
+    if (api.getEffectShaderAttrs) {
+        BSESPAttrs attrs{};
+        if (api.getEffectShaderAttrs(nifHandle, shapeHandle, &attrs) == 0) {
+            shape.shader["effectShader"] = json{
+                {"uvOffset", {attrs.uvOffsetU, attrs.uvOffsetV}},
+                {"uvScale", {attrs.uvScaleU, attrs.uvScaleV}},
+                {"emissiveColor", {attrs.emissiveColorR, attrs.emissiveColorG, attrs.emissiveColorB, attrs.emissiveColorA}},
+                {"emissiveMult", attrs.emissiveMult},
+                {"falloffStartAngle", attrs.falloffStartAngle},
+                {"falloffStopAngle", attrs.falloffStopAngle},
+                {"falloffStartOpacity", attrs.falloffStartOpacity},
+                {"falloffStopOpacity", attrs.falloffStopOpacity},
+                {"softFalloffDepth", attrs.softFalloffDepth},
+                {"envMapScale", attrs.envMapScale}
+            };
+        }
+    }
+    if (api.getAlphaProperty) {
+        AlphaPropertyBuf alpha{};
+        if (api.getAlphaProperty(nifHandle, shapeHandle, &alpha)) {
+            shape.alpha = json{{"flags", alpha.flags}, {"threshold", alpha.threshold}};
+        }
+    }
+}
+
 std::vector<ShapeData> ReadShapes(const NiflyApi& api, void* nifHandle, std::vector<Diagnostic>& diagnostics)
 {
     const int shapeCount = api.getShapes(nifHandle, nullptr, 0, 0);
@@ -376,8 +1174,21 @@ std::vector<ShapeData> ReadShapes(const NiflyApi& api, void* nifHandle, std::vec
     for (size_t shapeIndex = 0; shapeIndex < shapeHandles.size(); ++shapeIndex) {
         void* shapeHandle = shapeHandles[shapeIndex];
         ShapeData shape{};
+        shape.handle = shapeHandle;
+        shape.blockId = api.getBlockId ? api.getBlockId(nifHandle, shapeHandle) : -1;
+        if (api.getNodeParent && api.getBlockId) {
+            if (void* parent = api.getNodeParent(nifHandle, shapeHandle)) {
+                shape.parentBlockId = api.getBlockId(nifHandle, parent);
+            }
+        }
         shape.name = ReadCString([&](char* buffer, int size) { return api.getShapeName(shapeHandle, buffer, size); })
             .value_or("Shape_" + std::to_string(shapeIndex));
+        shape.blockName = api.getShapeBlockName
+            ? ReadCString([&](char* buffer, int size) { return api.getShapeBlockName(shapeHandle, buffer, size); }).value_or("")
+            : std::string();
+        if (api.getTransform) {
+            api.getTransform(shapeHandle, &shape.transform);
+        }
 
         const int vertexCount = api.getVertsForShape(nifHandle, shapeHandle, nullptr, 0, 0);
         const int triangleCount = api.getTriangles(nifHandle, shapeHandle, nullptr, 0, 0);
@@ -405,6 +1216,14 @@ std::vector<ShapeData> ReadShapes(const NiflyApi& api, void* nifHandle, std::vec
             }
         }
 
+        if (api.getColorsForShape) {
+            const int colorCount = api.getColorsForShape(nifHandle, shapeHandle, nullptr, 0);
+            if (colorCount == vertexCount) {
+                shape.colors.resize(static_cast<size_t>(vertexCount) * 4u);
+                api.getColorsForShape(nifHandle, shapeHandle, shape.colors.data(), static_cast<int>(shape.colors.size()));
+            }
+        }
+
         shape.triangles.resize(static_cast<size_t>(triangleCount) * 3u);
         api.getTriangles(nifHandle, shapeHandle, shape.triangles.data(), static_cast<int>(shape.triangles.size()), 0);
 
@@ -418,6 +1237,11 @@ std::vector<ShapeData> ReadShapes(const NiflyApi& api, void* nifHandle, std::vec
             }
         }
 
+        ReadShapeSkinning(api, nifHandle, shapeHandle, vertexCount, shape);
+        shape.segmentation = ReadShapeSegmentation(api, nifHandle, shapeHandle);
+        ReadShapeMaterial(api, nifHandle, shapeHandle, shape);
+        shape.extraData = ReadExtraDataList(api, nifHandle, shapeHandle);
+
         shapes.push_back(std::move(shape));
     }
 
@@ -427,6 +1251,9 @@ std::vector<ShapeData> ReadShapes(const NiflyApi& api, void* nifHandle, std::vec
 
 std::optional<std::string> ConvertShapesToUsd(
     const std::vector<ShapeData>& shapes,
+    std::vector<NodeData> nodes,
+    const json& rootExtraData,
+    const std::vector<CollisionProxyData>& collisionProxies,
     const fs::path& nifPath,
     const std::string& gameName,
     std::vector<Diagnostic>& diagnostics)
@@ -445,18 +1272,103 @@ std::optional<std::string> ConvertShapesToUsd(
     stage->SetDefaultPrim(root.GetPrim());
     root.GetPrim().SetCustomDataByKey(TfToken("brnifly:sourcePath"), VtValue(nifPath.string()));
     root.GetPrim().SetCustomDataByKey(TfToken("brnifly:gameName"), VtValue(gameName));
-    root.GetPrim().SetCustomDataByKey(TfToken("brnifly:unsupportedDataPolicy"), VtValue(std::string("preserve-via-service-streams")));
+    root.GetPrim().SetCustomDataByKey(TfToken("brnifly:unsupportedDataPolicy"), VtValue(std::string("preserve-as-usd-custom-data")));
+    if (!rootExtraData.empty()) {
+        root.GetPrim().SetCustomDataByKey(TfToken("brnifly:extraData"), VtValue(rootExtraData.dump()));
+    }
+
+    std::map<int, size_t> nodeIndexByBlockId;
+    std::set<int> shapeBlockIds;
+    for (const ShapeData& shape : shapes) {
+        if (shape.blockId >= 0) {
+            shapeBlockIds.insert(shape.blockId);
+        }
+    }
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        if (nodes[i].blockId >= 0 && shapeBlockIds.find(nodes[i].blockId) == shapeBlockIds.end()) {
+            nodeIndexByBlockId[nodes[i].blockId] = i;
+        }
+    }
+
+    std::set<std::string> usedNodePrimNames;
+    std::function<SdfPath(int)> ensureNodePath = [&](int blockId) -> SdfPath {
+        auto it = nodeIndexByBlockId.find(blockId);
+        if (it == nodeIndexByBlockId.end()) {
+            return SdfPath("/BRNifly");
+        }
+        NodeData& node = nodes[it->second];
+        if (!node.path.IsEmpty()) {
+            return node.path;
+        }
+        const SdfPath parentPath = node.parentBlockId >= 0 ? ensureNodePath(node.parentBlockId) : SdfPath("/BRNifly");
+        const std::string primName = MakeUniqueName(node.name.empty() ? "Node_" + std::to_string(node.blockId) : node.name, usedNodePrimNames);
+        node.path = parentPath.AppendChild(TfToken(primName));
+        UsdGeomXform nodePrim = UsdGeomXform::Define(stage, node.path);
+        nodePrim.GetPrim().SetCustomDataByKey(TfToken("brnifly:blockId"), VtValue(node.blockId));
+        if (!node.blockName.empty()) {
+            nodePrim.GetPrim().SetCustomDataByKey(TfToken("brnifly:blockName"), VtValue(node.blockName));
+        }
+        nodePrim.GetPrim().SetCustomDataByKey(TfToken("brnifly:flags"), VtValue(node.flags));
+        nodePrim.GetPrim().SetCustomDataByKey(TfToken("brnifly:transform"), VtValue(TransformJson(node.transform).dump()));
+        ApplyTransform(nodePrim.GetPrim(), node.transform);
+        return node.path;
+    };
+
+    for (const auto& [blockId, index] : nodeIndexByBlockId) {
+        (void)index;
+        ensureNodePath(blockId);
+    }
+
+    SdfPath materialsPath("/BRNifly/Materials");
+    UsdGeomXform::Define(stage, materialsPath);
+    std::map<std::string, UsdShadeMaterial> materials;
+    auto materialForShape = [&](const ShapeData& shape) -> UsdShadeMaterial {
+        if (shape.textures.empty() && shape.shader.empty() && shape.alpha.empty()) {
+            return UsdShadeMaterial();
+        }
+        json keyJson{{"textures", shape.textures}, {"shader", shape.shader}, {"alpha", shape.alpha}};
+        const std::string key = keyJson.dump();
+        auto existing = materials.find(key);
+        if (existing != materials.end()) {
+            return existing->second;
+        }
+
+        const std::string name = "Material_" + HexHash(Fnv1a64(key)).substr(0, 12);
+        UsdShadeMaterial material = UsdShadeMaterial::Define(stage, materialsPath.AppendChild(TfToken(name)));
+        material.GetPrim().SetCustomDataByKey(TfToken("brnifly:material"), VtValue(key));
+        if (!shape.textures.empty()) {
+            material.GetPrim().SetCustomDataByKey(TfToken("brnifly:textures"), VtValue(json(shape.textures).dump()));
+        }
+        UsdShadeShader shader = UsdShadeShader::Define(stage, material.GetPath().AppendChild(TfToken("PreviewSurface")));
+        shader.CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+        if (shape.shader.contains("lightingShader") && shape.shader["lightingShader"].contains("alpha")) {
+            shader.CreateInput(TfToken("opacity"), SdfValueTypeNames->Float).Set(shape.shader["lightingShader"]["alpha"].get<float>());
+        } else if (shape.alpha.contains("threshold")) {
+            shader.CreateInput(TfToken("opacity"), SdfValueTypeNames->Float).Set(1.0f);
+        }
+        material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), TfToken("surface"));
+        materials.emplace(key, material);
+        return material;
+    };
 
     size_t emittedMeshes = 0;
+    std::set<std::string> usedShapePrimNames;
     for (size_t shapeIndex = 0; shapeIndex < shapes.size(); ++shapeIndex) {
         const ShapeData& shape = shapes[shapeIndex];
-        const std::string primName = SanitizePrimName(shape.name.empty() ? "Shape_" + std::to_string(shapeIndex) : shape.name);
-        const SdfPath meshPath = SdfPath("/BRNifly").AppendChild(TfToken(primName));
+        const std::string primName = MakeUniqueName(shape.name.empty() ? "Shape_" + std::to_string(shapeIndex) : shape.name, usedShapePrimNames);
+        const SdfPath parentPath = shape.parentBlockId >= 0 ? ensureNodePath(shape.parentBlockId) : SdfPath("/BRNifly");
+        const SdfPath meshPath = parentPath.AppendChild(TfToken(primName));
         UsdGeomMesh mesh = UsdGeomMesh::Define(stage, meshPath);
         if (!mesh) {
             AddDiagnostic(diagnostics, "warning", "Failed to define USD mesh for shape '" + shape.name + "'.");
             continue;
         }
+        ApplyTransform(mesh.GetPrim(), shape.transform);
+        mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:blockId"), VtValue(shape.blockId));
+        if (!shape.blockName.empty()) {
+            mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:blockName"), VtValue(shape.blockName));
+        }
+        mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:transform"), VtValue(TransformJson(shape.transform).dump()));
 
         VtArray<GfVec3f> points;
         points.reserve(shape.positions.size() / 3u);
@@ -500,16 +1412,94 @@ std::optional<std::string> ConvertShapesToUsd(
             st.Set(uvValues);
         }
 
+        UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
+        if (shape.colors.size() == points.size() * 4u) {
+            VtArray<GfVec3f> displayColors;
+            VtArray<float> displayOpacity;
+            displayColors.reserve(points.size());
+            displayOpacity.reserve(points.size());
+            for (size_t i = 0; i + 3 < shape.colors.size(); i += 4) {
+                displayColors.push_back(GfVec3f(shape.colors[i], shape.colors[i + 1], shape.colors[i + 2]));
+                displayOpacity.push_back(shape.colors[i + 3]);
+            }
+            primvars.CreatePrimvar(TfToken("displayColor"), SdfValueTypeNames->Color3fArray, UsdGeomTokens->vertex).Set(displayColors);
+            primvars.CreatePrimvar(TfToken("displayOpacity"), SdfValueTypeNames->FloatArray, UsdGeomTokens->vertex).Set(displayOpacity);
+        }
+
+        if (!shape.jointIndices.empty() && !shape.jointWeights.empty()) {
+            VtArray<int> jointIndices(shape.jointIndices.begin(), shape.jointIndices.end());
+            VtArray<float> jointWeights(shape.jointWeights.begin(), shape.jointWeights.end());
+            UsdGeomPrimvar jointIndexPrimvar = primvars.CreatePrimvar(TfToken("brnifly:jointIndices"), SdfValueTypeNames->IntArray, UsdGeomTokens->vertex);
+            jointIndexPrimvar.SetElementSize(4);
+            jointIndexPrimvar.Set(jointIndices);
+            UsdGeomPrimvar jointWeightPrimvar = primvars.CreatePrimvar(TfToken("brnifly:jointWeights"), SdfValueTypeNames->FloatArray, UsdGeomTokens->vertex);
+            jointWeightPrimvar.SetElementSize(4);
+            jointWeightPrimvar.Set(jointWeights);
+            mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:jointNames"), VtValue(json(shape.boneNames).dump()));
+        }
+
         if (!shape.textures.empty()) {
             json textureMetadata = shape.textures;
             mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:textures"), VtValue(textureMetadata.dump()));
+        }
+        if (!shape.shader.empty()) {
+            mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:shader"), VtValue(shape.shader.dump()));
+        }
+        if (!shape.alpha.empty()) {
+            mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:alphaProperty"), VtValue(shape.alpha.dump()));
+        }
+        if (!shape.segmentation.empty()) {
+            mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:segmentation"), VtValue(shape.segmentation.dump()));
+        }
+        if (!shape.extraData.empty()) {
+            mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:extraData"), VtValue(shape.extraData.dump()));
+        }
+
+        if (UsdShadeMaterial material = materialForShape(shape)) {
+            UsdShadeMaterialBindingAPI(mesh.GetPrim()).Bind(material);
         }
 
         ++emittedMeshes;
     }
 
-    if (emittedMeshes == 0) {
-        AddDiagnostic(diagnostics, "error", "No drawable meshes were emitted from the NIF.");
+    if (!collisionProxies.empty()) {
+        const SdfPath collisionRoot("/BRNifly/Collision");
+        UsdGeomXform::Define(stage, collisionRoot);
+        std::set<std::string> usedCollisionNames;
+        for (size_t proxyIndex = 0; proxyIndex < collisionProxies.size(); ++proxyIndex) {
+            const CollisionProxyData& proxy = collisionProxies[proxyIndex];
+            const std::string name = MakeUniqueName(proxy.name.empty() ? "Collision_" + std::to_string(proxyIndex) : proxy.name, usedCollisionNames);
+            const SdfPath proxyPath = collisionRoot.AppendChild(TfToken(name));
+            VtArray<GfVec3f> points;
+            points.reserve(proxy.positions.size() / 3u);
+            for (size_t i = 0; i + 2 < proxy.positions.size(); i += 3) {
+                points.push_back(GfVec3f(proxy.positions[i], proxy.positions[i + 1], proxy.positions[i + 2]));
+            }
+            if (!proxy.triangles.empty()) {
+                UsdGeomMesh collisionMesh = UsdGeomMesh::Define(stage, proxyPath);
+                collisionMesh.CreatePointsAttr(VtValue(points));
+                VtArray<int> faceVertexCounts;
+                VtArray<int> faceVertexIndices;
+                for (size_t i = 0; i + 2 < proxy.triangles.size(); i += 3) {
+                    faceVertexCounts.push_back(3);
+                    faceVertexIndices.push_back(static_cast<int>(proxy.triangles[i]));
+                    faceVertexIndices.push_back(static_cast<int>(proxy.triangles[i + 1]));
+                    faceVertexIndices.push_back(static_cast<int>(proxy.triangles[i + 2]));
+                }
+                collisionMesh.CreateFaceVertexCountsAttr(VtValue(faceVertexCounts));
+                collisionMesh.CreateFaceVertexIndicesAttr(VtValue(faceVertexIndices));
+                collisionMesh.CreateSubdivisionSchemeAttr(VtValue(UsdGeomTokens->none));
+                collisionMesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:collision"), VtValue(json{{"sourceNodeId", proxy.sourceNodeId}, {"bodyId", proxy.bodyId}, {"shapeId", proxy.shapeId}, {"blockName", proxy.blockName}}.dump()));
+            } else {
+                UsdGeomPoints collisionPoints = UsdGeomPoints::Define(stage, proxyPath);
+                collisionPoints.CreatePointsAttr(VtValue(points));
+                collisionPoints.GetPrim().SetCustomDataByKey(TfToken("brnifly:collision"), VtValue(json{{"sourceNodeId", proxy.sourceNodeId}, {"bodyId", proxy.bodyId}, {"shapeId", proxy.shapeId}, {"blockName", proxy.blockName}}.dump()));
+            }
+        }
+    }
+
+    if (emittedMeshes == 0 && nodes.empty() && collisionProxies.empty() && rootExtraData.empty()) {
+        AddDiagnostic(diagnostics, "error", "No USD-representable data was emitted from the NIF.");
         return std::nullopt;
     }
 
@@ -519,7 +1509,7 @@ std::optional<std::string> ConvertShapesToUsd(
         return std::nullopt;
     }
 
-    AddDiagnostic(diagnostics, "info", "Converted " + std::to_string(emittedMeshes) + " NIF shape(s) to USD mesh prims.");
+    AddDiagnostic(diagnostics, "info", "Converted " + std::to_string(emittedMeshes) + " NIF shape(s), " + std::to_string(nodes.size()) + " node(s), and " + std::to_string(collisionProxies.size()) + " collision proxy/proxies to USD.");
     return usdText;
 }
 
@@ -561,10 +1551,13 @@ json ConvertUsdJson(const char* argv0, const fs::path& nifPath)
         gameName = ReadCString([&](char* buffer, int size) { return api->getGameName(nifHandle, buffer, size); }).value_or("unknown");
     }
 
+    std::vector<NodeData> nodes = ReadNodes(*api, nifHandle);
     std::vector<ShapeData> shapes = ReadShapes(*api, nifHandle, diagnostics);
+    json rootExtraData = ReadExtraDataList(*api, nifHandle, nullptr);
+    std::vector<CollisionProxyData> collisionProxies = ReadCollisionProxies(*api, nifHandle, nodes);
     api->destroy(nifHandle);
 
-    auto usdText = ConvertShapesToUsd(shapes, nifPath, gameName, diagnostics);
+    auto usdText = ConvertShapesToUsd(shapes, std::move(nodes), rootExtraData, collisionProxies, nifPath, gameName, diagnostics);
     if (!usdText) {
         response["message"] = "NIF-to-USD conversion failed.";
         response["diagnostics"] = json::array();
