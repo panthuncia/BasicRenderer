@@ -69,6 +69,12 @@ VoxelSoftwareRasterizationPass::~VoxelSoftwareRasterizationPass() = default;
 
 void VoxelSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
+    const ResourceState indirectState{
+        rhi::ResourceAccessType::IndirectArgument,
+        rhi::ResourceLayout::GenericRead,
+        rhi::ResourceSyncState::ExecuteIndirect
+    };
+
     builder->WithShaderResource(
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
@@ -87,7 +93,7 @@ void VoxelSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* b
             m_voxelWorkCounterBuffer,
             m_viewRasterInfoBuffer)
         .WithUnorderedAccess(m_voxelIndirectArgsBuffer, Builtin::DebugVisualization)
-        .WithIndirectArguments(m_voxelIndirectArgsBuffer)
+        .WithInternalTransition(m_voxelIndirectArgsBuffer, indirectState)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
 
     if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {

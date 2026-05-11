@@ -334,6 +334,17 @@ HierarchicalDispatchCullingPass::~HierarchicalDispatchCullingPass() = default;
 
 void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
+    const ResourceState computeReadState{
+        rhi::ResourceAccessType::ShaderResource,
+        rhi::ResourceLayout::ShaderResource,
+        rhi::ResourceSyncState::ComputeShading
+    };
+    const ResourceState indirectState{
+        rhi::ResourceAccessType::IndirectArgument,
+        rhi::ResourceLayout::GenericRead,
+        rhi::ResourceSyncState::ExecuteIndirect
+    };
+
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     auto queryBuilder = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
@@ -396,7 +407,20 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
             m_voxelRasterQueueDescriptorResourceId.c_str())
         .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery))
-        .WithIndirectArguments(m_pureComputeNodeDispatchArgsBuffer, m_pureComputeClusterDispatchArgsBuffer);
+        .WithInternalTransition(m_visibleClustersCounterBuffer, computeReadState)
+        .WithInternalTransition(m_occlusionReplayStateBuffer, computeReadState)
+        .WithInternalTransition(m_pureComputeCurrentNodeFrontierBuffer, computeReadState)
+        .WithInternalTransition(m_pureComputeCurrentNodeCounterBuffer, computeReadState);
+
+    const uint32_t traversalLevelCount = std::min(m_activeTraversalDepth, kPureComputeMaxTraversalLevels);
+    if (!m_isFirstPass || traversalLevelCount > 0u) {
+        builder->WithInternalTransition(m_pureComputeNodeDispatchArgsBuffer, indirectState)
+            .WithInternalTransition(m_pureComputeClusterDispatchArgsBuffer, indirectState);
+    }
+    if (traversalLevelCount > 0u) {
+        builder->WithInternalTransition(m_pureComputeNextNodeFrontierBuffer, computeReadState)
+            .WithInternalTransition(m_pureComputeNextNodeCounterBuffer, computeReadState);
+    }
 
     if (UsesSWClassification(m_workGraphMode) && m_swVisibleClustersCounterBuffer) {
         builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
@@ -660,6 +684,15 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
             buffers,
             rhi::ResourceAccessType::UnorderedAccess,
             rhi::ResourceAccessType::ShaderResource,
+            rhi::ResourceSyncState::ComputeShading,
+            rhi::ResourceSyncState::ComputeShading);
+    };
+
+    auto computeReadToUavBarrier = [&](std::initializer_list<std::shared_ptr<Buffer>> buffers) {
+        bufferBarrier(
+            buffers,
+            rhi::ResourceAccessType::ShaderResource,
+            rhi::ResourceAccessType::UnorderedAccess,
             rhi::ResourceSyncState::ComputeShading,
             rhi::ResourceSyncState::ComputeShading);
     };
@@ -978,6 +1011,12 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
         });
 
         dispatchClusterCull(m_pureComputeClusterFrontierBuffer, m_pureComputeClusterCounterBuffer);
+        computeReadToUavBarrier({
+            m_pureComputeClusterFrontierBuffer,
+            m_pureComputeClusterCounterBuffer,
+            m_pureComputeDenseClusterWorkBuffer,
+            m_pureComputeDenseClusterWorkCounterBuffer,
+        });
     }
 
     uavToComputeReadBarrier({
@@ -997,6 +1036,9 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
 
     const uint32_t traversalLevelCount = std::min(m_activeTraversalDepth, kPureComputeMaxTraversalLevels);
     for (uint32_t level = 0; level < traversalLevelCount; ++level) {
+        if (level > 0u) {
+            computeReadToUavBarrier({ nextNodeFrontier, nextNodeCounter });
+        }
         clearCounter(nextNodeCounter);
         clearCounter(m_pureComputeClusterCounterBuffer);
         uavBarrier({ nextNodeCounter, m_pureComputeClusterCounterBuffer });
@@ -1047,12 +1089,15 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
 
         dispatchClusterCull(m_pureComputeClusterFrontierBuffer, m_pureComputeClusterCounterBuffer);
 
+        computeReadToUavBarrier({
+            m_pureComputeClusterFrontierBuffer,
+            m_pureComputeClusterCounterBuffer,
+            m_pureComputeDenseClusterWorkBuffer,
+            m_pureComputeDenseClusterWorkCounterBuffer,
+        });
         uavBarrier({
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
-            m_pureComputeClusterFrontierBuffer,
-            m_pureComputeDenseClusterWorkBuffer,
-            m_pureComputeDenseClusterWorkCounterBuffer,
             m_occlusionReplayBuffer,
             m_occlusionReplayStateBuffer,
         });
@@ -1099,9 +1144,13 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
         m_declaredDrawSetResourceIds = currentDrawSetResourceIds;
         m_declaredResourcesChanged = true;
     }
+    const uint32_t previousActiveTraversalDepth = m_activeTraversalDepth;
     m_activeTraversalDepth = context.meshManager != nullptr
         ? context.meshManager->GetCLodMaxTraversalDepth()
         : 0u;
+    if (m_activeTraversalDepth != previousActiveTraversalDepth) {
+        m_declaredResourcesChanged = true;
+    }
     uint32_t zero = 0u;
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
     if (m_swVisibleClustersCounterBuffer) {

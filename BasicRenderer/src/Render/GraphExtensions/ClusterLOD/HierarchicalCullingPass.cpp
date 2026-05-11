@@ -205,6 +205,12 @@ HierarchicalCullingPass::HierarchicalCullingPass(
 HierarchicalCullingPass::~HierarchicalCullingPass() = default;
 
 void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
+    const ResourceState computeReadState{
+        rhi::ResourceAccessType::ShaderResource,
+        rhi::ResourceLayout::ShaderResource,
+        rhi::ResourceSyncState::ComputeShading
+    };
+
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     auto queryBuilder = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
@@ -320,7 +326,9 @@ void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
         builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder->WithInternalTransition(m_visibleClustersCounterBuffer, computeReadState)
+        .WithInternalTransition(m_occlusionReplayStateBuffer, computeReadState)
+        .WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void HierarchicalCullingPass::Setup() {
@@ -598,20 +606,25 @@ PassReturn HierarchicalCullingPass::Execute(PassExecutionContext& executionConte
         commandList.DispatchWorkGraph(replayDispatchDesc);
     }
 
-    std::array<rhi::BufferBarrier, 2> counterBarriers{};
+    std::array<rhi::BufferBarrier, 3> counterBarriers{};
     counterBarriers[0].buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
     counterBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-    counterBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    counterBarriers[0].afterAccess = rhi::ResourceAccessType::ShaderResource;
     counterBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
     counterBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
-    uint32_t counterBarrierCount = 1;
+    counterBarriers[1].buffer = m_occlusionReplayStateBuffer->GetAPIResource().GetHandle();
+    counterBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    counterBarriers[1].afterAccess = rhi::ResourceAccessType::ShaderResource;
+    counterBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
+    counterBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
+    uint32_t counterBarrierCount = 2;
     if (UsesSWClassification(m_workGraphMode)) {
-        counterBarriers[1].buffer = m_swVisibleClustersCounterBuffer->GetAPIResource().GetHandle();
-        counterBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-        counterBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-        counterBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
-        counterBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
-        counterBarrierCount = 2;
+        counterBarriers[2].buffer = m_swVisibleClustersCounterBuffer->GetAPIResource().GetHandle();
+        counterBarriers[2].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        counterBarriers[2].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        counterBarriers[2].beforeSync = rhi::ResourceSyncState::ComputeShading;
+        counterBarriers[2].afterSync = rhi::ResourceSyncState::ComputeShading;
+        counterBarrierCount = 3;
     }
     rhi::BarrierBatch counterBarrierBatch{};
     counterBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(counterBarriers.data(), counterBarrierCount);
