@@ -90,6 +90,13 @@ private:
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBufferPhase2;
 
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
+    std::shared_ptr<Buffer> m_histogramIndirectCommandPhase2;
+    std::shared_ptr<Buffer> m_histogramIndirectCommandSw;
+    std::shared_ptr<Buffer> m_histogramIndirectCommandPhase2Sw;
+    std::shared_ptr<Buffer> m_histogramIndirectCommandPageJob;
+    std::shared_ptr<Buffer> m_histogramIndirectCommandPhase2PageJob;
+    std::shared_ptr<Buffer> m_histogramIndirectCommandReyes;
+    std::shared_ptr<Buffer> m_histogramIndirectCommandPhase2Reyes;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
 
     std::shared_ptr<Buffer> m_rasterBucketsOffsetsBuffer;
@@ -108,6 +115,7 @@ private:
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferPhase2Sw;
 
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
+    std::shared_ptr<Buffer> m_compactedVisibleClustersBufferSw;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
     // TODO: Raster-bucket indirect args have exhibited invalid data when reused across otherwise separate
     // CLod rasterization paths. Until the root cause is understood, keep HW, compute SW, and SW page-job
@@ -164,6 +172,7 @@ private:
     std::shared_ptr<Buffer> m_voxelRasterIndirectArgsBuffer;
     uint32_t m_voxelRasterWorkCapacity = 0u;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
+    std::shared_ptr<Buffer> m_sortedToUnsortedMappingBufferSw;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;

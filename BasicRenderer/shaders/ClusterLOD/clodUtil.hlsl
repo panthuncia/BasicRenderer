@@ -2602,22 +2602,26 @@ void CreateRasterBucketsHistogramCommandCSMain()
     outCommand[0].dispatchY = dispatchY;
     outCommand[0].dispatchZ = 1;
 
-    StructuredBuffer<CLodReplayBufferState> replayStateBuffer = ResourceDescriptorHeap[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<CLodNodeGpuInput> nodeInputs = ResourceDescriptorHeap[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX];
+    if (CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX != 0xFFFFFFFFu &&
+        CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        StructuredBuffer<CLodReplayBufferState> replayStateBuffer = ResourceDescriptorHeap[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<CLodNodeGpuInput> nodeInputs = ResourceDescriptorHeap[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX];
 
-    const CLodReplayBufferState replayState = replayStateBuffer[0];
+        const CLodReplayBufferState replayState = replayStateBuffer[0];
 
-    const uint nodeReplayCount = min(replayState.nodeWriteCount, CLOD_NODE_REPLAY_CAPACITY);
-    const uint meshletReplayCount = min(replayState.meshletWriteCount, CLOD_MESHLET_REPLAY_CAPACITY);
+        const uint nodeReplayCount = min(replayState.nodeWriteCount, CLOD_NODE_REPLAY_CAPACITY);
+        const uint meshletReplayCount = min(replayState.meshletWriteCount, CLOD_MESHLET_REPLAY_CAPACITY);
 
-    // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
-    // Entry point 1 = TraverseNodes (node replay region, 12-byte stride).
-    // Entry point 2 = ClusterCull1  (meshlet replay region, 24-byte stride).
-    // recordsAddress for meshlet region is patched by C++ to include CLOD_REPLAY_MESHLET_REGION_OFFSET.
-    nodeInputs[1].numRecords = nodeReplayCount;
-    nodeInputs[1].recordStride = CLOD_NODE_REPLAY_STRIDE_BYTES;
-    nodeInputs[2].numRecords = meshletReplayCount;
-    nodeInputs[2].recordStride = CLOD_MESHLET_REPLAY_STRIDE_BYTES;
+        // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
+        // Entry point 1 = TraverseNodes (node replay region, 12-byte stride).
+        // Entry point 2 = ClusterCull1  (meshlet replay region, 24-byte stride).
+        // recordsAddress for meshlet region is patched by C++ to include CLOD_REPLAY_MESHLET_REGION_OFFSET.
+        nodeInputs[1].numRecords = nodeReplayCount;
+        nodeInputs[1].recordStride = CLOD_NODE_REPLAY_STRIDE_BYTES;
+        nodeInputs[2].numRecords = meshletReplayCount;
+        nodeInputs[2].recordStride = CLOD_MESHLET_REPLAY_STRIDE_BYTES;
+    }
 }
 
 // IndirectCommandSignatureRootConstant0 = cluster count

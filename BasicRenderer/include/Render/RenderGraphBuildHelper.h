@@ -229,10 +229,11 @@ void BuildGBufferPipeline(RenderGraph* graph) {
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     bool clearRTVs = false;
-    if (!occlusionCulling || !indirect) {
+    const bool needsVisibilityMaterialEvaluation = visibilityRendering;
+    if (!needsVisibilityMaterialEvaluation && (!occlusionCulling || !indirect)) {
         clearRTVs = true; // We will not run an earlier pass
     }
-    else {
+    if (needsVisibilityMaterialEvaluation) {
 
         // Reset material counters
         graph->BuildComputePass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");

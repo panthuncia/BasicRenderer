@@ -76,6 +76,7 @@ enum class CLodRasterOutputKind : uint8_t {
 enum class CLodTransparencyMode : uint8_t {
     LinkedListDeepVisibility,
     AVBOIT,
+    Disabled,
 };
 
 inline constexpr const char* CLodSoftwareRasterModeSettingName = "clodSoftwareRasterMode";
@@ -101,6 +102,7 @@ inline constexpr int CLodVSMRasterModeCount = static_cast<int>(sizeof(CLodVSMRas
 inline constexpr const char* CLodTransparencyModeNames[] = {
     "Linked-List Deep Visibility",
     "AVBOIT",
+    "Disabled",
 };
 inline constexpr int CLodTransparencyModeCount = static_cast<int>(sizeof(CLodTransparencyModeNames) / sizeof(CLodTransparencyModeNames[0]));
 inline constexpr float CLodReyesShadowCoarseTargetPagesPerTriangleDefault = 10.0f;

@@ -1079,6 +1079,10 @@ void CLodAppendVoxelRasterClusterWork(
     uint appendedCount = 0u;
     uint droppedCount = 0u;
     const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
+    const uint visibleClusterWriteCapacity =
+        (phase1HWBase < visibleClusterCapacity)
+            ? (visibleClusterCapacity - phase1HWBase)
+            : 0u;
 
     for (uint clusterIndex = 0u; clusterIndex < voxelDescriptor.clusterCount; ++clusterIndex)
     {
@@ -1113,9 +1117,9 @@ void CLodAppendVoxelRasterClusterWork(
 
         uint combinedSlot = 0u;
         InterlockedAdd(replayState[0].visibleClusterCombinedCount, 1u, combinedSlot);
-        if (combinedSlot >= visibleClusterCapacity)
+        if (combinedSlot >= visibleClusterWriteCapacity)
         {
-            InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+            InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterWriteCapacity);
             ++droppedCount;
             continue;
         }
@@ -2511,6 +2515,10 @@ void ClusterCullBody(
     // Always bind the resource to avoid DXC ICE with conditional ResourceDescriptorHeap casts.
     StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
+    const uint hwVisibleClusterWriteCapacity =
+        (phase1HWBase < visibleClusterCapacity)
+            ? (visibleClusterCapacity - phase1HWBase)
+            : 0u;
 
 #if CLOD_WG_ENABLE_SW_CLASSIFICATION
     // SW raster classification setup.
@@ -2520,6 +2528,10 @@ void ClusterCullBody(
         ResourceDescriptorHeap[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
+    const uint swVisibleClusterWriteCapacity =
+        (swWriteBase < visibleClusterCapacity)
+            ? (visibleClusterCapacity - swWriteBase)
+            : 0u;
     const bool useDedicatedComputePageJobBuffer = CLodWorkGraphUseDedicatedComputePageJobBuffer();
     // Page-job classification setup.
     const bool pageJobEnabled = CLodPageJobEnabled();
@@ -2729,8 +2741,8 @@ void ClusterCullBody(
             hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
             const uint hwAvail =
-                (hwCombinedBase < visibleClusterCapacity)
-                    ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
+                (hwCombinedBase < hwVisibleClusterWriteCapacity)
+                    ? min(hwWriteCount, hwVisibleClusterWriteCapacity - hwCombinedBase)
                     : 0u;
 
             if (WaveGetLaneIndex() == hwLeader) {
@@ -2744,8 +2756,8 @@ void ClusterCullBody(
                     ? min(hwLaneWriteCount, hwAvail - hwPrefix)
                     : 0u;
 
-            if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
-                InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+            if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > hwVisibleClusterWriteCapacity)) {
+                InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
             }
 
             if (isWaveLeader) {
@@ -2841,8 +2853,8 @@ void ClusterCullBody(
                 hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
                 const uint hwAvail =
-                    (hwCombinedBase < visibleClusterCapacity)
-                        ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
+                    (hwCombinedBase < hwVisibleClusterWriteCapacity)
+                        ? min(hwWriteCount, hwVisibleClusterWriteCapacity - hwCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == hwLeader) {
@@ -2856,8 +2868,8 @@ void ClusterCullBody(
                         ? min(hwLaneWriteCount, hwAvail - hwPrefix)
                         : 0u;
 
-                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
-                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > hwVisibleClusterWriteCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
                 }
 
                 if (isWaveLeader) {
@@ -3004,8 +3016,8 @@ void ClusterCullBody(
                 hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
                 const uint hwAvail =
-                    (hwCombinedBase < visibleClusterCapacity)
-                        ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
+                    (hwCombinedBase < hwVisibleClusterWriteCapacity)
+                        ? min(hwWriteCount, hwVisibleClusterWriteCapacity - hwCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == hwLeader) {
@@ -3019,8 +3031,8 @@ void ClusterCullBody(
                         ? min(hwLaneWriteCount, hwAvail - hwPrefix)
                         : 0u;
 
-                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
-                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > hwVisibleClusterWriteCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
                 }
 
                 if (isWaveLeader) {
@@ -3086,8 +3098,8 @@ void ClusterCullBody(
                 swCombinedBase = WaveReadLaneAt(swCombinedBase, swLeader);
 
                 swAvail =
-                    (swCombinedBase < visibleClusterCapacity)
-                        ? min(swIterCount, visibleClusterCapacity - swCombinedBase)
+                    (swCombinedBase < swVisibleClusterWriteCapacity)
+                        ? min(swIterCount, swVisibleClusterWriteCapacity - swCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == swLeader) {
@@ -3095,8 +3107,8 @@ void ClusterCullBody(
                 }
                 swBase = WaveReadLaneAt(swBase, swLeader);
 
-                if (WaveGetLaneIndex() == swLeader && (swCombinedBase + swIterCount > visibleClusterCapacity)) {
-                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                if (WaveGetLaneIndex() == swLeader && (swCombinedBase + swIterCount > swVisibleClusterWriteCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, swVisibleClusterWriteCapacity);
                 }
 
                 if (outputSW && (swRank < swAvail)) {
@@ -3182,8 +3194,8 @@ void ClusterCullBody(
                     pjCombinedBase = WaveReadLaneAt(pjCombinedBase, pjLeader);
 
                     pjAvail =
-                        (pjCombinedBase < visibleClusterCapacity)
-                            ? min(pjIterCount, visibleClusterCapacity - pjCombinedBase)
+                        (pjCombinedBase < swVisibleClusterWriteCapacity)
+                            ? min(pjIterCount, swVisibleClusterWriteCapacity - pjCombinedBase)
                             : 0u;
 
                     if (WaveGetLaneIndex() == pjLeader) {
@@ -3191,8 +3203,8 @@ void ClusterCullBody(
                     }
                     pjBase = WaveReadLaneAt(pjBase, pjLeader);
 
-                    if (WaveGetLaneIndex() == pjLeader && (pjCombinedBase + pjIterCount > visibleClusterCapacity)) {
-                        InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                    if (WaveGetLaneIndex() == pjLeader && (pjCombinedBase + pjIterCount > swVisibleClusterWriteCapacity)) {
+                        InterlockedMin(replayState[0].visibleClusterCombinedCount, swVisibleClusterWriteCapacity);
                     }
 
                     if (outputPageJob && (pjRank < pjAvail)) {

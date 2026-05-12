@@ -101,6 +101,9 @@ std::string CLodShadowVariant::AppendPageJobRasterPassesForPhase(
     const auto& indirectArgsBuffer = isPhase2
         ? extension.m_rasterBucketsIndirectArgsBufferPhase2PageJob
         : extension.m_rasterBucketsIndirectArgsBufferPageJob;
+    const auto& histogramIndirectCommand = isPhase2
+        ? extension.m_histogramIndirectCommandPhase2PageJob
+        : extension.m_histogramIndirectCommandPageJob;
     const auto& pageJobRecordsBuffer = isPhase2
         ? extension.m_swPageJobRecordsBufferPhase2
         : extension.m_swPageJobRecordsBuffer;
@@ -129,7 +132,7 @@ std::string CLodShadowVariant::AppendPageJobRasterPassesForPhase(
                 MakeVariantPassName(traits, "RasterBucketsCreateCommandPassPageJob2"),
                 std::make_shared<RasterBucketCreateCommandPass>(
                     visibleClustersCounterBuffer,
-                    extension.m_histogramIndirectCommand,
+                    histogramIndirectCommand,
                     extension.m_occlusionReplayStateBuffer,
                     extension.m_occlusionNodeGpuInputsBuffer,
                     true)));
@@ -140,7 +143,7 @@ std::string CLodShadowVariant::AppendPageJobRasterPassesForPhase(
                 MakeVariantPassName(traits, "RasterBucketsCreateCommandPassPageJob1"),
                 std::make_shared<RasterBucketCreateCommandPass>(
                     visibleClustersCounterBuffer,
-                    extension.m_histogramIndirectCommand,
+                    histogramIndirectCommand,
                     extension.m_occlusionReplayStateBuffer,
                     extension.m_occlusionNodeGpuInputsBuffer)));
     }
@@ -152,7 +155,7 @@ std::string CLodShadowVariant::AppendPageJobRasterPassesForPhase(
                 std::make_shared<RasterBucketHistogramPass>(
                     visibleClustersBuffer,
                     visibleClustersCounterBuffer,
-                    extension.m_histogramIndirectCommand,
+                    histogramIndirectCommand,
                     histogramBuffer,
                     nullptr,
                     extension.m_workGraphTelemetryBuffer,
@@ -168,7 +171,7 @@ std::string CLodShadowVariant::AppendPageJobRasterPassesForPhase(
                 std::make_shared<RasterBucketHistogramPass>(
                     visibleClustersBuffer,
                     visibleClustersCounterBuffer,
-                    extension.m_histogramIndirectCommand,
+                    histogramIndirectCommand,
                     histogramBuffer,
                     nullptr,
                     extension.m_workGraphTelemetryBuffer,
@@ -227,7 +230,7 @@ std::string CLodShadowVariant::AppendPageJobRasterPassesForPhase(
                     visibleClustersBuffer,
                     visibleClustersCounterBuffer,
                     visibleClustersCounterBuffer,
-                    extension.m_histogramIndirectCommand,
+                    histogramIndirectCommand,
                     histogramBuffer,
                     extension.m_rasterBucketsOffsetsBuffer,
                     writeCursorBuffer,
@@ -250,7 +253,7 @@ std::string CLodShadowVariant::AppendPageJobRasterPassesForPhase(
                     visibleClustersBuffer,
                     visibleClustersCounterBuffer,
                     visibleClustersCounterBuffer,
-                    extension.m_histogramIndirectCommand,
+                    histogramIndirectCommand,
                     histogramBuffer,
                     extension.m_rasterBucketsOffsetsBuffer,
                     writeCursorBuffer,
@@ -917,7 +920,7 @@ std::string CLodShadowVariant::AppendPhase1ReyesLargeRasterPasses(
             MakeVariantPassName(traits, "RasterBucketsCreateCommandPassReyesHW1"),
             std::make_shared<RasterBucketCreateCommandPass>(
                 extension.m_reyesRasterWorkCounterBuffer,
-                extension.m_histogramIndirectCommand,
+                extension.m_histogramIndirectCommandReyes,
                 extension.m_occlusionReplayStateBuffer,
                 extension.m_occlusionNodeGpuInputsBuffer)));
 
@@ -927,7 +930,7 @@ std::string CLodShadowVariant::AppendPhase1ReyesLargeRasterPasses(
             std::make_shared<ReyesRasterWorkHistogramPass>(
                 extension.m_reyesRasterWorkBuffer,
                 extension.m_reyesRasterWorkCounterBuffer,
-                extension.m_histogramIndirectCommand,
+                extension.m_histogramIndirectCommandReyes,
                 extension.m_rasterBucketsHistogramBufferSw)));
 
     outPasses.push_back(
@@ -953,7 +956,7 @@ std::string CLodShadowVariant::AppendPhase1ReyesLargeRasterPasses(
             std::make_shared<ReyesRasterWorkCompactAndArgsPass>(
                 extension.m_reyesRasterWorkBuffer,
                 extension.m_reyesRasterWorkCounterBuffer,
-                extension.m_histogramIndirectCommand,
+                extension.m_histogramIndirectCommandReyes,
                 extension.m_rasterBucketsHistogramBufferSw,
                 extension.m_rasterBucketsOffsetsBuffer,
                 extension.m_rasterBucketsWriteCursorBufferSw,
@@ -1139,7 +1142,7 @@ std::string CLodShadowVariant::AppendPhase2ReyesLargeRasterPasses(
             MakeVariantPassName(traits, "RasterBucketsCreateCommandPassReyesHW2"),
             std::make_shared<RasterBucketCreateCommandPass>(
                 extension.m_reyesRasterWorkCounterBufferPhase2,
-                extension.m_histogramIndirectCommand,
+                extension.m_histogramIndirectCommandPhase2Reyes,
                 extension.m_occlusionReplayStateBuffer,
                 extension.m_occlusionNodeGpuInputsBuffer)));
 
@@ -1149,7 +1152,7 @@ std::string CLodShadowVariant::AppendPhase2ReyesLargeRasterPasses(
             std::make_shared<ReyesRasterWorkHistogramPass>(
                 extension.m_reyesRasterWorkBufferPhase2,
                 extension.m_reyesRasterWorkCounterBufferPhase2,
-                extension.m_histogramIndirectCommand,
+                extension.m_histogramIndirectCommandPhase2Reyes,
                 extension.m_rasterBucketsHistogramBufferPhase2Sw)));
 
     outPasses.push_back(
@@ -1175,7 +1178,7 @@ std::string CLodShadowVariant::AppendPhase2ReyesLargeRasterPasses(
             std::make_shared<ReyesRasterWorkCompactAndArgsPass>(
                 extension.m_reyesRasterWorkBufferPhase2,
                 extension.m_reyesRasterWorkCounterBufferPhase2,
-                extension.m_histogramIndirectCommand,
+                extension.m_histogramIndirectCommandPhase2Reyes,
                 extension.m_rasterBucketsHistogramBufferPhase2Sw,
                 extension.m_rasterBucketsOffsetsBuffer,
                 extension.m_rasterBucketsWriteCursorBufferPhase2Sw,

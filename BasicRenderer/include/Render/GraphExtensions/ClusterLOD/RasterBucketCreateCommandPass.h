@@ -13,7 +13,8 @@ public:
         std::shared_ptr<Buffer> histogramIndirectCommand,
         std::shared_ptr<Buffer> occlusionReplayStateBuffer,
         std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
-        bool runWhenComputeSWRasterEnabledOnly = false);
+        bool runWhenComputeSWRasterEnabledOnly = false,
+        bool patchReplayNodeInputs = false);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -28,4 +29,5 @@ private:
     std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
     std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
     bool m_runWhenComputeSWRasterEnabledOnly = false;
+    bool m_patchReplayNodeInputs = false;
 };
