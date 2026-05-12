@@ -426,6 +426,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
             shadingDepthAttachment.stencilLoad = rhi::LoadOp::DontCare;
             shadingDepthAttachment.stencilStore = rhi::StoreOp::DontCare;
             shadingDepthAttachment.clear = m_AVBOITEarlyDepthTexture->GetClearColor();
+            shadingDepthAttachment.readOnly = true;
             p.depth = &shadingDepthAttachment;
         }
     }

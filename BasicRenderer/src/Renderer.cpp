@@ -43,6 +43,7 @@
 #include "RenderPasses/ClearVisibilityBufferPass.h"
 #include "RenderPasses/PostProcessing/DebugResolvePass.h"
 #include "RenderPasses/MenuRenderPass.h"
+#include "RenderPasses/PresentPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1967,10 +1968,6 @@ void Renderer::Render() {
 
     const uint8_t renderedFrameIndex = m_frameIndex;
 
-    // Record all the commands we need to render the scene into the command list
-    auto& commandAllocator = m_commandAllocators[renderedFrameIndex];
-    auto& commandList = m_commandLists[renderedFrameIndex];
-
     auto& world = RendererECSManager::GetInstance().GetWorld();
 	const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -2114,42 +2111,6 @@ void Renderer::Render() {
             spdlog::critical("Renderer: frame {} RenderGraph::Execute threw: {}", m_totalFramesRendered, ex.what());
             throw;
         }
-    });
-
-	// Transition backbuffer to Common for present
-    commandAllocator->Recycle();
-	commandList->Recycle(commandAllocator.Get());
-	rhi::TextureBarrier rtvBarrier = {};
-	rtvBarrier.afterAccess = rhi::ResourceAccessType::Common;
-	rtvBarrier.afterLayout = rhi::ResourceLayout::Common;
-	rtvBarrier.afterSync = rhi::ResourceSyncState::All;
-	rtvBarrier.beforeAccess = rhi::ResourceAccessType::RenderTarget;
-	rtvBarrier.beforeLayout = rhi::ResourceLayout::RenderTarget;
-	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
-    rtvBarrier.texture = renderTargets[renderedFrameIndex];
-	rhi::BarrierBatch batch = {};
-	batch.textures = { &rtvBarrier };
-    runCapturedStage("TransitionForPresent", [&]() {
-        ZoneScopedN("Renderer::Render::TransitionForPresent");
-        if (renderGraphBatchTraceEnabled) {
-            spdlog::info("Renderer: frame {} transitioning backbuffer {} for present", m_totalFramesRendered, renderedFrameIndex);
-        }
-        commandList->Barriers(batch);
-    });
-
-    // Keep the symbolic tracker in sync with the manual barrier above so the
-    // graph emits a Common->RenderTarget transition on the next frame.
-    m_backbufferResources[renderedFrameIndex]->ResetToCommon();
-
-    commandList->End();
-
-    // Execute the command list
-    runCapturedStage("SubmitPresent", [&]() {
-        ZoneScopedN("Renderer::Render::SubmitPresent");
-        if (renderGraphBatchTraceEnabled) {
-            spdlog::info("Renderer: frame {} submitting present command list", m_totalFramesRendered);
-        }
-        graphicsQueue.Submit({ &commandList.Get() });
     });
 
     // Present the frame
@@ -2716,6 +2677,10 @@ void Renderer::CreateRenderGraph() {
     }
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
+
+    newGraph->BuildRenderPass<PresentPass>("PresentPass");
+    newGraph->SetPassTechnique("PresentPass", "Frame::Present");
+
     probeGraphBuildPhase("CreateRenderGraph before CompileStructural");
 
     newGraph->SetStructuralMaterializeCheckpointCallback([](std::string_view passName) {
