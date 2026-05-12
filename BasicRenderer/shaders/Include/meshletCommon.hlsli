@@ -188,24 +188,8 @@ bool InitializeMeshletFromDrawCall(uint drawCallID, uint meshletLocalIndex, out 
     return InitializeMeshletInternal(meshletLocalIndex, meshInstance, setup);
 }
 
-uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
+uint3 DecodeTriangleFromBuffer(ByteAddressBuffer triangleBuffer, uint triOffset)
 {
-    ByteAddressBuffer triangleBuffer;
-    uint triOffset;
-
-    if (setup.pagePoolSlabDescriptorIndex != 0u)
-    {
-        // CLod path: triangle stream in slab, addressed by per-meshlet descriptor
-        triangleBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
-        triOffset = setup.triangleStreamBase + setup.triangleByteOffset + triLocalIndex * 3;
-    }
-    else
-    {
-        // Non-CLod path: original triangle buffer
-        triangleBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
-        triOffset = setup.groupMeshletTrianglesByteOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
-    }
-
     uint alignedOffset = (triOffset / 4) * 4;
     uint firstWord = triangleBuffer.Load(alignedOffset);
     uint byteOffset = triOffset % 4;
@@ -237,6 +221,20 @@ uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
     }
 
     return uint3(b0, b1, b2);
+}
+
+uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
+{
+    if (setup.pagePoolSlabDescriptorIndex != 0u)
+    {
+        ByteAddressBuffer triangleBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+        uint triOffset = setup.triangleStreamBase + setup.triangleByteOffset + triLocalIndex * 3;
+        return DecodeTriangleFromBuffer(triangleBuffer, triOffset);
+    }
+
+    ByteAddressBuffer triangleBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+    uint triOffset = setup.groupMeshletTrianglesByteOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
+    return DecodeTriangleFromBuffer(triangleBuffer, triOffset);
 }
 
 CLodMeshletUvDescriptor LoadMeshletUvDescriptorAbsolute(MeshletSetup setup, uint uvSetIndex)

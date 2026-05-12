@@ -105,6 +105,37 @@ void D3D12DebugCallback(
 
 namespace {
 
+void SyncOpenRenderGraphSettings(uint8_t numFramesInFlight) {
+    auto& sm = SettingsManager::GetInstance();
+    rg::runtime::OpenRenderGraphSettings orgSettings{};
+    orgSettings.numFramesInFlight = numFramesInFlight;
+    orgSettings.collectPassStatistics = sm.getSettingGetter<bool>("collectPassStatistics")();
+    orgSettings.collectPipelineStatistics = sm.getSettingGetter<bool>("collectPipelineStatistics")();
+    orgSettings.useAsyncCompute = sm.getSettingGetter<bool>("useAsyncCompute")();
+    orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
+    orgSettings.renderGraphVramDumpEnabled = sm.getSettingGetter<bool>("renderGraphVramDumpEnabled")();
+    orgSettings.renderGraphBatchTraceEnabled = sm.getSettingGetter<bool>("renderGraphBatchTraceEnabled")();
+    orgSettings.readOnlyUniformTransitionElisionEnabled = true;
+    orgSettings.autoAliasMode = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
+    orgSettings.autoAliasPackingStrategy = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
+    orgSettings.autoAliasEnableLogging = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
+    orgSettings.autoAliasLogExclusionReasons = sm.getSettingGetter<bool>("autoAliasLogExclusionReasons")();
+    orgSettings.autoAliasBuildDebugData = sm.getSettingGetter<bool>("autoAliasBuildDebugData")();
+    orgSettings.queueSchedulingEnableLogging = sm.getSettingGetter<bool>("queueSchedulingEnableLogging")();
+    orgSettings.queueSchedulingWidthScale = sm.getSettingGetter<float>("queueSchedulingWidthScale")();
+    orgSettings.queueSchedulingPenaltyBias = sm.getSettingGetter<float>("queueSchedulingPenaltyBias")();
+    orgSettings.queueSchedulingMinPenalty = sm.getSettingGetter<float>("queueSchedulingMinPenalty")();
+    orgSettings.queueSchedulingResourcePressureWeight = sm.getSettingGetter<float>("queueSchedulingResourcePressureWeight")();
+    orgSettings.queueSchedulingUavPressureWeight = sm.getSettingGetter<float>("queueSchedulingUavPressureWeight")();
+    orgSettings.queueSchedulingAutoGraphicsBias = sm.getSettingGetter<float>("queueSchedulingAutoGraphicsBias")();
+    orgSettings.queueSchedulingAsyncOverlapBonus = sm.getSettingGetter<float>("queueSchedulingAsyncOverlapBonus")();
+    orgSettings.queueSchedulingCrossQueueHandoffPenalty = sm.getSettingGetter<float>("queueSchedulingCrossQueueHandoffPenalty")();
+    orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
+    orgSettings.autoAliasPoolGrowthHeadroom = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
+    orgSettings.heavyDebug = sm.getSettingGetter<bool>("heavyDebug")();
+    rg::runtime::SetOpenRenderGraphSettings(orgSettings);
+}
+
 bool IsStreamlineDisabledByEnvironment() {
     char* value = nullptr;
     size_t len = 0;
@@ -189,6 +220,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
     UpscalingManager::GetInstance().InitSL();
     SetSettings();
+    SyncOpenRenderGraphSettings(m_numFramesInFlight);
     RendererECSManager::GetInstance().Initialize();
     TrackedEntityToken::Hooks trackedEntityHooks{};
     trackedEntityHooks.createEntity = [](flecs::entity existing) {
@@ -1181,7 +1213,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
     settingsManager.registerSetting<bool>("renderGraphVramDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphDisableCaching", false);
     settingsManager.registerSetting<bool>("renderGraphQueueSyncTraceEnabled", false);
@@ -1761,6 +1793,8 @@ void Renderer::Update(float elapsedSeconds) {
             m_preFrameDeferredFunctions.flush();
         });
     }
+    SyncOpenRenderGraphSettings(m_numFramesInFlight);
+
     if (rebuildRenderGraph) {
         runCapturedStage("RenderGraphBuild", [&]() {
             ZoneScopedN("Renderer::Update::RenderGraphBuild");
@@ -2026,38 +2060,7 @@ void Renderer::Render() {
 
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
 
-    // Sync SettingsManager values into OpenRenderGraphSettings so the
-    // DefaultRenderGraphSettingsService reads up-to-date values.
-    {
-        auto& sm = SettingsManager::GetInstance();
-        rg::runtime::OpenRenderGraphSettings orgSettings{};
-        orgSettings.numFramesInFlight        = m_numFramesInFlight;
-        orgSettings.collectPassStatistics    = sm.getSettingGetter<bool>("collectPassStatistics")();
-        orgSettings.collectPipelineStatistics = sm.getSettingGetter<bool>("collectPipelineStatistics")();
-        orgSettings.useAsyncCompute           = sm.getSettingGetter<bool>("useAsyncCompute")();
-        orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
-		orgSettings.renderGraphVramDumpEnabled = sm.getSettingGetter<bool>("renderGraphVramDumpEnabled")();
-        orgSettings.renderGraphBatchTraceEnabled = sm.getSettingGetter<bool>("renderGraphBatchTraceEnabled")();
-        orgSettings.readOnlyUniformTransitionElisionEnabled = true;
-        orgSettings.autoAliasMode             = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
-        orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
-        orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
-        orgSettings.autoAliasLogExclusionReasons = sm.getSettingGetter<bool>("autoAliasLogExclusionReasons")();
-        orgSettings.autoAliasBuildDebugData   = sm.getSettingGetter<bool>("autoAliasBuildDebugData")();
-        orgSettings.queueSchedulingEnableLogging = sm.getSettingGetter<bool>("queueSchedulingEnableLogging")();
-        orgSettings.queueSchedulingWidthScale = sm.getSettingGetter<float>("queueSchedulingWidthScale")();
-        orgSettings.queueSchedulingPenaltyBias = sm.getSettingGetter<float>("queueSchedulingPenaltyBias")();
-        orgSettings.queueSchedulingMinPenalty = sm.getSettingGetter<float>("queueSchedulingMinPenalty")();
-        orgSettings.queueSchedulingResourcePressureWeight = sm.getSettingGetter<float>("queueSchedulingResourcePressureWeight")();
-        orgSettings.queueSchedulingUavPressureWeight = sm.getSettingGetter<float>("queueSchedulingUavPressureWeight")();
-        orgSettings.queueSchedulingAutoGraphicsBias = sm.getSettingGetter<float>("queueSchedulingAutoGraphicsBias")();
-        orgSettings.queueSchedulingAsyncOverlapBonus = sm.getSettingGetter<float>("queueSchedulingAsyncOverlapBonus")();
-        orgSettings.queueSchedulingCrossQueueHandoffPenalty = sm.getSettingGetter<float>("queueSchedulingCrossQueueHandoffPenalty")();
-        orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
-        orgSettings.autoAliasPoolGrowthHeadroom   = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
-        orgSettings.heavyDebug                = sm.getSettingGetter<bool>("heavyDebug")();
-        rg::runtime::SetOpenRenderGraphSettings(orgSettings);
-    }
+    SyncOpenRenderGraphSettings(m_numFramesInFlight);
 
     std::shared_ptr<ExternalTextureResource> currentBackbufferResource;
     if (renderedFrameIndex < m_backbufferResources.size()) {
