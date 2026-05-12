@@ -83,6 +83,9 @@ endif()
 find_package(spdlog CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+if(TARGET imgui::imgui)
+    set_property(TARGET imgui::imgui PROPERTY INTERFACE_LINK_LIBRARIES "")
+endif()
 #find_package(meshoptimizer REQUIRED)
 find_package(DirectX-Headers CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
@@ -209,6 +212,31 @@ target_link_libraries(resource_codegen
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 add_executable(ShaderPreprocessTests "tests/ShaderPreprocessTests.cpp")
+
+set(_basicrenderer_imgui_vulkan_backend_candidates)
+if(DEFINED VCPKG_INSTALLED_DIR)
+    file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
+        "${VCPKG_INSTALLED_DIR}/vcpkg/blds/imgui/src/*/backends/imgui_impl_vulkan.cpp")
+endif()
+if(NOT _basicrenderer_imgui_vulkan_backend_candidates)
+    file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/vcpkg/blds/imgui/src/*/backends/imgui_impl_vulkan.cpp")
+endif()
+if(NOT _basicrenderer_imgui_vulkan_backend_candidates)
+    file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
+        "${BASICRENDERER_REPO_ROOT}/out/build/*/vcpkg_installed/vcpkg/blds/imgui/src/*/backends/imgui_impl_vulkan.cpp")
+endif()
+if(_basicrenderer_imgui_vulkan_backend_candidates)
+    list(SORT _basicrenderer_imgui_vulkan_backend_candidates)
+    list(GET _basicrenderer_imgui_vulkan_backend_candidates 0 _basicrenderer_imgui_vulkan_backend)
+    target_sources(${PROJECT_NAME} PRIVATE "${_basicrenderer_imgui_vulkan_backend}")
+    set_source_files_properties("${_basicrenderer_imgui_vulkan_backend}" PROPERTIES
+        SKIP_PRECOMPILE_HEADERS ON
+        COMPILE_DEFINITIONS "IMGUI_IMPL_VULKAN_NO_PROTOTYPES;VK_USE_PLATFORM_WIN32_KHR"
+        COMPILE_OPTIONS "/w")
+else()
+    message(FATAL_ERROR "BasicRenderer: imgui_impl_vulkan.cpp source was not found in the vcpkg build tree. Vulkan ImGui must compile the backend locally with IMGUI_IMPL_VULKAN_NO_PROTOTYPES instead of using the prebuilt imgui library backend.")
+endif()
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/pch.h")
 
@@ -757,6 +785,7 @@ target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/")
 target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/ThirdParty")
+target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/volk")
 target_include_directories(ShaderPreprocessTests BEFORE PRIVATE "${BASICRENDERER_SOURCE_ROOT}" "${BASICRENDERER_SOURCE_ROOT}/src" include/)
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)

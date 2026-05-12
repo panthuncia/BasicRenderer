@@ -170,9 +170,7 @@ StructuralSchedulingPolicy BuildStructuralSchedulingPolicy(const CLodVariantTrai
     const HierarchicalCullingWorkGraphMode workGraphMode = forceHardwareOnly
         ? HierarchicalCullingWorkGraphMode::HardwareOnly
         : GetCullingWorkGraphMode(softwareRasterMode);
-    const HierarchicalCullingBackend cullingBackend = forceHardwareOnly
-        ? HierarchicalCullingBackend::WorkGraph
-        : GetHierarchicalCullingBackend(cullingBackendMode);
+    const HierarchicalCullingBackend cullingBackend = GetHierarchicalCullingBackend(cullingBackendMode);
 
     return StructuralSchedulingPolicy{
         .transparencyMode = transparencyMode,
@@ -1476,6 +1474,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         HierarchicalCullingPassInputs cullPassInputs;
         cullPassInputs.isFirstPass = isPhase1;
         cullPassInputs.maxVisibleClusters = m_visibleClusterCapacity;
+        cullPassInputs.backend = cullingBackend;
         cullPassInputs.workGraphMode = workGraphMode;
         cullPassInputs.renderPhase = renderPhase;
         cullPassInputs.clodOnlyWorkloads = true;

@@ -287,6 +287,64 @@ void UsesPerFrameBuiltinCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             "finalized shader should not contain unresolved descriptor calls");
         }, failureCount);
 
+    RunTest("brdf pixel entry prunes unused fullscreen view-ray shader", []() {
+        const std::string source = R"(
+struct FULLSCREEN_VS_OUTPUT
+{
+    float4 position : SV_POSITION;
+    float2 uv : TEXCOORD1;
+    float3 viewRayVS : TEXCOORD2;
+};
+
+FULLSCREEN_VS_OUTPUT FullscreenVSMain(uint vid : SV_VertexID)
+{
+    StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    FULLSCREEN_VS_OUTPUT o;
+    o.position = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    o.uv = float2(0.0f, 0.0f);
+    o.viewRayVS = cameraBuffer[0].position.xyz;
+    return o;
+}
+
+FULLSCREEN_VS_OUTPUT FullscreenVSNoViewRayMain(uint vid : SV_VertexID)
+{
+    FULLSCREEN_VS_OUTPUT o;
+    o.position = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    o.uv = float2(0.0f, 0.0f);
+    o.viewRayVS = float3(0.0f, 0.0f, 0.0f);
+    return o;
+}
+
+float2 IntegrateBRDF(float NdotV, float roughness)
+{
+    return float2(NdotV, roughness);
+}
+
+float2 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_TARGET
+{
+    return IntegrateBRDF(input.uv.x, input.uv.y);
+}
+)";
+
+        PreparedShaderSource prepared =
+            PrepareShaderSourceForEntryPoint(MakeBuffer(source), "PSMain");
+
+        Require(prepared.diagnostics.safeToPrune, "expected BRDF-style shader to be safe to prune");
+        Require(Contains(prepared.sourceBeforeRewrite, "PSMain"),
+            "pixel entry point should remain");
+        Require(Contains(prepared.sourceBeforeRewrite, "IntegrateBRDF"),
+            "reachable BRDF helper should remain");
+        Require(!Contains(prepared.sourceBeforeRewrite, "FullscreenVSMain"),
+            "unused view-ray fullscreen shader should be pruned");
+        Require(!Contains(prepared.sourceBeforeRewrite, "Builtin::CameraBuffer"),
+            "unused fullscreen shader Builtin reference should be pruned before rewrite");
+
+        std::string finalized = FinalizePreparedShaderSource(prepared, {});
+        Require(!Contains(finalized, "Builtin::"), "finalized shader should not contain Builtin::");
+        Require(CollectResourceDescriptorCallsFromText(finalized).empty(),
+            "finalized shader should not contain unresolved descriptor calls");
+        }, failureCount);
+
     RunTest("parse degradation triggers fallback but rewrite still completes", []() {
         const std::string source = R"(
 float BrokenFunction(

@@ -39,7 +39,7 @@ void CreateGBufferResources(RenderGraph* graph) {
 
     TextureDescription normalsWorldSpaceDesc;
     normalsWorldSpaceDesc.channels = 3;
-    normalsWorldSpaceDesc.format = rhi::Format::R32G32B32A32_Typeless;
+    normalsWorldSpaceDesc.format = rhi::Format::R32G32B32A32_Float;
     normalsWorldSpaceDesc.hasRTV = true;
 	normalsWorldSpaceDesc.rtvFormat = rhi::Format::R32G32B32A32_Float;
     normalsWorldSpaceDesc.hasSRV = true;

@@ -3375,7 +3375,6 @@ void WG_ClusterCull4(
 }
 
 [Shader("node")]
-#endif
 [NodeID("ClusterCull8")]
 [NodeLaunch("coalescing")]
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
@@ -3458,6 +3457,8 @@ void WG_ClusterCull64(
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
+
+#endif
 
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
 #define CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST 1

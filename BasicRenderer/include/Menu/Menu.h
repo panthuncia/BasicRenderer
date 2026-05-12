@@ -11,7 +11,11 @@
 #include <imgui_impl_dx12.h>
 #if __has_include(<imgui_impl_vulkan.h>) && __has_include(<vulkan/vulkan.h>)
 #define BASICRENDERER_HAS_IMGUI_VULKAN 1
+#ifndef IMGUI_IMPL_VULKAN_NO_PROTOTYPES
+#define IMGUI_IMPL_VULKAN_NO_PROTOTYPES 1
+#endif
 #include <imgui_impl_vulkan.h>
+#include <volk.h>
 #include <rhi_interop_vulkan.h>
 #else
 #define BASICRENDERER_HAS_IMGUI_VULKAN 0
@@ -715,7 +719,7 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     } else if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
 #if BASICRENDERER_HAS_IMGUI_VULKAN
         ImGui_ImplVulkan_InitInfo initInfo{};
-        initInfo.ApiVersion = VK_API_VERSION_1_3;
+        initInfo.ApiVersion = rhi::vulkan::get_device_api_version(device);
         initInfo.Instance = rhi::vulkan::get_instance(device);
         initInfo.PhysicalDevice = rhi::vulkan::get_physical_device(device);
         initInfo.Device = rhi::vulkan::get_device(device);
@@ -739,6 +743,41 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 
         if (!initInfo.Instance || !initInfo.PhysicalDevice || !initInfo.Device || !initInfo.Queue) {
             throw std::runtime_error("Menu::Initialize failed to query Vulkan native handles for ImGui");
+        }
+        if (!vkGetInstanceProcAddr || !vkGetDeviceProcAddr) {
+            throw std::runtime_error("Menu::Initialize cannot initialize ImGui Vulkan backend because Volk has not loaded Vulkan function pointers");
+        }
+
+        struct ImGuiVulkanLoaderData {
+            VkInstance instance;
+            VkDevice device;
+        } loaderData{ initInfo.Instance, initInfo.Device };
+
+        if (!ImGui_ImplVulkan_LoadFunctions(initInfo.ApiVersion, [](const char* functionName, void* userData) -> PFN_vkVoidFunction {
+            const auto* loaderData = static_cast<const ImGuiVulkanLoaderData*>(userData);
+            if (!loaderData) {
+                return nullptr;
+            }
+            if (std::strcmp(functionName, "vkCmdBeginRendering") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdBeginRendering);
+            }
+            if (std::strcmp(functionName, "vkCmdEndRendering") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdEndRendering);
+            }
+            if (std::strcmp(functionName, "vkCmdBeginRenderingKHR") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdBeginRenderingKHR);
+            }
+            if (std::strcmp(functionName, "vkCmdEndRenderingKHR") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdEndRenderingKHR);
+            }
+            if (vkGetInstanceProcAddr) {
+                if (PFN_vkVoidFunction function = vkGetInstanceProcAddr(loaderData->instance, functionName)) {
+                    return function;
+                }
+            }
+            return vkGetDeviceProcAddr ? vkGetDeviceProcAddr(loaderData->device, functionName) : nullptr;
+        }, &loaderData)) {
+            throw std::runtime_error("Menu::Initialize failed to load ImGui Vulkan backend functions through Volk");
         }
 
         if (!ImGui_ImplVulkan_Init(&initInfo)) {
