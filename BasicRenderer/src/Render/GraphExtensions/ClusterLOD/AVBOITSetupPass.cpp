@@ -60,13 +60,13 @@ void AVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* builder)
         m_zeroTransmittanceSliceTexture);
 
     if (m_accumulationTexture) {
-        builder->WithRenderTarget(m_accumulationTexture);
+        builder->WithRenderTargetClear(m_accumulationTexture);
     }
     if (m_normalizationTexture) {
-        builder->WithRenderTarget(m_normalizationTexture);
+        builder->WithRenderTargetClear(m_normalizationTexture);
     }
     if (m_shadingExtinctionTexture) {
-        builder->WithRenderTarget(m_shadingExtinctionTexture);
+        builder->WithRenderTargetClear(m_shadingExtinctionTexture);
     }
 }
 
