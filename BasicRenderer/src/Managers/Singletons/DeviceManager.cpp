@@ -1,5 +1,10 @@
 #include "Managers/Singletons/DeviceManager.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <string>
+
 #include <spdlog/spdlog.h>
 #include <rhi_debug.h>
 
@@ -43,6 +48,52 @@ bool IsDiagnosticsBuild() {
 #else
     return false;
 #endif
+}
+
+std::string GetEnvironmentString(const char* name) {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, name) != 0 || value == nullptr) {
+        return {};
+    }
+
+    std::string result(value);
+    free(value);
+    return result;
+}
+
+std::string NormalizeBackendName(std::string value) {
+    value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char ch) { return std::isspace(ch) != 0 || ch == '-' || ch == '_'; }), value.end());
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+rhi::Backend ParseBackendName(const std::string& value, rhi::Backend fallback) {
+    const std::string normalized = NormalizeBackendName(value);
+    if (normalized == "vulkan" || normalized == "vk") {
+        return rhi::Backend::Vulkan;
+    }
+    if (normalized == "d3d12" || normalized == "dx12" || normalized == "direct3d12") {
+        return rhi::Backend::D3D12;
+    }
+    return fallback;
+}
+
+rhi::Backend GetRequestedBackend() {
+    rhi::Backend backend = rhi::Backend::D3D12;
+
+    try {
+        backend = ParseBackendName(SettingsManager::GetInstance().getSettingGetter<std::string>("rhiBackend")(), backend);
+    }
+    catch (const std::exception&) {
+    }
+
+    const std::string envBackend = GetEnvironmentString("BASICRENDERER_RHI_BACKEND");
+    if (!envBackend.empty()) {
+        backend = ParseBackendName(envBackend, backend);
+    }
+
+    return backend;
 }
 }
 
@@ -100,21 +151,32 @@ void DeviceManager::Initialize() {
         enableTexelAddressing,
         numFramesInFlight);
 
-    const rhi::Backend backend = rhi::Backend::D3D12;
+    const rhi::Backend backend = GetRequestedBackend();
+    if (backend == rhi::Backend::Vulkan && enableStreamline) {
+        spdlog::warn("DeviceManager::Initialize disabling Streamline for Vulkan backend; Streamline integration is D3D12-only in this workspace.");
+        enableStreamline = false;
+    }
 
-    rhi::CreateD3D12Device(
-        rhi::DeviceCreateInfo{
-            .backend = backend,
-            .framesInFlight = numFramesInFlight,
-            .enableDebug = enableDebug,
-            .instrumentation = {
-                .enableRuntimeInstrumentation = enableRuntimeInstrumentation,
-                .enableSynchronousRecording = enableSynchronousRecording,
-                .enableTexelAddressing = enableTexelAddressing,
-            },
+    const rhi::DeviceCreateInfo createInfo{
+        .backend = backend,
+        .framesInFlight = numFramesInFlight,
+        .enableDebug = enableDebug,
+        .instrumentation = {
+            .enableRuntimeInstrumentation = enableRuntimeInstrumentation,
+            .enableSynchronousRecording = enableSynchronousRecording,
+            .enableTexelAddressing = enableTexelAddressing,
         },
-        m_device,
-        enableStreamline);
+    };
+
+    const rhi::Result createResult = backend == rhi::Backend::Vulkan
+        ? rhi::CreateVulkanDevice(createInfo, m_device)
+        : rhi::CreateD3D12Device(createInfo, m_device, enableStreamline);
+
+    if (!rhi::IsOk(createResult) || !m_device) {
+        spdlog::error("DeviceManager::Initialize failed to create backend {} result={}", static_cast<uint32_t>(backend), static_cast<uint32_t>(createResult));
+        m_backend = rhi::Backend::Null;
+        return;
+    }
 
     m_backend = backend;
 

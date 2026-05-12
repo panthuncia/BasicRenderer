@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <rhi_feature_info.h>
+#include <rhi_interop.h>
 #include <rhi_interop_dx12.h>
 #include <spdlog/spdlog.h>
 
@@ -33,6 +34,20 @@
 #include "../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
 
 namespace {
+
+uint64_t GetNativeBufferDeviceAddress(rhi::Resource resource) noexcept
+{
+    if (ID3D12Resource* nativeResource = rhi::dx12::get_resource(resource)) {
+        return nativeResource->GetGPUVirtualAddress();
+    }
+
+    rhi::VulkanResourceInfo vulkanInfo{};
+    if (rhi::QueryNativeResource(resource, rhi::RHI_IID_VK_RESOURCE, &vulkanInfo, sizeof(vulkanInfo))) {
+        return vulkanInfo.deviceAddress;
+    }
+
+    return 0u;
+}
 
 constexpr bool kDisableVirtualShadowDirtyPageCulling = false;
 
@@ -852,14 +867,11 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         m_occlusionReplayBuffer->Materialize();
     }
 
-    if (ID3D12Resource* nodeInputResource = rhi::dx12::get_resource(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
-        const uint64_t nodeInputBufferAddress = nodeInputResource->GetGPUVirtualAddress();
+    if (const uint64_t nodeInputBufferAddress = GetNativeBufferDeviceAddress(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
         multiNodeGpuInput.nodeInputsAddress = nodeInputBufferAddress + sizeof(CLodNodeGpuInput);
     }
 
-    if (ID3D12Resource* replayResource = rhi::dx12::get_resource(m_occlusionReplayBuffer->GetAPIResource())) {
-        const uint64_t replayAddress = replayResource->GetGPUVirtualAddress();
-
+    if (const uint64_t replayAddress = GetNativeBufferDeviceAddress(m_occlusionReplayBuffer->GetAPIResource())) {
         // Entry point 1 = TraverseNodes — node replay region at offset 0
         nodeGpuInputs[1].entrypointIndex = 1;
         nodeGpuInputs[1].numRecords = 0; // patched by GPU in CreateRasterBucketsHistogramCommandCSMain

@@ -25,13 +25,28 @@
 #include "Resources/Resolvers/ECSResourceResolver.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "ShaderBuffers.h"
-#include <rhi_dx12_casting.h>
+#include <rhi_interop.h>
+#include <rhi_interop_dx12.h>
 #include "../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodPureComputeCullingRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
 
 namespace {
+
+uint64_t GetNativeBufferDeviceAddress(rhi::Resource resource) noexcept
+{
+    if (ID3D12Resource* nativeResource = rhi::dx12::get_resource(resource)) {
+        return nativeResource->GetGPUVirtualAddress();
+    }
+
+    rhi::VulkanResourceInfo vulkanInfo{};
+    if (rhi::QueryNativeResource(resource, rhi::RHI_IID_VK_RESOURCE, &vulkanInfo, sizeof(vulkanInfo))) {
+        return vulkanInfo.deviceAddress;
+    }
+
+    return 0u;
+}
 
 constexpr uint32_t kPureComputeObjectCullThreadsPerGroup = 64u;
 constexpr uint32_t kPureComputeTraverseThreadsPerGroup = 64u;
@@ -1322,14 +1337,11 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
         m_occlusionReplayBuffer->Materialize();
     }
 
-    if (ID3D12Resource* nodeInputResource = rhi::dx12::get_resource(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
-        const uint64_t nodeInputBufferAddress = nodeInputResource->GetGPUVirtualAddress();
+    if (const uint64_t nodeInputBufferAddress = GetNativeBufferDeviceAddress(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
         multiNodeGpuInput.nodeInputsAddress = nodeInputBufferAddress + sizeof(CLodNodeGpuInput);
     }
 
-    if (ID3D12Resource* replayResource = rhi::dx12::get_resource(m_occlusionReplayBuffer->GetAPIResource())) {
-        const uint64_t replayAddress = replayResource->GetGPUVirtualAddress();
-
+    if (const uint64_t replayAddress = GetNativeBufferDeviceAddress(m_occlusionReplayBuffer->GetAPIResource())) {
         nodeGpuInputs[1].entrypointIndex = 1;
         nodeGpuInputs[1].numRecords = 0;
         nodeGpuInputs[1].recordsAddress = replayAddress;
