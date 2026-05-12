@@ -173,7 +173,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     const bool enableDirectStorage = !IsDirectStorageDisabledByEnvironment();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
-    settingsManager.registerSetting<std::string>("rhiBackend", "D3D12");
+    settingsManager.registerSetting<rhi::Backend>("rhiBackend", rhi::Backend::D3D12);
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);

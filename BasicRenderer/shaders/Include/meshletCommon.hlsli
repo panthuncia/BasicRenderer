@@ -172,12 +172,11 @@ bool InitializeMeshletInternal(
     return true;
 }
 
-// per-draw invocation (mesh shader path uses global root constants set externally)
-// Mesh shader path (root constant perMeshInstanceBufferIndex already set)
+// per-draw invocation (mesh shader path uses root constants set externally)
 bool InitializeMeshlet(uint meshletLocalIndex, out MeshletSetup setup)
 {
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer meshInstance = meshInstanceBuffer[perMeshInstanceBufferIndex];
+    PerMeshInstanceBuffer meshInstance = meshInstanceBuffer[GetRootPerMeshInstanceBufferIndex()];
     return InitializeMeshletInternal(meshletLocalIndex, meshInstance, setup);
 }
 

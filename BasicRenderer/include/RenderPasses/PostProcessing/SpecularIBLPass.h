@@ -72,9 +72,8 @@ public:
         commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
         commandList.BindPipeline(m_pso->GetHandle());
 
-        unsigned int settings[NumSettingsRootConstants] = {};
-        settings[EnableGTAO] = m_gtaoEnabled;
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, settings);
+        unsigned int enableGTAO = m_gtaoEnabled;
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscEnableGTAO, 1, &enableGTAO);
 
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 

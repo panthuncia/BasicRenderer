@@ -190,14 +190,12 @@ private:
     }
 
     void SetCommonRootConstants(const RenderContext& context, rhi::CommandList& commandList) {
-        unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, settings);
+        unsigned int settings[] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
 
         if (m_meshShaders) {
-            unsigned int misc[NumMiscUintRootConstants] = {};
             //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
         }
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscEnableShadows, 3, settings);
     }
 
     void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
@@ -207,7 +205,8 @@ private:
         m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
 			auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash]; // Pull out only the meshes for this render phase
 
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
+            unsigned int perObjectIndex = drawInfo.perObjectCBIndex;
+            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerObjectBufferIndex, 1, &perObjectIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -215,10 +214,11 @@ private:
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
-                unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
+                unsigned int perMeshIndices[] = {
+                    static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB)),
+                    static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB))
+                };
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerMeshBufferIndex, 2, perMeshIndices);
 
 				//commandList.SetIndexBuffer(mesh.GetIndexBufferView());
 				//commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
@@ -233,7 +233,8 @@ private:
         m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes perPassMeshes) {
             auto& meshes = perPassMeshes.meshesByPass[m_renderPhase.hash];
 
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
+            unsigned int perObjectIndex = drawInfo.perObjectCBIndex;
+            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerObjectBufferIndex, 1, &perObjectIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -241,10 +242,11 @@ private:
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
-                unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
+                unsigned int perMeshIndices[] = {
+                    static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB)),
+                    static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB))
+                };
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerMeshBufferIndex, 2, perMeshIndices);
 
                 // Mesh shaders use DispatchMesh
                 //commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);

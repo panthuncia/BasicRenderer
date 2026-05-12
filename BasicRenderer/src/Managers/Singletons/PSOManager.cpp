@@ -578,6 +578,7 @@ const PipelineState& PSOManager::GetClusterLODDeepVisibilityResolvePSO(UINT psoF
 PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
@@ -650,6 +651,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
 PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -715,6 +717,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags ma
 PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -1308,6 +1311,7 @@ PipelineState PSOManager::CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags 
 PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -2494,11 +2498,7 @@ void PSOManager::createRootSignature() {
     auto device = DeviceManager::GetInstance().GetDevice();
 
     rhi::PushConstantRangeDesc pcs[] = {
-    { rhi::ShaderStage::All, NumPerObjectRootConstants, /*set*/0, /*binding*/0 },
-    { rhi::ShaderStage::All, NumPerMeshRootConstants,   0, 1 },
-    { rhi::ShaderStage::All, NumViewRootConstants,      0, 2 },
-    { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 3 },
-    { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4 },
+    { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4, rhi::PushConstantRangeType::EmulatedRootConstants },
     { rhi::ShaderStage::All, rg::shaderapi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter, rhi::PushConstantRangeType::EmulatedRootConstants },
     { rhi::ShaderStage::All, rg::shaderapi::kNumIndirectCommandSignatureRootConstants, 0, rg::shaderapi::kIndirectCommandSignatureRootParameter },
     };

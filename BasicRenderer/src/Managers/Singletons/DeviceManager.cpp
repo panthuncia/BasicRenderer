@@ -80,13 +80,7 @@ rhi::Backend ParseBackendName(const std::string& value, rhi::Backend fallback) {
 }
 
 rhi::Backend GetRequestedBackend() {
-    rhi::Backend backend = rhi::Backend::D3D12;
-
-    try {
-        backend = ParseBackendName(SettingsManager::GetInstance().getSettingGetter<std::string>("rhiBackend")(), backend);
-    }
-    catch (const std::exception&) {
-    }
+    rhi::Backend backend = backend = SettingsManager::GetInstance().getSettingGetter<rhi::Backend>("rhiBackend")();
 
     const std::string envBackend = GetEnvironmentString("BASICRENDERER_RHI_BACKEND");
     if (!envBackend.empty()) {

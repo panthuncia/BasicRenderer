@@ -15,12 +15,12 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[GetRootPerMeshBufferIndex()];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[GetRootPerMeshInstanceBufferIndex()];
     
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
+    PerObjectBuffer objectBuffer = perObjectBuffer[GetRootPerObjectBufferIndex()];
             
     uint vertexFlags = meshBuffer.vertexFlags;
     
@@ -64,13 +64,13 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
 #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
-    LightInfo light = lights[currentLightID];
+    LightInfo light = lights[GetRootCurrentLightID()];
     matrix lightMatrix;
     matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
             StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
-            uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
+            uint lightCameraIndex = pointLightCubemapIndicesBuffer[GetRootLightViewIndex()];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
             viewMatrix = lightCamera.view;
@@ -78,7 +78,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
         }
         case 1: { // Spot light
             StructuredBuffer<unsigned int> spotLightMatrixIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
-            uint lightCameraIndex = spotLightMatrixIndexBuffer[lightViewIndex];
+            uint lightCameraIndex = spotLightMatrixIndexBuffer[GetRootLightViewIndex()];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
             viewMatrix = lightCamera.view;
@@ -86,7 +86,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
         }
         case 2: { // Directional light
             StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::DirectionalLightCascadeBuffer)];
-            uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
+            uint lightCameraIndex = directionalLightCascadeIndicesBuffer[GetRootLightViewIndex()];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
             viewMatrix = lightCamera.view;
@@ -183,7 +183,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 {
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    uint meshBufferIndex = perMeshBufferIndex;
+    uint meshBufferIndex = GetRootPerMeshBufferIndex();
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
@@ -226,7 +226,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
     
     FragmentInfo fragmentInfo;
-    GetFragmentInfoDirect(input, viewDir, enableGTAO, false, isFrontFace, fragmentInfo);
+    GetFragmentInfoDirect(input, viewDir, GetRootEnableGTAO(), false, isFrontFace, fragmentInfo);
 
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::Environment::InfoBuffer), isFrontFace);
     

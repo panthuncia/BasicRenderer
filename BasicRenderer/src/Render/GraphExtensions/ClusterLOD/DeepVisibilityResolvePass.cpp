@@ -157,19 +157,10 @@ PassReturn DeepVisibilityResolvePass::Execute(PassExecutionContext& executionCon
     commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 
-    unsigned int settings[NumSettingsRootConstants] = {};
-    settings[EnableShadows] = m_getShadowsEnabled();
-    settings[EnablePunctualLights] = m_getPunctualLightingEnabled();
-    settings[EnableGTAO] = m_gtaoEnabled;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        SettingsRootSignatureIndex,
-        0,
-        NumSettingsRootConstants,
-        settings);
-
     uint32_t misc[NumMiscUintRootConstants] = {};
+    misc[MiscEnableShadows] = m_getShadowsEnabled();
+    misc[MiscEnablePunctualLights] = m_getPunctualLightingEnabled();
+    misc[MiscEnableGTAO] = m_gtaoEnabled;
     misc[CLOD_DEEP_VISIBILITY_RESOLVE_HEAD_POINTER_DESCRIPTOR_INDEX] = m_primaryHeadPointerTexture->GetSRVInfo(0).slot.index;
     misc[CLOD_DEEP_VISIBILITY_RESOLVE_NODE_BUFFER_DESCRIPTOR_INDEX] = m_deepVisibilityNodesBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_DEEP_VISIBILITY_RESOLVE_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityCounterBuffer->GetSRVInfo(0).slot.index;

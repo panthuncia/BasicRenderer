@@ -2477,7 +2477,7 @@ void SampleMaterialPrecompiled(
 void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
 {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    uint meshBufferIndexLocal = perMeshBufferIndex;
+    uint meshBufferIndexLocal = GetRootPerMeshBufferIndex();
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndexLocal];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
@@ -2490,7 +2490,7 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
 void GetMaterialInfoForFragmentPrecompiled(in const PSInput input, out MaterialInputs ret)
 {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    uint meshBufferIndexLocal = perMeshBufferIndex;
+    uint meshBufferIndexLocal = GetRootPerMeshBufferIndex();
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndexLocal];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
@@ -2708,7 +2708,7 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     PopulateFragmentInfoFromOpenPBR(surface, ret);
 }
 
-void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialInfo, in float3 viewWS, in float2 pixelCoords, in bool transparent, in bool isFrontFace, in uint materialFlags)
+void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialInfo, in float3 viewWS, in float2 pixelCoords, in bool enableGTAO, in bool transparent, in bool isFrontFace, in uint materialFlags)
 {
     ret.materialFlags = materialFlags;
     ret.selectedMaterialMipLevel = materialInfo.selectedMaterialMipLevel;
@@ -2782,10 +2782,10 @@ void GetFragmentInfoDirectPrecompiled(in PSInput input, in float3 viewWS, bool e
     GetMaterialInfoForFragmentPrecompiled(input, materialInfo);
     
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[GetRootPerMeshBufferIndex()];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialData = materialDataBuffer[meshBuffer.materialDataIndex];
-    FillFragmentInfoDirect(ret, materialInfo, viewWS, input.position.xy, transparent, isFrontFace, materialData.materialFlags);
+    FillFragmentInfoDirect(ret, materialInfo, viewWS, input.position.xy, enableGTAO, transparent, isFrontFace, materialData.materialFlags);
 }
 
 void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, bool transparent, bool isFrontFace, out FragmentInfo ret)
@@ -2798,10 +2798,10 @@ void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, 
     GetMaterialInfoForFragment(input, materialInfo);
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[GetRootPerMeshBufferIndex()];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialData = materialDataBuffer[meshBuffer.materialDataIndex];
-    FillFragmentInfoDirect(ret, materialInfo, viewWS, input.position.xy, transparent, isFrontFace, materialData.materialFlags);
+    FillFragmentInfoDirect(ret, materialInfo, viewWS, input.position.xy, enableGTAO, transparent, isFrontFace, materialData.materialFlags);
 }
 
 float unprojectDepth(float depth, float near, float far)

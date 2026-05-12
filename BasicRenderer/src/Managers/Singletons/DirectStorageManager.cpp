@@ -212,6 +212,12 @@ void DirectStorageManager::Initialize() {
         return;
     }
 
+    if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
+        m_statusMessage = "disabled for Vulkan backend; using CPU upload fallback";
+        spdlog::info("DirectStorageManager: {}", m_statusMessage);
+        return;
+    }
+
 #if !BASICRENDERER_HAS_DIRECTSTORAGE
     m_statusMessage = "SDK not configured at build time; using CPU upload fallback";
     spdlog::info("DirectStorageManager: {}", m_statusMessage);

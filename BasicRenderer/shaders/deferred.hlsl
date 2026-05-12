@@ -51,7 +51,7 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 viewDirWS = normalize(mainCamera.positionWorldSpace.xyz - positionWS);
 
     FragmentInfo fragmentInfo;
-    GetFragmentInfoScreenSpace(pixel, viewDirWS, positionVS, positionWS, enableGTAO, fragmentInfo);
+    GetFragmentInfoScreenSpace(pixel, viewDirWS, positionVS, positionWS, GetRootEnableGTAO(), fragmentInfo);
     
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::Environment::InfoBuffer), true);
     

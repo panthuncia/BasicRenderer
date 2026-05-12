@@ -11,13 +11,13 @@ groupshared Payload s_Payload;
 void ASMain(uint uGroupThreadID : SV_GroupThreadID, uint uDispatchThreadID : SV_DispatchThreadID, uint uGroupID : SV_GroupID)
 {
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[GetRootPerMeshInstanceBufferIndex()];
     
     ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX];
     unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + uDispatchThreadID;
  
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[GetRootPerMeshBufferIndex()];
     // Culling handled in compute shader
     bool visible = uDispatchThreadID < meshBuffer.numMeshlets && !GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
 

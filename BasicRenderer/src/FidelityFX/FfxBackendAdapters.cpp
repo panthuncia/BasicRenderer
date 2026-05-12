@@ -36,7 +36,8 @@ bool fidelityfx_backend::api::CreateUpscaleContext(ffx::Context& context, rhi::B
     case rhi::Backend::D3D12:
         return detail::CreateUpscaleContextDX12(context, device, createUpscaling);
     case rhi::Backend::Vulkan:
-        return detail::CreateUpscaleContextVulkan(context, device, createUpscaling);
+        spdlog::warn("FidelityFX upscale is disabled for the Vulkan backend in this milestone.");
+        return false;
     default:
         spdlog::warn("FidelityFX upscale does not support backend {}", static_cast<uint32_t>(backend));
         return false;
@@ -48,7 +49,8 @@ FfxApiResource fidelityfx_backend::api::GetResource(rhi::Backend backend, PixelB
     case rhi::Backend::D3D12:
         return detail::GetApiResourceDX12(resource, state);
     case rhi::Backend::Vulkan:
-        return detail::GetApiResourceVulkan(resource, state);
+        spdlog::error("FidelityFX API resources are disabled for the Vulkan backend in this milestone.");
+        return {};
     default:
         spdlog::error("Failed to get FFX API resource '{}' for unsupported backend {}", name ? "<named>" : "<unnamed>", BackendName(backend));
         return {};
@@ -60,7 +62,8 @@ void* fidelityfx_backend::api::GetCommandList(rhi::Backend backend, rhi::Command
     case rhi::Backend::D3D12:
         return detail::GetApiCommandListDX12(commandList);
     case rhi::Backend::Vulkan:
-        return detail::GetApiCommandListVulkan(commandList);
+        spdlog::error("FidelityFX API command lists are disabled for the Vulkan backend in this milestone.");
+        return nullptr;
     default:
         spdlog::error("Failed to get FFX API command list for unsupported backend {}", BackendName(backend));
         return nullptr;
@@ -72,7 +75,8 @@ bool fidelityfx_backend::host::CreateBackendInterface(FfxInterface& backendInter
     case rhi::Backend::D3D12:
         return detail::CreateHostBackendInterfaceDX12(backendInterface, scratchMemory, device, maxContexts);
     case rhi::Backend::Vulkan:
-        return detail::CreateHostBackendInterfaceVulkan(backendInterface, scratchMemory, device, maxContexts);
+        spdlog::warn("FidelityFX host backend is disabled for the Vulkan backend in this milestone.");
+        return false;
     default:
         spdlog::warn("FidelityFX host backend does not support backend {}", static_cast<uint32_t>(backend));
         return false;
@@ -84,7 +88,8 @@ FfxResource fidelityfx_backend::host::GetResource(rhi::Backend backend, PixelBuf
     case rhi::Backend::D3D12:
         return detail::GetHostResourceDX12(resource, name, state);
     case rhi::Backend::Vulkan:
-        return detail::GetHostResourceVulkan(resource, name, state);
+        spdlog::error("FidelityFX host resources are disabled for the Vulkan backend in this milestone.");
+        return {};
     default:
         spdlog::error("Failed to get FFX host resource '{}' for unsupported backend {}", name ? "<named>" : "<unnamed>", BackendName(backend));
         return {};
@@ -96,7 +101,8 @@ void* fidelityfx_backend::host::GetCommandList(rhi::Backend backend, rhi::Comman
     case rhi::Backend::D3D12:
         return detail::GetHostCommandListDX12(commandList);
     case rhi::Backend::Vulkan:
-        return detail::GetHostCommandListVulkan(commandList);
+        spdlog::error("FidelityFX host command lists are disabled for the Vulkan backend in this milestone.");
+        return nullptr;
     default:
         spdlog::error("Failed to get FFX host command list for unsupported backend {}", BackendName(backend));
         return nullptr;

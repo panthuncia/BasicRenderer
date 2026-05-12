@@ -657,39 +657,14 @@ inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
 
 
 enum RootSignatureLayout {
-    PerObjectRootSignatureIndex,
-    PerMeshRootSignatureIndex,
-	ViewRootSignatureIndex,
-	SettingsRootSignatureIndex,
-	MiscUintRootSignatureIndex,
-	ResourceDescriptorIndicesRootSignatureIndex,
+    MiscUintRootParameterIndex,
+    ResourceDescriptorIndicesRootParameterIndex,
 	IndirectCommandSignatureRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
-enum PerObjectRootConstants {
-	PerObjectBufferIndex,
-	NumPerObjectRootConstants
-};
-
-enum PerMeshRootConstants {
-	PerMeshBufferIndex,
-	PerMeshInstanceBufferIndex,
-	NumPerMeshRootConstants
-};
-
-enum ViewRootConstants {
-	CurrentLightID,
-    LightViewIndex,
-	NumViewRootConstants
-};
-
-enum SettingsRootConstants {
-	EnableShadows,
-	EnablePunctualLights,
-    EnableGTAO,
-	NumSettingsRootConstants
-};
+inline constexpr uint32_t MiscUintRootSignatureIndex = 4;
+inline constexpr uint32_t ResourceDescriptorIndicesRootSignatureIndex = 5;
 
 enum MiscUintRootConstants { // Used for pass-specific one-off constants, including float payloads bit-cast on the shader side via asfloat()
     UintRootConstant0,
@@ -719,6 +694,14 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants, includ
     UintRootConstant24,
     UintRootConstant25,
     UintRootConstant26,
+    MiscPerObjectBufferIndex = UintRootConstant19,
+    MiscPerMeshBufferIndex = UintRootConstant20,
+    MiscPerMeshInstanceBufferIndex = UintRootConstant21,
+    MiscCurrentLightID = UintRootConstant22,
+    MiscLightViewIndex = UintRootConstant23,
+    MiscEnableShadows = UintRootConstant24,
+    MiscEnablePunctualLights = UintRootConstant25,
+    MiscEnableGTAO = UintRootConstant26,
 	NumMiscUintRootConstants
 };
 

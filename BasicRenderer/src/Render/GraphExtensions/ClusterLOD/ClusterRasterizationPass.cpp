@@ -438,15 +438,12 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
 
     auto& psoManager = PSOManager::GetInstance();
 
-    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
-        unsigned int settings[NumSettingsRootConstants] = {};
-        settings[EnableShadows] = m_getShadowsEnabled ? m_getShadowsEnabled() : 0u;
-        settings[EnablePunctualLights] = m_getPunctualLightingEnabled ? m_getPunctualLightingEnabled() : 0u;
-        settings[EnableGTAO] = m_gtaoEnabled;
-        commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, settings);
-    }
-
     uint32_t misc[NumMiscUintRootConstants] = {};
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
+        misc[MiscEnableShadows] = m_getShadowsEnabled ? m_getShadowsEnabled() : 0u;
+        misc[MiscEnablePunctualLights] = m_getPunctualLightingEnabled ? m_getPunctualLightingEnabled() : 0u;
+        misc[MiscEnableGTAO] = m_gtaoEnabled;
+    }
     misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
