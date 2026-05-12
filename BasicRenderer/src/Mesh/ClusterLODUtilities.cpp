@@ -37,7 +37,7 @@ namespace
 	constexpr uint32_t CLOD_COMPRESSED_MESHLET_VERTEX_INDICES = 1u << 1;
 	constexpr uint32_t CLOD_COMPRESSED_NORMALS = 1u << 2;
 	constexpr uint32_t CLOD_VOXEL_PAGE_MAGIC = 0x4C435856u; // VXCL
-	constexpr uint32_t CLOD_VOXEL_PAGE_VERSION = 7u;
+	constexpr uint32_t CLOD_VOXEL_PAGE_VERSION = 9u;
 	constexpr uint32_t CLOD_VOXEL_PAGE_HEADER_SIZE = 64u;
 	constexpr uint32_t CLOD_STREAMING_PAGE_SIZE_BYTES = 256u * 1024u;
 	constexpr uint32_t CLOD_VOXEL_ATTRIBUTE_SAMPLES_PER_CUBE = 64u;
@@ -195,7 +195,7 @@ namespace
 				CLOD_VOXEL_ATTRIBUTE_SAMPLES_PER_CUBE,
 				static_cast<uint32_t>(sizeof(CLodVoxelClusterRecord)),
 				static_cast<uint32_t>(sizeof(CLodVoxelCubeRecord)),
-				0u
+				static_cast<uint32_t>(sizeof(CLodVoxelAttributeSample))
 			};
 			std::memcpy(blob.data(), header.data(), header.size() * sizeof(uint32_t));
 

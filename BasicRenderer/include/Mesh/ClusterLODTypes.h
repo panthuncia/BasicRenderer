@@ -93,9 +93,7 @@ struct VoxelCell
 	uint32_t y = 0;
 	uint32_t z = 0;
 	float    opacity = 0.0f;
-	DirectX::XMFLOAT3 normal = { 0.0f, 0.0f, 1.0f };
-	DirectX::XMFLOAT3 sggxDiagonal = { 1.0e-8f, 1.0e-8f, 0.25f };
-	DirectX::XMFLOAT3 sggxOffDiagonal = { 0.0f, 0.0f, 0.0f };
+	DirectX::XMFLOAT4 sggxAxisAndSigmas = { 0.0f, 0.0f, 1.0e-4f, 0.5f };
 	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
 	int32_t refinedGroup = -1;
 };

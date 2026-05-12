@@ -1006,6 +1006,28 @@ float3 CLodVoxelMulSGGX(float3 sDiag, float3 sOff, float3 v)
         sOff.y * v.x + sOff.z * v.y + sDiag.z * v.z);
 }
 
+float3 CLodVoxelDecodeOctAxis(float2 encoded)
+{
+    float3 axis = float3(encoded.xy, 1.0f - abs(encoded.x) - abs(encoded.y));
+    if (axis.z < 0.0f)
+    {
+        const float2 axisSign = float2(axis.x >= 0.0f ? 1.0f : -1.0f, axis.y >= 0.0f ? 1.0f : -1.0f);
+        const float2 folded = (1.0f - abs(axis.yx)) * axisSign;
+        axis.xy = folded;
+    }
+    return normalize(dot(axis, axis) > 1.0e-12f ? axis : float3(0.0f, 0.0f, 1.0f));
+}
+
+float3 CLodVoxelMulAxialSGGX(float4 sggxAxisAndSigmas, float3 v)
+{
+    const float3 axis = CLodVoxelDecodeOctAxis(sggxAxisAndSigmas.xy);
+    const float sigmaPerp = max(sggxAxisAndSigmas.z, 1.0e-4f);
+    const float sigmaParallel = max(sggxAxisAndSigmas.w, 1.0e-4f);
+    const float sp2 = sigmaPerp * sigmaPerp;
+    const float sa2 = sigmaParallel * sigmaParallel;
+    return sp2 * v + (sa2 - sp2) * axis * dot(axis, v);
+}
+
 float CLodVoxelDetSGGX(float3 sDiag, float3 sOff)
 {
     const float sxx = sDiag.x;
@@ -1028,15 +1050,20 @@ float3 CLodVoxelDominantSGGXNormal(float3 sDiag, float3 sOff)
     return axis;
 }
 
-float3 CLodVoxelSampleSGGXVNDF(float3 sDiag, float3 sOff, float3 wi, float u1, float u2)
+float3 CLodVoxelDominantAxialSGGXNormal(float4 sggxAxisAndSigmas)
+{
+    return CLodVoxelDecodeOctAxis(sggxAxisAndSigmas.xy);
+}
+
+float3 CLodVoxelSampleSGGXVNDF(float4 sggxAxisAndSigmas, float3 wi, float u1, float u2)
 {
     wi = normalize(wi);
     float3 k, j;
     CLodVoxelBuildOrthonormalBasis(wi, k, j);
 
-    const float3 Sk = CLodVoxelMulSGGX(sDiag, sOff, k);
-    const float3 Sj = CLodVoxelMulSGGX(sDiag, sOff, j);
-    const float3 Si = CLodVoxelMulSGGX(sDiag, sOff, wi);
+    const float3 Sk = CLodVoxelMulAxialSGGX(sggxAxisAndSigmas, k);
+    const float3 Sj = CLodVoxelMulAxialSGGX(sggxAxisAndSigmas, j);
+    const float3 Si = CLodVoxelMulAxialSGGX(sggxAxisAndSigmas, wi);
     const float Skj = dot(k, Sj);
     const float Ski = dot(k, Si);
     const float Sjj = dot(j, Sj);
@@ -1044,7 +1071,11 @@ float3 CLodVoxelSampleSGGXVNDF(float3 sDiag, float3 sOff, float3 wi, float u1, f
     float Sii = dot(wi, Si);
 
     const float eps = 1.0e-8f;
-    const float detS = max(CLodVoxelDetSGGX(sDiag, sOff), eps);
+    const float sigmaPerp = max(sggxAxisAndSigmas.z, 1.0e-4f);
+    const float sigmaParallel = max(sggxAxisAndSigmas.w, 1.0e-4f);
+    const float sp2 = sigmaPerp * sigmaPerp;
+    const float sa2 = sigmaParallel * sigmaParallel;
+    const float detS = max(sp2 * sp2 * sa2, eps);
     Sii = max(Sii, eps);
     const float tmp = max(Sjj * Sii - Sji * Sji, eps);
     const float sqrtSii = sqrt(Sii);
@@ -1160,8 +1191,9 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
 
     CLodVoxelAttributeSample attributeSample = CLodLoadVoxelAttributeSampleFromPage(pageEntry, pageHeader, cube, cellIndex);
-    const float3 sggxDiagonal = max(attributeSample.sggxDiagonalAndOpacity.xyz, float3(1.0e-8f, 1.0e-8f, 1.0e-8f));
-    const float3 sggxOffDiagonal = attributeSample.sggxOffDiagonal.xyz;
+    const float4 sggxAxisAndSigmas = float4(
+        attributeSample.sggxAxisAndSigmas.xy,
+        max(attributeSample.sggxAxisAndSigmas.zw, float2(1.0e-4f, 1.0e-4f)));
     const uint sampleSeed = CLodVoxelHash(
         pixel.x * 0x1F123BB5u ^
         pixel.y * 0x05491333u ^
@@ -1169,8 +1201,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
         primID * 0x68BC21EBu ^
         cellIndex * 0xB5297A4Du);
     float3 normalOS = CLodVoxelSampleSGGXVNDF(
-        sggxDiagonal,
-        sggxOffDiagonal,
+        sggxAxisAndSigmas,
         rayDirObject,
         CLodVoxelHashToUnitFloat(sampleSeed),
         CLodVoxelHashToUnitFloat(sampleSeed ^ 0xD1B54A35u));
@@ -1192,7 +1223,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     sample.positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
     sample.normalWSBase = normalWS;
     sample.normalOS = normalOS;
-    sample.vertexColor = float3(1.0f, 1.0f, 1.0f);
+    sample.vertexColor = 1.0f.xxx;
     sample.dpdxWS = 0.0f.xxx;
     sample.dpdyWS = 0.0f.xxx;
     sample.motionVector = ComputeClodMotionVector(
@@ -1207,7 +1238,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     sample.materialInfo = materialInfo;
 #endif
     sample.materialFlags = 0u;
-    sample.materialInputs = BuildVoxelMaterialInputs(materialInfo, normalWS, saturate(attributeSample.sggxDiagonalAndOpacity.w));
+    sample.materialInputs = BuildVoxelMaterialInputs(materialInfo, normalWS, saturate(attributeSample.opacity));
     return true;
 }
 

@@ -217,8 +217,8 @@ uint3 CLodVoxelDecodeCubeCoord(uint packedCoord)
 
 struct CLodVoxelAttributeSample
 {
-    float4 sggxDiagonalAndOpacity;
-    float4 sggxOffDiagonal;
+    float4 sggxAxisAndSigmas;
+    float opacity;
 };
 
 struct CLodVoxelRasterQueueDescriptors
@@ -245,10 +245,10 @@ struct CLodVoxelRasterDispatchCommand
 };
 
 static const uint CLOD_VOXEL_PAGE_MAGIC = 0x4C435856u;
-static const uint CLOD_VOXEL_PAGE_VERSION = 7u;
+static const uint CLOD_VOXEL_PAGE_VERSION = 9u;
 static const uint CLOD_VOXEL_CLUSTER_RECORD_STRIDE = 32u;
 static const uint CLOD_VOXEL_CUBE_RECORD_STRIDE = 32u;
-static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 32u;
+static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 20u;
 
 struct CLodVoxelPageHeader
 {
@@ -267,6 +267,7 @@ struct CLodVoxelPageHeader
     uint attributeSamplesPerCube;
     uint clusterRecordStride;
     uint cubeRecordStride;
+    uint attributeSampleStride;
 };
 
 GroupPageMapEntry CLodLoadVoxelPageMapEntry(CLodMeshMetadata metadata, ClusterLODGroup group, uint pageIndex)
@@ -298,6 +299,7 @@ CLodVoxelPageHeader CLodLoadVoxelPageHeader(uint slabDescriptorIndex, uint pageB
     header.attributeSamplesPerCube = d3.x;
     header.clusterRecordStride = d3.y;
     header.cubeRecordStride = d3.z;
+    header.attributeSampleStride = d3.w;
     return header;
 }
 
@@ -573,10 +575,11 @@ CLodVoxelAttributeSample CLodLoadVoxelAttributeSample(CLodMeshMetadata metadata,
         {
             ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pageEntry.slabDescriptorIndex)];
             const uint attributeIndex = cube.firstAttribute + localCellIndex;
-            const uint addr = pageEntry.slabByteOffset + pageHeader.attributeSamplesOffset + attributeIndex * CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE;
+            const uint attributeStride = pageHeader.attributeSampleStride != 0u ? pageHeader.attributeSampleStride : CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE;
+            const uint addr = pageEntry.slabByteOffset + pageHeader.attributeSamplesOffset + attributeIndex * attributeStride;
             CLodVoxelAttributeSample sample;
-            sample.sggxDiagonalAndOpacity = asfloat(slab.Load4(addr));
-            sample.sggxOffDiagonal = asfloat(slab.Load4(addr + 16u));
+            sample.sggxAxisAndSigmas = asfloat(slab.Load4(addr));
+            sample.opacity = asfloat(slab.Load(addr + 16u));
             return sample;
         }
 
@@ -590,10 +593,11 @@ CLodVoxelAttributeSample CLodLoadVoxelAttributeSampleFromPage(GroupPageMapEntry 
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pageEntry.slabDescriptorIndex)];
     const uint attributeIndex = cube.firstAttribute + localCellIndex;
-    const uint addr = pageEntry.slabByteOffset + pageHeader.attributeSamplesOffset + attributeIndex * CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE;
+    const uint attributeStride = pageHeader.attributeSampleStride != 0u ? pageHeader.attributeSampleStride : CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE;
+    const uint addr = pageEntry.slabByteOffset + pageHeader.attributeSamplesOffset + attributeIndex * attributeStride;
     CLodVoxelAttributeSample sample;
-    sample.sggxDiagonalAndOpacity = asfloat(slab.Load4(addr));
-    sample.sggxOffDiagonal = asfloat(slab.Load4(addr + 16u));
+    sample.sggxAxisAndSigmas = asfloat(slab.Load4(addr));
+    sample.opacity = asfloat(slab.Load(addr + 16u));
     return sample;
 }
 

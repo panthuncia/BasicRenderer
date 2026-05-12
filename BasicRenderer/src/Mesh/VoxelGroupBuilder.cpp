@@ -71,6 +71,15 @@ namespace
 		}
 	};
 
+	struct AxialSGGX
+	{
+		Float3 axis = Float3(0.0f, 0.0f, 1.0f);
+		float sigmaPerp = 1.0e-4f;
+		float sigmaParallel = 0.5f;
+	};
+
+	std::array<Float3, 3> EigenvectorsSymmetric(const SymmetricMatrix3& m);
+
 	Float3 Mul(const SymmetricMatrix3& m, const Float3& v)
 	{
 		return {
@@ -112,6 +121,99 @@ namespace
 		constexpr float kMinSigma = 1.0e-4f;
 		const float minS = kMinSigma * kMinSigma;
 		return Outer(n, 0.25f) + Outer(t, minS) + Outer(b, minS);
+	}
+
+	SymmetricMatrix3 SGGXFromAxial(const AxialSGGX& axial)
+	{
+		const Float3 axis = SafeNormalizeNormal(axial.axis);
+		const float sigmaPerp = std::max(axial.sigmaPerp, 1.0e-4f);
+		const float sigmaParallel = std::max(axial.sigmaParallel, 1.0e-4f);
+		const float sp2 = sigmaPerp * sigmaPerp;
+		const float sa2 = sigmaParallel * sigmaParallel;
+		SymmetricMatrix3 result{};
+		result.xx = sp2;
+		result.yy = sp2;
+		result.zz = sp2;
+		return result + Outer(axis, sa2 - sp2);
+	}
+
+	Float3 CanonicalizeAxialAxis(Float3 axis)
+	{
+		axis = SafeNormalizeNormal(axis);
+		if (axis.z < 0.0f || (axis.z == 0.0f && (axis.y < 0.0f || (axis.y == 0.0f && axis.x < 0.0f))))
+		{
+			axis = axis * -1.0f;
+		}
+		return axis;
+	}
+
+	DirectX::XMFLOAT2 EncodeOctahedralAxis(Float3 axis)
+	{
+		axis = CanonicalizeAxialAxis(axis);
+		const float invL1 = 1.0f / std::max(std::abs(axis.x) + std::abs(axis.y) + std::abs(axis.z), 1.0e-12f);
+		return DirectX::XMFLOAT2(axis.x * invL1, axis.y * invL1);
+	}
+
+	Float3 DecodeOctahedralAxis(float octX, float octY)
+	{
+		Float3 axis(octX, octY, 1.0f - std::abs(octX) - std::abs(octY));
+		if (axis.z < 0.0f)
+		{
+			const float x = axis.x;
+			const float y = axis.y;
+			axis.x = (1.0f - std::abs(y)) * (x >= 0.0f ? 1.0f : -1.0f);
+			axis.y = (1.0f - std::abs(x)) * (y >= 0.0f ? 1.0f : -1.0f);
+		}
+		return CanonicalizeAxialAxis(axis);
+	}
+
+	AxialSGGX CompressSGGXToAxial(const SymmetricMatrix3& sggx)
+	{
+		const std::array<Float3, 3> axes = EigenvectorsSymmetric(sggx);
+		std::array<float, 3> eigenvalues{};
+		for (size_t axisIndex = 0; axisIndex < axes.size(); ++axisIndex)
+		{
+			eigenvalues[axisIndex] = std::max(axes[axisIndex].dot(Mul(sggx, axes[axisIndex])), 1.0e-8f);
+		}
+
+		size_t parallelAxisIndex = 0;
+		for (size_t axisIndex = 1; axisIndex < eigenvalues.size(); ++axisIndex)
+		{
+			if (eigenvalues[axisIndex] > eigenvalues[parallelAxisIndex])
+			{
+				parallelAxisIndex = axisIndex;
+			}
+		}
+
+		float perpendicularSum = 0.0f;
+		for (size_t axisIndex = 0; axisIndex < eigenvalues.size(); ++axisIndex)
+		{
+			if (axisIndex != parallelAxisIndex)
+			{
+				perpendicularSum += eigenvalues[axisIndex];
+			}
+		}
+
+		AxialSGGX axial{};
+		axial.axis = CanonicalizeAxialAxis(axes[parallelAxisIndex]);
+		axial.sigmaPerp = std::sqrt(std::max(perpendicularSum * 0.5f, 1.0e-8f));
+		axial.sigmaParallel = std::sqrt(std::max(eigenvalues[parallelAxisIndex], 1.0e-8f));
+		return axial;
+	}
+
+	DirectX::XMFLOAT4 EncodeAxialSGGX(const AxialSGGX& axial)
+	{
+		const DirectX::XMFLOAT2 oct = EncodeOctahedralAxis(axial.axis);
+		return DirectX::XMFLOAT4(oct.x, oct.y, std::max(axial.sigmaPerp, 1.0e-4f), std::max(axial.sigmaParallel, 1.0e-4f));
+	}
+
+	SymmetricMatrix3 DecodeAxialSGGX(const DirectX::XMFLOAT4& packed)
+	{
+		AxialSGGX axial{};
+		axial.axis = DecodeOctahedralAxis(packed.x, packed.y);
+		axial.sigmaPerp = packed.z;
+		axial.sigmaParallel = packed.w;
+		return SGGXFromAxial(axial);
 	}
 
 	void JacobiRotate(float a[3][3], float v[3][3], int p, int q)
@@ -1250,15 +1352,8 @@ namespace
 			}
 
 			sample.coverage += weightedCoverage;
-			sample.accumulatedNormal = sample.accumulatedNormal + ToFloat3(sourceCell.normal) * weightedCoverage;
-			sample.accumulatedSGGX = sample.accumulatedSGGX + SymmetricMatrix3{
-				sourceCell.sggxDiagonal.x,
-				sourceCell.sggxDiagonal.y,
-				sourceCell.sggxDiagonal.z,
-				sourceCell.sggxOffDiagonal.x,
-				sourceCell.sggxOffDiagonal.y,
-				sourceCell.sggxOffDiagonal.z
-			} * weightedCoverage;
+			sample.accumulatedNormal = sample.accumulatedNormal + DecodeOctahedralAxis(sourceCell.sggxAxisAndSigmas.x, sourceCell.sggxAxisAndSigmas.y) * weightedCoverage;
+			sample.accumulatedSGGX = sample.accumulatedSGGX + DecodeAxialSGGX(sourceCell.sggxAxisAndSigmas) * weightedCoverage;
 			sample.sggxWeight += weightedCoverage;
 			if (sourceCell.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
 			{
@@ -1952,12 +2047,10 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 			vc.y = cy;
 			vc.z = cz;
 			vc.opacity = coverage.coverage;
-			vc.normal = ToXM(normalSum.normalized());
 			SymmetricMatrix3 sggx = coverage.sggxWeight > 0.0f
 				? coverage.accumulatedSGGX * (1.0f / coverage.sggxWeight)
 				: SGGXFromNormal(normalSum);
-			vc.sggxDiagonal = DirectX::XMFLOAT3(sggx.xx, sggx.yy, sggx.zz);
-			vc.sggxOffDiagonal = DirectX::XMFLOAT3(sggx.xy, sggx.xz, sggx.yz);
+			vc.sggxAxisAndSigmas = EncodeAxialSGGX(CompressSGGXToAxial(sggx));
 			vc.dominantBoneIndex = dominantBoneIndex;
 			vc.refinedGroup = refinedGroup;
 
@@ -2082,16 +2175,8 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		accum.refinedGroup = cell.refinedGroup;
 		accum.mask |= (uint64_t{ 1 } << localBit);
 		accum.opacitySum += cell.opacity;
-		accum.attributes[localBit].sggxDiagonalAndOpacity = DirectX::XMFLOAT4(
-			cell.sggxDiagonal.x,
-			cell.sggxDiagonal.y,
-			cell.sggxDiagonal.z,
-			cell.opacity);
-		accum.attributes[localBit].sggxOffDiagonal = DirectX::XMFLOAT4(
-			cell.sggxOffDiagonal.x,
-			cell.sggxOffDiagonal.y,
-			cell.sggxOffDiagonal.z,
-			0.0f);
+		accum.attributes[localBit].sggxAxisAndSigmas = cell.sggxAxisAndSigmas;
+		accum.attributes[localBit].opacity = cell.opacity;
 		if (cell.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
 		{
 			accum.boneWeights[cell.dominantBoneIndex] += std::max(cell.opacity, 1.0e-6f);

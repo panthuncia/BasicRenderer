@@ -176,9 +176,8 @@ static_assert(sizeof(CLodVoxelCubeRecord) == 32, "CLodVoxelCubeRecord must be 32
 
 struct CLodVoxelAttributeSample
 {
-	// SGGX matrix in object space. sggxDiagonalAndOpacity.xyz = Sxx/Syy/Szz, w = opacity.
-	DirectX::XMFLOAT4 sggxDiagonalAndOpacity = { 1.0e-8f, 1.0e-8f, 0.25f, 0.0f };
-	// sggxOffDiagonal.xyz = Sxy/Sxz/Syz.
-	DirectX::XMFLOAT4 sggxOffDiagonal = { 0.0f, 0.0f, 0.0f, 0.0f };
+	// xy = oct-encoded object-space symmetry axis, z/w = sigmaPerp/sigmaParallel.
+	DirectX::XMFLOAT4 sggxAxisAndSigmas = { 0.0f, 0.0f, 1.0e-4f, 0.5f };
+	float opacity = 0.0f;
 };
-static_assert(sizeof(CLodVoxelAttributeSample) == 32, "CLodVoxelAttributeSample must be 32 bytes");
+static_assert(sizeof(CLodVoxelAttributeSample) == 20, "CLodVoxelAttributeSample must be 20 bytes");
