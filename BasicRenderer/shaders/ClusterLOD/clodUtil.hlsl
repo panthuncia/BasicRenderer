@@ -2663,6 +2663,10 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint rasterBucketIndex = perMeshBuffer[perMeshIndex].rasterBucketIndex;
+    if (rasterBucketIndex >= CLOD_HISTOGRAM_NUM_RASTER_BUCKETS)
+    {
+        return;
+    }
 
     // Group threads in the wave by matId
     uint4 mask = WaveMatch(rasterBucketIndex);
@@ -2882,11 +2886,12 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     {
         const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
         CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_INPUTS, 1u);
+        bool shouldCompactCluster = true;
         if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
             CLodIsVisibleClusterOwnedByReyes(sourceClusterIndex, CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX))
         {
             CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_REYES_SKIPPED, 1u);
-            return;
+            shouldCompactCluster = false;
         }
 
         ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
@@ -2895,20 +2900,26 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
         const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
-        if (CLodVisibleClusterIsVoxel(packedCluster))
+        if (shouldCompactCluster && CLodVisibleClusterIsVoxel(packedCluster))
         {
             CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_VOXEL_SKIPPED, 1u);
-            return;
+            shouldCompactCluster = false;
         }
-        uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
+        if (shouldCompactCluster)
+        {
+            uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
+            shouldCompactCluster = bucketIndex < numBuckets;
+            if (shouldCompactCluster)
+            {
+                uint localOffset = 0;
+                InterlockedAdd(writeCursor[bucketIndex], 1, localOffset);
 
-        uint localOffset = 0;
-        InterlockedAdd(writeCursor[bucketIndex], 1, localOffset);
-
-        uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
-        CLodStoreVisibleClusterPackedWordsRW(compactedClusters, dst, packedCluster);
-        sortedToUnsortedMapping[dst] = sourceClusterIndex;
-        CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_TRIANGLE_EMITTED, 1u);
+                uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
+                CLodStoreVisibleClusterPackedWordsRW(compactedClusters, dst, packedCluster);
+                sortedToUnsortedMapping[dst] = sourceClusterIndex;
+                CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_TRIANGLE_EMITTED, 1u);
+            }
+        }
     }
 
     if (linearizedID < numBuckets)

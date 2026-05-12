@@ -143,6 +143,7 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
     if (m_readBaseCounterBuffer) {
         uintRootConstants[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer->GetSRVInfo(0).slot.index;
     }
+    uintRootConstants[CLOD_HISTOGRAM_NUM_RASTER_BUCKETS] = numRasterBuckets;
     uintRootConstants[CLOD_HISTOGRAM_READ_MODE_FLAGS] =
         (m_readReverse ? CLOD_HISTOGRAM_READ_FLAG_REVERSED : 0u) |
         (m_reyesOwnershipBitsetBuffer ? CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED : 0u);
