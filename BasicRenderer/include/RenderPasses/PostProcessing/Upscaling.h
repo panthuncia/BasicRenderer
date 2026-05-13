@@ -16,12 +16,24 @@ public:
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
         ResourceIdentifierAndRange upscaledHDR(Builtin::PostProcessing::UpscaledHDR, {});
-        if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::FSR3) {
+        const UpscalingMode upscalingMode = UpscalingManager::GetInstance().GetCurrentUpscalingMode();
+        const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+
+        if (upscalingMode == UpscalingMode::FSR3) {
             builder->WithShaderResource(
                 Builtin::Color::HDRColorTarget,
                 Builtin::GBuffer::MotionVectors,
                 Builtin::PrimaryCamera::ProjectedDepthTexture)
                 .WithUnorderedAccess(upscaledHDR);
+            return;
+        }
+
+        if (upscalingMode == UpscalingMode::None && backend == rhi::Backend::Vulkan) {
+            builder->WithCopySource(Builtin::Color::HDRColorTarget)
+                .WithCopyDest(upscaledHDR)
+                .WithShaderResource(
+                    Builtin::GBuffer::MotionVectors,
+                    Builtin::PrimaryCamera::ProjectedDepthTexture);
             return;
         }
 
@@ -35,7 +47,7 @@ public:
             .sync = rhi::ResourceSyncState::All };
 
         // TODO: Remove these backend-specific workarounds when ORG can model combined non-conflicting usages on one resource.
-        if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
+        if (backend == rhi::Backend::Vulkan) {
             builder->WithShaderResource(
                 Builtin::Color::HDRColorTarget,
                 Builtin::GBuffer::MotionVectors,

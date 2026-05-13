@@ -612,57 +612,64 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
         .depth = 1,
     };
 
+    const bool graphOwnsCopyBarriers = DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan
+        && m_upscalingMode == UpscalingMode::None;
+
     rhi::TextureSubresourceRange copyRange{};
     copyRange.baseMip = mipSlice;
     copyRange.mipCount = 1;
     copyRange.baseLayer = arraySlice;
     copyRange.layerCount = 1;
 
-    rhi::TextureBarrier preCopyBarriers[2]{};
-    preCopyBarriers[0].texture = src.texture;
-    preCopyBarriers[0].range = copyRange;
-    preCopyBarriers[0].beforeSync = rhi::ResourceSyncState::All;
-    preCopyBarriers[0].afterSync = rhi::ResourceSyncState::Copy;
-    preCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::Common;
-    preCopyBarriers[0].afterAccess = rhi::ResourceAccessType::CopySource;
-    preCopyBarriers[0].beforeLayout = rhi::ResourceLayout::Common;
-    preCopyBarriers[0].afterLayout = rhi::ResourceLayout::CopySource;
-    preCopyBarriers[1].texture = dst.texture;
-    preCopyBarriers[1].range = copyRange;
-    preCopyBarriers[1].beforeSync = rhi::ResourceSyncState::All;
-    preCopyBarriers[1].afterSync = rhi::ResourceSyncState::Copy;
-    preCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::Common;
-    preCopyBarriers[1].afterAccess = rhi::ResourceAccessType::CopyDest;
-    preCopyBarriers[1].beforeLayout = rhi::ResourceLayout::Common;
-    preCopyBarriers[1].afterLayout = rhi::ResourceLayout::CopyDest;
+    if (!graphOwnsCopyBarriers) {
+        rhi::TextureBarrier preCopyBarriers[2]{};
+        preCopyBarriers[0].texture = src.texture;
+        preCopyBarriers[0].range = copyRange;
+        preCopyBarriers[0].beforeSync = rhi::ResourceSyncState::All;
+        preCopyBarriers[0].afterSync = rhi::ResourceSyncState::Copy;
+        preCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::Common;
+        preCopyBarriers[0].afterAccess = rhi::ResourceAccessType::CopySource;
+        preCopyBarriers[0].beforeLayout = rhi::ResourceLayout::Common;
+        preCopyBarriers[0].afterLayout = rhi::ResourceLayout::CopySource;
+        preCopyBarriers[1].texture = dst.texture;
+        preCopyBarriers[1].range = copyRange;
+        preCopyBarriers[1].beforeSync = rhi::ResourceSyncState::All;
+        preCopyBarriers[1].afterSync = rhi::ResourceSyncState::Copy;
+        preCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::Common;
+        preCopyBarriers[1].afterAccess = rhi::ResourceAccessType::CopyDest;
+        preCopyBarriers[1].beforeLayout = rhi::ResourceLayout::Common;
+        preCopyBarriers[1].afterLayout = rhi::ResourceLayout::CopyDest;
 
-    rhi::BarrierBatch preCopyBatch{};
-    preCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(preCopyBarriers, 2);
-    commandList.Barriers(preCopyBatch);
+        rhi::BarrierBatch preCopyBatch{};
+        preCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(preCopyBarriers, 2);
+        commandList.Barriers(preCopyBatch);
+    }
 
     commandList.CopyTextureRegion(dst, src);
 
-    rhi::TextureBarrier postCopyBarriers[2]{};
-    postCopyBarriers[0].texture = src.texture;
-    postCopyBarriers[0].range = copyRange;
-    postCopyBarriers[0].beforeSync = rhi::ResourceSyncState::Copy;
-    postCopyBarriers[0].afterSync = rhi::ResourceSyncState::All;
-    postCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::CopySource;
-    postCopyBarriers[0].afterAccess = rhi::ResourceAccessType::Common;
-    postCopyBarriers[0].beforeLayout = rhi::ResourceLayout::CopySource;
-    postCopyBarriers[0].afterLayout = rhi::ResourceLayout::Common;
-    postCopyBarriers[1].texture = dst.texture;
-    postCopyBarriers[1].range = copyRange;
-    postCopyBarriers[1].beforeSync = rhi::ResourceSyncState::Copy;
-    postCopyBarriers[1].afterSync = rhi::ResourceSyncState::All;
-    postCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::CopyDest;
-    postCopyBarriers[1].afterAccess = rhi::ResourceAccessType::Common;
-    postCopyBarriers[1].beforeLayout = rhi::ResourceLayout::CopyDest;
-    postCopyBarriers[1].afterLayout = rhi::ResourceLayout::Common;
+    if (!graphOwnsCopyBarriers) {
+        rhi::TextureBarrier postCopyBarriers[2]{};
+        postCopyBarriers[0].texture = src.texture;
+        postCopyBarriers[0].range = copyRange;
+        postCopyBarriers[0].beforeSync = rhi::ResourceSyncState::Copy;
+        postCopyBarriers[0].afterSync = rhi::ResourceSyncState::All;
+        postCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::CopySource;
+        postCopyBarriers[0].afterAccess = rhi::ResourceAccessType::Common;
+        postCopyBarriers[0].beforeLayout = rhi::ResourceLayout::CopySource;
+        postCopyBarriers[0].afterLayout = rhi::ResourceLayout::Common;
+        postCopyBarriers[1].texture = dst.texture;
+        postCopyBarriers[1].range = copyRange;
+        postCopyBarriers[1].beforeSync = rhi::ResourceSyncState::Copy;
+        postCopyBarriers[1].afterSync = rhi::ResourceSyncState::All;
+        postCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::CopyDest;
+        postCopyBarriers[1].afterAccess = rhi::ResourceAccessType::Common;
+        postCopyBarriers[1].beforeLayout = rhi::ResourceLayout::CopyDest;
+        postCopyBarriers[1].afterLayout = rhi::ResourceLayout::Common;
 
-    rhi::BarrierBatch postCopyBatch{};
-    postCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(postCopyBarriers, 2);
-    commandList.Barriers(postCopyBatch);
+        rhi::BarrierBatch postCopyBatch{};
+        postCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(postCopyBarriers, 2);
+        commandList.Barriers(postCopyBatch);
+    }
 }
 
 void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
