@@ -1576,6 +1576,9 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 	}
 
     m_frameIndex = static_cast<uint8_t>(m_swapChain->CurrentImageIndex());
+    if (m_dynamicBackbuffer && m_frameIndex < m_backbufferResources.size()) {
+        m_dynamicBackbuffer->SetResource(m_backbufferResources[m_frameIndex]);
+    }
 
     result = device.CreateTimeline(m_frameFence);
     result = device.CreateTimeline(m_readbackFence);
@@ -1651,7 +1654,7 @@ void Renderer::CreateRTVs() {
         if (n < m_backbufferResources.size() && m_backbufferResources[n]) {
             m_backbufferResources[n]->SetHandle(renderTargets[n]);
             m_backbufferResources[n]->SetRTVSlot({ rtvHeap->GetHandle(), n });
-            m_backbufferResources[n]->ResetToCommon();
+            m_backbufferResources[n]->ResetToUndefined();
             if (renderGraphBatchTraceEnabled) {
                 spdlog::info(
                     "Renderer: CreateRTVs slot={} resourceID={} handle=({}, {}) rtv=({}, {})",
@@ -1825,6 +1828,10 @@ void Renderer::Update(float elapsedSeconds) {
         DeletionManager::GetInstance().ProcessDeletions();
         RendererECSManager::GetInstance().FlushDeferredWorldOperations();
         });
+
+    if (m_dynamicBackbuffer && m_swapChainReady && m_frameIndex < m_backbufferResources.size()) {
+        m_dynamicBackbuffer->SetResource(m_backbufferResources[m_frameIndex]);
+    }
 
     auto& resourceManager = ResourceManager::GetInstance();
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -2100,7 +2107,6 @@ void Renderer::Render() {
             ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "before RenderGraph::Execute");
             spdlog::info("Renderer: frame {} entering RenderGraph::Execute", m_totalFramesRendered);
         }
-        m_dynamicBackbuffer->SetResource(m_backbufferResources[renderedFrameIndex]);
         try {
             currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
             if (renderGraphBatchTraceEnabled) {
