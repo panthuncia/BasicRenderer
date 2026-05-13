@@ -9,7 +9,7 @@ public:
 	ClearVisibilityBufferPass() {}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithUnorderedAccess(Builtin::PrimaryCamera::VisibilityTexture,
+		builder->WithUnorderedAccessClear(Builtin::PrimaryCamera::VisibilityTexture,
 			Builtin::GBuffer::Albedo,
 			Builtin::GBuffer::Coat,
 			Builtin::GBuffer::Emissive,

@@ -2119,7 +2119,16 @@ void Renderer::Render() {
         if (renderGraphBatchTraceEnabled) {
             spdlog::info("Renderer: frame {} calling Present for slot {}", m_totalFramesRendered, renderedFrameIndex);
         }
-        m_swapChain->Present(!m_allowTearing);
+        if (auto presentDependency = currentRenderGraph->GetLastPresentDependency();
+            presentDependency && presentDependency->valid) {
+            rhi::PresentSyncDesc presentSync{
+                .queue = presentDependency->queue,
+                .wait = presentDependency->wait,
+            };
+            m_swapChain->Present(!m_allowTearing, presentSync);
+        } else {
+            m_swapChain->Present(!m_allowTearing);
+        }
     });
 
     runCapturedStage("SignalFence", [&]() {
