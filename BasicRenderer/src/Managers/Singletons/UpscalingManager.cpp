@@ -15,6 +15,7 @@
 #include "Utilities/Utilities.h"
 
 #include <sl.h>
+#include <sl_core_api.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
 #include "rhi_interop_dx12.h"
@@ -90,12 +91,13 @@ namespace {
         resource.width = resourceInfo.width;
         resource.height = resourceInfo.height;
         resource.nativeFormat = slotInfo.nativeFormat != VK_FORMAT_UNDEFINED ? slotInfo.nativeFormat : resourceInfo.nativeFormat;
-        resource.mipLevels = resourceInfo.mipLevels;
-        resource.arrayLayers = resourceInfo.arrayLayers;
+        resource.mipLevels = slotInfo.levelCount != 0 ? slotInfo.levelCount : resourceInfo.mipLevels;
+        resource.arrayLayers = slotInfo.layerCount != 0 ? slotInfo.layerCount : resourceInfo.arrayLayers;
         resource.flags = resourceInfo.flags;
         resource.usage = resourceInfo.usage;
         return resource.nativeFormat != VK_FORMAT_UNDEFINED;
     }
+
 }
 
 bool CheckDLSSSupport(rhi::Device dev, rhi::Backend backend) {
@@ -404,7 +406,7 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     StoreFloat4x4(camera->info.prevUnjitteredProjection, cameraViewToClipPrev);
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
-	consts.jitterOffset.x = camera->jitterPixelSpace.x;
+    consts.jitterOffset.x = camera->jitterPixelSpace.x;
     consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
     // The motion buffer stores currentNdc - prevNdc with unjittered projections.
@@ -466,26 +468,28 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     sl::Extent renderExtent = { 0, 0, renderRes.x, renderRes.y };
     sl::Extent upscaleExtent = { 0, 0, outputRes.x, outputRes.y };
 
-    sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
-    sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &upscaleExtent };
-    sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
-    sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
-
-    const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
-
     void* nativeCommandList = backend == rhi::Backend::Vulkan
         ? static_cast<void*>(rhi::vulkan::get_cmd_list(commandList))
         : static_cast<void*>(rhi::dx12::get_cmd_list(commandList));
-    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), nativeCommandList)))
-    {
-        spdlog::error("DLSS evaluation failed!");
-    }
-    else
-    {
-        // IMPORTANT: Host is responsible for restoring state on the command list used
-        //restoreState(myCmdList); ??
-    }
+
     if (backend == rhi::Backend::Vulkan) {
+        const sl::ResourceTag tags[] = {
+            sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+            sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &upscaleExtent },
+            sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+            sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+        };
+        if (SL_FAILED(result, slSetTagForFrame(*frameToken, myViewport, tags, _countof(tags), nativeCommandList))) {
+            spdlog::error("Failed to tag Vulkan DLSS resources!");
+            return;
+        }
+
+        const sl::BaseStructure* inputs[] = { &myViewport };
+        if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), nativeCommandList)))
+        {
+            spdlog::error("DLSS evaluation failed!");
+        }
+
         rhi::TextureBarrier streamlineOutputBarrier{};
         streamlineOutputBarrier.texture = pUpscaledHDRTarget->GetAPIResource().GetHandle();
         streamlineOutputBarrier.range = { 0, pUpscaledHDRTarget->GetMipLevels(), 0, pUpscaledHDRTarget->GetArraySize() };
@@ -499,6 +503,24 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
         rhi::BarrierBatch streamlineOutputBatch{};
         streamlineOutputBatch.textures = { &streamlineOutputBarrier };
         commandList.Barriers(streamlineOutputBatch);
+    }
+    else
+    {
+        sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
+        sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &upscaleExtent };
+        sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
+        sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
+
+        const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
+        if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), nativeCommandList)))
+        {
+            spdlog::error("DLSS evaluation failed!");
+        }
+        else
+        {
+            // IMPORTANT: Host is responsible for restoring state on the command list used
+            //restoreState(myCmdList); ??
+        }
     }
 }
 
@@ -524,16 +546,16 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
     //dispatchUpscale.reactive;
     //dispatchUpscale.transparencyAndComposition;
 
-	auto renderRes = m_getRenderRes();
-	auto outputRes = m_getOutputRes();
+    auto renderRes = m_getRenderRes();
+    auto outputRes = m_getOutputRes();
 
     // Jitter is calculated earlier in the frame using a callback from the camera update
-    dispatchUpscale.jitterOffset.x = camera->jitterPixelSpace.x;
-    dispatchUpscale.jitterOffset.y = camera->jitterPixelSpace.y;
-	// Motion vectors are curNDC - prevNDC in [-1,1]. FSR expects prevScreenPixel - curScreenPixel.
-	// X negated for direction convention; Y positive because direction flip and NDC-Y-up→screen-Y-down cancel.
-	// Divide by 2 because NDC spans 2 units for full screen width/height.
-	dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x) / 2.0f;
+    dispatchUpscale.jitterOffset.x = -camera->jitterPixelSpace.x;
+    dispatchUpscale.jitterOffset.y = -camera->jitterPixelSpace.y;
+    // Motion vectors are curNDC - prevNDC in [-1,1]. FSR expects prevScreenPixel - curScreenPixel.
+    // X negates direction. Y is positive because direction flip and NDC-Y-up to screen-Y-down cancel.
+    // Divide by 2 because NDC spans 2 units for full screen width/height.
+    dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x) / 2.0f;
     dispatchUpscale.motionVectorScale.y = static_cast<float>(renderRes.y) / 2.0f;
     dispatchUpscale.reset = false;
     dispatchUpscale.enableSharpening = false;
@@ -551,9 +573,9 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
     // Setup camera params as required
     dispatchUpscale.cameraFovAngleVertical = camera->fov;
 
-    // Actual physical distances; FFX_UPSCALE_ENABLE_DEPTH_INVERTED handles the reverse-Z layout.
-    dispatchUpscale.cameraNear = camera->zNear;
-    dispatchUpscale.cameraFar = camera->zFar;
+    // FFX expects reversed-Z dispatch planes in reversed order when DEPTH_INVERTED is set.
+    dispatchUpscale.cameraNear = camera->zFar;
+    dispatchUpscale.cameraFar = camera->zNear;
 
     const ffx::ReturnCode dispatchResult = fidelityfx_backend::api::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
     if (dispatchResult != ffx::ReturnCode::Ok) {

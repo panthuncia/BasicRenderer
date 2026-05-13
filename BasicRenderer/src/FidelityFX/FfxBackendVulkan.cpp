@@ -8,11 +8,11 @@
 #include <spdlog/spdlog.h>
 
 #include "Resources/PixelBuffer.h"
+#include "rhi_interop_vulkan.h"
 
 #if BASICRHI_HAS_VULKAN_HEADERS
 #include "ThirdParty/FFX/host/backends/vk/ffx_vk.h"
 #include "ThirdParty/FFX/vk/ffx_api_vk.hpp"
-#include "rhi_interop_vulkan.h"
 
 namespace {
 struct VulkanBackendFunctions {
@@ -131,6 +131,33 @@ VkImageCreateInfo BuildVkImageCreateInfo(const TextureDescription& description) 
     }
     return createInfo;
 }
+
+VkImageCreateInfo BuildVkImageCreateInfo(rhi::Resource resource, const TextureDescription& description) {
+    rhi::VulkanResourceInfo resourceInfo{};
+    if (!rhi::vulkan::get_resource_info(resource, resourceInfo) || resourceInfo.resource == nullptr) {
+        return BuildVkImageCreateInfo(description);
+    }
+
+    VkImageCreateInfo createInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    createInfo.flags = static_cast<VkImageCreateFlags>(resourceInfo.flags);
+    createInfo.imageType = VK_IMAGE_TYPE_2D;
+    createInfo.format = static_cast<VkFormat>(resourceInfo.nativeFormat);
+    createInfo.extent.width = resourceInfo.width;
+    createInfo.extent.height = resourceInfo.height;
+    createInfo.extent.depth = 1u;
+    createInfo.mipLevels = (std::max)(1u, resourceInfo.mipLevels);
+    createInfo.arrayLayers = (std::max)(1u, resourceInfo.arrayLayers);
+    createInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    createInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    createInfo.usage = static_cast<VkImageUsageFlags>(resourceInfo.usage);
+    createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    createInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (createInfo.format == VK_FORMAT_UNDEFINED || createInfo.usage == 0u || createInfo.extent.width == 0u || createInfo.extent.height == 0u) {
+        return BuildVkImageCreateInfo(description);
+    }
+    return createInfo;
+}
 }
 
 namespace fidelityfx_backend::detail {
@@ -138,13 +165,26 @@ bool CreateUpscaleContextVulkan(ffx::Context& context, rhi::Device device, ffx::
     ffx::CreateBackendVKDesc backendDesc{};
     backendDesc.vkDevice = rhi::vulkan::get_device(device);
     backendDesc.vkPhysicalDevice = rhi::vulkan::get_physical_device(device);
-    backendDesc.vkDeviceProcAddr = vkGetDeviceProcAddr;
+
+    if (backendDesc.vkDevice == VK_NULL_HANDLE || backendDesc.vkPhysicalDevice == VK_NULL_HANDLE) {
+        spdlog::error("CreateUpscaleContextVulkan failed to query Vulkan device handles (device={}, physicalDevice={})",
+            fmt::ptr(backendDesc.vkDevice),
+            fmt::ptr(backendDesc.vkPhysicalDevice));
+        return false;
+    }
+
+    backendDesc.vkDeviceProcAddr = rhi::vulkan::get_device_proc_addr();
+    if (backendDesc.vkDeviceProcAddr == nullptr) {
+        spdlog::error("CreateUpscaleContextVulkan failed because Vulkan device proc loader is not initialized");
+        return false;
+    }
     return api::CreateContext(context, nullptr, createUpscaling, backendDesc) == ffx::ReturnCode::Ok;
 }
 
 FfxApiResource GetApiResourceVulkan(PixelBuffer* resource, FfxApiResourceState state) {
-    const VkImage nativeImage = rhi::vulkan::get_resource(resource->GetAPIResource());
-    const VkImageCreateInfo createInfo = BuildVkImageCreateInfo(resource->GetDescription());
+    const rhi::Resource apiResource = resource->GetAPIResource();
+    const VkImage nativeImage = rhi::vulkan::get_resource(apiResource);
+    const VkImageCreateInfo createInfo = BuildVkImageCreateInfo(apiResource, resource->GetDescription());
     const FfxApiResourceDescription desc = ffxApiGetImageResourceDescriptionVK(nativeImage, createInfo, 0u);
     return ffxApiGetResourceVK(reinterpret_cast<void*>(nativeImage), desc, state);
 }
@@ -161,7 +201,19 @@ bool CreateHostBackendInterfaceVulkan(FfxInterface& backendInterface, void*& scr
     VkDeviceContext deviceContext{};
     deviceContext.vkDevice = rhi::vulkan::get_device(device);
     deviceContext.vkPhysicalDevice = rhi::vulkan::get_physical_device(device);
-    deviceContext.vkDeviceProcAddr = vkGetDeviceProcAddr;
+
+    if (deviceContext.vkDevice == VK_NULL_HANDLE || deviceContext.vkPhysicalDevice == VK_NULL_HANDLE) {
+        spdlog::error("CreateHostBackendInterfaceVulkan failed to query Vulkan device handles (device={}, physicalDevice={})",
+            fmt::ptr(deviceContext.vkDevice),
+            fmt::ptr(deviceContext.vkPhysicalDevice));
+        return false;
+    }
+
+    deviceContext.vkDeviceProcAddr = rhi::vulkan::get_device_proc_addr();
+    if (deviceContext.vkDeviceProcAddr == nullptr) {
+        spdlog::error("CreateHostBackendInterfaceVulkan failed because Vulkan device proc loader is not initialized");
+        return false;
+    }
 
     const FfxDevice ffxDevice = g_vulkanBackendFunctions.GetDevice(&deviceContext);
     const size_t scratchMemorySize = g_vulkanBackendFunctions.GetScratchMemorySize(deviceContext.vkPhysicalDevice, maxContexts);
@@ -186,8 +238,9 @@ FfxResource GetHostResourceVulkan(PixelBuffer* resource, const wchar_t* name, Ff
         return {};
     }
 
-    const VkImage nativeImage = rhi::vulkan::get_resource(resource->GetAPIResource());
-    const VkImageCreateInfo createInfo = BuildVkImageCreateInfo(resource->GetDescription());
+    const rhi::Resource apiResource = resource->GetAPIResource();
+    const VkImage nativeImage = rhi::vulkan::get_resource(apiResource);
+    const VkImageCreateInfo createInfo = BuildVkImageCreateInfo(apiResource, resource->GetDescription());
     const FfxResourceDescription desc = g_vulkanBackendFunctions.GetImageResourceDescription(nativeImage, createInfo, FFX_RESOURCE_USAGE_READ_ONLY);
     return g_vulkanBackendFunctions.GetResource(reinterpret_cast<void*>(nativeImage), desc, name, state);
 }
