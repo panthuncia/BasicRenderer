@@ -16,6 +16,15 @@ public:
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
         ResourceIdentifierAndRange upscaledHDR(Builtin::PostProcessing::UpscaledHDR, {});
+        if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::FSR3) {
+            builder->WithShaderResource(
+                Builtin::Color::HDRColorTarget,
+                Builtin::GBuffer::MotionVectors,
+                Builtin::PrimaryCamera::ProjectedDepthTexture)
+                .WithUnorderedAccess(upscaledHDR);
+            return;
+        }
+
         ResourceState vulkanStreamlineExitState{
             .access = rhi::ResourceAccessType::UnorderedAccess | rhi::ResourceAccessType::UnorderedAccessClear,
             .layout = rhi::ResourceLayout::UnorderedAccess,

@@ -98,8 +98,6 @@ namespace {
     }
 }
 
-ffxFunctions ffxModule;
-
 bool CheckDLSSSupport(rhi::Device dev, rhi::Backend backend) {
     sl::AdapterInfo ai{};
 
@@ -185,31 +183,36 @@ void UpscalingManager::ProxyDevice() { // TODO: RHI now handles this internally
 }
 
 bool UpscalingManager::InitFFX() {
+    if (m_fsrIntialized) {
+        Shutdown();
+    }
+	m_fsrUpscalingContext = nullptr;
+
     m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
     m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
 	const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
     auto outputRes = m_getOutputRes();
-    auto renderRes = m_getRenderRes();
-	const wchar_t* moduleName = backend == rhi::Backend::Vulkan ? L"amd_fidelityfx_vk.dll" : L"amd_fidelityfx_dx12.dll";
-	auto module = LoadLibrary(moduleName);
-    if (module) {
-        ffxLoadFunctions(&ffxModule, module);
 
-        ffx::CreateContextDescUpscale createUpscaling;
-        createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
-        createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
-        createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
+    ffx::CreateContextDescUpscale createUpscaling;
+    createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
+    createUpscaling.maxRenderSize = { outputRes.x, outputRes.y };
+    createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
 
-        if (!fidelityfx_backend::api::CreateUpscaleContext(m_fsrUpscalingContext, backend, DeviceManager::GetInstance().GetDevice(), createUpscaling)) {
-            spdlog::error("UpscalingManager::InitFFX failed to create context for backend {}", static_cast<uint32_t>(backend));
-            return false;
-        }
-		m_fsrIntialized = true;
-
-		return true;
+    if (!fidelityfx_backend::api::CreateUpscaleContext(m_fsrUpscalingContext, backend, DeviceManager::GetInstance().GetDevice(), createUpscaling)) {
+        spdlog::error("UpscalingManager::InitFFX failed to create context for backend {}", static_cast<uint32_t>(backend));
+		m_fsrUpscalingContext = nullptr;
+        return false;
     }
-	spdlog::error("UpscalingManager::InitFFX failed to load {}", ws2s(moduleName));
-	return false;
+	m_fsrIntialized = true;
+
+	return true;
+}
+
+bool UpscalingManager::EnsureFSRContext() {
+    if (m_fsrIntialized && m_fsrUpscalingContext != nullptr) {
+        return true;
+    }
+    return InitFFX();
 }
 
 DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
@@ -231,16 +234,23 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
         break;
     }
     case UpscalingMode::FSR3: {
+        if (!EnsureFSRContext()) {
+            return { 0.0f, 0.0f };
+        }
+
         auto displayWidth = m_getOutputRes().x;
         auto renderWidth = m_getRenderRes().x;
         float jitterX = 0.0f, jitterY = 0.0f;
-        ffx::ReturnCode                     retCode;
-        int32_t                             jitterPhaseCount;
+        int32_t jitterPhaseCount = 1;
         ffx::QueryDescUpscaleGetJitterPhaseCount getJitterPhaseDesc{};
         getJitterPhaseDesc.displayWidth = displayWidth;
         getJitterPhaseDesc.renderWidth = renderWidth;
         getJitterPhaseDesc.pOutPhaseCount = &jitterPhaseCount;
-        retCode = ffx::Query(m_fsrUpscalingContext, getJitterPhaseDesc);
+        ffx::ReturnCode retCode = fidelityfx_backend::api::Query(m_fsrUpscalingContext, getJitterPhaseDesc);
+        if (retCode != ffx::ReturnCode::Ok || jitterPhaseCount <= 0) {
+            spdlog::warn("UpscalingManager::GetJitter failed to query FSR jitter phase count: {}", static_cast<uint32_t>(retCode));
+            return { 0.0f, 0.0f };
+        }
 
         ffx::QueryDescUpscaleGetJitterOffset getJitterOffsetDesc{};
         getJitterOffsetDesc.index = frameNumber % jitterPhaseCount;
@@ -248,7 +258,11 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
         getJitterOffsetDesc.pOutX = &jitterX;
         getJitterOffsetDesc.pOutY = &jitterY;
 
-        retCode = ffx::Query(m_fsrUpscalingContext, getJitterOffsetDesc);
+        retCode = fidelityfx_backend::api::Query(m_fsrUpscalingContext, getJitterOffsetDesc);
+        if (retCode != ffx::ReturnCode::Ok) {
+            spdlog::warn("UpscalingManager::GetJitter failed to query FSR jitter offset: {}", static_cast<uint32_t>(retCode));
+            return { 0.0f, 0.0f };
+        }
 
         return { jitterX, jitterY };
     }
@@ -322,6 +336,12 @@ void UpscalingManager::Setup() {
         break;
     }
     case UpscalingMode::FSR3: {
+        if (!EnsureFSRContext()) {
+            spdlog::error("UpscalingManager::Setup failed to initialize FSR context; using output resolution as render resolution");
+            SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(outputRes);
+            break;
+        }
+
         DirectX::XMUINT2 optimalRenderRes = {};
         ffxQueryDescUpscaleGetRenderResolutionFromQualityMode queryDesc{};
         queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
@@ -331,7 +351,11 @@ void UpscalingManager::Setup() {
         queryDesc.pOutRenderWidth = &optimalRenderRes.x;
         queryDesc.pOutRenderHeight = &optimalRenderRes.y;
 
-		ffx::Query(m_fsrUpscalingContext, queryDesc);
+        const ffx::ReturnCode queryResult = fidelityfx_backend::api::Query(m_fsrUpscalingContext, queryDesc);
+        if (queryResult != ffx::ReturnCode::Ok || optimalRenderRes.x == 0 || optimalRenderRes.y == 0) {
+            spdlog::error("UpscalingManager::Setup failed to query FSR render resolution: {}", static_cast<uint32_t>(queryResult));
+            optimalRenderRes = outputRes;
+        }
 
         SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(optimalRenderRes);
         
@@ -479,6 +503,11 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 }
 
 void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    if (!EnsureFSRContext()) {
+        spdlog::warn("UpscalingManager::EvaluateFSR3 skipped dispatch because the FSR context is not initialized");
+        return;
+    }
+
     ffx::DispatchDescUpscale dispatchUpscale{};
     const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
 
@@ -488,10 +517,10 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
         return;
     }
 
-    dispatchUpscale.color = fidelityfx_backend::api::GetResource(backend, pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
-    dispatchUpscale.depth = fidelityfx_backend::api::GetResource(backend, pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
-    dispatchUpscale.motionVectors = fidelityfx_backend::api::GetResource(backend, pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMMON);
-    dispatchUpscale.output = fidelityfx_backend::api::GetResource(backend, pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.color = fidelityfx_backend::api::GetResource(backend, pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchUpscale.depth = fidelityfx_backend::api::GetResource(backend, pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchUpscale.motionVectors = fidelityfx_backend::api::GetResource(backend, pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchUpscale.output = fidelityfx_backend::api::GetResource(backend, pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
     //dispatchUpscale.reactive;
     //dispatchUpscale.transparencyAndComposition;
 
@@ -526,7 +555,10 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
     dispatchUpscale.cameraNear = camera->zNear;
     dispatchUpscale.cameraFar = camera->zFar;
 
-    ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
+    const ffx::ReturnCode dispatchResult = fidelityfx_backend::api::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
+    if (dispatchResult != ffx::ReturnCode::Ok) {
+        spdlog::error("UpscalingManager::EvaluateFSR3 dispatch failed: {}", static_cast<uint32_t>(dispatchResult));
+    }
 }
 
 void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Components::Camera* camera, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
@@ -569,17 +601,17 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
     preCopyBarriers[0].range = copyRange;
     preCopyBarriers[0].beforeSync = rhi::ResourceSyncState::All;
     preCopyBarriers[0].afterSync = rhi::ResourceSyncState::Copy;
-    preCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::ShaderResource;
+    preCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::Common;
     preCopyBarriers[0].afterAccess = rhi::ResourceAccessType::CopySource;
-    preCopyBarriers[0].beforeLayout = rhi::ResourceLayout::ShaderResource;
+    preCopyBarriers[0].beforeLayout = rhi::ResourceLayout::Common;
     preCopyBarriers[0].afterLayout = rhi::ResourceLayout::CopySource;
     preCopyBarriers[1].texture = dst.texture;
     preCopyBarriers[1].range = copyRange;
     preCopyBarriers[1].beforeSync = rhi::ResourceSyncState::All;
     preCopyBarriers[1].afterSync = rhi::ResourceSyncState::Copy;
-    preCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    preCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::Common;
     preCopyBarriers[1].afterAccess = rhi::ResourceAccessType::CopyDest;
-    preCopyBarriers[1].beforeLayout = rhi::ResourceLayout::UnorderedAccess;
+    preCopyBarriers[1].beforeLayout = rhi::ResourceLayout::Common;
     preCopyBarriers[1].afterLayout = rhi::ResourceLayout::CopyDest;
 
     rhi::BarrierBatch preCopyBatch{};
@@ -594,17 +626,17 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
     postCopyBarriers[0].beforeSync = rhi::ResourceSyncState::Copy;
     postCopyBarriers[0].afterSync = rhi::ResourceSyncState::All;
     postCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::CopySource;
-    postCopyBarriers[0].afterAccess = rhi::ResourceAccessType::ShaderResource;
+    postCopyBarriers[0].afterAccess = rhi::ResourceAccessType::Common;
     postCopyBarriers[0].beforeLayout = rhi::ResourceLayout::CopySource;
-    postCopyBarriers[0].afterLayout = rhi::ResourceLayout::ShaderResource;
+    postCopyBarriers[0].afterLayout = rhi::ResourceLayout::Common;
     postCopyBarriers[1].texture = dst.texture;
     postCopyBarriers[1].range = copyRange;
     postCopyBarriers[1].beforeSync = rhi::ResourceSyncState::Copy;
     postCopyBarriers[1].afterSync = rhi::ResourceSyncState::All;
     postCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::CopyDest;
-    postCopyBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    postCopyBarriers[1].afterAccess = rhi::ResourceAccessType::Common;
     postCopyBarriers[1].beforeLayout = rhi::ResourceLayout::CopyDest;
-    postCopyBarriers[1].afterLayout = rhi::ResourceLayout::UnorderedAccess;
+    postCopyBarriers[1].afterLayout = rhi::ResourceLayout::Common;
 
     rhi::BarrierBatch postCopyBatch{};
     postCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(postCopyBarriers, 2);
@@ -629,8 +661,10 @@ void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components:
 
 void UpscalingManager::Shutdown() {
     if (m_fsrIntialized) {
-        ffx::DestroyContext(m_fsrUpscalingContext);
+        fidelityfx_backend::api::DestroyContext(m_fsrUpscalingContext);
         m_fsrIntialized = false;
     }
+	m_fsrUpscalingContext = nullptr;
+	fidelityfx_backend::api::UnloadModule();
 	// RHI now handles streamline internally
 }

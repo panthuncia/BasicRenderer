@@ -877,9 +877,6 @@ PRIVATE
     slang::slang
     "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib" 
     "${BASICRENDERER_SOURCE_ROOT}/sl.interposer.lib" 
-    "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_dx12.lib" 
-    "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_vk.lib"
-    "${BASICRENDERER_SOURCE_ROOT}/ffx_backend_dx12_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/ffx_sssr_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )

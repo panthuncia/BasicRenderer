@@ -168,12 +168,23 @@ public:
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
+        if (m_imguiBackend == rhi::Backend::Vulkan) {
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+            for (auto& entry : imguiVkTextureIds_) {
+                ImGui_ImplVulkan_RemoveTexture(entry.second);
+            }
+            imguiVkTextureIds_.clear();
+#endif
+        }
         if (m_imguiBackend == rhi::Backend::D3D12) {
             ImGui_ImplDX12_Shutdown();
         }
 #if BASICRENDERER_HAS_IMGUI_VULKAN
         if (m_imguiBackend == rhi::Backend::Vulkan) {
             ImGui_ImplVulkan_Shutdown();
+            if (m_imguiVkPreviewSampler != VK_NULL_HANDLE && m_imguiVkDevice != VK_NULL_HANDLE) {
+                vkDestroySampler(m_imguiVkDevice, m_imguiVkPreviewSampler, nullptr);
+            }
         }
 #endif
         if (m_imguiWin32Initialized) {
@@ -186,6 +197,11 @@ public:
         imguiHeapIncrementSize_ = 0;
         imguiHeapNextSlot_ = 1;
         imguiHeapFreeSlots_ = {};
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        imguiVkTextureIds_.clear();
+        m_imguiVkPreviewSampler = VK_NULL_HANDLE;
+        m_imguiVkDevice = VK_NULL_HANDLE;
+#endif
 		m_settingSubscriptions.clear();
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
@@ -218,14 +234,49 @@ public:
     }
     void FreeImGuiDescriptor(uint32_t index) {
         if (index == 0) return; // never free the font atlas slot
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        if (m_imguiBackend == rhi::Backend::Vulkan) {
+            auto textureIt = imguiVkTextureIds_.find(index);
+            if (textureIt != imguiVkTextureIds_.end()) {
+                ImGui_ImplVulkan_RemoveTexture(textureIt->second);
+                imguiVkTextureIds_.erase(textureIt);
+            }
+        }
+#endif
         std::lock_guard lock(imguiHeapMutex_);
         imguiHeapFreeSlots_.push(index);
     }
-    ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) const {
-		if (m_imguiBackend != rhi::Backend::D3D12) {
-            return static_cast<ImTextureID>(0);
-		}
+    ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) {
+        if (m_imguiBackend == rhi::Backend::D3D12) {
         return static_cast<ImTextureID>(imguiHeapGpuStart_ + static_cast<uint64_t>(index) * imguiHeapIncrementSize_);
+        }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        if (m_imguiBackend == rhi::Backend::Vulkan && g_pd3dSrvDescHeap && m_imguiVkPreviewSampler != VK_NULL_HANDLE) {
+            auto textureIt = imguiVkTextureIds_.find(index);
+            if (textureIt != imguiVkTextureIds_.end()) {
+                return (ImTextureID)textureIt->second;
+            }
+
+            auto device = DeviceManager::GetInstance().GetDevice();
+            const rhi::DescriptorSlot slot{ g_pd3dSrvDescHeap->GetHandle(), index };
+            const VkImageView imageView = rhi::vulkan::get_image_view(device, slot);
+            if (imageView == VK_NULL_HANDLE) {
+                return static_cast<ImTextureID>(0);
+            }
+
+            VkDescriptorSet textureSet = ImGui_ImplVulkan_AddTexture(
+                m_imguiVkPreviewSampler,
+                imageView,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            if (textureSet == VK_NULL_HANDLE) {
+                return static_cast<ImTextureID>(0);
+            }
+
+            imguiVkTextureIds_[index] = textureSet;
+            return (ImTextureID)textureSet;
+        }
+#endif
+        return static_cast<ImTextureID>(0);
     }
     rhi::DescriptorHeapHandle GetImGuiHeapHandle() const {
 		if (!g_pd3dSrvDescHeap) {
@@ -241,12 +292,17 @@ private:
     uint32_t imguiHeapIncrementSize_ = 0;
     uint32_t imguiHeapNextSlot_ = 1; // slot 0 = font atlas
     std::queue<uint32_t> imguiHeapFreeSlots_;
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    std::unordered_map<uint32_t, VkDescriptorSet> imguiVkTextureIds_;
+#endif
     std::mutex imguiHeapMutex_;
     rhi::Backend m_imguiBackend = rhi::Backend::Null;
     bool m_imguiWin32Initialized = false;
 #if BASICRENDERER_HAS_IMGUI_VULKAN
     VkFormat m_imguiVkColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
     VkPipelineRenderingCreateInfoKHR m_imguiVkRenderingInfo{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+    VkDevice m_imguiVkDevice = VK_NULL_HANDLE;
+    VkSampler m_imguiVkPreviewSampler = VK_NULL_HANDLE;
 #endif
 
     Menu() { 
@@ -785,6 +841,27 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
         }
         if (!ImGui_ImplVulkan_CreateFontsTexture()) {
             throw std::runtime_error("Menu::Initialize failed to create ImGui Vulkan font texture");
+        }
+
+        auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
+        if (!rhi::IsOk(result) || !g_pd3dSrvDescHeap) {
+            throw std::runtime_error("Menu::Initialize failed to create ImGui descriptor heap for Vulkan backend");
+        }
+
+        VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+        samplerInfo.maxAnisotropy = 1.0f;
+        m_imguiVkDevice = initInfo.Device;
+        const VkResult samplerResult = vkCreateSampler(m_imguiVkDevice, &samplerInfo, nullptr, &m_imguiVkPreviewSampler);
+        if (samplerResult != VK_SUCCESS) {
+            throw std::runtime_error("Menu::Initialize failed to create Vulkan ImGui preview sampler");
         }
 
         m_imguiBackend = rhi::Backend::Vulkan;
@@ -1767,7 +1844,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
 		RGInspectorOptions opts;
-        if (m_imguiBackend == rhi::Backend::D3D12 && g_pd3dSrvDescHeap) {
+        if ((m_imguiBackend == rhi::Backend::D3D12 || m_imguiBackend == rhi::Backend::Vulkan) && g_pd3dSrvDescHeap) {
             opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
             opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
             opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };

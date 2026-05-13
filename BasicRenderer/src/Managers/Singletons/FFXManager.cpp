@@ -4,13 +4,10 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
 #include "FidelityFX/FfxBackendAdapters.h"
-#include "ThirdParty/FFX/ffx_api_loader.h"
 #include "ThirdParty/FFX/host/ffx_sssr.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
 #include "Render/RenderContext.h"
-
-extern ffxFunctions ffxModule;
 
 bool FFXManager::InitFFX() {
     Shutdown();

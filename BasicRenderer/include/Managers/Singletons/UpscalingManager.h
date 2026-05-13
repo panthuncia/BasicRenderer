@@ -15,7 +15,6 @@
 
 #include <rhi.h>
 
-#include "ThirdParty/FFX/ffx_api_loader.h"
 #include "ThirdParty/FFX/ffx_api.hpp"
 #include "ThirdParty/FFX/ffx_upscale.hpp"
 
@@ -114,6 +113,7 @@ public:
 
 private:
     UpscalingManager() = default;
+    bool EnsureFSRContext();
 	void EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
     void EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void EvaluateNone(rhi::CommandList& commandList, const Components::Camera* camera, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
@@ -122,7 +122,7 @@ private:
     std::function<DirectX::XMUINT2()> m_getRenderRes;
 	std::function<DirectX::XMUINT2()> m_getOutputRes;
     bool m_fsrIntialized = false;
-    ffx::Context m_fsrUpscalingContext;
+    ffx::Context m_fsrUpscalingContext = nullptr;
 	bool m_dlssSupported = false;
 };
 

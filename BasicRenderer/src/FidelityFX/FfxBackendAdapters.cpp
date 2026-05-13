@@ -1,5 +1,9 @@
 #include "FidelityFX/FfxBackendAdapters.h"
 
+#include <windows.h>
+
+#include "ThirdParty/FFX/ffx_api_loader.h"
+
 #include <spdlog/spdlog.h>
 
 namespace fidelityfx_backend::detail {
@@ -19,6 +23,10 @@ void* GetHostCommandListVulkan(rhi::CommandList& commandList);
 }
 
 namespace {
+ffxFunctions g_apiFunctions{};
+HMODULE g_apiModule = nullptr;
+rhi::Backend g_apiBackend = rhi::Backend::Null;
+
 const char* BackendName(rhi::Backend backend) {
     switch (backend) {
     case rhi::Backend::D3D12:
@@ -29,9 +37,106 @@ const char* BackendName(rhi::Backend backend) {
         return "Unknown";
     }
 }
+
+const wchar_t* ApiModuleName(rhi::Backend backend) {
+    switch (backend) {
+    case rhi::Backend::D3D12:
+        return L"amd_fidelityfx_dx12.dll";
+    case rhi::Backend::Vulkan:
+        return L"amd_fidelityfx_vk.dll";
+    default:
+        return nullptr;
+    }
+}
+
+bool HasRequiredApiFunctions() {
+    return g_apiFunctions.CreateContext != nullptr &&
+        g_apiFunctions.DestroyContext != nullptr &&
+        g_apiFunctions.Configure != nullptr &&
+        g_apiFunctions.Query != nullptr &&
+        g_apiFunctions.Dispatch != nullptr;
+}
+}
+
+bool fidelityfx_backend::api::LoadModule(rhi::Backend backend) {
+    if (g_apiModule != nullptr && g_apiBackend == backend) {
+        return true;
+    }
+
+    if (g_apiModule != nullptr) {
+        FreeLibrary(g_apiModule);
+        g_apiModule = nullptr;
+        g_apiFunctions = {};
+        g_apiBackend = rhi::Backend::Null;
+    }
+
+    const wchar_t* moduleName = ApiModuleName(backend);
+    if (moduleName == nullptr) {
+        spdlog::warn("FidelityFX API does not support backend {}", static_cast<uint32_t>(backend));
+        return false;
+    }
+
+    g_apiModule = LoadLibraryW(moduleName);
+    if (g_apiModule == nullptr) {
+        spdlog::error("Failed to load FidelityFX API module for backend {}", BackendName(backend));
+        return false;
+    }
+
+    ffxLoadFunctions(&g_apiFunctions, g_apiModule);
+    if (!HasRequiredApiFunctions()) {
+        spdlog::error("FidelityFX API module for backend {} is missing required exports", BackendName(backend));
+        FreeLibrary(g_apiModule);
+        g_apiModule = nullptr;
+        g_apiFunctions = {};
+        return false;
+    }
+
+    g_apiBackend = backend;
+    return true;
+}
+
+void fidelityfx_backend::api::UnloadModule() {
+    if (g_apiModule != nullptr) {
+        FreeLibrary(g_apiModule);
+        g_apiModule = nullptr;
+        g_apiFunctions = {};
+        g_apiBackend = rhi::Backend::Null;
+    }
+}
+
+ffx::ReturnCode fidelityfx_backend::api::CreateContext(ffx::Context& context, ffxAllocationCallbacks* memCb, ffxCreateContextDescHeader* header) {
+    if (g_apiFunctions.CreateContext == nullptr || header == nullptr) {
+        return ffx::ReturnCode::ErrorRuntimeError;
+    }
+    return static_cast<ffx::ReturnCode>(g_apiFunctions.CreateContext(&context, header, memCb));
+}
+
+ffx::ReturnCode fidelityfx_backend::api::DestroyContext(ffx::Context& context, const ffxAllocationCallbacks* memCb) {
+    if (g_apiFunctions.DestroyContext == nullptr || context == nullptr) {
+        return ffx::ReturnCode::ErrorRuntimeError;
+    }
+    return static_cast<ffx::ReturnCode>(g_apiFunctions.DestroyContext(&context, memCb));
+}
+
+ffx::ReturnCode fidelityfx_backend::api::Query(ffx::Context& context, ffxQueryDescHeader* header) {
+    if (g_apiFunctions.Query == nullptr || context == nullptr || header == nullptr) {
+        return ffx::ReturnCode::ErrorRuntimeError;
+    }
+    return static_cast<ffx::ReturnCode>(g_apiFunctions.Query(&context, header));
+}
+
+ffx::ReturnCode fidelityfx_backend::api::Dispatch(ffx::Context& context, ffxDispatchDescHeader* header) {
+    if (g_apiFunctions.Dispatch == nullptr || context == nullptr || header == nullptr) {
+        return ffx::ReturnCode::ErrorRuntimeError;
+    }
+    return static_cast<ffx::ReturnCode>(g_apiFunctions.Dispatch(&context, header));
 }
 
 bool fidelityfx_backend::api::CreateUpscaleContext(ffx::Context& context, rhi::Backend backend, rhi::Device device, ffx::CreateContextDescUpscale& createUpscaling) {
+    if (!LoadModule(backend)) {
+        return false;
+    }
+
     switch (backend) {
     case rhi::Backend::D3D12:
         return detail::CreateUpscaleContextDX12(context, device, createUpscaling);
