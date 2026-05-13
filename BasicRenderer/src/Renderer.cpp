@@ -160,7 +160,7 @@ bool IsDirectStorageDisabledByEnvironment() {
 }
 
 bool DefaultEnableReShapeForBuild() {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+#if BASICRHI_ENABLE_RESHAPE
     return true;
 #else
     return false;
@@ -1825,7 +1825,6 @@ void Renderer::Update(float elapsedSeconds) {
     runCapturedStage("WaitForFrame", [&]() {
         ZoneScopedN("Renderer::Update::WaitForFrame");
         WaitForFrame(m_frameIndex);
-        DeletionManager::GetInstance().ProcessDeletions();
         RendererECSManager::GetInstance().FlushDeferredWorldOperations();
         });
 
@@ -2500,7 +2499,6 @@ void Renderer::CreateRenderGraph() {
     };
 
     newGraph->ResetForRebuild();
-    DeletionManager::GetInstance().DrainAll();
     probeGraphBuildPhase("CreateRenderGraph after ResetForRebuild");
 
     newGraph->RegisterProvider(m_pMeshManager.get());

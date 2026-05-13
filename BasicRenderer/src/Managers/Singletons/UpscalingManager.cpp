@@ -18,6 +18,7 @@
 #include <sl_consts.h>
 #include <sl_dlss.h>
 #include "rhi_interop_dx12.h"
+#include "rhi_interop_vulkan.h"
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
 PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
@@ -60,27 +61,70 @@ namespace {
         }
         return requestedMode;
     }
+
+    bool MakeStreamlineVulkanTextureResource(
+        rhi::Device device,
+        PixelBuffer* texture,
+        rhi::DescriptorSlot viewSlot,
+        VkImageLayout layout,
+        sl::Resource& resource)
+    {
+        if (!texture) {
+            return false;
+        }
+
+        rhi::VulkanResourceInfo resourceInfo{};
+        rhi::VulkanDescriptorSlotInfo slotInfo{};
+        if (!rhi::vulkan::get_resource_info(texture->GetAPIResource(), resourceInfo) ||
+            !rhi::vulkan::get_descriptor_slot_info(device, viewSlot, slotInfo)) {
+            return false;
+        }
+
+        VkImage image = rhi::vulkan::from_native_void<VkImage>(resourceInfo.resource);
+        VkImageView view = rhi::vulkan::from_native_void<VkImageView>(slotInfo.imageView);
+        if (image == VK_NULL_HANDLE || view == VK_NULL_HANDLE) {
+            return false;
+        }
+
+        resource = sl::Resource{ sl::ResourceType::eTex2d, image, nullptr, view, static_cast<uint32_t>(layout) };
+        resource.width = resourceInfo.width;
+        resource.height = resourceInfo.height;
+        resource.nativeFormat = slotInfo.nativeFormat != VK_FORMAT_UNDEFINED ? slotInfo.nativeFormat : resourceInfo.nativeFormat;
+        resource.mipLevels = resourceInfo.mipLevels;
+        resource.arrayLayers = resourceInfo.arrayLayers;
+        resource.flags = resourceInfo.flags;
+        resource.usage = resourceInfo.usage;
+        return resource.nativeFormat != VK_FORMAT_UNDEFINED;
+    }
 }
 
 ffxFunctions ffxModule;
 
 bool CheckDLSSSupport(rhi::Device dev, rhi::Backend backend) {
-    if (backend != rhi::Backend::D3D12) {
-        return false;
-    }
-
-    IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
-    if (!ad) {
-        return false;
-    }
-    DXGI_ADAPTER_DESC desc{};
-    if (FAILED(ad->GetDesc(&desc))) {
-        return false;
-    }
-
     sl::AdapterInfo ai{};
-    ai.deviceLUID = reinterpret_cast<uint8_t*>(&desc.AdapterLuid);
-    ai.deviceLUIDSizeInBytes = sizeof(LUID);
+
+    if (backend == rhi::Backend::D3D12) {
+        IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
+        if (!ad) {
+            return false;
+        }
+        DXGI_ADAPTER_DESC desc{};
+        if (FAILED(ad->GetDesc(&desc))) {
+            return false;
+        }
+        ai.deviceLUID = reinterpret_cast<uint8_t*>(&desc.AdapterLuid);
+        ai.deviceLUIDSizeInBytes = sizeof(LUID);
+    }
+    else if (backend == rhi::Backend::Vulkan) {
+        VkPhysicalDevice physicalDevice = rhi::vulkan::get_physical_device(dev);
+        if (physicalDevice == VK_NULL_HANDLE) {
+            return false;
+        }
+        ai.vkPhysicalDevice = physicalDevice;
+    }
+    else {
+        return false;
+    }
 
     sl::Result res = sl::Result::eOk;
     if (SL_FAILED(res, slIsFeatureSupported(sl::kFeatureDLSS, ai))) {
@@ -119,15 +163,6 @@ void UpscalingManager::InitializeAdapter()
             m_upscalingMode = UpscalingMode::None;
         }
         spdlog::info("UpscalingManager::InitializeAdapter skipped DLSS probing because enableStreamline=false");
-        return;
-    }
-
-    if (backend != rhi::Backend::D3D12) {
-        m_dlssSupported = false;
-        if (m_upscalingMode == UpscalingMode::DLSS) {
-            m_upscalingMode = UpscalingMode::None;
-        }
-        spdlog::warn("UpscalingManager::InitializeAdapter disabled DLSS because Streamline Vulkan integration is not available in this workspace.");
         return;
     }
 
@@ -224,15 +259,6 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 }
 
 bool UpscalingManager::InitSL() {
-    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
-        m_dlssSupported = false;
-        if (m_upscalingMode == UpscalingMode::DLSS) {
-            m_upscalingMode = UpscalingMode::None;
-        }
-        spdlog::warn("UpscalingManager::InitSL skipped because Streamline Vulkan integration is not available in this workspace.");
-        return false;
-    }
-
     if (!IsStreamlineEnabledSetting()) {
         m_dlssSupported = false;
         if (m_upscalingMode == UpscalingMode::DLSS) {
@@ -315,8 +341,9 @@ void UpscalingManager::Setup() {
 }
 
 void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
-    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
-        spdlog::warn("UpscalingManager::EvaluateDLSS called on unsupported backend {}; skipping.", static_cast<uint32_t>(DeviceManager::GetInstance().GetBackend()));
+    const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+    if (backend != rhi::Backend::D3D12 && backend != rhi::Backend::Vulkan) {
+        spdlog::warn("UpscalingManager::EvaluateDLSS called on unsupported backend {}; skipping.", static_cast<uint32_t>(backend));
         return;
     }
 
@@ -383,10 +410,33 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
         spdlog::error("Failed to set DLSS constants");
     }
 
-    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource colorOut = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pUpscaledHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource depth = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource mvec = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pMotionVectors->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    sl::Resource colorIn{};
+    sl::Resource colorOut{};
+    sl::Resource depth{};
+    sl::Resource mvec{};
+    if (backend == rhi::Backend::Vulkan) {
+        rhi::Device device = DeviceManager::GetInstance().GetDevice();
+        const rhi::DescriptorSlot colorInView = pHDRTarget->GetSRVInfo(0).slot;
+        const rhi::DescriptorSlot colorOutView = pUpscaledHDRTarget->HasUAVShaderVisible()
+            ? pUpscaledHDRTarget->GetUAVShaderVisibleInfo(0).slot
+            : pUpscaledHDRTarget->GetSRVInfo(0).slot;
+        const rhi::DescriptorSlot depthView = pDepthTexture->GetSRVInfo(0).slot;
+        const rhi::DescriptorSlot motionVectorView = pMotionVectors->GetSRVInfo(0).slot;
+
+        if (!MakeStreamlineVulkanTextureResource(device, pHDRTarget, colorInView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, colorIn) ||
+            !MakeStreamlineVulkanTextureResource(device, pUpscaledHDRTarget, colorOutView, VK_IMAGE_LAYOUT_GENERAL, colorOut) ||
+            !MakeStreamlineVulkanTextureResource(device, pDepthTexture, depthView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, depth) ||
+            !MakeStreamlineVulkanTextureResource(device, pMotionVectors, motionVectorView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mvec)) {
+            spdlog::error("DLSS evaluation skipped because Vulkan Streamline resource metadata could not be resolved.");
+            return;
+        }
+    }
+    else {
+        colorIn = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        colorOut = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pUpscaledHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        depth = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        mvec = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pMotionVectors->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    }
     //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
 
     sl::Extent renderExtent = { 0, 0, renderRes.x, renderRes.y };
@@ -399,7 +449,10 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 
     const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
 
-    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), rhi::dx12::get_cmd_list(commandList))))
+    void* nativeCommandList = backend == rhi::Backend::Vulkan
+        ? static_cast<void*>(rhi::vulkan::get_cmd_list(commandList))
+        : static_cast<void*>(rhi::dx12::get_cmd_list(commandList));
+    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), nativeCommandList)))
     {
         spdlog::error("DLSS evaluation failed!");
     }
@@ -501,17 +554,17 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
     preCopyBarriers[0].range = copyRange;
     preCopyBarriers[0].beforeSync = rhi::ResourceSyncState::All;
     preCopyBarriers[0].afterSync = rhi::ResourceSyncState::Copy;
-    preCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::Common;
+    preCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::ShaderResource;
     preCopyBarriers[0].afterAccess = rhi::ResourceAccessType::CopySource;
-    preCopyBarriers[0].beforeLayout = rhi::ResourceLayout::Common;
+    preCopyBarriers[0].beforeLayout = rhi::ResourceLayout::ShaderResource;
     preCopyBarriers[0].afterLayout = rhi::ResourceLayout::CopySource;
     preCopyBarriers[1].texture = dst.texture;
     preCopyBarriers[1].range = copyRange;
     preCopyBarriers[1].beforeSync = rhi::ResourceSyncState::All;
     preCopyBarriers[1].afterSync = rhi::ResourceSyncState::Copy;
-    preCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::Common;
+    preCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
     preCopyBarriers[1].afterAccess = rhi::ResourceAccessType::CopyDest;
-    preCopyBarriers[1].beforeLayout = rhi::ResourceLayout::Common;
+    preCopyBarriers[1].beforeLayout = rhi::ResourceLayout::UnorderedAccess;
     preCopyBarriers[1].afterLayout = rhi::ResourceLayout::CopyDest;
 
     rhi::BarrierBatch preCopyBatch{};
@@ -526,17 +579,17 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
     postCopyBarriers[0].beforeSync = rhi::ResourceSyncState::Copy;
     postCopyBarriers[0].afterSync = rhi::ResourceSyncState::All;
     postCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::CopySource;
-    postCopyBarriers[0].afterAccess = rhi::ResourceAccessType::Common;
+    postCopyBarriers[0].afterAccess = rhi::ResourceAccessType::ShaderResource;
     postCopyBarriers[0].beforeLayout = rhi::ResourceLayout::CopySource;
-    postCopyBarriers[0].afterLayout = rhi::ResourceLayout::Common;
+    postCopyBarriers[0].afterLayout = rhi::ResourceLayout::ShaderResource;
     postCopyBarriers[1].texture = dst.texture;
     postCopyBarriers[1].range = copyRange;
     postCopyBarriers[1].beforeSync = rhi::ResourceSyncState::Copy;
     postCopyBarriers[1].afterSync = rhi::ResourceSyncState::All;
     postCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::CopyDest;
-    postCopyBarriers[1].afterAccess = rhi::ResourceAccessType::Common;
+    postCopyBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
     postCopyBarriers[1].beforeLayout = rhi::ResourceLayout::CopyDest;
-    postCopyBarriers[1].afterLayout = rhi::ResourceLayout::Common;
+    postCopyBarriers[1].afterLayout = rhi::ResourceLayout::UnorderedAccess;
 
     rhi::BarrierBatch postCopyBatch{};
     postCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(postCopyBarriers, 2);

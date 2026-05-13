@@ -1766,38 +1766,36 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
+		RGInspectorOptions opts;
         if (m_imguiBackend == rhi::Backend::D3D12 && g_pd3dSrvDescHeap) {
-            RGInspectorOptions opts;
             opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
             opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
             opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
             opts.imguiHeapHandle = GetImGuiHeapHandle();
-            RGInspector::Show(m_renderGraph->GetBatches(),
-                m_renderGraph->GetQueueRegistry(),
-                PassUsesResourceAdapter,
-                [this](uint64_t resourceId) -> std::string {
-                    if (!m_renderGraph) return {};
-                    auto resource = m_renderGraph->GetResourceByID(resourceId);
-                    if (!resource) return {};
-                    return resource->GetName();
-                },
-                [this](uint64_t resourceId) -> Resource* {
-                    if (!m_renderGraph) return nullptr;
-                    auto resource = m_renderGraph->GetResourceByID(resourceId);
-                    return resource ? resource.get() : nullptr;
-                },
-                [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
-                    if (!m_renderGraph) {
-                        return;
-                    }
-                    if (auto* readbackService = m_renderGraph->GetReadbackService()) {
-                        readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
-                    }
-                },
-                opts);
-        } else {
-            ImGui::TextUnformatted("Texture preview integration currently requires the DX12 ImGui backend.");
         }
+        RGInspector::Show(m_renderGraph->GetBatches(),
+            m_renderGraph->GetQueueRegistry(),
+            PassUsesResourceAdapter,
+            [this](uint64_t resourceId) -> std::string {
+                if (!m_renderGraph) return {};
+                auto resource = m_renderGraph->GetResourceByID(resourceId);
+                if (!resource) return {};
+                return resource->GetName();
+            },
+            [this](uint64_t resourceId) -> Resource* {
+                if (!m_renderGraph) return nullptr;
+                auto resource = m_renderGraph->GetResourceByID(resourceId);
+                return resource ? resource.get() : nullptr;
+            },
+            [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
+                if (!m_renderGraph) {
+                    return;
+                }
+                if (auto* readbackService = m_renderGraph->GetReadbackService()) {
+                    readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
+                }
+            },
+            opts);
         ImGui::End();
 
     }

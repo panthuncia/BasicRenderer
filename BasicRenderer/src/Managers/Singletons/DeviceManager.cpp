@@ -109,7 +109,7 @@ void DeviceManager::Initialize() {
     if (IsStreamlineDisabledByEnvironment()) {
         enableStreamline = false;
     }
-
+    enableStreamline = false;
     const bool enableDebug = IsDiagnosticsBuild();
 
     bool enableRuntimeInstrumentation = false;
@@ -121,6 +121,10 @@ void DeviceManager::Initialize() {
     catch (const std::exception&) {
         enableRuntimeInstrumentation = false;
     }
+
+#if !BASICRHI_ENABLE_RESHAPE
+    enableRuntimeInstrumentation = false;
+#endif
 
     try {
         enableSynchronousRecording = settingsManager.getSettingGetter<bool>("reshapeSynchronousRecording")();
@@ -146,10 +150,6 @@ void DeviceManager::Initialize() {
         numFramesInFlight);
 
     const rhi::Backend backend = GetRequestedBackend();
-    if (backend == rhi::Backend::Vulkan && enableStreamline) {
-        spdlog::warn("DeviceManager::Initialize disabling Streamline for Vulkan backend; Streamline integration is D3D12-only in this workspace.");
-        enableStreamline = false;
-    }
 
     const rhi::DeviceCreateInfo createInfo{
         .backend = backend,
@@ -163,7 +163,7 @@ void DeviceManager::Initialize() {
     };
 
     const rhi::Result createResult = backend == rhi::Backend::Vulkan
-        ? rhi::CreateVulkanDevice(createInfo, m_device)
+        ? rhi::CreateVulkanDevice(createInfo, m_device, enableStreamline)
         : rhi::CreateD3D12Device(createInfo, m_device, enableStreamline);
 
     if (!rhi::IsOk(createResult) || !m_device) {

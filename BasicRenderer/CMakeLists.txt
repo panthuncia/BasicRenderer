@@ -514,6 +514,16 @@ add_symlink_or_copy_per_config(
     "FFX_backend_dx12"
 )
 
+set(FFX_BACKEND_VK_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_backend_vk_x64drel.dll")
+set(FFX_BACKEND_VK_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_backend_vk_x64drel.dll")
+
+add_symlink_or_copy_per_config(
+    "${FFX_BACKEND_VK_DIR}"
+    "${FFX_BACKEND_VK_FILE}"
+    FALSE  # IS_DIRECTORY
+    "FFX_backend_vk"
+)
+
 set(FFX_SSSR_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_sssr_x64drel.dll")
 set(FFX_SSSR_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_sssr_x64drel.dll")
 
@@ -898,7 +908,7 @@ if(BASICRENDERER_DIRECTSTORAGE_CORE_DLL)
     )
 endif()
 
-if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
+if(BASICRHI_ENABLE_RESHAPE AND (TARGET GRS.Backends.DX12.Layer OR TARGET GRS.Backends.Vulkan.Layer))
     target_link_directories(${PROJECT_NAME} PRIVATE
         "${CMAKE_BINARY_DIR}/External/lib"
     )
@@ -950,17 +960,14 @@ if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
     endif()
     br_add_reshape_plugin(GRS.Features.ExportIndices.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/ExportIndices/ExportIndices.xml")
 
-    add_dependencies(${PROJECT_NAME}
-        GRS.Backends.DX12.Layer
-        ${_basicrenderer_reshape_plugins}
-    )
-
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
+    set(_basicrenderer_reshape_backend_targets ${_basicrenderer_reshape_plugins})
+    set(_basicrenderer_reshape_backend_copy_commands)
+    if(TARGET GRS.Backends.DX12.Layer)
+        list(APPEND _basicrenderer_reshape_backend_targets GRS.Backends.DX12.Layer)
+        list(APPEND _basicrenderer_reshape_backend_copy_commands
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxil.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxil.dll"
@@ -970,6 +977,28 @@ if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxilconv.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxilconv.dll"
+        )
+    endif()
+    if(TARGET GRS.Backends.Vulkan.Layer)
+        list(APPEND _basicrenderer_reshape_backend_targets GRS.Backends.Vulkan.Layer)
+        list(APPEND _basicrenderer_reshape_backend_copy_commands
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:GRS.Backends.Vulkan.Layer>"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.Vulkan.Layer>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Backends/Vulkan/Layer/Resources/VK_LAYER_GPUOPEN_GRS.json"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/VK_LAYER_GPUOPEN_GRS.json"
+        )
+    endif()
+
+    add_dependencies(${PROJECT_NAME}
+        ${_basicrenderer_reshape_backend_targets}
+    )
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC"
+        ${_basicrenderer_reshape_backend_copy_commands}
         ${_basicrenderer_reshape_plugin_copy_commands}
             COMMAND ${CMAKE_COMMAND} -E rm -f
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Debug.Backend.dll"

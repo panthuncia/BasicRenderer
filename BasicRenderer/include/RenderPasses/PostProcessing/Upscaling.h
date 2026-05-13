@@ -14,7 +14,11 @@ public:
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
-        builder->WithLegacyInterop(Builtin::Color::HDRColorTarget, Builtin::GBuffer::MotionVectors, Builtin::PrimaryCamera::ProjectedDepthTexture, Builtin::PostProcessing::UpscaledHDR);
+        builder->WithShaderResource(
+            Builtin::Color::HDRColorTarget,
+            Builtin::GBuffer::MotionVectors,
+            Builtin::PrimaryCamera::ProjectedDepthTexture)
+            .WithUnorderedAccess(Builtin::PostProcessing::UpscaledHDR);
     }
 
     void Setup() override {
