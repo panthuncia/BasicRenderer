@@ -20,7 +20,7 @@
 namespace {
     // Bump this whenever the shader compiler argument set changes in a way that affects
     // the generated shader bytecode container, especially debug payload availability.
-    constexpr uint64_t kShaderCompilerArgumentFingerprint = 4u;
+    constexpr uint64_t kShaderCompilerArgumentFingerprint = 5u;
 }
 
 namespace {
@@ -1934,6 +1934,7 @@ void PSOManager::GetPreprocessedBlob(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
+    opts.emitSpirv = IsSpirvFormat(GetActiveShaderBinaryFormat());
 #if WRITE_DEBUG_FILES
     opts.enableDebugInfo = true;
 #endif
@@ -2346,6 +2347,9 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
         args.push_back(L"-E"); args.push_back(opts.entryPoint.c_str());
     }
     args.push_back(L"-T"); args.push_back(opts.target.c_str());
+
+    args.push_back(L"-D");
+    args.push_back(opts.emitSpirv ? L"BASICRENDERER_SHADER_API_VULKAN=1" : L"BASICRENDERER_SHADER_API_DX12=1");
 
     if (opts.emitSpirv) {
         args.push_back(L"-spirv");

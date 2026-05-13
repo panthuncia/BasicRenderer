@@ -806,12 +806,6 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.FontGlobalScale = 1.2f;
 
-	DirectX::XMUINT2 renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-	DirectX::XMUINT2 outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-	io.DisplaySize = ImVec2(static_cast<float>(outputResolution.x), static_cast<float>(outputResolution.y));
-    io.DisplayFramebufferScale = ImVec2(
-        2.0, 2.0);
-
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
 
@@ -1311,8 +1305,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         attchment.loadOp = rhi::LoadOp::Load;
 		attchment.rtv = { context.rtvHeap.GetHandle() , context.frameIndex }; // Index into the swapchain RTV heap
 		beginInfo.colors = { &attchment };
-		beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
-		beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
+        beginInfo.height = context.outputResolution.y;
+        beginInfo.width = context.outputResolution.x;
 
 		commandList.BeginPass(beginInfo);
 
@@ -1844,8 +1838,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     attchment.loadOp = rhi::LoadOp::Load;
 	attchment.rtv = { context.rtvHeap.GetHandle() , context.frameIndex }; // Index into the swapchain RTV heap
 	beginInfo.colors = { &attchment };
-	beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
-	beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
+    beginInfo.height = context.outputResolution.y;
+    beginInfo.width = context.outputResolution.x;
 
 	commandList.BeginPass(beginInfo);
 

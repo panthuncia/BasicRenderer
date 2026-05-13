@@ -213,13 +213,13 @@ private:
 	bool m_allowTearing = false;
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
-	bool m_gtaoEnabled = true;
+	bool m_gtaoEnabled = false;
 	bool m_visibilityRendering = true;
-	bool m_occlusionCulling = true;
+	bool m_occlusionCulling = false;
 	bool m_meshletCulling = true;
-    bool m_bloom = true;
+    bool m_bloom = false;
     bool m_jitter = true;
-	bool m_screenSpaceReflections = true;
+	bool m_screenSpaceReflections = false;
 	bool m_useMeshShaders = true;
 
     std::function<uint16_t()> getShadowResolution;
