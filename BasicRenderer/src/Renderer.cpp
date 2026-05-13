@@ -2252,10 +2252,10 @@ void Renderer::Cleanup() {
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
     RendererECSManager::GetInstance().FlushDeferredWorldOperations();
+	RenderGraph::ShutdownRuntime();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
     RendererECSManager::GetInstance().Cleanup();
-    DeletionManager::GetInstance().Cleanup();
 	spdlog::info("Cleaning up swap chain");
     m_swapChain.Reset();
 	spdlog::info("Cleaning up device manager");
