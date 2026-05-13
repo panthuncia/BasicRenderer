@@ -4,6 +4,7 @@
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Scene/Scene.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
 
 class UpscalingPass : public RenderPass {
@@ -14,11 +15,33 @@ public:
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
-        builder->WithShaderResource(
-            Builtin::Color::HDRColorTarget,
-            Builtin::GBuffer::MotionVectors,
-            Builtin::PrimaryCamera::ProjectedDepthTexture)
-            .WithUnorderedAccess(Builtin::PostProcessing::UpscaledHDR);
+        ResourceIdentifierAndRange upscaledHDR(Builtin::PostProcessing::UpscaledHDR, {});
+        ResourceState vulkanStreamlineExitState{
+            .access = rhi::ResourceAccessType::UnorderedAccess | rhi::ResourceAccessType::UnorderedAccessClear,
+            .layout = rhi::ResourceLayout::UnorderedAccess,
+            .sync = rhi::ResourceSyncState::AllShading | rhi::ResourceSyncState::ClearUnorderedAccessView };
+        ResourceState dx12StreamlineExitState{
+            .access = rhi::ResourceAccessType::Common,
+            .layout = rhi::ResourceLayout::Common,
+            .sync = rhi::ResourceSyncState::All };
+
+        // TODO: Remove these backend-specific workarounds when ORG can model combined non-conflicting usages on one resource.
+        if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
+            builder->WithShaderResource(
+                Builtin::Color::HDRColorTarget,
+                Builtin::GBuffer::MotionVectors,
+                Builtin::PrimaryCamera::ProjectedDepthTexture)
+                .WithUnorderedAccessClear(upscaledHDR)
+                .WithInternalTransition(upscaledHDR, vulkanStreamlineExitState);
+        }
+        else {
+            builder->WithLegacyInterop(
+                Builtin::Color::HDRColorTarget,
+                Builtin::GBuffer::MotionVectors,
+                Builtin::PrimaryCamera::ProjectedDepthTexture,
+                upscaledHDR)
+                .WithInternalTransition(upscaledHDR, dx12StreamlineExitState);
+        }
     }
 
     void Setup() override {

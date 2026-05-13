@@ -461,6 +461,21 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
         // IMPORTANT: Host is responsible for restoring state on the command list used
         //restoreState(myCmdList); ??
     }
+    if (backend == rhi::Backend::Vulkan) {
+        rhi::TextureBarrier streamlineOutputBarrier{};
+        streamlineOutputBarrier.texture = pUpscaledHDRTarget->GetAPIResource().GetHandle();
+        streamlineOutputBarrier.range = { 0, pUpscaledHDRTarget->GetMipLevels(), 0, pUpscaledHDRTarget->GetArraySize() };
+        streamlineOutputBarrier.beforeSync = rhi::ResourceSyncState::ClearUnorderedAccessView;
+        streamlineOutputBarrier.afterSync = rhi::ResourceSyncState::AllShading | rhi::ResourceSyncState::ClearUnorderedAccessView;
+        streamlineOutputBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccessClear;
+        streamlineOutputBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess | rhi::ResourceAccessType::UnorderedAccessClear;
+        streamlineOutputBarrier.beforeLayout = rhi::ResourceLayout::UnorderedAccess;
+        streamlineOutputBarrier.afterLayout = rhi::ResourceLayout::UnorderedAccess;
+
+        rhi::BarrierBatch streamlineOutputBatch{};
+        streamlineOutputBatch.textures = { &streamlineOutputBarrier };
+        commandList.Barriers(streamlineOutputBatch);
+    }
 }
 
 void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {

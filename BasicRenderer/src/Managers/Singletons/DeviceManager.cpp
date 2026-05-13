@@ -109,7 +109,7 @@ void DeviceManager::Initialize() {
     if (IsStreamlineDisabledByEnvironment()) {
         enableStreamline = false;
     }
-    enableStreamline = false;
+
     const bool enableDebug = IsDiagnosticsBuild();
 
     bool enableRuntimeInstrumentation = false;

@@ -36,3 +36,9 @@ void CommandSignatureManager::Initialize() {
         computeLayout.GetHandle(), m_materialEvaluationCommandSignature);
 
 }
+
+void CommandSignatureManager::Cleanup() {
+    m_dispatchMeshCommandSignature.Reset();
+    m_dispatchCommandSignature.Reset();
+    m_materialEvaluationCommandSignature.Reset();
+}

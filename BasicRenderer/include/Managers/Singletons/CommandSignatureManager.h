@@ -9,6 +9,7 @@ class CommandSignatureManager {
 public:
 	static CommandSignatureManager& GetInstance();
 	void Initialize();
+	void Cleanup();
 	const rhi::CommandSignature& GetDispatchMeshCommandSignature() {
 		return m_dispatchMeshCommandSignature.Get();
 	}
