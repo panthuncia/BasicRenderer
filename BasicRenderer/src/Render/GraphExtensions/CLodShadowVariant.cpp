@@ -445,11 +445,7 @@ void CLodShadowVariant::RefreshConfiguredSettings(CLodExtension& extension)
 
 uint32_t CLodShadowVariant::GetVisibleClusterCapacity(const CLodExtension& extension)
 {
-    if (extension.m_type != CLodExtensionType::Shadow) {
-        return extension.m_maxVisibleClusters;
-    }
-
-    return std::max(extension.m_maxVisibleClusters, extension.m_shadowConfiguredExpandedRecordCapacity);
+    return extension.m_maxVisibleClusters;
 }
 
 std::string CLodShadowVariant::AppendStructuralPrelude(

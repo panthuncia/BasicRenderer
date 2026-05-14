@@ -3960,10 +3960,9 @@ namespace
 			}
 		}
 
-		// Build parent error map: for each group, store the max error of any
-		// parent (coarser) group that refines into it.  Also track the parent
-		// group ID so the shader can load the parent's sphere for an exact
-		// bidirectional LOD check.
+		// Build parent error map: for each group, store the max traversal error
+		// of any parent (coarser) group that refines into it. Also track the
+		// parent group ID associated with that max error.
 		std::vector<float> parentErrorForGroup(state.groups.size(), 0.0f);
 		std::vector<int32_t> parentGroupIdForGroup(state.groups.size(), -1);
 		for (uint32_t groupID = 0; groupID < uint32_t(state.groups.size()); ++groupID)
@@ -4097,11 +4096,10 @@ namespace
 					grp.bounds.center[1],
 					grp.bounds.center[2],
 					grp.bounds.radius);
-				// Store the own group's error for propagation to parent BVH
-				// internal nodes.  TraverseNodes loads the actual group for
-				// the leaf-level LOD check, but internal nodes use the
-				// propagated maxQuadricError as a conservative bound.
-				node.traversalMetric.maxQuadricError = grp.bounds.error;
+				// Leaf traversal decisions use the max hierarchical parent
+				// traversal error. Internal traversal nodes propagate the max of
+				// their children below.
+				node.traversalMetric.maxQuadricError = parentErrorForGroup[info.ownerGroupId];
 			}
 
 			if (leafCount == 1) {

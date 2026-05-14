@@ -1161,7 +1161,7 @@ inline uint32_t CLodRoundUpCapacity(uint32_t required)
 
 inline uint32_t CLodVoxelRasterWorkCapacity(uint32_t maxVisibleClusters)
 {
-    return std::max(1u, maxVisibleClusters * 16u);
+    return std::max(1u, maxVisibleClusters /** 16u*/);
 }
 
 inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(

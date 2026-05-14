@@ -205,7 +205,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     const bool enableDirectStorage = !IsDirectStorageDisabledByEnvironment();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
-    settingsManager.registerSetting<rhi::Backend>("rhiBackend", rhi::Backend::D3D12);
+    settingsManager.registerSetting<rhi::Backend>("rhiBackend", rhi::Backend::Vulkan);
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
@@ -1214,7 +1214,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphVramDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphDisableCaching", false);
     settingsManager.registerSetting<bool>("renderGraphQueueSyncTraceEnabled", false);

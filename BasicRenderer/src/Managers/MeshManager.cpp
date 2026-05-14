@@ -46,8 +46,8 @@ MeshManager::MeshManager() {
 	m_meshletVertexIndices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_meshletTriangles->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_clusterLODMeshletBounds->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_clodSharedGroupChunks->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_clodGroupPageMap->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clodSharedGroupChunks->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
+	m_clodGroupPageMap->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
 
 	// Tag resources for memory statistics
 	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");

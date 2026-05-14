@@ -1616,11 +1616,14 @@ bool CLodRefinedChildSuppressesParent(
 
     const uint childGroupGlobalIndex = groupsBase + childGroupLocalIndex;
     const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
+    const float childTraversalError = childGroup.parentGroupId >= 0
+        ? groups[groupsBase + childGroup.parentGroupId].bounds.error
+        : childGroup.bounds.error;
     const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
     const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
     const float childBoundaryEOD = ProjectedGeometricError(
         childWorldCenter, childWorldRadius,
-        childGroup.bounds.error, lodUniformScale,
+        childTraversalError, lodUniformScale,
         lodCam.positionWorldSpace.xyz, lodCam.zNear,
         lodCameraIsOrtho);
 
@@ -1697,7 +1700,7 @@ bool CLodPrepareRenderableLeaf(
     leaf.errorOverDistance = ProjectedGeometricError(
         groupWorldCenter,
         groupWorldRadius,
-        leaf.group.bounds.error,
+        node.metric.maxQuadricError,
         lodUniformScale,
         lodCam.positionWorldSpace.xyz,
         lodCam.zNear,
