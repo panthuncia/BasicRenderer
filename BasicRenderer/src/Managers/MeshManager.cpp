@@ -21,11 +21,6 @@
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_preSkinningVertices = DynamicBuffer::CreateShared(1, 4, "preSkinnedVertices", true);
-	m_postSkinningVertices = DynamicBuffer::CreateShared(1, 4, "PostSkinnedvertices", true, true);
-	m_meshletOffsets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "meshletOffsets");
-	m_meshletVertexIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "meshletVertexIndices");
-	m_meshletTriangles = DynamicBuffer::CreateShared(1, 4, "meshletTriangles", true);
 
 	m_perMeshBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "PerMeshBuffers");
 	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshInstanceCB), 1, "perMeshInstanceBuffers");
@@ -37,25 +32,14 @@ MeshManager::MeshManager() {
 	m_clodHierarchyLevelInfos = DynamicBuffer::CreateShared(sizeof(CLodHierarchyLevelInfo), 10000, "clodHierarchyLevelInfos");
 	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 10000, "clusterLODGroups");
 	m_clusterLODSegments = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupSegment), 10000, "clusterLODSegments");
-	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
+	//m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 10000, "clusterLODNodes");
 	m_clodGroupPageMap = DynamicBuffer::CreateShared(sizeof(GroupPageMapEntry), 10000, "clodGroupPageMap");
 
-	m_postSkinningVertices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_meshletOffsets->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_meshletVertexIndices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_meshletTriangles->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_clusterLODMeshletBounds->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_clodSharedGroupChunks->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
 	m_clodGroupPageMap->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
 
 	// Tag resources for memory statistics
-	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_postSkinningVertices, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_meshletOffsets, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_meshletVertexIndices, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_meshletTriangles, "Mesh Data");
-
 	rg::memory::SetResourceUsageHint(*m_perMeshBuffers, "PerMesh, PerMeshInstance, PerObject");
 	rg::memory::SetResourceUsageHint(*m_perMeshInstanceBuffers, "PerMesh, PerMeshInstance, PerObject");
 	rg::memory::SetResourceUsageHint(*m_perMeshInstanceClodOffsets, "Cluster LOD data");
@@ -64,18 +48,11 @@ MeshManager::MeshManager() {
 	rg::memory::SetResourceUsageHint(*m_clodHierarchyLevelInfos, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODGroups, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODSegments, "Cluster LOD data");
-	rg::memory::SetResourceUsageHint(*m_clusterLODMeshletBounds, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODNodes, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clodGroupPageMap, "Cluster LOD streaming");
 
-
-	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
-	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
 	m_resources[Builtin::PerMeshBuffer] = m_perMeshBuffers;
 	m_resources[Builtin::PerMeshInstanceBuffer] = m_perMeshInstanceBuffers;
-	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
-	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
-	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
 
 	m_resources[Builtin::CLod::Offsets] = m_perMeshInstanceClodOffsets;
 	m_resources[Builtin::CLod::GroupChunks] = m_clodSharedGroupChunks;
@@ -83,7 +60,7 @@ MeshManager::MeshManager() {
 	m_resources[CLodLevelInfosBufferId] = m_clodHierarchyLevelInfos;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
 	m_resources[Builtin::CLod::Segments] = m_clusterLODSegments;
-	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
+	//m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
 	m_resources[Builtin::CLod::Nodes] = m_clusterLODNodes;
 	m_resources[Builtin::CLod::GroupPageMap] = m_clodGroupPageMap;
 
@@ -293,45 +270,6 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
 
 	mesh->SetCurrentMeshManager(this);
-	if (mesh->GetPreSkinningVertexBufferView() != nullptr) {
-		m_preSkinningVertices->Deallocate(mesh->GetPreSkinningVertexBufferView());
-		mesh->SetPreSkinningVertexBufferView(nullptr);
-	}
-	if (mesh->GetPostSkinningVertexBufferView() != nullptr) {
-		m_postSkinningVertices->Deallocate(mesh->GetPostSkinningVertexBufferView());
-		mesh->SetPostSkinningVertexBufferView(nullptr);
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPreSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_preSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPostSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_postSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletVertexChunkViews()) {
-		if (chunkView) {
-			m_meshletVertexIndices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletChunkViews()) {
-		if (chunkView) {
-			m_meshletOffsets->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletTriangleChunkViews()) {
-		if (chunkView) {
-			m_meshletTriangles->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletBoundsChunkViews()) {
-		if (chunkView) {
-			m_clusterLODMeshletBounds->Deallocate(chunkView.get());
-		}
-	}
-	mesh->SetCLodGroupChunkViews({}, {}, {}, {}, {}, {}, {}, {}, {});
 
 	const auto& groupDiskLocators = mesh->GetCLodGroupDiskLocators();
 
@@ -366,25 +304,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	// Per mesh buffer
 	auto perMeshBufferView = m_perMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
-
-	// Vertex data
-	if (preSkinningView) {
-		mesh->SetPreSkinningVertexBufferView(std::move(preSkinningView));
-	}
-	if (postSkinningView) {
-		mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
-	}
-	mesh->SetCLodGroupChunkViews(
-		std::move(clodPreSkinningChunkViews),
-		std::move(clodPostSkinningChunkViews),
-		std::move(clodMeshletVertexChunkViews),
-		std::move(clodCompressedPositionChunkViews),
-		std::move(clodCompressedNormalChunkViews),
-		std::move(clodCompressedMeshletVertexChunkViews),
-		std::move(clodMeshletChunkViews),
-		std::move(clodMeshletTriangleChunkViews),
-		std::move(clodMeshletBoundsChunkViews));
-	//mesh->SetMeshletBoundsBufferView(std::move(meshletBoundsView));
 
 	// Cluster LOD hierarchy data is shared per mesh; per-instance state stores only indirection/instance IDs.
 	auto clusterLODGroupsView = m_clusterLODGroups->AddData(mesh->GetCLodGroups().data(), mesh->GetCLodGroups().size() * sizeof(ClusterLODGroup), sizeof(ClusterLODGroup));
@@ -536,49 +455,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 
 void MeshManager::RemoveMesh(Mesh* mesh) {
 
-	// Things to remove:
-	// - Pre-skinning vertices, if any
-	// - Post-skinning vertices
-	// - Meshlet bounds
-
-	auto preSkinningView = mesh->GetPreSkinningVertexBufferView();
-	if (preSkinningView != nullptr) {
-		m_preSkinningVertices->Deallocate(preSkinningView);
-	}
-	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
-	if (postSkinningView != nullptr) {
-		m_postSkinningVertices->Deallocate(postSkinningView);
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPreSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_preSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPostSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_postSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletVertexChunkViews()) {
-		if (chunkView) {
-			m_meshletVertexIndices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletChunkViews()) {
-		if (chunkView) {
-			m_meshletOffsets->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletTriangleChunkViews()) {
-		if (chunkView) {
-			m_meshletTriangles->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletBoundsChunkViews()) {
-		if (chunkView) {
-			m_clusterLODMeshletBounds->Deallocate(chunkView.get());
-		}
-	}
 	// Deallocate the per mesh buffer view
 	auto& perMeshBufferView = mesh->GetPerMeshBufferView();
 	if (perMeshBufferView != nullptr) {

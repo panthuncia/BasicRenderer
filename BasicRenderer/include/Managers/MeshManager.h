@@ -24,9 +24,6 @@ class ResourceGroup;
 class BufferView;
 class ViewManager;
 
-// TODO: Find better way of batching these with namespaces
-#define MESH_RESOURCE_IDFENTIFIERS Builtin::MeshResources::MeshletOffsets, Builtin::MeshResources::MeshletVertexIndices, Builtin::MeshResources::MeshletTriangles
-
 class MeshManager : public IResourceProvider {
 public:
 	struct CLodActiveGroupRange {
@@ -135,15 +132,6 @@ public:
 private:
 	MeshManager();
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
-	std::shared_ptr<DynamicBuffer> m_preSkinningVertices; // Used for skinned meshes
-	std::shared_ptr<DynamicBuffer> m_postSkinningVertices; // Used by all meshes
-	std::shared_ptr<DynamicBuffer> m_meshletOffsets; // meshopt_Meshlet
-	std::shared_ptr<DynamicBuffer> m_meshletVertexIndices; // 
-	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
-
-	//std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
-	//std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;
-	//std::shared_ptr<DynamicBuffer> m_clusterToVisibleClusterTableIndexBuffer; // Used by visibility buffer, for drawcall indexing
 
 	// Base meshes
 	std::shared_ptr<DynamicBuffer> m_perMeshBuffers;
@@ -159,7 +147,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_clusterLODSegments;
 
 	//std::shared_ptr<DynamicBuffer> m_clusterLODMeshlets;
-	std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
+	//std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
 	std::shared_ptr<DynamicBuffer> m_clusterLODNodes;
 	std::shared_ptr<DynamicBuffer> m_clodGroupPageMap;
 	uint64_t m_activeMeshletCount = 0;

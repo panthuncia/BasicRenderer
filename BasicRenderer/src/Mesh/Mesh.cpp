@@ -536,36 +536,6 @@ uint64_t Mesh::GetGlobalID() const {
 	return m_globalMeshID;
 }
 
-void Mesh::SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
-	m_preSkinningVertexBufferView = std::move(view);
-	if (m_preSkinningVertexBufferView != nullptr) {
-		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_preSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
-	}
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-
-void Mesh::SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
-	m_postSkinningVertexBufferView = std::move(view);
-	if (m_postSkinningVertexBufferView != nullptr) {
-		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_postSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
-	}
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-
-BufferView* Mesh::GetPreSkinningVertexBufferView() {
-	return m_preSkinningVertexBufferView.get();
-}
-
-BufferView* Mesh::GetPostSkinningVertexBufferView() {
-	return m_postSkinningVertexBufferView.get();
-}
-
 void Mesh::SetCLodBufferViews(
 	std::unique_ptr<BufferView> clusterLODGroupsView,
 	std::unique_ptr<BufferView> clusterLODSegmentsView,
@@ -608,9 +578,6 @@ void Mesh::SetCLodBufferViews(
 		return 0u;
 	};
 
-	m_perMeshBufferData.clodMeshletBufferOffset = firstChunkOffsetDiv(m_clodMeshletChunkViews, sizeof(meshopt_Meshlet));
-	m_perMeshBufferData.clodMeshletVerticesBufferOffset = firstChunkOffsetDiv(m_clodMeshletVertexChunkViews, sizeof(uint32_t));
-	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = firstChunkOffsetBytes(m_clodMeshletTriangleChunkViews); // Intentionally in bytes to index byteaddressbuffer
 	uint32_t totalMeshletCount = 0;
 	for (const auto& group : m_clodGroups) {
 		totalMeshletCount += group.meshletCount;

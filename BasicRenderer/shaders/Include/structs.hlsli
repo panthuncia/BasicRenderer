@@ -526,7 +526,6 @@ struct PerMeshInstanceBuffer {
     uint perMeshBufferIndex;
     uint perObjectBufferIndex;
     uint skinningInstanceSlot;
-    uint postSkinningVertexBufferOffset;
     float skinnedBoundsScale;
     BoundingSphere boundingSphere;
 };

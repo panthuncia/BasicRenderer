@@ -43,7 +43,6 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
     const bool shadowsEnabled = m_getShadowsEnabled ? m_getShadowsEnabled() : false;
     builder->WithShaderResource(
             Builtin::Light::BufferGroup,
-            Builtin::PostSkinningVertices,
             Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
@@ -66,9 +65,6 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::CLod::GroupChunks,
             Builtin::CLod::Groups,
             Builtin::CLod::MeshMetadata,
-            Builtin::MeshResources::MeshletTriangles,
-            Builtin::MeshResources::MeshletVertexIndices,
-            Builtin::MeshResources::MeshletOffsets,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo,

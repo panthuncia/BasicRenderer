@@ -50,7 +50,6 @@ public:
 		m_indirect = inputs.indirect;
 
         builder->WithShaderResource(
-            MESH_RESOURCE_IDFENTIFIERS,
             Builtin::CameraBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Light::ActiveLightIndices,
@@ -71,8 +70,7 @@ public:
 			Builtin::OpenPBR::IdealMetalEnergyComplement,
             Builtin::OpenPBR::IdealMetalAverageEnergyComplement,
 			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
-			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
-            Builtin::PostSkinningVertices)
+			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .IsGeometryPass();

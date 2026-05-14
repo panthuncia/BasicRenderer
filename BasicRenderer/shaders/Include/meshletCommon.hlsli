@@ -107,9 +107,6 @@ bool InitializeMeshletInternal(
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     setup.meshBuffer = perMeshBuffer[meshInstance.perMeshBufferIndex];
@@ -225,15 +222,8 @@ uint3 DecodeTriangleFromBuffer(ByteAddressBuffer triangleBuffer, uint triOffset)
 
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
 {
-    if (setup.pagePoolSlabDescriptorIndex != 0u)
-    {
-        ByteAddressBuffer triangleBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
-        uint triOffset = setup.triangleStreamBase + setup.triangleByteOffset + triLocalIndex * 3;
-        return DecodeTriangleFromBuffer(triangleBuffer, triOffset);
-    }
-
-    ByteAddressBuffer triangleBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
-    uint triOffset = setup.groupMeshletTrianglesByteOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
+    ByteAddressBuffer triangleBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint triOffset = setup.triangleStreamBase + setup.triangleByteOffset + triLocalIndex * 3;
     return DecodeTriangleFromBuffer(triangleBuffer, triOffset);
 }
 

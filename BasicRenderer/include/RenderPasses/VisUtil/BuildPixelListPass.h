@@ -40,8 +40,7 @@ public:
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
     	b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
 
-        b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
-                              Builtin::PrimaryCamera::VisibilityTexture,
+        b->WithShaderResource(Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
                               Builtin::PerMeshBuffer,

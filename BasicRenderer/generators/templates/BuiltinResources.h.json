@@ -25,7 +25,6 @@
       "GroupChunks": {},
       "GroupPageMap": {},
       "Segments": {},
-      "MeshletBounds": {},
       "MeshMetadata": {},
       "Nodes": {},
       "VoxelDescriptorIndices": {},
@@ -48,15 +47,7 @@
     "PerObjectBuffer": {},
     "PerMeshBuffer": {},
     "PerMeshInstanceBuffer": {},
-    "PreSkinningVertices": {},
-    "PostSkinningVertices": {},
     "NormalMatrixBuffer": {},
-    "MeshResources": {
-      "MeshletOffsets": {},
-      "MeshletVertexIndices": {},
-      "MeshletTriangles": {},
-      "MeshletBounds": {}
-    },
     "SkeletonResources": {
       "BoneTransforms": {},
       "InverseBindMatrices": {},

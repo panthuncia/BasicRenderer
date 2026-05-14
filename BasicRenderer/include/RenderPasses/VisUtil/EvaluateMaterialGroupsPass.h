@@ -77,14 +77,12 @@ public:
         }
 
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
-            MESH_RESOURCE_IDFENTIFIERS,
             Builtin::PrimaryCamera::VisibilityTexture,
             //Builtin::PrimaryCamera::VisibleClusterTable,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::PerMeshBuffer,
             Builtin::CameraBuffer,
-            Builtin::PostSkinningVertices,
             Builtin::NormalMatrixBuffer,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,

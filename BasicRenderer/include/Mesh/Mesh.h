@@ -52,14 +52,6 @@ public:
 
     std::shared_ptr<Material> material;
 
-	void SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view);
-	void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
-	BufferView* GetPreSkinningVertexBufferView();
-	BufferView* GetPostSkinningVertexBufferView();
-	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view);
-	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view);
-	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view);
-
 	void SetBaseSkin(std::shared_ptr<Skeleton> skeleton);
 	bool HasBaseSkin() const { return m_baseSkeleton != nullptr; }
 	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }
@@ -161,127 +153,6 @@ public:
 		return m_clusterLODNodesView.get();
 	}
 
-	void SetCLodGroupChunkViews(
-		std::vector<std::unique_ptr<BufferView>> preSkinningVertexChunkViews,
-		std::vector<std::unique_ptr<BufferView>> postSkinningVertexChunkViews,
-		std::vector<std::unique_ptr<BufferView>> meshletVertexChunkViews,
-		std::vector<std::unique_ptr<BufferView>> compressedPositionChunkViews,
-		std::vector<std::unique_ptr<BufferView>> compressedNormalChunkViews,
-		std::vector<std::unique_ptr<BufferView>> compressedMeshletVertexChunkViews,
-		std::vector<std::unique_ptr<BufferView>> meshletChunkViews,
-		std::vector<std::unique_ptr<BufferView>> meshletTriangleChunkViews,
-		std::vector<std::unique_ptr<BufferView>> meshletBoundsChunkViews) {
-		m_clodPreSkinningVertexChunkViews = ToSparseChunkViewTable(std::move(preSkinningVertexChunkViews));
-		m_clodPostSkinningVertexChunkViews = ToSparseChunkViewTable(std::move(postSkinningVertexChunkViews));
-		m_clodMeshletVertexChunkViews = ToSparseChunkViewTable(std::move(meshletVertexChunkViews));
-		m_clodCompressedPositionChunkViews = ToSparseChunkViewTable(std::move(compressedPositionChunkViews));
-		m_clodCompressedNormalChunkViews = ToSparseChunkViewTable(std::move(compressedNormalChunkViews));
-		m_clodCompressedMeshletVertexChunkViews = ToSparseChunkViewTable(std::move(compressedMeshletVertexChunkViews));
-		m_clodMeshletChunkViews = ToSparseChunkViewTable(std::move(meshletChunkViews));
-		m_clodMeshletTriangleChunkViews = ToSparseChunkViewTable(std::move(meshletTriangleChunkViews));
-		m_clodMeshletBoundsChunkViews = ToSparseChunkViewTable(std::move(meshletBoundsChunkViews));
-	}
-
-	const SparseChunkViewTable& GetCLodPreSkinningVertexChunkViews() const {
-		return m_clodPreSkinningVertexChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodPostSkinningVertexChunkViews() const {
-		return m_clodPostSkinningVertexChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodMeshletVertexChunkViews() const {
-		return m_clodMeshletVertexChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodCompressedPositionChunkViews() const {
-		return m_clodCompressedPositionChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodCompressedNormalChunkViews() const {
-		return m_clodCompressedNormalChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodCompressedMeshletVertexChunkViews() const {
-		return m_clodCompressedMeshletVertexChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodMeshletChunkViews() const {
-		return m_clodMeshletChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodMeshletTriangleChunkViews() const {
-		return m_clodMeshletTriangleChunkViews;
-	}
-
-	const SparseChunkViewTable& GetCLodMeshletBoundsChunkViews() const {
-		return m_clodMeshletBoundsChunkViews;
-	}
-
-	const BufferView* GetCLodPostSkinningVertexChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodPostSkinningVertexChunkViews, groupIndex);
-	}
-
-	const BufferView* GetCLodMeshletVertexChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodMeshletVertexChunkViews, groupIndex);
-	}
-
-	const BufferView* GetCLodCompressedPositionChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodCompressedPositionChunkViews, groupIndex);
-	}
-
-	const BufferView* GetCLodCompressedNormalChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodCompressedNormalChunkViews, groupIndex);
-	}
-
-	const BufferView* GetCLodCompressedMeshletVertexChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodCompressedMeshletVertexChunkViews, groupIndex);
-	}
-
-	const BufferView* GetCLodMeshletChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodMeshletChunkViews, groupIndex);
-	}
-
-	const BufferView* GetCLodMeshletTriangleChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodMeshletTriangleChunkViews, groupIndex);
-	}
-
-	const BufferView* GetCLodMeshletBoundsChunkView(uint32_t groupIndex) const {
-		return GetChunkViewAt(m_clodMeshletBoundsChunkViews, groupIndex);
-	}
-
-	void SetCLodPostSkinningVertexChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodPostSkinningVertexChunkViews, groupIndex, std::move(view));
-	}
-
-	void SetCLodMeshletVertexChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodMeshletVertexChunkViews, groupIndex, std::move(view));
-	}
-
-	void SetCLodCompressedPositionChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodCompressedPositionChunkViews, groupIndex, std::move(view));
-	}
-
-	void SetCLodCompressedNormalChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodCompressedNormalChunkViews, groupIndex, std::move(view));
-	}
-
-	void SetCLodCompressedMeshletVertexChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodCompressedMeshletVertexChunkViews, groupIndex, std::move(view));
-	}
-
-	void SetCLodMeshletChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodMeshletChunkViews, groupIndex, std::move(view));
-	}
-
-	void SetCLodMeshletTriangleChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodMeshletTriangleChunkViews, groupIndex, std::move(view));
-	}
-
-	void SetCLodMeshletBoundsChunkView(uint32_t groupIndex, std::unique_ptr<BufferView> view) {
-		SetChunkViewAt(m_clodMeshletBoundsChunkViews, groupIndex, std::move(view));
-	}
-
 	uint32_t GetCLodRootNodeIndex() const { // For hierarchy cut
 		return m_clodTopRootNode;
 	}
@@ -330,9 +201,6 @@ private:
     static std::atomic<uint32_t> globalMeshCount;
 	uint32_t m_globalMeshID;
 
-	std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
-	std::unique_ptr<BufferView> m_preSkinningVertexBufferView = nullptr;
-
 	// TODO: packing
 	std::vector<ClusterLODGroup> m_clodGroups;
 	std::vector<ClusterLODGroupSegment> m_clodSegments;
@@ -343,15 +211,6 @@ private:
 	} m_clodCacheBuildChunkData;
 	std::vector<ClusterLODGroupDiskLocator> m_clodGroupDiskLocators;
 	ClusterLODCacheSource m_clodCacheSource;
-	SparseChunkViewTable m_clodPreSkinningVertexChunkViews;
-	SparseChunkViewTable m_clodPostSkinningVertexChunkViews;
-	SparseChunkViewTable m_clodMeshletVertexChunkViews;
-	SparseChunkViewTable m_clodCompressedPositionChunkViews;
-	SparseChunkViewTable m_clodCompressedNormalChunkViews;
-	SparseChunkViewTable m_clodCompressedMeshletVertexChunkViews;
-	SparseChunkViewTable m_clodMeshletChunkViews;
-	SparseChunkViewTable m_clodMeshletTriangleChunkViews;
-	SparseChunkViewTable m_clodMeshletBoundsChunkViews;
 
 	std::vector<ClusterLODNode>      m_clodNodes;
 	std::vector<ClusterLODNodeRangeAlloc> m_clodLodNodeRanges;  // per depth

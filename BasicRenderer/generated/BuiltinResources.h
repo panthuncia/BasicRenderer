@@ -12,7 +12,6 @@ struct Builtin {
     inline static constexpr std::string_view GroupPageMap = "Builtin::CLod::GroupPageMap";
     inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
     inline static constexpr std::string_view MeshMetadata = "Builtin::CLod::MeshMetadata";
-    inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";
     inline static constexpr std::string_view Nodes = "Builtin::CLod::Nodes";
     inline static constexpr std::string_view Offsets = "Builtin::CLod::Offsets";
     inline static constexpr std::string_view PagePoolSlabBase = "Builtin::CLod::PagePoolSlabBase";
@@ -87,12 +86,6 @@ struct Builtin {
     inline static constexpr std::string_view TextureStreamingFeedbackBuffer = "Builtin::Material::TextureStreamingFeedbackBuffer";
     inline static constexpr std::string_view TextureStreamingMetadataBuffer = "Builtin::Material::TextureStreamingMetadataBuffer";
   };
-  struct MeshResources {
-    inline static constexpr std::string_view MeshletBounds = "Builtin::MeshResources::MeshletBounds";
-    inline static constexpr std::string_view MeshletOffsets = "Builtin::MeshResources::MeshletOffsets";
-    inline static constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
-    inline static constexpr std::string_view MeshletVertexIndices = "Builtin::MeshResources::MeshletVertexIndices";
-  };
   struct Noise {
     inline static constexpr std::string_view BlueNoise2D = "Builtin::Noise::BlueNoise2D";
   };
@@ -124,8 +117,6 @@ struct Builtin {
     inline static constexpr std::string_view ScreenSpaceReflections = "Builtin::PostProcessing::ScreenSpaceReflections";
     inline static constexpr std::string_view UpscaledHDR = "Builtin::PostProcessing::UpscaledHDR";
   };
-  inline static constexpr std::string_view PostSkinningVertices = "Builtin::PostSkinningVertices";
-  inline static constexpr std::string_view PreSkinningVertices = "Builtin::PreSkinningVertices";
   struct PrimaryCamera {
     inline static constexpr std::string_view DepthTexture = "Builtin::PrimaryCamera::DepthTexture";
     struct IndirectCommandBuffers {
