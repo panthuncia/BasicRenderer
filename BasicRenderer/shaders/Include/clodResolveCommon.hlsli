@@ -952,25 +952,25 @@ bool ResolveRaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, uint2 occupancy
     return false;
 }
 
-MaterialInputs BuildVoxelMaterialInputs(MaterialInfo materialInfo, float3 normalWS, float opacity)
+MaterialInputs BuildVoxelMaterialInputs(MaterialInfo materialInfo, uint materialFlags, float3 normalWS, float3 posWS, float2 uv, float opacity)
 {
-    MaterialInputs inputs = (MaterialInputs)0;
-    inputs.albedo = materialInfo.baseColorFactor.rgb;
-    inputs.normalWS = normalWS;
-    inputs.emissive = materialInfo.emissiveFactor.rgb;
-    inputs.coatColor = float3(1.0f, 1.0f, 1.0f);
-    inputs.metallic = materialInfo.metallicFactor;
-    inputs.roughness = materialInfo.roughnessFactor;
-    inputs.coatWeight = 0.0f;
-    inputs.coatRoughness = 1.0f;
-    inputs.fuzzColor = float3(1.0f, 1.0f, 1.0f);
-    inputs.fuzzWeight = 0.0f;
-    inputs.fuzzRoughness = 1.0f;
-    inputs.opacity = opacity;
-    inputs.ambientOcclusion = materialInfo.ambientStrength;
-    inputs.openPBRMaterialDataIndex = materialInfo.openPBRMaterialDataIndex;
-    inputs.selectedMaterialMipLevel = MATERIAL_DEBUG_INVALID_MIP_LEVEL;
-    inputs.selectedMaterialMipMaxLevel = MATERIAL_DEBUG_INVALID_MIP_LEVEL;
+    MaterialUvCache uvCache = BuildSingleUvCache(uv, float2(0.0f, 0.0f), float2(0.0f, 0.0f));
+    const uint voxelMaterialFlags = materialFlags & ~(MATERIAL_NORMAL_MAP | MATERIAL_PARALLAX | MATERIAL_GEOMETRIC_DISPLACEMENT);
+    MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, voxelMaterialFlags, uvCache);
+
+    MaterialInputs inputs;
+    SampleMaterialFromUvCacheRuntime(
+        uvCache,
+        uvBindings,
+        normalWS,
+        posWS,
+        float3(1.0f, 1.0f, 1.0f),
+        materialInfo,
+        voxelMaterialFlags,
+        float3(0.0f, 0.0f, 0.0f),
+        float3(0.0f, 0.0f, 0.0f),
+        inputs);
+    inputs.opacity *= opacity;
     return inputs;
 }
 
@@ -1212,6 +1212,7 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
 
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[mesh.materialDataIndex];
+    const uint materialFlags = materialInfo.materialFlags;
 
     sample.linearDepth = linearDepth;
     sample.clusterIndex = visibleClusterIndex;
@@ -1237,8 +1238,8 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
 #else
     sample.materialInfo = materialInfo;
 #endif
-    sample.materialFlags = 0u;
-    sample.materialInputs = BuildVoxelMaterialInputs(materialInfo, normalWS, saturate(attributeSample.opacity));
+    sample.materialFlags = materialFlags;
+    sample.materialInputs = BuildVoxelMaterialInputs(materialInfo, materialFlags, normalWS, worldPosition, attributeSample.uv, saturate(attributeSample.opacity));
     return true;
 }
 

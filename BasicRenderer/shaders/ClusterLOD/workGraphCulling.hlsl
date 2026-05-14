@@ -1618,13 +1618,13 @@ bool CLodRefinedChildSuppressesParent(
     const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
     const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
     const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
-    const float childEOD = ProjectedGeometricError(
+    const float childBoundaryEOD = ProjectedGeometricError(
         childWorldCenter, childWorldRadius,
         childGroup.bounds.error, lodUniformScale,
         lodCam.positionWorldSpace.xyz, lodCam.zNear,
         lodCameraIsOrtho);
 
-    if (childEOD < lodCam.errorOverDistanceThreshold)
+    if (childBoundaryEOD < lodCam.errorOverDistanceThreshold)
     {
         return false;
     }
@@ -2001,12 +2001,27 @@ void WG_TraverseNodes(
                     }
                     else if (leaf.isVoxel)
                     {
+                        const float voxelRepresentationError = leaf.group.representationError > 0.0f ? leaf.group.representationError : leaf.group.bounds.error;
+                        const float voxelRepresentationErrorOverDistance = ProjectedGeometricError(
+                            mul(float4(leaf.group.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz,
+                            leaf.group.bounds.centerAndRadius.w * lodUniformScale,
+                            voxelRepresentationError,
+                            lodUniformScale,
+                            lodCam.positionWorldSpace.xyz,
+                            lodCam.zNear,
+                            lodCamera.isOrtho);
+                        const bool voxelRepresentationAcceptable = forceLodDecision || voxelRepresentationErrorOverDistance <= lodCam.errorOverDistanceThreshold;
+
                         StructuredBuffer<ClusterLODGroupSegment> segments =
                             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
                         const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
                         const ClusterLODGroupSegment seg = segments[segGlobalIndex];
                         CLodVoxelGroupDescriptor voxelDescriptor;
-                        if (CLodTryLoadVoxelDescriptorForSegment(clodMeshMetadata, leaf.group, seg, voxelDescriptor))
+                        if (!voxelRepresentationAcceptable)
+                        {
+                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS, 1);
+                        }
+                        else if (CLodTryLoadVoxelDescriptorForSegment(clodMeshMetadata, leaf.group, seg, voxelDescriptor))
                         {
                             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
                             CLodAppendVoxelRasterClusterWork(

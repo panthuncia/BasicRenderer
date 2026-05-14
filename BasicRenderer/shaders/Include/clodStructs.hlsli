@@ -163,6 +163,7 @@ struct ClusterLODGroup
     uint pageMapBase; // absolute index into GroupPageMap buffer
     uint pageCount;   // number of pages for this group
     int parentGroupId; // mesh-local group index of the parent group (-1 for root)
+    float representationError; // actual render representation error; currently used by voxel groups
 };
 
 static const uint CLOD_NODE_INTERNAL = 0u;
@@ -219,6 +220,7 @@ struct CLodVoxelAttributeSample
 {
     float4 sggxAxisAndSigmas;
     float opacity;
+    float2 uv;
 };
 
 struct CLodVoxelRasterQueueDescriptors
@@ -245,10 +247,10 @@ struct CLodVoxelRasterDispatchCommand
 };
 
 static const uint CLOD_VOXEL_PAGE_MAGIC = 0x4C435856u;
-static const uint CLOD_VOXEL_PAGE_VERSION = 9u;
+static const uint CLOD_VOXEL_PAGE_VERSION = 10u;
 static const uint CLOD_VOXEL_CLUSTER_RECORD_STRIDE = 32u;
 static const uint CLOD_VOXEL_CUBE_RECORD_STRIDE = 32u;
-static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 20u;
+static const uint CLOD_VOXEL_ATTRIBUTE_SAMPLE_STRIDE = 28u;
 
 struct CLodVoxelPageHeader
 {
@@ -580,6 +582,7 @@ CLodVoxelAttributeSample CLodLoadVoxelAttributeSample(CLodMeshMetadata metadata,
             CLodVoxelAttributeSample sample;
             sample.sggxAxisAndSigmas = asfloat(slab.Load4(addr));
             sample.opacity = asfloat(slab.Load(addr + 16u));
+            sample.uv = attributeStride >= 28u ? asfloat(slab.Load2(addr + 20u)) : float2(0.0f, 0.0f);
             return sample;
         }
 
@@ -598,6 +601,7 @@ CLodVoxelAttributeSample CLodLoadVoxelAttributeSampleFromPage(GroupPageMapEntry 
     CLodVoxelAttributeSample sample;
     sample.sggxAxisAndSigmas = asfloat(slab.Load4(addr));
     sample.opacity = asfloat(slab.Load(addr + 16u));
+    sample.uv = attributeStride >= 28u ? asfloat(slab.Load2(addr + 20u)) : float2(0.0f, 0.0f);
     return sample;
 }
 

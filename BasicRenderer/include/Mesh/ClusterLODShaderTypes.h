@@ -130,6 +130,7 @@ struct ClusterLODGroup
 	uint32_t pageMapBase = 0;   // absolute index into GroupPageMap buffer
 	uint32_t pageCount = 0;     // number of pages for this group
 	int32_t  parentGroupId = -1; // mesh-local group index of the parent group (-1 for root)
+	float representationError = 0.0f; // actual render representation error; currently used by voxel groups
 };
 
 static constexpr uint32_t CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
@@ -179,5 +180,6 @@ struct CLodVoxelAttributeSample
 	// xy = oct-encoded object-space symmetry axis, z/w = sigmaPerp/sigmaParallel.
 	DirectX::XMFLOAT4 sggxAxisAndSigmas = { 0.0f, 0.0f, 1.0e-4f, 0.5f };
 	float opacity = 0.0f;
+	DirectX::XMFLOAT2 uv = { 0.0f, 0.0f };
 };
-static_assert(sizeof(CLodVoxelAttributeSample) == 20, "CLodVoxelAttributeSample must be 20 bytes");
+static_assert(sizeof(CLodVoxelAttributeSample) == 28, "CLodVoxelAttributeSample must be 28 bytes");

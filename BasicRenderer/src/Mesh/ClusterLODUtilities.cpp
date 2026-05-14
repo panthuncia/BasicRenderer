@@ -37,7 +37,7 @@ namespace
 	constexpr uint32_t CLOD_COMPRESSED_MESHLET_VERTEX_INDICES = 1u << 1;
 	constexpr uint32_t CLOD_COMPRESSED_NORMALS = 1u << 2;
 	constexpr uint32_t CLOD_VOXEL_PAGE_MAGIC = 0x4C435856u; // VXCL
-	constexpr uint32_t CLOD_VOXEL_PAGE_VERSION = 9u;
+	constexpr uint32_t CLOD_VOXEL_PAGE_VERSION = 10u;
 	constexpr uint32_t CLOD_VOXEL_PAGE_HEADER_SIZE = 64u;
 	constexpr uint32_t CLOD_STREAMING_PAGE_SIZE_BYTES = 256u * 1024u;
 	constexpr uint32_t CLOD_VOXEL_ATTRIBUTE_SAMPLES_PER_CUBE = 64u;
@@ -2834,7 +2834,7 @@ namespace
 			: 0.0f;
 
 		// TODO: I don't think this scaling should be necessary- something is wrong with voxel traversal error
-		constexpr float kVoxelTraversalErrorScalingFactor = 6.0f;
+		constexpr float kVoxelTraversalErrorScalingFactor = 1.0f;
 		const float voxelError = voxelWidth * kVoxelTraversalErrorScalingFactor;
 		if (sourceError <= 0.0f)
 		{
@@ -2852,16 +2852,22 @@ namespace
 			return 0.0f;
 		}
 
-		const float groupError = state.groups[groupIndex].bounds.error;
-		if (std::isfinite(groupError) && groupError > 0.0f && groupError < std::numeric_limits<float>::max() * 0.5f)
+		const float representationError = state.groups[groupIndex].representationError;
+		if (std::isfinite(representationError) && representationError > 0.0f)
 		{
-			return groupError;
+			return representationError;
 		}
 
 		const float descriptorError = GetVoxelDescriptorErrorForGroup(state, groupIndex);
 		if (std::isfinite(descriptorError) && descriptorError > 0.0f)
 		{
 			return descriptorError;
+		}
+
+		const float groupError = state.groups[groupIndex].bounds.error;
+		if (std::isfinite(groupError) && groupError > 0.0f && groupError < std::numeric_limits<float>::max() * 0.5f)
+		{
+			return groupError;
 		}
 
 		const VoxelGroupPayload* payload = GetVoxelRenderPayloadForGroup(state, groupIndex);
@@ -3694,8 +3700,8 @@ namespace
 
 			const float triangleError = group.bounds.error;
 			const bool terminalErrorSentinel = triangleError >= std::numeric_limits<float>::max() * 0.5f;
-			const bool replaceGroupWithVoxels = forceAllVoxels || group.terminalSegmentCount < group.segmentCount;
-			group.bounds.error = packedVoxelTraversalError;
+			const bool replaceGroupWithVoxels = forceAllVoxels || group.terminalSegmentCount == 0u;
+			group.representationError = packedVoxelTraversalError;
 			if (replaceGroupWithVoxels)
 			{
 				group.flags |= CLOD_GROUP_FLAG_IS_VOXEL;
@@ -3736,7 +3742,7 @@ namespace
 				group.depth,
 				triangleError,
 				payload.voxelWidth,
-				group.bounds.error,
+				packedVoxelTraversalError,
 				terminalErrorSentinel,
 				group.terminalSegmentCount,
 				group.segmentCount,

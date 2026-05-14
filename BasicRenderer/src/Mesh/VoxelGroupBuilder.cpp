@@ -341,6 +341,28 @@ namespace
 		return n;
 	}
 
+	DirectX::XMFLOAT2 ReadTexcoord(const std::vector<std::byte>& vertices, size_t stride, uint32_t index)
+	{
+		const size_t texcoordOffset = MeshVertexLayout::TexcoordOffset(VertexFlags::VERTEX_TEXCOORDS);
+		if (stride < texcoordOffset + sizeof(float) * 2u || stride == 0u || index >= vertices.size() / stride)
+		{
+			return DirectX::XMFLOAT2(0.0f, 0.0f);
+		}
+
+		DirectX::XMFLOAT2 uv{};
+		const size_t offset = static_cast<size_t>(index) * stride + texcoordOffset;
+		std::memcpy(&uv.x, vertices.data() + offset, sizeof(float));
+		std::memcpy(&uv.y, vertices.data() + offset + sizeof(float), sizeof(float));
+		return uv;
+	}
+
+	DirectX::XMFLOAT2 InterpolateUv(const DirectX::XMFLOAT2& uv0, const DirectX::XMFLOAT2& uv1, const DirectX::XMFLOAT2& uv2, float bary0, float bary1, float bary2)
+	{
+		return DirectX::XMFLOAT2(
+			uv0.x * bary0 + uv1.x * bary1 + uv2.x * bary2,
+			uv0.y * bary0 + uv1.y * bary1 + uv2.y * bary2);
+	}
+
 	Float3 ToFloat3(const DirectX::XMFLOAT3& v) { return { v.x, v.y, v.z }; }
 	DirectX::XMFLOAT3 ToXM(const Float3& v) { return { v.x, v.y, v.z }; }
 	Float3 MinFloat3(const Float3& a, const Float3& b) { return { std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z) }; }
@@ -1094,8 +1116,56 @@ namespace
 		Float3 accumulatedNormal{};
 		SymmetricMatrix3 accumulatedSGGX{};
 		float sggxWeight = 0.0f;
+		DirectX::XMFLOAT2 accumulatedUv{};
+		float uvWeight = 0.0f;
+		std::vector<DirectX::XMFLOAT2> uvSamples;
 		std::vector<Float3> normalSamples;
 	};
+
+	void AddCoverageUvSample(CellCoverageSample& sample, const DirectX::XMFLOAT2& uv, float weight)
+	{
+		if (weight <= 0.0f || !std::isfinite(uv.x) || !std::isfinite(uv.y))
+		{
+			return;
+		}
+
+		sample.accumulatedUv.x += uv.x * weight;
+		sample.accumulatedUv.y += uv.y * weight;
+		sample.uvWeight += weight;
+		sample.uvSamples.push_back(uv);
+	}
+
+	DirectX::XMFLOAT2 SelectRepresentativeUv(const CellCoverageSample& sample)
+	{
+		if (sample.uvWeight <= 0.0f)
+		{
+			return DirectX::XMFLOAT2(0.0f, 0.0f);
+		}
+
+		const DirectX::XMFLOAT2 mean(
+			sample.accumulatedUv.x / sample.uvWeight,
+			sample.accumulatedUv.y / sample.uvWeight);
+		if (sample.uvSamples.empty())
+		{
+			return mean;
+		}
+
+		DirectX::XMFLOAT2 representative = sample.uvSamples.front();
+		float bestDistanceSq = std::numeric_limits<float>::max();
+		for (const DirectX::XMFLOAT2& uv : sample.uvSamples)
+		{
+			const float dx = uv.x - mean.x;
+			const float dy = uv.y - mean.y;
+			const float distanceSq = dx * dx + dy * dy;
+			if (distanceSq < bestDistanceSq)
+			{
+				bestDistanceSq = distanceSq;
+				representative = uv;
+			}
+		}
+
+		return representative;
+	}
 
 	// Per-cell coverage sampling via ray tracing against triangles.
 	CellCoverageSample SampleCellCoverageTriangles(
@@ -1125,6 +1195,7 @@ namespace
 			uint32_t nearestTriangleIndex = std::numeric_limits<uint32_t>::max();
 			float nearestT = tMax;
 			Float3 nearestNormal{};
+			DirectX::XMFLOAT2 nearestUv{};
 			for (uint32_t triLocalIdx : cellTriangleIndices)
 			{
 				const uint32_t i0 = meshTriangleIndices[triLocalIdx * 3 + 0];
@@ -1151,6 +1222,13 @@ namespace
 						? interpolatedNormal.normalized()
 						: TriangleNormal(v0, v1, v2);
 					nearestNormal = OrientHitNormalForSidedness(nearestNormal, TriangleNormal(v0, v1, v2), dir, doubleSidedTriangles);
+					nearestUv = InterpolateUv(
+						ReadTexcoord(vertices, vertexStrideBytes, i0),
+						ReadTexcoord(vertices, vertexStrideBytes, i1),
+						ReadTexcoord(vertices, vertexStrideBytes, i2),
+						hitW,
+						hitU,
+						hitV);
 				}
 			}
 
@@ -1163,6 +1241,7 @@ namespace
 				}
 				sample.accumulatedNormal = sample.accumulatedNormal + nearestNormal;
 				sample.normalSamples.push_back(nearestNormal);
+				AddCoverageUvSample(sample, nearestUv, 1.0f);
 			}
 		}
 
@@ -1232,6 +1311,7 @@ namespace
 			uint32_t nearestTriangleIndex = std::numeric_limits<uint32_t>::max();
 			float nearestT = tExit + kCellHitEpsilon;
 			Float3 nearestNormal{};
+			DirectX::XMFLOAT2 nearestUv{};
 			for (uint32_t triLocalIdx : sourceCandidateTriangles)
 			{
 				if (triangleRefinedGroupIds != nullptr && triLocalIdx < triangleRefinedGroupIds->size() && (*triangleRefinedGroupIds)[triLocalIdx] != refinedGroupFilter)
@@ -1280,6 +1360,13 @@ namespace
 					? interpolatedNormal.normalized()
 					: TriangleNormal(v0, v1, v2);
 				nearestNormal = OrientHitNormalForSidedness(nearestNormal, TriangleNormal(v0, v1, v2), dir, doubleSidedTriangles);
+				nearestUv = InterpolateUv(
+					ReadTexcoord(*vertices, sourceTriangles.VertexStrideBytes(), i0),
+					ReadTexcoord(*vertices, sourceTriangles.VertexStrideBytes(), i1),
+					ReadTexcoord(*vertices, sourceTriangles.VertexStrideBytes(), i2),
+					hitW,
+					hitU,
+					hitV);
 			}
 
 			if (nearestTriangleIndex != std::numeric_limits<uint32_t>::max())
@@ -1291,6 +1378,7 @@ namespace
 				}
 				sample.accumulatedNormal = sample.accumulatedNormal + nearestNormal;
 				sample.normalSamples.push_back(nearestNormal);
+				AddCoverageUvSample(sample, nearestUv, 1.0f);
 			}
 		}
 
@@ -1355,6 +1443,7 @@ namespace
 			sample.accumulatedNormal = sample.accumulatedNormal + DecodeOctahedralAxis(sourceCell.sggxAxisAndSigmas.x, sourceCell.sggxAxisAndSigmas.y) * weightedCoverage;
 			sample.accumulatedSGGX = sample.accumulatedSGGX + DecodeAxialSGGX(sourceCell.sggxAxisAndSigmas) * weightedCoverage;
 			sample.sggxWeight += weightedCoverage;
+			AddCoverageUvSample(sample, sourceCell.uv, weightedCoverage);
 			if (sourceCell.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
 			{
 				boneWeights[sourceCell.dominantBoneIndex] += weightedCoverage;
@@ -2009,6 +2098,10 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 					coverage.accumulatedNormal = coverage.accumulatedNormal + voxelCoverage.accumulatedNormal;
 					coverage.accumulatedSGGX = coverage.accumulatedSGGX + voxelCoverage.accumulatedSGGX;
 					coverage.sggxWeight += voxelCoverage.sggxWeight;
+					coverage.accumulatedUv.x += voxelCoverage.accumulatedUv.x;
+					coverage.accumulatedUv.y += voxelCoverage.accumulatedUv.y;
+					coverage.uvWeight += voxelCoverage.uvWeight;
+					coverage.uvSamples.insert(coverage.uvSamples.end(), voxelCoverage.uvSamples.begin(), voxelCoverage.uvSamples.end());
 				}
 			}
 
@@ -2051,6 +2144,7 @@ VoxelizeTrianglesResult VoxelizeTrianglesDetailed(const VoxelizeTrianglesInput& 
 				? coverage.accumulatedSGGX * (1.0f / coverage.sggxWeight)
 				: SGGXFromNormal(normalSum);
 			vc.sggxAxisAndSigmas = EncodeAxialSGGX(CompressSGGXToAxial(sggx));
+			vc.uv = SelectRepresentativeUv(coverage);
 			vc.dominantBoneIndex = dominantBoneIndex;
 			vc.refinedGroup = refinedGroup;
 
@@ -2177,6 +2271,7 @@ PackedVoxelGroupBuildResult PackVoxelGroupToCubes(const PackVoxelGroupInput& inp
 		accum.opacitySum += cell.opacity;
 		accum.attributes[localBit].sggxAxisAndSigmas = cell.sggxAxisAndSigmas;
 		accum.attributes[localBit].opacity = cell.opacity;
+		accum.attributes[localBit].uv = cell.uv;
 		if (cell.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
 		{
 			accum.boneWeights[cell.dominantBoneIndex] += std::max(cell.opacity, 1.0e-6f);
