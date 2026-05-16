@@ -1686,6 +1686,7 @@ struct CLodRenderableLeaf
 {
     bool valid;
     bool isVoxel;
+    bool canRender;
     uint groupGlobalIndex;
     ClusterLODGroup group;
     float errorOverDistance;
@@ -1745,18 +1746,18 @@ bool CLodPrepareRenderableLeaf(
         return false;
     }
 
-    if (!CLodTouchAndRequestGroupResident(
+    leaf.canRender = CLodTouchAndRequestGroupResident(
         leaf.groupGlobalIndex,
         instanceIndex,
         meshBufferIndex,
         viewId,
-        leaf.errorOverDistance))
+        leaf.errorOverDistance);
+    if (!leaf.canRender)
     {
         if (leaf.isVoxel)
         {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
         }
-        return false;
     }
 
     leaf.valid = true;
@@ -2023,6 +2024,11 @@ void WG_TraverseNodes(
                         false))
                     {
                         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
+                    }
+                    else if (!leaf.canRender)
+                    {
+                        // The group was requested above; keep traversal/request side effects
+                        // but do not emit render work until the page data is resident.
                     }
                     else if (leaf.isVoxel)
                     {

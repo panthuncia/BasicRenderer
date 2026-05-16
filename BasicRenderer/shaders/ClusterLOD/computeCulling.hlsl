@@ -308,6 +308,11 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
             return;
         }
 
+        if (!leaf.canRender)
+        {
+            return;
+        }
+
         if (leaf.isVoxel)
         {
             StructuredBuffer<ClusterLODGroupSegment> segments =
