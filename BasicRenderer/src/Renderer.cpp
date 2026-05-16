@@ -1235,7 +1235,8 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
-    settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
+    settingsManager.registerSetting<uint32_t>(CLodStreamingCpuUploadBudgetSettingName, 5000u);
+    settingsManager.registerSetting<bool>(CLodStreamingEnableDirectStorageSettingName, false);
     settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
     settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName, CLodVirtualShadowDefaultBackingResolution);
@@ -2487,7 +2488,7 @@ void Renderer::CreateRenderGraph() {
                 m_managerInterface.GetMaterialManager()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        uint maxClusters = 10000000; // TODO: make this configurable based on scene content   
+        uint maxClusters = 30000000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
             std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");

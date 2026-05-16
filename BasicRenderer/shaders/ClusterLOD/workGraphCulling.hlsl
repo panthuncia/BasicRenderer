@@ -263,6 +263,27 @@ bool CLodWorkGraphIsPhase2()
     return (CLOD_WG_FLAGS & CLOD_WG_FLAG_PHASE2) != 0u;
 }
 
+uint CLodWorkGraphSharedVisibleClusterWriteCapacity(
+    uint visibleClusterCapacity,
+    uint phase1HWBase,
+    uint phase1SWBase)
+{
+    if (!CLodWorkGraphIsPhase2())
+    {
+        return visibleClusterCapacity;
+    }
+
+    if (phase1HWBase >= visibleClusterCapacity)
+    {
+        return 0u;
+    }
+
+    const uint capacityAfterHW = visibleClusterCapacity - phase1HWBase;
+    return (phase1SWBase < capacityAfterHW)
+        ? (capacityAfterHW - phase1SWBase)
+        : 0u;
+}
+
 bool CLodWorkGraphUseComputeSWRaster()
 {
 #if CLOD_WG_ENABLE_SW_CLASSIFICATION
@@ -1075,14 +1096,16 @@ void CLodAppendVoxelRasterClusterWork(
         ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
+    StructuredBuffer<uint> phase1SWBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint phase1SWBase = CLodWorkGraphIsPhase2() ? phase1SWBaseCounter.Load(0) : 0u;
 
     uint appendedCount = 0u;
     uint droppedCount = 0u;
     const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
-    const uint visibleClusterWriteCapacity =
-        (phase1HWBase < visibleClusterCapacity)
-            ? (visibleClusterCapacity - phase1HWBase)
-            : 0u;
+    const uint visibleClusterWriteCapacity = CLodWorkGraphSharedVisibleClusterWriteCapacity(
+        visibleClusterCapacity,
+        phase1HWBase,
+        phase1SWBase);
 
     for (uint clusterIndex = 0u; clusterIndex < voxelDescriptor.clusterCount; ++clusterIndex)
     {
@@ -2532,10 +2555,6 @@ void ClusterCullBody(
     // Always bind the resource to avoid DXC ICE with conditional ResourceDescriptorHeap casts.
     StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
-    const uint hwVisibleClusterWriteCapacity =
-        (phase1HWBase < visibleClusterCapacity)
-            ? (visibleClusterCapacity - phase1HWBase)
-            : 0u;
 
 #if CLOD_WG_ENABLE_SW_CLASSIFICATION
     // SW raster classification setup.
@@ -2545,15 +2564,24 @@ void ClusterCullBody(
         ResourceDescriptorHeap[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
-    const uint swVisibleClusterWriteCapacity =
-        (swWriteBase < visibleClusterCapacity)
-            ? (visibleClusterCapacity - swWriteBase)
-            : 0u;
+    const uint phase1SWBase = swWriteBase;
     const bool useDedicatedComputePageJobBuffer = CLodWorkGraphUseDedicatedComputePageJobBuffer();
     // Page-job classification setup.
     const bool pageJobEnabled = CLodPageJobEnabled();
     const float pageJobDiameterThreshold = (float)CLodPageJobDiameterThreshold();
     const bool pageJobForceAll = CLodPageJobForceAll();
+#else
+    StructuredBuffer<uint> phase1SWBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint phase1SWBase = CLodWorkGraphIsPhase2() ? phase1SWBaseCounter.Load(0) : 0u;
+#endif
+
+    const uint sharedVisibleClusterWriteCapacity = CLodWorkGraphSharedVisibleClusterWriteCapacity(
+        visibleClusterCapacity,
+        phase1HWBase,
+        phase1SWBase);
+    const uint hwVisibleClusterWriteCapacity = sharedVisibleClusterWriteCapacity;
+#if CLOD_WG_ENABLE_SW_CLASSIFICATION
+    const uint swVisibleClusterWriteCapacity = sharedVisibleClusterWriteCapacity;
 #endif
 
     uint totalSurvivors = 0;
@@ -2778,7 +2806,7 @@ void ClusterCullBody(
                 InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
             }
 
-            if (isWaveLeader) {
+            if (WaveGetLaneIndex() == hwLeader) {
                 WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
             }
 
@@ -2890,7 +2918,7 @@ void ClusterCullBody(
                     InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
                 }
 
-                if (isWaveLeader) {
+                if (WaveGetLaneIndex() == hwLeader) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
                 }
 
@@ -3053,7 +3081,7 @@ void ClusterCullBody(
                     InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
                 }
 
-                if (isWaveLeader) {
+                if (WaveGetLaneIndex() == hwLeader) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
                 }
 

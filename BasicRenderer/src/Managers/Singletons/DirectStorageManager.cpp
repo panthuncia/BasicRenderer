@@ -1394,6 +1394,14 @@ DirectStorageAsyncRequestStatus DirectStorageManager::PollRequest(const DirectSt
     status.message = "DirectStorage SDK is not available in this build";
     return status;
 #else
+    const bool fenceComplete = state->fence != nullptr && state->fence->GetCompletedValue() >= state->fenceValue;
+    if (!fenceComplete) {
+        status.state = DirectStorageAsyncRequestState::Pending;
+        std::scoped_lock lock(state->mutex);
+        status.message = state->pendingMessage;
+        return status;
+    }
+
     const HRESULT requestHr = state->statusArray ? state->statusArray->GetHResult(0u) : E_FAIL;
     if (requestHr == E_PENDING) {
         status.state = DirectStorageAsyncRequestState::Pending;

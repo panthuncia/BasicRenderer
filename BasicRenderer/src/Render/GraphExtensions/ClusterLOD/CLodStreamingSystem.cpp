@@ -208,6 +208,7 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     m_groupOwnedPages.clear();
     ClearPrefetchedChildLayouts();
     m_preAllocatedPagesByGroup.clear();
+    m_pendingResidencyCommitGroups.clear();
     m_groupsUsingPinnedStorage.clear();
     m_readbackGapPinnedGroups.clear();
     m_readbackGeneration = 0;
@@ -646,6 +647,7 @@ void CLodStreamingSystem::EnsurePageTrackingCapacity(MeshManager* meshManager) {
 
 void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager) {
     EvictPrefetchedChildLayoutsForOwner(groupIndex);
+    m_pendingResidencyCommitGroups.erase(groupIndex);
 
     auto it = m_groupOwnedPages.find(groupIndex);
     if (it == m_groupOwnedPages.end()) {
@@ -758,7 +760,9 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
     std::vector<uint32_t> pages;
     pages.reserve(count);
 
-    for (uint32_t i = 0; i < count; ++i) {
+    uint32_t attemptsRemaining = m_pageLru.Size();
+    while (pages.size() < count && attemptsRemaining > 0u) {
+        --attemptsRemaining;
         uint32_t page = m_pageLru.PopOldest();
         if (page == ~0u) break;
 
@@ -766,13 +770,18 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
         if (ownerGroup >= 0) {
             uint32_t g = static_cast<uint32_t>(ownerGroup);
 
+            if (IsStreamingRequestInProgress(g) ||
+                m_preAllocatedPagesByGroup.count(g) != 0u ||
+                m_pendingResidencyCommitGroups.count(g) != 0u) {
+                continue;
+            }
+
             // Never evict pages belonging to groups the GPU reported as
             // visible last frame - doing so causes single-frame holes.
             const uint32_t wa = BitWordAddress(g);
             if (wa < m_usedGroupsBitsCpu.size() && (m_usedGroupsBitsCpu[wa] & BitMask(g)) != 0u) {
                 // Push the page back to MRU and stop - we've hit the
                 // on-screen frontier so no older pages are safe either.
-                m_pageLru.Insert(page);
                 break;
             }
 
@@ -801,6 +810,7 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
                 if (meshManager) {
                     meshManager->FreeCLodGroupEviction(g);
                 }
+                m_pendingResidencyCommitGroups.erase(g);
             }
         }
 
@@ -892,6 +902,18 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
         }
     }
 
+    for (uint32_t seg = 0; seg < segmentCount; ++seg) {
+        if (!result.segmentNeedsFetch[seg]) {
+            continue;
+        }
+
+        const uint32_t page = result.pagesBySegment[seg];
+        if (page != ~0u && page < m_pageOwnerGroup.size()) {
+            m_pageOwnerGroup[page] = static_cast<int32_t>(groupIndex);
+            m_pageOwnerSegment[page] = seg;
+        }
+    }
+
     return result;
 }
 
@@ -944,6 +966,41 @@ void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& page
     if (!pinnedPagesToFree.empty() && meshManager != nullptr) {
         if (PagePool* pool = meshManager->GetCLodPagePool()) {
             pool->FreePinnedPages(pinnedPagesToFree);
+        }
+    }
+}
+
+void CLodStreamingSystem::CommitPendingResidencyPromotions() {
+    if (m_pendingResidencyCommitGroups.empty()) {
+        return;
+    }
+
+    std::vector<uint32_t> groups;
+    groups.reserve(m_pendingResidencyCommitGroups.size());
+    for (uint32_t groupIndex : m_pendingResidencyCommitGroups) {
+        groups.push_back(groupIndex);
+    }
+    m_pendingResidencyCommitGroups.clear();
+
+    for (uint32_t groupIndex : groups) {
+        if (groupIndex >= m_streamingStorageGroupCapacity || !IsGroupActive(groupIndex)) {
+            continue;
+        }
+        if (m_groupOwnedPages.find(groupIndex) == m_groupOwnedPages.end()) {
+            continue;
+        }
+
+        const uint32_t wordAddress = BitWordAddress(groupIndex);
+        if (wordAddress >= m_streamingNonResidentBitsCpu.size()) {
+            continue;
+        }
+
+        const uint32_t bitMask = BitMask(groupIndex);
+        const bool wasNonResident = (m_streamingNonResidentBitsCpu[wordAddress] & bitMask) != 0u;
+        m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
+        if (wasNonResident) {
+            m_streamingResidentGroupsCount++;
+            m_streamingNonResidentBitsUploadPending = true;
         }
     }
 }
@@ -1280,15 +1337,6 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
         auto preAllocIt = m_preAllocatedPagesByGroup.find(groupIndex);
 
         if (completion.success) {
-            const uint32_t wordAddress = BitWordAddress(groupIndex);
-            const uint32_t bitMask = BitMask(groupIndex);
-            const bool wasNonResident = (m_streamingNonResidentBitsCpu[wordAddress] & bitMask) != 0u;
-            m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
-            if (wasNonResident) {
-                m_streamingResidentGroupsCount++;
-                m_streamingNonResidentBitsUploadPending = true;
-            }
-
             if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
                 const bool usesPinnedStorage = preAllocIt->second.usesPinnedStorage;
                 AssignPagesToGroup(groupIndex, preAllocIt->second);
@@ -1310,8 +1358,10 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
 
             TouchGroupPages(groupIndex);
             PrefetchChildGroupLayouts(groupIndex, meshManager);
+            m_pendingResidencyCommitGroups.insert(groupIndex);
         }
         else {
+            m_pendingResidencyCommitGroups.erase(groupIndex);
             if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
                 ReleasePreAllocatedPages(preAllocIt->second, meshManager);
                 m_preAllocatedPagesByGroup.erase(preAllocIt);
@@ -1549,6 +1599,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
 
     if (meshManager != nullptr) {
         InitializePageLru(meshManager);
+        CommitPendingResidencyPromotions();
         meshManager->ProcessCLodDiskStreamingIO(budget);
         ApplyDiskStreamingCompletions(meshManager);
     }
@@ -1650,14 +1701,8 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             continue;
         }
 
-        // If pages are already pre-allocated, skip to avoid leaking them from the LRU.
-        if (m_preAllocatedPagesByGroup.count(groupIndex)) {
-            processed++;
-            continue;
-        }
-
         // Pre-allocate pages (popping from LRU, evicting as needed).
-        if (pool && pageSize > 0) {
+        if (m_preAllocatedPagesByGroup.count(groupIndex) == 0u && pool && pageSize > 0) {
             const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
             const uint32_t pagesNeeded = info.valid
                 ? CLodEstimatePagesNeeded(info.hint, info.vertexByteSize, pageSize)

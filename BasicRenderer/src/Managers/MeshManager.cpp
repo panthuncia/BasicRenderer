@@ -3,6 +3,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Managers/Singletons/DirectStorageManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Mesh/Mesh.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Buffers/BufferView.h"
@@ -21,6 +22,21 @@
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
+
+	try {
+		auto& settingsManager = SettingsManager::GetInstance();
+		m_clodStreamingDirectStorageEnabled.store(
+			settingsManager.getSettingGetter<bool>(CLodStreamingEnableDirectStorageSettingName)(),
+			std::memory_order_release);
+		m_clodStreamingDirectStorageSubscription = settingsManager.addObserver<bool>(
+			CLodStreamingEnableDirectStorageSettingName,
+			[this](const bool& enabled) {
+				m_clodStreamingDirectStorageEnabled.store(enabled, std::memory_order_release);
+			});
+	}
+	catch (const std::exception&) {
+		m_clodStreamingDirectStorageEnabled.store(true, std::memory_order_release);
+	}
 
 	m_perMeshBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "PerMeshBuffers");
 	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshInstanceCB), 1, "perMeshInstanceBuffers");
@@ -84,6 +100,21 @@ MeshManager::~MeshManager() {
 }
 
 void MeshManager::InvalidateCLodDiskStreamingPipeline() {
+	std::vector<DirectStorageAsyncRequestHandle> pendingDirectStorageUploads;
+	pendingDirectStorageUploads.reserve(m_clodPendingDirectStorageUploads.size());
+	for (const auto& pendingUpload : m_clodPendingDirectStorageUploads) {
+		if (pendingUpload.uploadHandle.IsValid()) {
+			pendingDirectStorageUploads.push_back(pendingUpload.uploadHandle);
+		}
+	}
+	if (!pendingDirectStorageUploads.empty()) {
+		std::string waitMessage;
+		if (!DirectStorageManager::GetInstance().WaitForRequests(pendingDirectStorageUploads, &waitMessage) && !waitMessage.empty()) {
+			spdlog::warn("CLod streaming: DirectStorage invalidate wait reported '{}'", waitMessage);
+		}
+		m_clodPendingDirectStorageUploads.clear();
+	}
+
 	// Bump generation so in-flight IO tasks produce stale results that will be rejected.
 	m_clodDiskStreamingGeneration.fetch_add(1, std::memory_order_release);
 
@@ -191,7 +222,8 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			CLodCache::LoadedGroupPayload payload{};
 			bool loaded = false;
 			const std::wstring containerPath = CLodCache::ResolveContainerPath(request.cacheSource);
-			if (DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu) && !containerPath.empty()) {
+			const bool clodDirectStorageEnabled = m_clodStreamingDirectStorageEnabled.load(std::memory_order_acquire);
+			if (clodDirectStorageEnabled && DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu) && !containerPath.empty()) {
 				if (request.prefetchedLayout.has_value() && request.prefetchedLayout->IsValid()) {
 					result.groupChunkMetadata = request.prefetchedLayout->groupChunkMetadata;
 					result.directStoragePageBlobSizes = request.prefetchedLayout->pageBlobSizes;
@@ -220,7 +252,7 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 				}
 			}
 
-			if (!loaded && DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
+			if (!loaded && clodDirectStorageEnabled && DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
 				const std::wstring containerPath = CLodCache::ResolveContainerPath(request.cacheSource);
 				if (!containerPath.empty()) {
 					std::string directStorageMessage;
@@ -731,8 +763,9 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 	// The page-pool path considers a group "ready" when the page allocation is valid.
 	// Zero-meshlet voxel groups can still own streamable pages, so readiness is based
 	// on pageCount rather than meshletCount.
-	const bool hasRequiredAllocations = !residentAllocations.pageAllocations.empty()
-		|| sourceChunk.pageCount == 0u;
+	const bool hasRequiredAllocations =
+		IsCLodGroupResident(state, groupLocalIndex) &&
+		(!residentAllocations.pageAllocations.empty() || sourceChunk.pageCount == 0u);
 
 	if (hasRequiredAllocations) {
 		return true;

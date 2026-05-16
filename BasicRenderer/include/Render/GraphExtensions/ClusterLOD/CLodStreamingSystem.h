@@ -72,6 +72,7 @@ private:
     void ClearPendingLoadPriority(uint32_t groupIndex);
     void SetGroupUsesPinnedStorage(uint32_t groupIndex, bool usesPinnedStorage);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
+    void CommitPendingResidencyPromotions();
     void TouchGroupPages(uint32_t groupIndex);
     void PrefetchChildGroupLayouts(uint32_t parentGroupIndex, MeshManager* meshManager);
     void EvictPrefetchedChildLayoutsForOwner(uint32_t ownerGroupIndex);
@@ -122,6 +123,7 @@ private:
 	std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
     std::unordered_set<uint32_t> m_streamingRequestsInProgress;
+    std::unordered_set<uint32_t> m_pendingResidencyCommitGroups;
     std::unordered_map<uint32_t, uint32_t> m_pendingLoadPriorityByGroup;
     std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
     // Groups whose pages are temporarily LRU-pinned until the GPU confirms

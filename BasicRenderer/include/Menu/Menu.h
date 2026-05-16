@@ -727,6 +727,10 @@ private:
     std::function<uint32_t()> getCLodStreamingCpuUploadBudgetRequests;
     std::function<void(uint32_t)> setCLodStreamingCpuUploadBudgetRequests;
 
+    bool m_clodStreamingEnableDirectStorage = true;
+    std::function<bool()> getCLodStreamingEnableDirectStorage;
+    std::function<void(bool)> setCLodStreamingEnableDirectStorage;
+
     float m_autoAliasPoolGrowthHeadroom = 1.5f;
     std::function<float()> getAutoAliasPoolGrowthHeadroom;
     std::function<void(float)> setAutoAliasPoolGrowthHeadroom;
@@ -1188,10 +1192,15 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     m_autoAliasPoolRetireIdleFrames = getAutoAliasPoolRetireIdleFrames();
     observerSetting(m_autoAliasPoolRetireIdleFrames, "autoAliasPoolRetireIdleFrames");
 
-    getCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingGetter<uint32_t>("clodStreamingCpuUploadBudgetRequests");
-    setCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingSetter<uint32_t>("clodStreamingCpuUploadBudgetRequests");
+    getCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingGetter<uint32_t>(CLodStreamingCpuUploadBudgetSettingName);
+    setCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingSetter<uint32_t>(CLodStreamingCpuUploadBudgetSettingName);
     m_clodStreamingCpuUploadBudgetRequests = getCLodStreamingCpuUploadBudgetRequests();
-    observerSetting(m_clodStreamingCpuUploadBudgetRequests, "clodStreamingCpuUploadBudgetRequests");
+    observerSetting(m_clodStreamingCpuUploadBudgetRequests, CLodStreamingCpuUploadBudgetSettingName);
+
+    getCLodStreamingEnableDirectStorage = settingsManager.getSettingGetter<bool>(CLodStreamingEnableDirectStorageSettingName);
+    setCLodStreamingEnableDirectStorage = settingsManager.getSettingSetter<bool>(CLodStreamingEnableDirectStorageSettingName);
+    m_clodStreamingEnableDirectStorage = getCLodStreamingEnableDirectStorage();
+    observerSetting(m_clodStreamingEnableDirectStorage, CLodStreamingEnableDirectStorageSettingName);
 
     getAutoAliasPoolGrowthHeadroom = settingsManager.getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
     setAutoAliasPoolGrowthHeadroom = settingsManager.getSettingSetter<float>("autoAliasPoolGrowthHeadroom");
@@ -1714,6 +1723,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {
             m_clodStreamingCpuUploadBudgetRequests = static_cast<uint32_t>(std::max(clodCpuUploadBudget, 1));
             setCLodStreamingCpuUploadBudgetRequests(m_clodStreamingCpuUploadBudgetRequests);
+        }
+        if (ImGui::Checkbox("CLod Streaming DirectStorage", &m_clodStreamingEnableDirectStorage)) {
+            setCLodStreamingEnableDirectStorage(m_clodStreamingEnableDirectStorage);
         }
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);

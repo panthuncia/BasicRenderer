@@ -13,6 +13,7 @@
 #include "Mesh/Mesh.h"
 #include "Import/CLodCache.h"
 #include "Managers/Singletons/DirectStorageManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/PagePool.h"
 #include "Interfaces/IResourceProvider.h"
@@ -214,6 +215,8 @@ private:
 	bool m_clodSharedStreamingRangesDirty = true;
 	// Set whenever mesh/instance structural changes occur; consumed by CLodExtension.
 	std::atomic<bool> m_clodStreamingStructureDirty{true};
+	std::atomic<bool> m_clodStreamingDirectStorageEnabled{true};
+	SettingsManager::Subscription m_clodStreamingDirectStorageSubscription;
 
 	// Incremental debug-stats counters — updated in place by residency mutations.
 	std::atomic<uint32_t> m_debugResidentGroups{0};
