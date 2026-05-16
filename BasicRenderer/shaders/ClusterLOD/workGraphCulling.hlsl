@@ -1616,15 +1616,15 @@ bool CLodRefinedChildSuppressesParent(
 
     const uint childGroupGlobalIndex = groupsBase + childGroupLocalIndex;
     const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
-    const float childTraversalError = childGroup.parentGroupId >= 0
-        ? groups[groupsBase + childGroup.parentGroupId].bounds.error
-        : childGroup.bounds.error;
     const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
     const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
     const float childBoundaryEOD = ProjectedGeometricError(
-        childWorldCenter, childWorldRadius,
-        childTraversalError, lodUniformScale,
-        lodCam.positionWorldSpace.xyz, lodCam.zNear,
+        childWorldCenter,
+        childWorldRadius,
+        childGroup.maxParentError,
+        lodUniformScale,
+        lodCam.positionWorldSpace.xyz,
+        lodCam.zNear,
         lodCameraIsOrtho);
 
     if (childBoundaryEOD < lodCam.errorOverDistanceThreshold)
@@ -1705,7 +1705,6 @@ bool CLodPrepareRenderableLeaf(
         lodCam.positionWorldSpace.xyz,
         lodCam.zNear,
         lodCameraIsOrtho);
-
     const bool wantsRender = forceLodDecision || (parentAllowsRefine && (leaf.errorOverDistance >= lodCam.errorOverDistanceThreshold));
     if (!wantsRender)
     {
@@ -2613,9 +2612,10 @@ void ClusterCullBody(
                 }
 #endif
 
-                // Per-meshlet LOD condition 2: read refined group ID from descriptor.
-                // Terminal meshlets (refinedGroupId < 0) pass automatically.
-                // Non-terminal meshlets check if the child group is acceptable.
+                // Per-meshlet LOD condition 2: terminal meshlets pass
+                // automatically; non-terminal meshlets are suppressed when
+                // the refined child boundary is still above the threshold and
+                // the refined child is resident.
                 if (survives && !forceLodDecision) {
                     const int refinedGroupId = CLodDescRefinedGroupId(desc);
                     if (CLodRefinedChildSuppressesParent(

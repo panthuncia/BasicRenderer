@@ -678,7 +678,8 @@ void CLodExtension::InitializeCoreResources()
         .add<CLodWorkGraphTelemetryBufferTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false); // TODO: Alias this when we don't need the gpu address in node input during setup
+    // HLSL binds this as RWByteAddressBuffer; publish a raw UAV so Store/Load offsets are byte offsets.
+    m_occlusionReplayBuffer = CreateAliasedUnmaterializedRawBuffer(CLodReplayBufferSizeBytes, true, false, false); // TODO: Alias this when we don't need the gpu address in node input during setup
     m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
 
     m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);

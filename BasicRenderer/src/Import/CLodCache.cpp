@@ -670,7 +670,7 @@ namespace CLodCache {
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // UV quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(7));  // USD compliance layout + inherited primvar card isolation
 		boost::hash_combine(seed, static_cast<uint32_t>(27));  // voxel page descriptors use local segment addressing and SGGX voxel attributes
-		boost::hash_combine(seed, static_cast<uint32_t>(1));  // traversal nodes carry max hierarchical parent error
+		boost::hash_combine(seed, static_cast<uint32_t>(3));  // traversal nodes/groups carry max hierarchical parent error; segments split by refined domain
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MODE");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_GRID");
 		hashEnvironmentString("BASICRENDERER_CLOD_VOXEL_MIN_RES");

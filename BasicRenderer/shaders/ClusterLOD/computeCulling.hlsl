@@ -20,7 +20,10 @@ void BuildPureComputeReplayDispatchArgsCS()
     const uint rawCount = (CLOD_PC_REPLAY_SOURCE_INDEX == 0u)
         ? replayState[0].nodeWriteCount
         : replayState[0].meshletWriteCount;
-    const uint count = min(rawCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint replayCapacity = (CLOD_PC_REPLAY_SOURCE_INDEX == 0u)
+        ? CLOD_NODE_REPLAY_CAPACITY
+        : CLOD_MESHLET_REPLAY_CAPACITY;
+    const uint count = min(rawCount, min(CLOD_WG_VISIBLE_CLUSTERS_CAPACITY, replayCapacity));
     const uint threadsPerGroup = max(1u, CLOD_PC_DISPATCH_THREADS_PER_GROUP);
     const uint groups = (count == 0u) ? 1u : ((count + threadsPerGroup - 1u) / threadsPerGroup);
     dispatchArgs[0] = uint3(groups, 1u, 1u);
@@ -34,7 +37,7 @@ void SeedPureComputeReplayNodesCS(const uint3 dispatchThreadID : SV_DispatchThre
     RWStructuredBuffer<TraverseNodeRecord> outFrontier = ResourceDescriptorHeap[CLOD_PC_FRONTIER_OUTPUT_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> outCounter = ResourceDescriptorHeap[CLOD_PC_FRONTIER_OUTPUT_COUNT_DESCRIPTOR_INDEX];
 
-    const uint count = min(replayState[0].nodeWriteCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint count = min(replayState[0].nodeWriteCount, min(CLOD_WG_VISIBLE_CLUSTERS_CAPACITY, CLOD_NODE_REPLAY_CAPACITY));
     const uint index = dispatchThreadID.x;
     if (index == 0u) {
         outCounter[0] = count;
@@ -61,7 +64,7 @@ void SeedPureComputeReplayClustersCS(const uint3 dispatchThreadID : SV_DispatchT
     RWStructuredBuffer<MeshletBucketRecord> outFrontier = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> outCounter = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_COUNT_DESCRIPTOR_INDEX];
 
-    const uint count = min(replayState[0].meshletWriteCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY);
+    const uint count = min(replayState[0].meshletWriteCount, min(CLOD_WG_VISIBLE_CLUSTERS_CAPACITY, CLOD_MESHLET_REPLAY_CAPACITY));
     const uint index = dispatchThreadID.x;
     if (index == 0u) {
         outCounter[0] = count;

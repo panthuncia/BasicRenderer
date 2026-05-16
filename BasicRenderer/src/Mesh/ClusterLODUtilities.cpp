@@ -1400,28 +1400,35 @@ namespace
 				pageBins.pop_back();
 			}
 
-			// === Create segments: one segment per page ===
+			// === Create segments: one segment per contiguous refined-group run within a page ===
+			// A ClusterLODGroupSegment is a DAG edge, so every meshlet in the
+			// segment must have the same refinedGroup tag. Pages may still pack
+			// multiple runs; pageIndex + firstMeshletInPage addresses each run.
 			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi)
 			{
 				const PageBin& page = pageBins[pi];
 				if (page.meshletIndices.empty()) continue;
 
-				int32_t representativeTag = -1;
-				for (uint32_t mi : page.meshletIndices)
+				uint32_t runStart = 0u;
+				while (runStart < static_cast<uint32_t>(page.meshletIndices.size()))
 				{
-					if (meshletBucketTag[mi] >= 0)
+					const int32_t runTag = meshletBucketTag[page.meshletIndices[runStart]];
+					uint32_t runEnd = runStart + 1u;
+					while (runEnd < static_cast<uint32_t>(page.meshletIndices.size()) &&
+						meshletBucketTag[page.meshletIndices[runEnd]] == runTag)
 					{
-						representativeTag = meshletBucketTag[mi];
-						break;
+						++runEnd;
 					}
-				}
 
-				ClusterLODGroupSegment seg{};
-				seg.refinedGroup = representativeTag;
-				seg.pageIndex = pi;
-				seg.firstMeshletInPage = 0;
-				seg.meshletCount = static_cast<uint32_t>(page.meshletIndices.size());
-				output.segments.push_back(seg);
+					ClusterLODGroupSegment seg{};
+					seg.refinedGroup = runTag;
+					seg.pageIndex = pi;
+					seg.firstMeshletInPage = runStart;
+					seg.meshletCount = runEnd - runStart;
+					output.segments.push_back(seg);
+
+					runStart = runEnd;
+				}
 			}
 
 			// Sort segments: terminal (refinedGroup < 0) first.
@@ -3992,6 +3999,7 @@ namespace
 				parentErrorForGroup[i] = std::numeric_limits<float>::max();
 			}
 			state.groups[i].parentGroupId = parentGroupIdForGroup[i];
+			state.groups[i].maxParentError = parentErrorForGroup[i];
 		}
 
 		state.lodNodeRanges.assign(lodLevelCount, {});
@@ -4299,6 +4307,7 @@ namespace
 			uint32_t refinedEdgeCount = 0u;
 			uint32_t monotonicErrorViolations = 0u;
 			uint32_t invalidSegmentRanges = 0u;
+			uint32_t invalidSegmentDomains = 0u;
 			uint32_t voxelPayloadMissing = 0u;
 			uint32_t voxelTrianglePayloadLeaks = 0u;
 			uint32_t groupPageCountMismatches = 0u;
@@ -4336,6 +4345,40 @@ namespace
 				for (uint32_t segmentOffset = 0; segmentOffset < group.segmentCount; ++segmentOffset)
 				{
 					const ClusterLODGroupSegment& segment = state.segments[group.firstSegment + segmentOffset];
+					if (!isVoxelGroup && groupIndex < state.groupMeshletRefinedGroupChunks.size())
+					{
+						const std::vector<int32_t>& tags = state.groupMeshletRefinedGroupChunks[groupIndex];
+						const uint32_t firstMeshlet = ComputeGroupSegmentFirstMeshlet(state, group, segment);
+						if (firstMeshlet + segment.meshletCount > tags.size())
+						{
+							invalidSegmentRanges++;
+						}
+						else
+						{
+							for (uint32_t meshletOffset = 0; meshletOffset < segment.meshletCount; ++meshletOffset)
+							{
+								if (tags[firstMeshlet + meshletOffset] != segment.refinedGroup)
+								{
+									invalidSegmentDomains++;
+									if (invalidSegmentDomains <= 8u)
+									{
+										spdlog::error(
+											"ClusterLOD hierarchy validation segment domain violation: group={} segment={} page={} first_in_page={} meshlets={} segment_refined={} meshlet={} meshlet_refined={}",
+											groupIndex,
+											segmentOffset,
+											segment.pageIndex,
+											segment.firstMeshletInPage,
+											segment.meshletCount,
+											segment.refinedGroup,
+											firstMeshlet + meshletOffset,
+											tags[firstMeshlet + meshletOffset]);
+									}
+									break;
+								}
+							}
+						}
+					}
+
 					if (segment.refinedGroup < 0)
 					{
 						continue;
@@ -4444,7 +4487,7 @@ namespace
 			}
 
 			spdlog::info(
-				"ClusterLOD runtime hierarchy validation: groups={} refined_edges={} nodes={} reachable_nodes={} unreachable_nodes={} invalid_node_kinds={} invalid_node_ranges={} invalid_leaf_owners={} invalid_leaf_payloads={} internal_max_error_violations={} monotonic_error_violations={} invalid_segment_ranges={} voxel_payload_missing={} voxel_triangle_payload_leaks={} page_count_mismatches={}",
+				"ClusterLOD runtime hierarchy validation: groups={} refined_edges={} nodes={} reachable_nodes={} unreachable_nodes={} invalid_node_kinds={} invalid_node_ranges={} invalid_leaf_owners={} invalid_leaf_payloads={} internal_max_error_violations={} monotonic_error_violations={} invalid_segment_ranges={} invalid_segment_domains={} voxel_payload_missing={} voxel_triangle_payload_leaks={} page_count_mismatches={}",
 				state.groups.size(),
 				refinedEdgeCount,
 				state.nodes.size(),
@@ -4457,6 +4500,7 @@ namespace
 				internalMaxErrorViolations,
 				monotonicErrorViolations,
 				invalidSegmentRanges,
+				invalidSegmentDomains,
 				voxelPayloadMissing,
 				voxelTrianglePayloadLeaks,
 				groupPageCountMismatches);
@@ -4531,7 +4575,7 @@ namespace
 			}
 
 			if (invalidNodeKindCount != 0u || invalidNodeRanges != 0u || invalidLeafOwners != 0u || invalidLeafPayloads != 0u ||
-				internalMaxErrorViolations != 0u || monotonicErrorViolations != 0u || invalidSegmentRanges != 0u ||
+				internalMaxErrorViolations != 0u || monotonicErrorViolations != 0u || invalidSegmentRanges != 0u || invalidSegmentDomains != 0u ||
 				voxelPayloadMissing != 0u || voxelTrianglePayloadLeaks != 0u || groupPageCountMismatches != 0u)
 			{
 				throw std::runtime_error("Cluster LOD: runtime hierarchy validation failed; see preceding ClusterLOD runtime hierarchy validation logs");

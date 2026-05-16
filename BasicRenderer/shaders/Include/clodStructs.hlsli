@@ -163,6 +163,7 @@ struct ClusterLODGroup
     uint pageMapBase; // absolute index into GroupPageMap buffer
     uint pageCount;   // number of pages for this group
     int parentGroupId; // mesh-local group index of the parent group (-1 for root)
+    float maxParentError; // max error of any parent group that refines into this group
     float representationError; // actual render representation error; currently used by voxel groups
 };
 
