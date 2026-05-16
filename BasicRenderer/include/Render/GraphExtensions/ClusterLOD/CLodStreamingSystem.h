@@ -35,6 +35,13 @@ public:
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
 
 private:
+    enum class CLodPhysicalPageState : uint8_t {
+        Free,
+        Resident,
+        PreAllocatedCpuUpload,
+        PendingDirectStorageWrite,
+    };
+
     struct StreamingServiceSummary {
         uint32_t requested = 0;
         uint32_t unique = 0;
@@ -120,6 +127,9 @@ private:
     CLodPageLRU m_pageLru;
 	std::vector<int32_t> m_pageOwnerGroup;       // page ID to group global index (-1 = unowned)
 	std::vector<uint32_t> m_pageOwnerSegment;    // page ID to segment index within owning group
+    std::vector<CLodPhysicalPageState> m_pageState;
+    std::vector<uint32_t> m_pendingPageOwnerGroup;
+    std::vector<uint32_t> m_pendingPageOwnerSegment;
 	std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
     std::unordered_set<uint32_t> m_streamingRequestsInProgress;
@@ -154,6 +164,9 @@ private:
     rhi::TimelinePtr m_streamingReadbackFencePtr;
     rhi::Timeline m_streamingReadbackFenceHandle;
     std::atomic<uint64_t> m_streamingReadbackFenceCounter{0};
+    rhi::TimelinePtr m_directStorageLaunchFencePtr;
+    rhi::Timeline m_directStorageLaunchFenceHandle;
+    std::atomic<uint64_t> m_directStorageLaunchFenceCounter{0};
 
     struct ReadbackStagingSlot {
         std::shared_ptr<Buffer> counterStaging;

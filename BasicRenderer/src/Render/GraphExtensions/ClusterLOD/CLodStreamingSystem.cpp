@@ -13,6 +13,8 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingBeginFramePass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingReadbackCopyPass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodAsyncUploadPass.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodDirectStorageCompletionWaitPass.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodDirectStorageLaunchPass.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Managers/UploadInstance.h"
 #include "Render/MemoryIntrospectionAPI.h"
@@ -115,6 +117,10 @@ CLodStreamingSystem::CLodStreamingSystem() {
         auto result = device.CreateTimeline(m_streamingReadbackFencePtr, 0, "CLodStreamingReadbackFence");
         if (result == rhi::Result::Ok && m_streamingReadbackFencePtr) {
             m_streamingReadbackFenceHandle = m_streamingReadbackFencePtr.Get();
+        }
+        result = device.CreateTimeline(m_directStorageLaunchFencePtr, 0, "CLodDirectStorageLaunchFence");
+        if (result == rhi::Result::Ok && m_directStorageLaunchFencePtr) {
+            m_directStorageLaunchFenceHandle = m_directStorageLaunchFencePtr.Get();
         }
     }
 
@@ -312,6 +318,28 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
 
     RefreshStreamingActiveGroupDomain();
 
+    if (meshManager != nullptr && meshManager->HasPendingCLodDirectStorageUploads()) {
+        std::vector<ExternalTimelinePoint> waits;
+        meshManager->CollectCLodDirectStorageCompletionWaits(waits);
+        if (!waits.empty()) {
+            CLodDirectStorageCompletionWaitInputs waitInputs{};
+            waitInputs.waits = std::move(waits);
+            if (PagePool* pool = meshManager->GetCLodPagePool()) {
+                auto slabGroup = pool->GetSlabResourceGroup();
+                if (auto pt = pool->GetPageTableBuffer()) {
+                    slabGroup->AddResource(pt);
+                }
+                waitInputs.targetSlabResolver = std::make_unique<ResourceGroupResolver>(slabGroup);
+            }
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Copy(
+                    "CLod::DirectStorageCompletionWait",
+                    std::make_shared<CLodDirectStorageCompletionWaitPass>(std::move(waitInputs)))
+                    .At(RenderGraph::ExternalInsertPoint::Before("CLod::StreamingBeginFramePass"))
+                    .PreferQueue(QueueKind::Graphics));
+        }
+    }
+
     auto streamingUploads = rg::runtime::ConsumeStreamingUploadsDispatch();
     if (!streamingUploads.empty()) {
         StreamingUploadInputs inputs;
@@ -363,6 +391,41 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                 .At(RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass"))
                 .PreferQueue(QueueKind::Copy)
                 .PinToQueue(m_uploadQueueSlot));
+    }
+
+    if (meshManager != nullptr
+        && meshManager->HasPendingCLodDirectStorageLaunches()
+        && m_directStorageLaunchFenceHandle.IsValid()) {
+        CLodDirectStorageLaunchInputs launchInputs{};
+        if (PagePool* pool = meshManager->GetCLodPagePool()) {
+            auto slabGroup = pool->GetSlabResourceGroup();
+            if (auto pt = pool->GetPageTableBuffer()) {
+                slabGroup->AddResource(pt);
+            }
+            launchInputs.targetSlabResolver = std::make_unique<ResourceGroupResolver>(slabGroup);
+        }
+        launchInputs.launchCallback = [this, meshManager]() -> PassReturn {
+            if (!m_directStorageLaunchFenceHandle.IsValid()) {
+                return {};
+            }
+
+            const uint64_t fenceValue =
+                m_directStorageLaunchFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+            meshManager->LaunchPendingCLodDirectStorageUploads(
+                m_directStorageLaunchFenceHandle,
+                fenceValue);
+
+            PassReturn ret{};
+            ret.externalSignalsAfterCompletion.push_back({ m_directStorageLaunchFenceHandle, fenceValue });
+            return ret;
+        };
+
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Copy(
+                "CLod::DirectStorageLaunch",
+                std::make_shared<CLodDirectStorageLaunchPass>(std::move(launchInputs)))
+                .At(RenderGraph::ExternalInsertPoint::After("PresentPass"))
+                .PreferQueue(QueueKind::Graphics));
     }
 
     // Schedule a readback copy pass immediately after the final CLod shadow
@@ -609,6 +672,9 @@ void CLodStreamingSystem::InitializePageLru(MeshManager* meshManager) {
 
     m_pageOwnerGroup.assign(totalPages, -1);
     m_pageOwnerSegment.resize(totalPages, 0u);
+    m_pageState.assign(totalPages, CLodPhysicalPageState::Free);
+    m_pendingPageOwnerGroup.assign(totalPages, ~0u);
+    m_pendingPageOwnerSegment.assign(totalPages, 0u);
 
     for (uint32_t p = 0; p < generalPages; ++p) {
         m_pageLru.Insert(p);
@@ -642,6 +708,9 @@ void CLodStreamingSystem::EnsurePageTrackingCapacity(MeshManager* meshManager) {
     if (m_pageOwnerGroup.size() < totalPages) {
         m_pageOwnerGroup.resize(totalPages, -1);
         m_pageOwnerSegment.resize(totalPages, 0u);
+        m_pageState.resize(totalPages, CLodPhysicalPageState::Free);
+        m_pendingPageOwnerGroup.resize(totalPages, ~0u);
+        m_pendingPageOwnerSegment.resize(totalPages, 0u);
     }
 }
 
@@ -677,6 +746,9 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
         if (page < m_pageOwnerGroup.size()) {
             m_pageOwnerGroup[page] = -1;
             m_pageOwnerSegment[page] = 0u;
+            m_pageState[page] = CLodPhysicalPageState::Free;
+            m_pendingPageOwnerGroup[page] = ~0u;
+            m_pendingPageOwnerSegment[page] = 0u;
         }
 
         if (usesPinnedStorage) {
@@ -903,14 +975,19 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
     }
 
     for (uint32_t seg = 0; seg < segmentCount; ++seg) {
-        if (!result.segmentNeedsFetch[seg]) {
+        const uint32_t page = result.pagesBySegment[seg];
+        if (page == ~0u || page >= m_pageState.size()) {
             continue;
         }
-
-        const uint32_t page = result.pagesBySegment[seg];
-        if (page != ~0u && page < m_pageOwnerGroup.size()) {
+        if (result.segmentNeedsFetch[seg]) {
+            // PopOldest() keeps pages represented in the LRU. Preallocated pages
+            // must therefore keep a provisional owner so later allocations can
+            // reject them via m_preAllocatedPagesByGroup / in-progress checks.
             m_pageOwnerGroup[page] = static_cast<int32_t>(groupIndex);
             m_pageOwnerSegment[page] = seg;
+            m_pageState[page] = CLodPhysicalPageState::PreAllocatedCpuUpload;
+            m_pendingPageOwnerGroup[page] = groupIndex;
+            m_pendingPageOwnerSegment[page] = seg;
         }
     }
 
@@ -926,6 +1003,9 @@ void CLodStreamingSystem::AssignPagesToGroup(uint32_t groupIndex, const PreAlloc
         if (page != ~0u && page < m_pageOwnerGroup.size()) {
             m_pageOwnerGroup[page] = static_cast<int32_t>(groupIndex);
             m_pageOwnerSegment[page] = seg;
+            m_pageState[page] = CLodPhysicalPageState::Resident;
+            m_pendingPageOwnerGroup[page] = ~0u;
+            m_pendingPageOwnerSegment[page] = 0u;
             if (!pages.usesPinnedStorage) {
                 m_pageLru.Touch(page);
             }
@@ -947,6 +1027,9 @@ void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& page
             if (page < m_pageOwnerGroup.size()) {
                 m_pageOwnerGroup[page] = -1;
                 m_pageOwnerSegment[page] = 0u;
+                m_pageState[page] = CLodPhysicalPageState::Free;
+                m_pendingPageOwnerGroup[page] = ~0u;
+                m_pendingPageOwnerSegment[page] = 0u;
             }
             pinnedPagesToFree.push_back(page);
             continue;
@@ -957,6 +1040,9 @@ void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& page
             if (page < m_pageOwnerGroup.size()) {
                 m_pageOwnerGroup[page] = -1;
                 m_pageOwnerSegment[page] = 0u;
+                m_pageState[page] = CLodPhysicalPageState::Free;
+                m_pendingPageOwnerGroup[page] = ~0u;
+                m_pendingPageOwnerSegment[page] = 0u;
             }
         }
         // Both fresh and reused pages go back into the LRU.

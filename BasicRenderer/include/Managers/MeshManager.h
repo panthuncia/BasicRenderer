@@ -14,6 +14,7 @@
 #include "Import/CLodCache.h"
 #include "Managers/Singletons/DirectStorageManager.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "RenderPasses/Base/PassReturn.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/PagePool.h"
 #include "Interfaces/IResourceProvider.h"
@@ -101,6 +102,10 @@ public:
 	// Returns true if the request was queued (or was already in the queue).
 	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout = nullptr);
 	bool TryGetCLodGroupPayloadLayout(uint32_t groupGlobalIndex, CLodCache::GroupPayloadLayoutMetadata& outLayout, std::string* outMessage = nullptr);
+	bool HasPendingCLodDirectStorageLaunches() const;
+	bool HasPendingCLodDirectStorageUploads() const;
+	void CollectCLodDirectStorageCompletionWaits(std::vector<ExternalTimelinePoint>& outWaits) const;
+	bool LaunchPendingCLodDirectStorageUploads(rhi::Timeline waitTimeline, uint64_t waitValue);
 
 	// Returns true if the group currently has disk I/O queued or in-flight.
 	bool IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const;
@@ -261,6 +266,25 @@ private:
 		uint64_t totalBlobBytes = 0;
 		std::string uploadPathLabel = "DirectStorageGpuDirect";
 		DirectStorageAsyncRequestHandle uploadHandle;
+		rhi::Timeline completionTimeline;
+		uint64_t completionValue = 0;
+		std::vector<uint32_t> pageIds;
+	};
+
+	struct CLodPendingDirectStorageLaunch {
+		uint32_t groupGlobalIndex = 0;
+		uint64_t generation = 0;
+		ClusterLODCacheSource cacheSource{};
+		std::shared_ptr<CLodSharedStreamingState> sharedState;
+		uint32_t groupLocalIndex = 0;
+		ClusterLODGroupChunk chunk{};
+		std::vector<PagePool::PageAllocation> pageAllocations;
+		std::vector<GroupPageMapEntry> pageMapEntries;
+		std::vector<br::DirectStorageBufferRegionCopy> copies;
+		std::vector<uint32_t> pageIds;
+		uint32_t fetchedPageCount = 0;
+		uint64_t totalBlobBytes = 0;
+		std::string uploadPathLabel = "DirectStorageGpuDirect";
 	};
 
 	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
@@ -277,7 +301,12 @@ private:
 	// Completed results waiting to be applied on the main thread.
 	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
+	std::vector<CLodPendingDirectStorageLaunch> m_clodPendingDirectStorageLaunches;
 	std::vector<CLodPendingDirectStorageUpload> m_clodPendingDirectStorageUploads;
+
+	rhi::TimelinePtr m_clodDirectStorageCompletionFencePtr;
+	rhi::Timeline m_clodDirectStorageCompletionFenceHandle;
+	std::atomic<uint64_t> m_clodDirectStorageCompletionFenceCounter{0};
 
 	// Guards CLodSharedStreamingState interiors (groupResidentFlags,
 	// baselineGroupChunks, residentGroupAllocations),
