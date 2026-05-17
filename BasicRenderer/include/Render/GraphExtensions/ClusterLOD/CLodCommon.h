@@ -27,6 +27,10 @@ inline constexpr const char* CLodPageJobMaxPagesPerClusterSettingName = "clodPag
 inline constexpr const char* CLodPageJobRecordCapacitySettingName = "clodPageJobRecordCapacity";
 inline constexpr const char* CLodPageJobForceAllSettingName = "clodPageJobForceAll";
 inline constexpr const char* CLodForceTraversalDepthRootSettingName = "clodForceTraversalDepthRoot";
+inline constexpr const char* CLodPureComputePhase2ExpansionFactorSettingName = "clodPureComputePhase2ExpansionFactor";
+inline constexpr uint32_t CLodPureComputePhase2ExpansionFactorDefault = 2u;
+inline constexpr uint32_t CLodPureComputePhase2ExpansionFactorMin = 1u;
+inline constexpr uint32_t CLodPureComputePhase2ExpansionFactorMax = 64u;
 inline constexpr uint32_t CLodForceTraversalDepthRootDisabled = 0xFFFFFFFFu;
 inline constexpr const char* CLodWorkGraphComputePageJobDescriptorBufferId = "CLod::WorkGraphComputePageJobDescriptors";
 inline constexpr const char* CLodLevelInfosBufferId = "Builtin::CLod::LevelInfos";
@@ -155,6 +159,19 @@ constexpr bool CLodVSMRasterModeUsesLargeClusterShadowRouting(CLodVSMRasterMode 
 constexpr bool CLodVSMRasterModeUsesReyes(CLodVSMRasterMode mode)
 {
     return mode == CLodVSMRasterMode::Reyes;
+}
+
+constexpr uint32_t CLodNormalizePureComputePhase2ExpansionFactor(uint32_t value)
+{
+    value = std::clamp(
+        value,
+        CLodPureComputePhase2ExpansionFactorMin,
+        CLodPureComputePhase2ExpansionFactorMax);
+    uint32_t normalized = CLodPureComputePhase2ExpansionFactorMin;
+    while ((normalized << 1u) <= value && (normalized << 1u) <= CLodPureComputePhase2ExpansionFactorMax) {
+        normalized <<= 1u;
+    }
+    return normalized;
 }
 
 struct RasterBucketsHistogramIndirectCommand
@@ -1138,7 +1155,6 @@ inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;  
 inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSizeBytes;
 inline constexpr uint32_t CLodNodeReplayStrideBytes = 12u;   // sizeof(TraverseNodeRecord): 3 uints
 inline constexpr uint32_t CLodMeshletReplayStrideBytes = 24u; // sizeof(MeshletBucketRecord): 6 uints
-inline constexpr uint32_t CLodDenseClusterWorkStrideBytes = 24u; // sizeof(CLodDenseClusterWorkRecord): 6 uints
 inline constexpr uint32_t CLodVoxelRasterThreadsPerGroup = 64u;
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;

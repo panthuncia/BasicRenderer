@@ -531,6 +531,10 @@ private:
     std::function<CLodCullingBackend()> getCLodCullingBackend;
     std::function<void(CLodCullingBackend)> setCLodCullingBackend;
 
+    uint32_t m_clodPureComputePhase2ExpansionFactor = CLodPureComputePhase2ExpansionFactorDefault;
+    std::function<uint32_t()> getCLodPureComputePhase2ExpansionFactor;
+    std::function<void(uint32_t)> setCLodPureComputePhase2ExpansionFactor;
+
     CLodSoftwareRasterMode m_clodSoftwareRasterMode = CLodSoftwareRasterMode::Disabled;
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
@@ -955,6 +959,14 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     setCLodCullingBackend = settingsManager.getSettingSetter<CLodCullingBackend>(CLodCullingBackendSettingName);
     m_clodCullingBackend = getCLodCullingBackend();
     observerSetting(m_clodCullingBackend, CLodCullingBackendSettingName);
+
+    getCLodPureComputePhase2ExpansionFactor =
+        settingsManager.getSettingGetter<uint32_t>(CLodPureComputePhase2ExpansionFactorSettingName);
+    setCLodPureComputePhase2ExpansionFactor =
+        settingsManager.getSettingSetter<uint32_t>(CLodPureComputePhase2ExpansionFactorSettingName);
+    m_clodPureComputePhase2ExpansionFactor =
+        CLodNormalizePureComputePhase2ExpansionFactor(getCLodPureComputePhase2ExpansionFactor());
+    observerSetting(m_clodPureComputePhase2ExpansionFactor, CLodPureComputePhase2ExpansionFactorSettingName);
 
     getCLodSoftwareRasterMode = settingsManager.getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
@@ -1446,6 +1458,33 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             clodCullingBackendIndex = std::clamp(clodCullingBackendIndex, 0, CLodCullingBackendCount - 1);
             m_clodCullingBackend = static_cast<CLodCullingBackend>(clodCullingBackendIndex);
             setCLodCullingBackend(m_clodCullingBackend);
+        }
+        if (m_clodCullingBackend == CLodCullingBackend::PureCompute) {
+            static constexpr uint32_t kPureComputePhase2ExpansionFactors[] = { 1u, 2u, 4u, 8u, 16u, 32u, 64u };
+            static constexpr const char* kPureComputePhase2ExpansionFactorLabels[] = { "1", "2", "4", "8", "16", "32", "64" };
+            static constexpr int kPureComputePhase2ExpansionFactorCount =
+                static_cast<int>(sizeof(kPureComputePhase2ExpansionFactors) / sizeof(kPureComputePhase2ExpansionFactors[0]));
+            m_clodPureComputePhase2ExpansionFactor =
+                CLodNormalizePureComputePhase2ExpansionFactor(m_clodPureComputePhase2ExpansionFactor);
+            int phase2ExpansionIndex = 0;
+            for (int i = 0; i < kPureComputePhase2ExpansionFactorCount; ++i) {
+                if (kPureComputePhase2ExpansionFactors[i] == m_clodPureComputePhase2ExpansionFactor) {
+                    phase2ExpansionIndex = i;
+                    break;
+                }
+            }
+            if (ImGui::Combo(
+                    "Pure Compute Phase-2 Bucket Size",
+                    &phase2ExpansionIndex,
+                    kPureComputePhase2ExpansionFactorLabels,
+                    kPureComputePhase2ExpansionFactorCount)) {
+                phase2ExpansionIndex = std::clamp(
+                    phase2ExpansionIndex,
+                    0,
+                    kPureComputePhase2ExpansionFactorCount - 1);
+                m_clodPureComputePhase2ExpansionFactor = kPureComputePhase2ExpansionFactors[phase2ExpansionIndex];
+                setCLodPureComputePhase2ExpansionFactor(m_clodPureComputePhase2ExpansionFactor);
+            }
         }
         int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
         if (ImGui::Combo("Visibility/Alpha SW Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
@@ -3440,17 +3479,17 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
 
             const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
-            const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+            const uint32_t phase2Records = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
             const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
-            const bool denseDispatchActive = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u);
+            const bool denseDispatchActive = (phase2Records > 0u || denseClustersDispatched > 0u);
             const char* clusterDispatchMode = denseDispatchActive
-                ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense per-cluster")
+                ? ((bucketDispatchRecords > 0u) ? "mixed" : "phase2 records")
                 : "bucketed";
             ImGui::Text(
-                "ClusterCull dispatch mode: %s | bucket records=%u | dense expansion buckets=%u | dense clusters=%u",
+                "ClusterCull dispatch mode: %s | bucket records=%u | phase2 records=%u | phase2 clusters=%u",
                 clusterDispatchMode,
                 bucketDispatchRecords,
-                denseExpansionBuckets,
+                phase2Records,
                 denseClustersDispatched);
 
             const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);

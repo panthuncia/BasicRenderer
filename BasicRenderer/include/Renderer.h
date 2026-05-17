@@ -213,9 +213,9 @@ private:
 	bool m_allowTearing = false;
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
-	bool m_gtaoEnabled = false;
+	bool m_gtaoEnabled = true;
 	bool m_visibilityRendering = true;
-	bool m_occlusionCulling = false;
+	bool m_occlusionCulling = true;
 	bool m_meshletCulling = true;
     bool m_bloom = false;
     bool m_jitter = true;

@@ -97,7 +97,7 @@ MeshManager::MeshManager() {
 		PagePool::Config ppConfig;
 		ppConfig.pageSize     = 256 * 1024;         // 256 KB
 		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.numStreamingSlabs = 32;
+		ppConfig.numStreamingSlabs = 24;
 		ppConfig.debugName    = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}

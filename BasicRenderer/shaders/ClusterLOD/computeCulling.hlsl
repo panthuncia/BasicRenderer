@@ -1,6 +1,19 @@
 #define CLOD_COMPUTE_INCLUDE_ONLY 1
 #include "ClusterLOD/workGraphCulling.hlsl"
 
+uint PureComputeNormalizePhase2ExpansionFactor(uint value)
+{
+    value = min(max(value, 1u), 64u);
+    uint normalized = 1u;
+    [unroll]
+    for (uint candidate = 2u; candidate <= 64u; candidate <<= 1u) {
+        if (candidate <= value) {
+            normalized = candidate;
+        }
+    }
+    return normalized;
+}
+
 [numthreads(1, 1, 1)]
 void BuildPureComputeDispatchArgsCS()
 {
@@ -364,37 +377,13 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + leaf.group.pageMapBase, seg.pageIndex);
         const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
 
-        uint tail = seg.meshletCount;
-        uint budget = MAX_RECORDS_PER_SEGMENT;
-        uint n64 = min(tail / 64u, budget);
-        tail -= n64 * 64u;
-        budget -= n64;
-
-        uint n32 = 0u;
-        uint n16 = 0u;
-        uint n8 = 0u;
-        uint n4 = 0u;
-        uint n2 = 0u;
-        uint n1 = 0u;
-
-        if (tail >= 32u && budget >= 2u) { n32 = 1u; tail -= 32u; budget--; }
-        if (tail >= 16u && budget >= 2u) { n16 = 1u; tail -= 16u; budget--; }
-        if (tail >= 8u  && budget >= 2u) { n8  = 1u; tail -= 8u;  budget--; }
-        if (tail >= 4u  && budget >= 2u) { n4  = 1u; tail -= 4u;  budget--; }
-        if (tail >= 2u  && budget >= 2u) { n2  = 1u; tail -= 2u;  budget--; }
-
-        if      (tail > 32u) { n64++; }
-        else if (tail > 16u) { n32++; }
-        else if (tail > 8u)  { n16++; }
-        else if (tail > 4u)  { n8++;  }
-        else if (tail > 2u)  { n4++;  }
-        else if (tail > 1u)  { n2++;  }
-        else if (tail > 0u)  { n1 = 1u; }
-
+        const uint phase2ExpansionFactor =
+            PureComputeNormalizePhase2ExpansionFactor(CLOD_PC_PHASE2_EXPANSION_FACTOR);
         uint meshletBase = seg.firstMeshletInPage;
-
+        uint remainingMeshlets = seg.meshletCount;
         [loop]
-        for (uint bucketIndex64 = 0u; bucketIndex64 < n64; ++bucketIndex64) {
+        while (remainingMeshlets > 0u) {
+            const uint chunkCount = min(phase2ExpansionFactor, remainingMeshlets);
             uint outputIndex = 0u;
             InterlockedAdd(clusterCounter[0], 1u, outputIndex);
             if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
@@ -402,114 +391,13 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
                 outRecord.instanceIndex = rec.instanceIndex;
                 outRecord.viewId = rec.viewId;
                 outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 64u);
+                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, chunkCount);
                 outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
                 outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
                 clusterFrontier[outputIndex] = outRecord;
             }
-            meshletBase += 64u;
-        }
-
-        [loop]
-        for (uint bucketIndex32 = 0u; bucketIndex32 < n32; ++bucketIndex32) {
-            uint outputIndex = 0u;
-            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
-            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
-                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
-                outRecord.instanceIndex = rec.instanceIndex;
-                outRecord.viewId = rec.viewId;
-                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 32u);
-                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
-                clusterFrontier[outputIndex] = outRecord;
-            }
-            meshletBase += 32u;
-        }
-
-        [loop]
-        for (uint bucketIndex16 = 0u; bucketIndex16 < n16; ++bucketIndex16) {
-            uint outputIndex = 0u;
-            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
-            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
-                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
-                outRecord.instanceIndex = rec.instanceIndex;
-                outRecord.viewId = rec.viewId;
-                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 16u);
-                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
-                clusterFrontier[outputIndex] = outRecord;
-            }
-            meshletBase += 16u;
-        }
-
-        [loop]
-        for (uint bucketIndex8 = 0u; bucketIndex8 < n8; ++bucketIndex8) {
-            uint outputIndex = 0u;
-            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
-            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
-                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
-                outRecord.instanceIndex = rec.instanceIndex;
-                outRecord.viewId = rec.viewId;
-                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 8u);
-                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
-                clusterFrontier[outputIndex] = outRecord;
-            }
-            meshletBase += 8u;
-        }
-
-        [loop]
-        for (uint bucketIndex4 = 0u; bucketIndex4 < n4; ++bucketIndex4) {
-            uint outputIndex = 0u;
-            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
-            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
-                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
-                outRecord.instanceIndex = rec.instanceIndex;
-                outRecord.viewId = rec.viewId;
-                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 4u);
-                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
-                clusterFrontier[outputIndex] = outRecord;
-            }
-            meshletBase += 4u;
-        }
-
-        [loop]
-        for (uint bucketIndex2 = 0u; bucketIndex2 < n2; ++bucketIndex2) {
-            uint outputIndex = 0u;
-            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
-            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
-                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
-                outRecord.instanceIndex = rec.instanceIndex;
-                outRecord.viewId = rec.viewId;
-                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 2u);
-                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
-                clusterFrontier[outputIndex] = outRecord;
-            }
-            meshletBase += 2u;
-        }
-
-        [loop]
-        for (uint bucketIndex1 = 0u; bucketIndex1 < n1; ++bucketIndex1) {
-            uint outputIndex = 0u;
-            InterlockedAdd(clusterCounter[0], 1u, outputIndex);
-            if (outputIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY) {
-                MeshletBucketRecord outRecord = (MeshletBucketRecord)0;
-                outRecord.instanceIndex = rec.instanceIndex;
-                outRecord.viewId = rec.viewId;
-                outRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, sourceTag);
-                outRecord.meshletIndexAndCount = PackMeshletIndexAndCount(meshletBase, 1u);
-                outRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-                outRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
-                clusterFrontier[outputIndex] = outRecord;
-            }
-            meshletBase += 1u;
+            meshletBase += chunkCount;
+            remainingMeshlets -= chunkCount;
         }
         return;
     }
@@ -660,87 +548,71 @@ void PureComputeClusterFrontierCS(const uint3 dispatchThreadID : SV_DispatchThre
     ClusterCullBody(bucket, hasBucket, true, GI, activeCount, 64u, swPending, pageJobPending);
 }
 
-groupshared uint gs_denseBaseIndex;
+groupshared MeshletBucketRecord gs_phase2Records[64];
+groupshared uint gs_phase2ActiveClusterCount;
 
 [numthreads(64, 1, 1)]
-void PureComputeExpandClusterFrontierCS(
-    const uint3 dispatchThreadID : SV_DispatchThreadID,
+void PureComputeDenseClusterWorkCS(
     const uint3 groupID : SV_GroupID,
     const uint GI : SV_GroupIndex)
 {
     StructuredBuffer<MeshletBucketRecord> inputFrontier = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> inputCountBuffer = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<CLodDenseClusterWorkRecord> denseClusterWork = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<uint> denseClusterWorkCount = ResourceDescriptorHeap[CLOD_PC_CLUSTER_OUTPUT_COUNT_DESCRIPTOR_INDEX];
 
-    const uint bucketIndex = groupID.x;
     const uint inputCount = inputCountBuffer[0];
-    const bool hasBucket = bucketIndex < inputCount;
-    MeshletBucketRecord bucket = (MeshletBucketRecord)0;
-    uint firstLocalMeshletIndex = 0u;
-    uint meshletCount = 0u;
-    if (hasBucket) {
-        bucket = inputFrontier[bucketIndex];
-        firstLocalMeshletIndex = UnpackMeshletFirstIndex(bucket.meshletIndexAndCount);
-        meshletCount = UnpackMeshletCount(bucket.meshletIndexAndCount);
-    }
+    const uint phase2ExpansionFactor =
+        PureComputeNormalizePhase2ExpansionFactor(CLOD_PC_PHASE2_EXPANSION_FACTOR);
+    const uint recordsPerGroup = 64u / phase2ExpansionFactor;
+    const uint groupRecordBase = groupID.x * recordsPerGroup;
+    const uint recordsThisGroup = (groupRecordBase < inputCount)
+        ? min(recordsPerGroup, inputCount - groupRecordBase)
+        : 0u;
 
-    uint writableMeshletCount = 0u;
-    if (GI == 0u) {
-        gs_denseBaseIndex = 0u;
-        if (hasBucket && meshletCount > 0u) {
-            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_DENSE_EXPANSION_BUCKETS, 1u);
-            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_DENSE_CLUSTERS_DISPATCHED, meshletCount);
-            if (UnpackGroupSourceTag(bucket.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
-                WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED, 1u);
-            }
-            InterlockedAdd(denseClusterWorkCount[0], meshletCount, gs_denseBaseIndex);
+    if (GI < recordsPerGroup) {
+        const uint recordIndex = groupRecordBase + GI;
+        if (recordIndex < inputCount) {
+            gs_phase2Records[GI] = inputFrontier[recordIndex];
+        } else {
+            gs_phase2Records[GI] = (MeshletBucketRecord)0;
         }
     }
     GroupMemoryBarrierWithGroupSync();
 
-    if (hasBucket && gs_denseBaseIndex < CLOD_WG_VISIBLE_CLUSTERS_CAPACITY)
-    {
-        writableMeshletCount = min(meshletCount, CLOD_WG_VISIBLE_CLUSTERS_CAPACITY - gs_denseBaseIndex);
+    if (GI == 0u) {
+        uint activeClusterCount = 0u;
+        [loop]
+        for (uint recordIndex = 0u; recordIndex < recordsThisGroup; ++recordIndex) {
+            activeClusterCount += UnpackMeshletCount(gs_phase2Records[recordIndex].meshletIndexAndCount);
+        }
+        gs_phase2ActiveClusterCount = activeClusterCount;
     }
+    GroupMemoryBarrierWithGroupSync();
 
-    if (hasBucket && GI < writableMeshletCount) {
-        const uint denseIndex = gs_denseBaseIndex + GI;
-        CLodDenseClusterWorkRecord work = (CLodDenseClusterWorkRecord)0;
-        work.instanceIndex = bucket.instanceIndex;
-        work.viewId = bucket.viewId;
-        work.groupIdPacked = bucket.groupIdPacked;
-        work.localMeshletIndex = firstLocalMeshletIndex + GI;
-        work.pageSlabDescriptorIndex = bucket.pageSlabDescriptorIndex;
-        work.pageSlabByteOffset = bucket.pageSlabByteOffset;
-        denseClusterWork[denseIndex] = work;
-    }
-}
-
-[numthreads(64, 1, 1)]
-void PureComputeDenseClusterWorkCS(const uint3 dispatchThreadID : SV_DispatchThreadID, const uint GI : SV_GroupIndex)
-{
-    StructuredBuffer<CLodDenseClusterWorkRecord> inputWork = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX];
-    StructuredBuffer<uint> inputCountBuffer = ResourceDescriptorHeap[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX];
-
-    const uint inputCount = inputCountBuffer[0];
-    const uint index = dispatchThreadID.x;
-    const uint groupBase = dispatchThreadID.x - GI;
-    const uint activeCount = (groupBase < inputCount) ? min(64u, inputCount - groupBase) : 0u;
-    if (index >= inputCount) {
+    const uint recordSlotInGroup = GI / phase2ExpansionFactor;
+    const uint laneInRecord = GI - recordSlotInGroup * phase2ExpansionFactor;
+    if (recordSlotInGroup >= recordsThisGroup) {
         return;
     }
 
-    const CLodDenseClusterWorkRecord work = inputWork[index];
-    MeshletBucketRecord bucket = (MeshletBucketRecord)0;
-    bucket.instanceIndex = work.instanceIndex;
-    bucket.viewId = work.viewId;
-    bucket.groupIdPacked = work.groupIdPacked;
-    bucket.meshletIndexAndCount = (1u << 16u) | (work.localMeshletIndex & 0xFFFFu);
-    bucket.pageSlabDescriptorIndex = work.pageSlabDescriptorIndex;
-    bucket.pageSlabByteOffset = work.pageSlabByteOffset;
+    const MeshletBucketRecord inputBucket = gs_phase2Records[recordSlotInGroup];
+    const uint meshletCount = UnpackMeshletCount(inputBucket.meshletIndexAndCount);
+    if (laneInRecord == 0u && meshletCount > 0u) {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_DENSE_EXPANSION_BUCKETS, 1u);
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_DENSE_CLUSTERS_DISPATCHED, meshletCount);
+        if (UnpackGroupSourceTag(inputBucket.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
+            WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED, 1u);
+        }
+    }
+
+    if (laneInRecord >= meshletCount) {
+        return;
+    }
+
+    MeshletBucketRecord bucket = inputBucket;
+    bucket.meshletIndexAndCount =
+        PackMeshletIndexAndCount(UnpackMeshletFirstIndex(inputBucket.meshletIndexAndCount) + laneInRecord, 1u);
 
     uint swPending = 0u;
     uint pageJobPending = 0u;
-    ClusterCullBody(bucket, true, false, GI, activeCount, 1u, swPending, pageJobPending);
+    ClusterCullBody(bucket, true, false, GI, gs_phase2ActiveClusterCount, 1u, swPending, pageJobPending);
 }

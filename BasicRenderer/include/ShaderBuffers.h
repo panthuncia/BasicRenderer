@@ -558,15 +558,6 @@ struct CLodNodeGpuInput {
     uint64_t recordStride = 0;
 };
 
-struct CLodDenseClusterWorkRecord {
-    uint32_t instanceIndex = 0;
-    uint32_t viewId = 0;
-    uint32_t groupIdPacked = 0;
-    uint32_t localMeshletIndex = 0;
-    uint32_t pageSlabDescriptorIndex = 0;
-    uint32_t pageSlabByteOffset = 0;
-};
-
 struct CLodMultiNodeGpuInput {
     uint32_t numNodeInputs = 0;
     uint32_t pad0 = 0;
@@ -693,6 +684,7 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants, includ
     UintRootConstant24,
     UintRootConstant25,
     UintRootConstant26,
+    UintRootConstant27,
     MiscPerObjectBufferIndex = UintRootConstant19,
     MiscPerMeshBufferIndex = UintRootConstant20,
     MiscPerMeshInstanceBufferIndex = UintRootConstant21,

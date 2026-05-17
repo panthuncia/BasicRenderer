@@ -75,7 +75,6 @@ private:
     PipelineState m_pureComputeReplayNodesPipelineState;
     PipelineState m_pureComputeReplayClustersPipelineState;
     PipelineState m_pureComputeTraversePipelineState;
-    PipelineState m_pureComputeExpandClustersPipelineState;
     PipelineState m_pureComputeClusterPipelineState;
     PipelineState m_pureComputeDenseClusterPipelineState;
     rhi::CommandSignaturePtr m_pureComputeDispatchCommandSignature;
@@ -112,8 +111,6 @@ private:
     std::shared_ptr<Buffer> m_pureComputeCurrentNodeCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeNextNodeCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterCounterBuffer;
-    std::shared_ptr<Buffer> m_pureComputeDenseClusterWorkBuffer;
-    std::shared_ptr<Buffer> m_pureComputeDenseClusterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeNodeDispatchArgsBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;

@@ -51,15 +51,8 @@ uint64_t GetNativeBufferDeviceAddress(rhi::Resource resource) noexcept
 constexpr uint32_t kPureComputeObjectCullThreadsPerGroup = 64u;
 constexpr uint32_t kPureComputeTraverseThreadsPerGroup = 64u;
 constexpr uint32_t kPureComputeClusterThreadsPerGroup = 32u;
-constexpr uint32_t kPureComputeDenseClusterThreadsPerGroup = 64u;
-constexpr uint32_t kPureComputeDenseClusterExpansionFactor = 64u;
 constexpr uint32_t kPureComputeMaxTraversalLevels = 64u;
 constexpr bool kDisableVirtualShadowDirtyPageCulling = false; 
-
-uint32_t GetPureComputeDenseClusterWorkCapacity(uint32_t maxVisibleClusters)
-{
-	return std::max(1u, maxVisibleClusters);
-}
 
 bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
 {
@@ -228,16 +221,6 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
     m_pureComputeNextNodeCounterBuffer->SetName("CLod Pure Compute Next Node Counter");
     m_pureComputeClusterCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1u, sizeof(uint32_t), true, false, false, false);
     m_pureComputeClusterCounterBuffer->SetName("CLod Pure Compute Cluster Counter");
-    m_pureComputeDenseClusterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        GetPureComputeDenseClusterWorkCapacity(frontierCapacity),
-        CLodDenseClusterWorkStrideBytes,
-        true,
-        false,
-        false,
-        true);
-    m_pureComputeDenseClusterWorkBuffer->SetName("CLod Pure Compute Dense Cluster Work");
-    m_pureComputeDenseClusterWorkCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1u, sizeof(uint32_t), true, false, false, false);
-    m_pureComputeDenseClusterWorkCounterBuffer->SetName("CLod Pure Compute Dense Cluster Work Counter");
     m_pureComputeNodeDispatchArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1u, sizeof(PureComputeDispatchCommand), true, false, false, false);
     m_pureComputeNodeDispatchArgsBuffer->SetName("CLod Pure Compute Node Dispatch Args");
     m_pureComputeClusterDispatchArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1u, sizeof(PureComputeDispatchCommand), true, false, false, false);
@@ -317,12 +300,6 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
         L"PureComputeTraverseFrontierCS",
         pureComputeDefines,
         "CLod.PureCompute.Traverse");
-    m_pureComputeExpandClustersPipelineState = psoManager.MakeComputePipeline(
-        computeLayout,
-        L"shaders/ClusterLOD/computeCulling.hlsl",
-        L"PureComputeExpandClusterFrontierCS",
-        pureComputeDefines,
-        "CLod.PureCompute.ExpandClusterFrontier");
     m_pureComputeClusterPipelineState = psoManager.MakeComputePipeline(
         computeLayout,
         L"shaders/ClusterLOD/computeCulling.hlsl",
@@ -388,8 +365,6 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
             m_pureComputeCurrentNodeCounterBuffer,
             m_pureComputeNextNodeCounterBuffer,
             m_pureComputeClusterCounterBuffer,
-            m_pureComputeDenseClusterWorkBuffer,
-            m_pureComputeDenseClusterWorkCounterBuffer,
             m_pureComputeNodeDispatchArgsBuffer,
             m_pureComputeClusterDispatchArgsBuffer,
             Builtin::CLod::StreamingLoadRequests,
@@ -537,6 +512,10 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
         commandList.Barriers(clearBarrierBatch);
     }
 
+    const uint32_t phase2ExpansionFactor = CLodNormalizePureComputePhase2ExpansionFactor(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodPureComputePhase2ExpansionFactorSettingName)());
+    const uint32_t phase2RecordsPerGroup = 64u / phase2ExpansionFactor;
+
     uint32_t sharedRootConstants[NumMiscUintRootConstants] = {};
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -611,6 +590,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
         (m_swWriteBaseCounterBuffer ? m_swWriteBaseCounterBuffer : m_swVisibleClustersCounterBuffer)
             ->GetSRVInfo(0)
             .slot.index;
+    sharedRootConstants[CLOD_PC_PHASE2_EXPANSION_FACTOR] = phase2ExpansionFactor;
 
     uint32_t workGraphFlags = 0u;
     if (IsCLodWorkGraphTelemetryEnabled()) {
@@ -802,7 +782,6 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     };
 
     const bool useDenseClusterPath = true;
-    const uint32_t denseClusterWorkCapacity = GetPureComputeDenseClusterWorkCapacity(m_maxVisibleClusters);
 
     auto dispatchClusterCull = [&](const std::shared_ptr<Buffer>& frontierBuffer, const std::shared_ptr<Buffer>& frontierCounterBuffer) {
         if (!useDenseClusterPath) {
@@ -837,56 +816,25 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
             return;
         }
 
-        uavBarrier({ m_pureComputeDenseClusterWorkBuffer, m_pureComputeDenseClusterWorkCounterBuffer });
-        clearCounter(m_pureComputeDenseClusterWorkCounterBuffer);
-        uavBarrier({ m_pureComputeDenseClusterWorkCounterBuffer });
-
         if (clusterDispatchArgsNeedReuseBarrier) {
             indirectArgsToUavBarrier({ m_pureComputeClusterDispatchArgsBuffer });
             clusterDispatchArgsNeedReuseBarrier = false;
         }
-        buildDispatchArgsWithLimit(frontierCounterBuffer, m_pureComputeClusterDispatchArgsBuffer, 1u, static_cast<uint32_t>(m_maxVisibleClusters));
-        uavToIndirectArgsBarrier({ m_pureComputeClusterDispatchArgsBuffer });
-
-        BindResourceDescriptorIndices(commandList, m_pureComputeExpandClustersPipelineState.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_pureComputeExpandClustersPipelineState.GetAPIPipelineState().GetHandle());
-        uint32_t expandRootConstants[NumMiscUintRootConstants] = {};
-        std::copy(std::begin(sharedRootConstants), std::end(sharedRootConstants), std::begin(expandRootConstants));
-        expandRootConstants[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX] = frontierBuffer->GetSRVInfo(0).slot.index;
-        expandRootConstants[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX] = frontierCounterBuffer->GetSRVInfo(0).slot.index;
-        expandRootConstants[CLOD_PC_CLUSTER_OUTPUT_DESCRIPTOR_INDEX] = m_pureComputeDenseClusterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        expandRootConstants[CLOD_PC_CLUSTER_OUTPUT_COUNT_DESCRIPTOR_INDEX] = m_pureComputeDenseClusterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        commandList.PushConstants(
-            rhi::ShaderStage::Compute,
-            0,
-            MiscUintRootSignatureIndex,
-            0,
-            NumMiscUintRootConstants,
-            expandRootConstants);
-        commandList.ExecuteIndirect(
-            m_pureComputeDispatchCommandSignature->GetHandle(),
-            m_pureComputeClusterDispatchArgsBuffer->GetAPIResource().GetHandle(),
-            0,
-            {},
-            0,
-            1);
-
-        uavToComputeReadBarrier({ m_pureComputeDenseClusterWorkBuffer, m_pureComputeDenseClusterWorkCounterBuffer });
-
-        indirectArgsToUavBarrier({ m_pureComputeClusterDispatchArgsBuffer });
+        // For dense cluster culling this root constant names records per shader group,
+        // not thread lanes: the shader expands each record across phase2ExpansionFactor lanes.
         buildDispatchArgsWithLimit(
-            m_pureComputeDenseClusterWorkCounterBuffer,
+            frontierCounterBuffer,
             m_pureComputeClusterDispatchArgsBuffer,
-            kPureComputeDenseClusterThreadsPerGroup,
-            denseClusterWorkCapacity);
+            phase2RecordsPerGroup,
+            static_cast<uint32_t>(m_maxVisibleClusters));
         uavToIndirectArgsBarrier({ m_pureComputeClusterDispatchArgsBuffer });
 
         BindResourceDescriptorIndices(commandList, m_pureComputeDenseClusterPipelineState.GetResourceDescriptorSlots());
         commandList.BindPipeline(m_pureComputeDenseClusterPipelineState.GetAPIPipelineState().GetHandle());
         uint32_t denseClusterRootConstants[NumMiscUintRootConstants] = {};
         std::copy(std::begin(sharedRootConstants), std::end(sharedRootConstants), std::begin(denseClusterRootConstants));
-        denseClusterRootConstants[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX] = m_pureComputeDenseClusterWorkBuffer->GetSRVInfo(0).slot.index;
-        denseClusterRootConstants[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX] = m_pureComputeDenseClusterWorkCounterBuffer->GetSRVInfo(0).slot.index;
+        denseClusterRootConstants[CLOD_PC_FRONTIER_INPUT_DESCRIPTOR_INDEX] = frontierBuffer->GetSRVInfo(0).slot.index;
+        denseClusterRootConstants[CLOD_PC_FRONTIER_INPUT_COUNT_DESCRIPTOR_INDEX] = frontierCounterBuffer->GetSRVInfo(0).slot.index;
         commandList.PushConstants(
             rhi::ShaderStage::Compute,
             0,
@@ -1029,8 +977,6 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
         computeReadToUavBarrier({
             m_pureComputeClusterFrontierBuffer,
             m_pureComputeClusterCounterBuffer,
-            m_pureComputeDenseClusterWorkBuffer,
-            m_pureComputeDenseClusterWorkCounterBuffer,
         });
     }
 
@@ -1107,8 +1053,6 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
         computeReadToUavBarrier({
             m_pureComputeClusterFrontierBuffer,
             m_pureComputeClusterCounterBuffer,
-            m_pureComputeDenseClusterWorkBuffer,
-            m_pureComputeDenseClusterWorkCounterBuffer,
         });
         uavBarrier({
             m_visibleClustersBuffer,
@@ -1181,15 +1125,12 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     m_pureComputeCurrentNodeCounterBuffer->ResizeStructured(1u);
     m_pureComputeNextNodeCounterBuffer->ResizeStructured(1u);
     m_pureComputeClusterCounterBuffer->ResizeStructured(1u);
-    m_pureComputeDenseClusterWorkBuffer->ResizeStructured(GetPureComputeDenseClusterWorkCapacity(m_maxVisibleClusters));
-    m_pureComputeDenseClusterWorkCounterBuffer->ResizeStructured(1u);
     m_pureComputeNodeDispatchArgsBuffer->ResizeStructured(1u);
     m_pureComputeClusterDispatchArgsBuffer->ResizeStructured(1u);
 
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pureComputeCurrentNodeCounterBuffer), 0);
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pureComputeNextNodeCounterBuffer), 0);
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pureComputeClusterCounterBuffer), 0);
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pureComputeDenseClusterWorkCounterBuffer), 0);
 
     auto numViews = context.viewManager->GetCameraBufferSize();
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);

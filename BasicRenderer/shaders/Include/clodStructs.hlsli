@@ -647,16 +647,6 @@ struct CLodNodeGpuInput
     uint64_t recordStride;
 };
 
-struct CLodDenseClusterWorkRecord
-{
-    uint instanceIndex;
-    uint viewId;
-    uint groupIdPacked;
-    uint localMeshletIndex;
-    uint pageSlabDescriptorIndex;
-    uint pageSlabByteOffset;
-};
-
 struct CLodMultiNodeGpuInput
 {
     uint numNodeInputs;

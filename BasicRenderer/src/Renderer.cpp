@@ -1201,6 +1201,9 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<uint32_t>(CLodPageJobRecordCapacitySettingName, CLodPageJobDefaultRecordCapacity);
     settingsManager.registerSetting<bool>(CLodPageJobForceAllSettingName, false);
     settingsManager.registerSetting<uint32_t>(CLodForceTraversalDepthRootSettingName, CLodForceTraversalDepthRootDisabled);
+    settingsManager.registerSetting<uint32_t>(
+        CLodPureComputePhase2ExpansionFactorSettingName,
+        CLodPureComputePhase2ExpansionFactorDefault);
     settingsManager.registerSetting<bool>("enableBloom", m_bloom);
     settingsManager.registerSetting<bool>("enableJitter", m_jitter);
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
