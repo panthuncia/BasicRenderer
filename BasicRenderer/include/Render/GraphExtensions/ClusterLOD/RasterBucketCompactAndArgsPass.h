@@ -14,6 +14,7 @@ public:
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,
         std::shared_ptr<Buffer> compactedBaseCounterBuffer,
+        std::shared_ptr<Buffer> readBaseCounterBuffer,
         std::shared_ptr<Buffer> indirectCommand,
         std::shared_ptr<Buffer> histogramBuffer,
         std::shared_ptr<Buffer> offsetsBuffer,
@@ -43,6 +44,7 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_compactedBaseCounterBuffer;
+    std::shared_ptr<Buffer> m_readBaseCounterBuffer;
     std::shared_ptr<Buffer> m_indirectCommand;
     std::shared_ptr<Buffer> m_histogramBuffer;
     std::shared_ptr<Buffer> m_offsetsBuffer;

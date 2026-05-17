@@ -1581,6 +1581,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             isPhase1 ? m_rasterBucketsIndirectArgsBuffer : m_rasterBucketsIndirectArgsBufferPhase2;
         const std::shared_ptr<Buffer> previousTotalCountBuffer =
             isPhase1 ? m_visibleClustersCounterBuffer : m_rasterBucketsTotalCountBufferPhase1;
+        // Phase 2 reads the shared visible-cluster buffer after all phase-1 entries,
+        // but appends compacted triangle work after only phase-1 compacted entries.
+        const std::shared_ptr<Buffer> visibleClusterReadBaseCounterBuffer =
+            isPhase1 ? std::shared_ptr<Buffer>{} : m_visibleClustersCounterBuffer;
 
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
@@ -1618,6 +1622,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClustersBuffer,
                     visibleClustersCounterBuffer,
                     previousTotalCountBuffer,
+                    visibleClusterReadBaseCounterBuffer,
                     histogramIndirectCommand,
                     histogramBuffer,
                     m_rasterBucketsOffsetsBuffer,
@@ -1634,7 +1639,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         return traits.rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer &&
             (!enablePhase2OcclusionReplay || phaseIndex == 2u);
     };
-    const auto appendFixedRasterPass = [&](uint32_t phaseIndex, bool updateShadowClearDirtyBitsAfter) {
+    const auto appendFixedRasterPass = [&](uint32_t phaseIndex, bool updateShadowClearDirtyBitsAfter) -> std::string {
         const bool isPhase1 = phaseIndex == 1u;
         const std::string phaseSuffix = std::to_string(phaseIndex);
         ClusterRasterizationPassInputs rasterizePassInputs;
@@ -1689,8 +1694,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         if (updateShadowClearDirtyBitsAfter) {
             shadowClearDirtyBitsAfterPassName = passName;
         }
+
+        return passName;
     };
-    const auto appendComputeSoftwareRasterPasses = [&](uint32_t phaseIndex, const std::shared_ptr<Buffer>& reyesOwnershipBitsetBuffer) {
+    const auto appendComputeSoftwareRasterPasses = [&](uint32_t phaseIndex, const std::shared_ptr<Buffer>& reyesOwnershipBitsetBuffer) -> std::string {
         const bool isPhase1 = phaseIndex == 1u;
         const std::string phaseSuffix = std::to_string(phaseIndex);
         const std::shared_ptr<Buffer> swVisibleClustersCounterBuffer =
@@ -1709,6 +1716,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             isPhase1 ? std::shared_ptr<Buffer>{} : m_swVisibleClustersCounterBuffer;
         const std::shared_ptr<Buffer> previousSwTotalCountBuffer =
             isPhase1 ? m_swVisibleClustersCounterBuffer : m_rasterBucketsTotalCountBufferPhase1Sw;
+        // See the HW path above: SW compaction has the same split between
+        // visible-buffer read base and compacted-buffer append base.
+        const std::shared_ptr<Buffer> swVisibleClusterReadBaseCounterBuffer =
+            isPhase1 ? std::shared_ptr<Buffer>{} : m_swVisibleClustersCounterBuffer;
 
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
@@ -1761,6 +1772,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClustersBuffer,
                     swVisibleClustersCounterBuffer,
                     previousSwTotalCountBuffer,
+                    swVisibleClusterReadBaseCounterBuffer,
                     swHistogramIndirectCommand,
                     swHistogramBuffer,
                     m_rasterBucketsOffsetsBuffer,
@@ -1887,6 +1899,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow) {
             shadowClearDirtyBitsAfterPassName = passName;
         }
+
+        return passName;
     };
     const auto appendPerViewDepthCopyPass = [&](uint32_t phaseIndex) {
         if (!traits.schedulesPerViewDepthCopy) {
@@ -1902,22 +1916,31 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         }
         outPasses.push_back(std::move(depthCopyPassDesc));
     };
-    const auto appendLinearDepthDownsamplePass = [&](uint32_t phaseIndex) {
+    const auto appendLinearDepthDownsamplePass = [&](uint32_t phaseIndex, const std::string& afterPassName = {}) {
         auto downsamplePassDesc = RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "LinearDepthDownsamplePass" + std::to_string(phaseIndex)),
             std::make_shared<DownsamplePass>());
-        if (traits.rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer) {
+        if (!afterPassName.empty()) {
+            auto downsampleInsertPoint = RenderGraph::ExternalInsertPoint::After(afterPassName);
+            if (traits.rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer) {
+                downsampleInsertPoint.AlsoBefore("DeferredShadingPass");
+            }
+            downsamplePassDesc.At(std::move(downsampleInsertPoint));
+        }
+        else if (traits.rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer) {
             downsamplePassDesc.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
         }
         outPasses.push_back(std::move(downsamplePassDesc));
     };
-    const auto appendPhaseRasterRouting = [&](uint32_t phaseIndex, const std::shared_ptr<Buffer>& reyesOwnershipBitsetBuffer) {
-        appendFixedRasterPass(
+    const auto appendPhaseRasterRouting = [&](uint32_t phaseIndex, const std::shared_ptr<Buffer>& reyesOwnershipBitsetBuffer) -> std::string {
+        const std::string fixedRasterPassName = appendFixedRasterPass(
             phaseIndex,
             phaseIndex == 2u || traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow);
 
+        std::string lastRasterPassName = fixedRasterPassName;
+        const std::string voxelRasterPassName = MakeVariantPassName(traits, "VoxelSoftwareRasterizePass" + std::to_string(phaseIndex));
         auto voxelRasterPassDesc = RenderGraph::ExternalPassDesc::Compute(
-            MakeVariantPassName(traits, "VoxelSoftwareRasterizePass" + std::to_string(phaseIndex)),
+            voxelRasterPassName,
             std::make_shared<VoxelSoftwareRasterizationPass>(
                     m_visibleClustersBuffer,
                     m_voxelRasterWorkBuffer,
@@ -1931,26 +1954,35 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     slabGroup,
                     m_voxelRasterWorkCapacity));
         if (phaseFeedsPrimaryVisibility(phaseIndex)) {
-            voxelRasterPassDesc.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
+            auto voxelInsertPoint = RenderGraph::ExternalInsertPoint::Between(fixedRasterPassName, "MaterialHistogramPass");
+            voxelRasterPassDesc.At(std::move(voxelInsertPoint));
         }
+        else {
+            voxelRasterPassDesc.At(RenderGraph::ExternalInsertPoint::After(fixedRasterPassName));
+        }
+        voxelRasterPassDesc.PreferQueue(QueueKind::Graphics);
         outPasses.push_back(std::move(voxelRasterPassDesc));
+        lastRasterPassName = voxelRasterPassName;
 
         if (useComputeSWRaster) {
-            appendComputeSoftwareRasterPasses(phaseIndex, reyesOwnershipBitsetBuffer);
+            lastRasterPassName = appendComputeSoftwareRasterPasses(phaseIndex, reyesOwnershipBitsetBuffer);
         }
 
         if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowPageJob) {
-            shadowClearDirtyBitsAfterPassName = phaseIndex == 1u
+            lastRasterPassName = phaseIndex == 1u
                 ? CLodShadowVariant::AppendPhase1PageJobRasterPasses(*this, traits, slabGroup, outPasses)
                 : CLodShadowVariant::AppendPhase2PageJobRasterPasses(*this, traits, slabGroup, outPasses);
+            shadowClearDirtyBitsAfterPassName = lastRasterPassName;
         }
         else if (traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow && useShadowReyesRouting) {
-            shadowClearDirtyBitsAfterPassName = phaseIndex == 1u
+            lastRasterPassName = phaseIndex == 1u
                 ? CLodShadowVariant::AppendPhase1ReyesLargeRasterPasses(*this, traits, slabGroup, outPasses)
                 : CLodShadowVariant::AppendPhase2ReyesLargeRasterPasses(*this, traits, slabGroup, outPasses);
+            shadowClearDirtyBitsAfterPassName = lastRasterPassName;
         }
 
         appendPerViewDepthCopyPass(phaseIndex);
+        return lastRasterPassName;
     };
     const auto appendReplayPhase = [&]() {
         appendHierarchicalCullingPass(2u, MakeVariantPassName(traits, "LinearDepthDownsamplePass1"));
@@ -2028,8 +2060,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         return;
     }
 
-    appendPhaseRasterRouting(1u, reyesOwnershipBitsetBuffer);
-    appendLinearDepthDownsamplePass(1u);
+    const std::string phase1LastRasterPassName = appendPhaseRasterRouting(1u, reyesOwnershipBitsetBuffer);
+    appendLinearDepthDownsamplePass(1u, phase1LastRasterPassName);
 
     // Only visibility scheduling currently uses phase 2 replay. Tie the entire
     // replay phase to the occlusion setting so disabling occlusion removes all

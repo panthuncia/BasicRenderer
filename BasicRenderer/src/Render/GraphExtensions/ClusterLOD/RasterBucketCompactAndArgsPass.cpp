@@ -19,6 +19,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
     std::shared_ptr<Buffer> compactedBaseCounterBuffer,
+    std::shared_ptr<Buffer> readBaseCounterBuffer,
     std::shared_ptr<Buffer> indirectCommand,
     std::shared_ptr<Buffer> histogramBuffer,
     std::shared_ptr<Buffer> offsetsBuffer,
@@ -36,6 +37,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer))
     , m_compactedBaseCounterBuffer(std::move(compactedBaseCounterBuffer))
+    , m_readBaseCounterBuffer(std::move(readBaseCounterBuffer))
     , m_indirectCommand(std::move(indirectCommand))
     , m_histogramBuffer(std::move(histogramBuffer))
     , m_offsetsBuffer(std::move(offsetsBuffer))
@@ -97,6 +99,9 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
         .WithIndirectArguments(m_indirectCommand);
     if (m_reyesOwnershipBitsetBuffer) {
         builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
+    }
+    if (m_readBaseCounterBuffer) {
+        builder->WithShaderResource(m_readBaseCounterBuffer);
     }
     if (m_telemetryBuffer) {
         builder->WithUnorderedAccess(m_telemetryBuffer);
@@ -179,8 +184,8 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
         rc[CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     }
     rc[CLOD_COMPACTION_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
-    if (m_appendToExisting) {
-        rc[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
+    if (m_appendToExisting && m_readBaseCounterBuffer) {
+        rc[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer->GetSRVInfo(0).slot.index;
     }
     rc[CLOD_COMPACTION_READ_MODE_FLAGS] =
         (m_readReverse ? CLOD_COMPACTION_READ_FLAG_REVERSED : 0u) |
