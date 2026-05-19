@@ -58,7 +58,7 @@ public:
 	void AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices);
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
-	uint32_t GetCLodMaxTraversalDepth() const;
+	uint32_t GetCLodMaxTraversalDepth() const { return m_clodActiveMaxTraversalDepth.load(std::memory_order_acquire); }
 
 	void GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const;
 	void GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const;
@@ -227,6 +227,7 @@ private:
 	std::atomic<uint32_t> m_debugResidentGroups{0};
 	std::atomic<uint32_t> m_debugResidentAllocations{0};
 	std::atomic<uint64_t> m_debugTotalStreamedBytes{0};
+	std::atomic<uint32_t> m_clodActiveMaxTraversalDepth{0};
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;
@@ -335,6 +336,7 @@ private:
 	bool ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
 
 	void RebuildCLodSharedStreamingRangeIndex();
+	void RecomputeCLodActiveMaxTraversalDepth();
 	std::shared_ptr<CLodSharedStreamingState> FindCLodSharedStreamingStateByGlobalGroup(uint32_t groupGlobalIndex, uint32_t& outGroupLocalIndex);
 
 	ViewManager* m_pViewManager;

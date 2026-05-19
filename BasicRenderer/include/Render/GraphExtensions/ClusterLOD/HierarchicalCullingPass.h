@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <boost/container_hash/hash.hpp>
 #include <rhi.h>
@@ -15,6 +17,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Resources/PixelBuffer.h"
+#include "ShaderBuffers.h"
 
 class Buffer;
 class PixelBuffer;
@@ -138,6 +141,18 @@ private:
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
     std::vector<uint64_t> m_declaredDrawSetResourceIds;
     std::vector<uint64_t> m_declaredVisibilityBufferIds;
+    std::vector<CLodViewRasterInfo> m_cachedViewRasterInfo;
+    std::vector<CLodViewDepthSRVIndex> m_cachedViewDepthSrvIndices;
+    std::vector<uint32_t> m_zeroTelemetryScratch;
+    std::array<CLodNodeGpuInput, 3> m_cachedNodeGpuInputs{};
+    CLodVoxelRasterQueueDescriptors m_cachedVoxelQueueDescriptors{};
+    CLodWorkGraphComputePageJobDescriptors m_cachedPageJobDescriptors{};
+    uint64_t m_lastDrawSetDeclarationRevision = 0u;
+    uint64_t m_lastViewResourceLayoutRevision = 0u;
+    bool m_hasCachedNodeGpuInputs = false;
+    bool m_hasCachedVoxelQueueDescriptors = false;
+    bool m_hasCachedPageJobDescriptors = false;
+    bool m_hasUploadedViewDepthSrvIndices = false;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;

@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <rhi.h>
 
@@ -115,6 +117,19 @@ private:
     std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::vector<uint64_t> m_declaredDrawSetResourceIds;
+    std::vector<CLodViewRasterInfo> m_cachedViewRasterInfo;
+    std::vector<CLodViewDepthSRVIndex> m_cachedViewDepthSrvIndices;
+    std::vector<uint32_t> m_zeroTelemetryScratch;
+    std::array<CLodNodeGpuInput, 3> m_cachedNodeGpuInputs{};
+    CLodVoxelRasterQueueDescriptors m_cachedVoxelQueueDescriptors{};
+    CLodWorkGraphComputePageJobDescriptors m_cachedPageJobDescriptors{};
+    uint64_t m_lastDrawSetDeclarationRevision = 0u;
+    uint64_t m_lastViewResourceLayoutRevision = 0u;
+    uint32_t m_sizedPureComputeFrontierCapacity = 0u;
+    bool m_hasCachedNodeGpuInputs = false;
+    bool m_hasCachedVoxelQueueDescriptors = false;
+    bool m_hasCachedPageJobDescriptors = false;
+    bool m_hasUploadedViewDepthSrvIndices = false;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;

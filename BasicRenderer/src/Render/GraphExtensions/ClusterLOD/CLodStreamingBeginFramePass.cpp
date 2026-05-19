@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <spdlog/spdlog.h>
+#include <tracy/Tracy.hpp>
 
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -18,8 +19,8 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     std::shared_ptr<Buffer> nonResidentBits,
     std::shared_ptr<Buffer> activeGroupsBits,
     std::shared_ptr<Buffer> runtimeState,
-    std::function<bool(std::vector<uint32_t>&)> tryConsumeNonResidentBitsUpload,
-    std::function<void(std::vector<uint32_t>&, uint32_t&)> getActiveGroupsBitsUpload,
+    std::function<bool(std::vector<uint32_t>&, uint32_t&)> tryConsumeNonResidentBitsUpload,
+    std::function<bool(std::vector<uint32_t>&, uint32_t&)> getActiveGroupsBitsUpload,
     std::function<void()> scheduleStreamingReadbacks,
     std::function<void()> processStreamingRequests)
     : m_loadCounter(std::move(loadCounter))
@@ -48,6 +49,8 @@ PassReturn CLodStreamingBeginFramePass::Execute(PassExecutionContext& executionC
 }
 
 void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& executionContext) {
+    ZoneScopedN("CLodStreamingBeginFramePass::Update");
+
     auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
     if (!updateContext) {
         return;
@@ -56,56 +59,71 @@ void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& execution
     // Retire upload-heap pages from completed frames.
     UploadInstance* uploadInstance = m_getUploadInstance ? m_getUploadInstance() : nullptr;
     if (uploadInstance) {
+        ZoneScopedN("CLodStreamingBeginFramePass::ProcessDeferredReleases");
         uploadInstance->ProcessDeferredReleases(static_cast<uint8_t>(executionContext.frameIndex));
     }
 
     if (m_scheduleStreamingReadbacks) {
+        ZoneScopedN("CLodStreamingBeginFramePass::PollReadbacks");
         m_scheduleStreamingReadbacks();
     }
     if (m_processStreamingRequests) {
+        ZoneScopedN("CLodStreamingBeginFramePass::ProcessStreamingRequests");
         m_processStreamingRequests();
     }
 
     // Counters and metadata go through BUFFER_UPLOAD (graphics-queue upload
     // manager) so they are visible to culling passes this frame.
     const uint32_t zero = 0u;
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_loadCounter), 0);
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_usedGroupsCounter), 0);
-
-    std::vector<uint32_t> activeGroupsBitsUpload;
-    uint32_t activeGroupScanCount = 0u;
-    if (m_getActiveGroupsBitsUpload) {
-        m_getActiveGroupsBitsUpload(activeGroupsBitsUpload, activeGroupScanCount);
+    {
+        ZoneScopedN("CLodStreamingBeginFramePass::UploadCounters");
+        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_loadCounter), 0);
+        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_usedGroupsCounter), 0);
     }
-    if (!activeGroupsBitsUpload.empty()) {
+
+    uint32_t activeGroupScanCount = 0u;
+    {
+        ZoneScopedN("CLodStreamingBeginFramePass::UploadActiveGroupsBits");
+        const bool activeGroupsBitsUploadPending = m_getActiveGroupsBitsUpload
+            && m_getActiveGroupsBitsUpload(m_activeGroupsBitsUploadScratch, activeGroupScanCount);
+        if (activeGroupsBitsUploadPending && !m_activeGroupsBitsUploadScratch.empty()) {
+            BUFFER_UPLOAD(
+                m_activeGroupsBitsUploadScratch.data(),
+                static_cast<uint32_t>(m_activeGroupsBitsUploadScratch.size() * sizeof(uint32_t)),
+                rg::runtime::UploadTarget::FromShared(m_activeGroupsBits),
+                0);
+        }
+    }
+
+    {
+        ZoneScopedN("CLodStreamingBeginFramePass::UploadRuntimeState");
+        CLodStreamingRuntimeState state{};
+        state.activeGroupScanCount = activeGroupScanCount;
+        state.unloadAfterFrames = 0u;
+        state.activeGroupsBitsetWordCount = CLodBitsetWordCount(activeGroupScanCount);
         BUFFER_UPLOAD(
-            activeGroupsBitsUpload.data(),
-            static_cast<uint32_t>(activeGroupsBitsUpload.size() * sizeof(uint32_t)),
-            rg::runtime::UploadTarget::FromShared(m_activeGroupsBits),
+            &state,
+            sizeof(CLodStreamingRuntimeState),
+            rg::runtime::UploadTarget::FromShared(m_runtimeState),
             0);
     }
-
-    CLodStreamingRuntimeState state{};
-    state.activeGroupScanCount = activeGroupScanCount;
-    state.unloadAfterFrames = 0u;
-    state.activeGroupsBitsetWordCount = CLodBitsetWordCount(activeGroupScanCount);
-    BUFFER_UPLOAD(
-        &state,
-        sizeof(CLodStreamingRuntimeState),
-        rg::runtime::UploadTarget::FromShared(m_runtimeState),
-        0);
 
     // nonResidentBits stays on UploadInstance so it arrives in the same copy
     // batch as slab page data — residency is never advertised before data lands.
     if (!uploadInstance) return;
 
-    std::vector<uint32_t> nonResidentBitsUpload;
-    if (m_tryConsumeNonResidentBitsUpload && m_tryConsumeNonResidentBitsUpload(nonResidentBitsUpload)) {
-        uploadInstance->UploadData(
-            nonResidentBitsUpload.data(),
-            static_cast<uint32_t>(nonResidentBitsUpload.size() * sizeof(uint32_t)),
-            rg::runtime::UploadTarget::FromShared(m_nonResidentBits),
-            0);
+    uint32_t nonResidentFirstWord = 0u;
+    {
+        ZoneScopedN("CLodStreamingBeginFramePass::UploadNonResidentBits");
+        if (m_tryConsumeNonResidentBitsUpload
+            && m_tryConsumeNonResidentBitsUpload(m_nonResidentBitsUploadScratch, nonResidentFirstWord)
+            && !m_nonResidentBitsUploadScratch.empty()) {
+            uploadInstance->UploadData(
+                m_nonResidentBitsUploadScratch.data(),
+                static_cast<uint32_t>(m_nonResidentBitsUploadScratch.size() * sizeof(uint32_t)),
+                rg::runtime::UploadTarget::FromShared(m_nonResidentBits),
+                nonResidentFirstWord * sizeof(uint32_t));
+        }
     }
 }
 

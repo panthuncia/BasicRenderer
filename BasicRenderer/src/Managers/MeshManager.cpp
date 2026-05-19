@@ -537,7 +537,19 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	}
 
 	if (sharedState) {
+		const bool wasInactive = sharedState->activeInstanceCount == 0u;
 		sharedState->activeInstanceCount++;
+		if (wasInactive && sharedState->mesh != nullptr) {
+			const uint32_t meshTraversalDepth = sharedState->mesh->GetCLodMaxTraversalDepth();
+			uint32_t cachedDepth = m_clodActiveMaxTraversalDepth.load(std::memory_order_acquire);
+			while (meshTraversalDepth > cachedDepth
+				&& !m_clodActiveMaxTraversalDepth.compare_exchange_weak(
+					cachedDepth,
+					meshTraversalDepth,
+					std::memory_order_release,
+					std::memory_order_acquire)) {
+			}
+		}
 	}
 
 	MeshInstanceClodOffsets clodOffsets = {};
@@ -588,6 +600,9 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 			if (sharedMeshState != nullptr && sharedMeshState->activeInstanceCount > 0u) {
 				sharedMeshState->activeInstanceCount--;
 				if (sharedMeshState->activeInstanceCount == 0u) {
+					const uint32_t removedTraversalDepth = sharedMeshState->mesh
+						? sharedMeshState->mesh->GetCLodMaxTraversalDepth()
+						: 0u;
 					ReleaseAllCLodGroupChunkAllocations(*sharedMeshState);
 					if (sharedMeshState->ownedMeshMetadataView != nullptr) {
 						m_clodMeshMetadata->Deallocate(sharedMeshState->ownedMeshMetadataView.get());
@@ -601,6 +616,9 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 					m_clodSharedStreamingStateByMesh.erase(mesh->GetMesh().get());
 					m_clodSharedStreamingRangesDirty = true;
 					m_clodStreamingStructureDirty = true;
+					if (removedTraversalDepth >= m_clodActiveMaxTraversalDepth.load(std::memory_order_acquire)) {
+						RecomputeCLodActiveMaxTraversalDepth();
+					}
 				}
 			}
 		}
@@ -609,25 +627,18 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	}
 }
 
-uint32_t MeshManager::GetCLodMaxTraversalDepth() const
+void MeshManager::RecomputeCLodActiveMaxTraversalDepth()
 {
 	uint32_t maxTraversalDepth = 0u;
-	std::unordered_set<const CLodSharedStreamingState*> visitedSharedStates;
-	visitedSharedStates.reserve(m_clodStreamingStateByInstanceIndex.size());
-
-	for (const auto& [_, state] : m_clodStreamingStateByInstanceIndex) {
-		const auto* sharedState = state.sharedMeshState.get();
-		if (sharedState == nullptr || sharedState->mesh == nullptr) {
-			continue;
-		}
-		if (!visitedSharedStates.insert(sharedState).second) {
+	for (const auto& [_, sharedState] : m_clodSharedStreamingStateByMesh) {
+		if (sharedState == nullptr || sharedState->mesh == nullptr || sharedState->activeInstanceCount == 0u) {
 			continue;
 		}
 
 		maxTraversalDepth = std::max(maxTraversalDepth, sharedState->mesh->GetCLodMaxTraversalDepth());
 	}
 
-	return maxTraversalDepth;
+	m_clodActiveMaxTraversalDepth.store(maxTraversalDepth, std::memory_order_release);
 }
 
 void MeshManager::ProcessCLodDiskStreamingIO(

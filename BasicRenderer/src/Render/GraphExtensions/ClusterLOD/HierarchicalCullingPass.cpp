@@ -10,6 +10,7 @@
 #include <rhi_interop.h>
 #include <rhi_interop_dx12.h>
 #include <spdlog/spdlog.h>
+#include <tracy/Tracy.hpp>
 
 #include "Managers\IndirectCommandBufferManager.h"
 #include "Managers\MaterialManager.h"
@@ -74,6 +75,12 @@ bool UsesVirtualShadowOutput(CLodRasterOutputKind outputKind)
 bool UsesPerViewDepthMapOcclusion(CLodRasterOutputKind outputKind)
 {
     return !UsesVirtualShadowOutput(outputKind);
+}
+
+template <typename T>
+bool BytesEqual(const T& left, const T& right)
+{
+    return std::memcmp(&left, &right, sizeof(T)) == 0;
 }
 
 ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
@@ -668,117 +675,165 @@ PassReturn HierarchicalCullingPass::Execute(PassExecutionContext& executionConte
 }
 
 void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionContext) {
+    ZoneScopedN("HierarchicalCullingPass::Update");
+
     auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
     if (!updateContext) {
         return;
     }
     auto& context = *updateContext;
     m_declaredResourcesChanged = false;
-    const std::vector<uint64_t> currentDrawSetResourceIds = CollectDeclaredDrawSetResourceIds(m_renderPhase, m_clodOnlyWorkloads);
-    if (currentDrawSetResourceIds != m_declaredDrawSetResourceIds) {
-        m_declaredDrawSetResourceIds = currentDrawSetResourceIds;
-        m_declaredResourcesChanged = true;
+
+    {
+        ZoneScopedN("HierarchicalCullingPass::CheckDeclaredDrawSetRevision");
+        const uint64_t drawSetRevision = context.objectManager
+            ? context.objectManager->GetDrawSetDeclarationRevision()
+            : m_lastDrawSetDeclarationRevision + 1u;
+        if (drawSetRevision != m_lastDrawSetDeclarationRevision) {
+            ZoneScopedN("HierarchicalCullingPass::CollectDeclaredDrawSets");
+            m_lastDrawSetDeclarationRevision = drawSetRevision;
+            const std::vector<uint64_t> currentDrawSetResourceIds = CollectDeclaredDrawSetResourceIds(m_renderPhase, m_clodOnlyWorkloads);
+            if (currentDrawSetResourceIds != m_declaredDrawSetResourceIds) {
+                m_declaredDrawSetResourceIds = currentDrawSetResourceIds;
+                m_declaredResourcesChanged = true;
+            }
+        }
     }
 
     uint32_t zero = 0u;
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
-    if (UsesSWClassification(m_workGraphMode)) {
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
+    {
+        ZoneScopedN("HierarchicalCullingPass::UploadCounterResets");
+        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+        if (UsesSWClassification(m_workGraphMode)) {
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
+        }
     }
 
-    CLodVoxelRasterQueueDescriptors voxelQueueDescriptors{};
-    voxelQueueDescriptors.workRecordsUAVDescriptorIndex = m_voxelRasterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    voxelQueueDescriptors.workRecordCounterUAVDescriptorIndex = m_voxelRasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    voxelQueueDescriptors.workRecordCapacity = m_voxelRasterWorkCapacity;
-    BUFFER_UPLOAD(
-        &voxelQueueDescriptors,
-        sizeof(CLodVoxelRasterQueueDescriptors),
-        rg::runtime::UploadTarget::FromShared(m_voxelRasterQueueDescriptorsBuffer),
-        0);
+    {
+        ZoneScopedN("HierarchicalCullingPass::UpdateDescriptorTables");
+        CLodVoxelRasterQueueDescriptors voxelQueueDescriptors{};
+        voxelQueueDescriptors.workRecordsUAVDescriptorIndex = m_voxelRasterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        voxelQueueDescriptors.workRecordCounterUAVDescriptorIndex = m_voxelRasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        voxelQueueDescriptors.workRecordCapacity = m_voxelRasterWorkCapacity;
+        if (!m_hasCachedVoxelQueueDescriptors || !BytesEqual(voxelQueueDescriptors, m_cachedVoxelQueueDescriptors)) {
+            m_cachedVoxelQueueDescriptors = voxelQueueDescriptors;
+            m_hasCachedVoxelQueueDescriptors = true;
+            BUFFER_UPLOAD(
+                &voxelQueueDescriptors,
+                sizeof(CLodVoxelRasterQueueDescriptors),
+                rg::runtime::UploadTarget::FromShared(m_voxelRasterQueueDescriptorsBuffer),
+                0);
+        }
 
-    CLodWorkGraphComputePageJobDescriptors pageJobDescriptors{};
-    if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
-        pageJobDescriptors.visibleClustersUAVDescriptorIndex = m_pageJobVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        pageJobDescriptors.visibleClustersCounterUAVDescriptorIndex = m_pageJobVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        CLodWorkGraphComputePageJobDescriptors pageJobDescriptors{};
+        if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
+            pageJobDescriptors.visibleClustersUAVDescriptorIndex = m_pageJobVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            pageJobDescriptors.visibleClustersCounterUAVDescriptorIndex = m_pageJobVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        }
+        if (!m_hasCachedPageJobDescriptors || !BytesEqual(pageJobDescriptors, m_cachedPageJobDescriptors)) {
+            m_cachedPageJobDescriptors = pageJobDescriptors;
+            m_hasCachedPageJobDescriptors = true;
+            BUFFER_UPLOAD(
+                &pageJobDescriptors,
+                sizeof(CLodWorkGraphComputePageJobDescriptors),
+                rg::runtime::UploadTarget::FromShared(m_workGraphComputePageJobDescriptorsBuffer),
+                0);
+        }
     }
-    BUFFER_UPLOAD(
-        &pageJobDescriptors,
-        sizeof(CLodWorkGraphComputePageJobDescriptors),
-        rg::runtime::UploadTarget::FromShared(m_workGraphComputePageJobDescriptorsBuffer),
-        0);
+
+    bool rebuildViewTables = false;
+    {
+        ZoneScopedN("HierarchicalCullingPass::CheckViewResourceRevision");
+        const uint64_t viewResourceRevision = context.viewManager
+            ? context.viewManager->GetResourceLayoutRevision()
+            : m_lastViewResourceLayoutRevision + 1u;
+        rebuildViewTables = viewResourceRevision != m_lastViewResourceLayoutRevision;
+        if (rebuildViewTables) {
+            m_lastViewResourceLayoutRevision = viewResourceRevision;
+        }
+    }
 
     // Keep the shared per-view visibility UAV table valid for any visibility-buffer path.
     // Reyes patch raster consumes this buffer even when the primary CLod path is not using SW classification.
     if (UsesVisibilityBufferOutput(m_rasterOutputKind) || UsesSWClassification(m_workGraphMode)) {
-        m_visibilityBuffers.clear();
-        auto numViews = context.viewManager->GetCameraBufferSize();
-        std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-        std::vector<std::pair<uint32_t, std::shared_ptr<PixelBuffer>>> visibilityBuffersByCameraIndex;
-        const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
-        context.viewManager->ForEachView([&](uint64_t v) {
-            auto viewInfo = context.viewManager->Get(v);
-            if (!viewInfo) {
-                return;
-            }
+        if (rebuildViewTables || m_cachedViewRasterInfo.empty()) {
+            ZoneScopedN("HierarchicalCullingPass::RebuildViewRasterInfo");
+            m_visibilityBuffers.clear();
+            auto numViews = context.viewManager->GetCameraBufferSize();
+            std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
+            std::vector<std::pair<uint32_t, std::shared_ptr<PixelBuffer>>> visibilityBuffersByCameraIndex;
+            const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
+            context.viewManager->ForEachView([&](uint64_t v) {
+                auto viewInfo = context.viewManager->Get(v);
+                if (!viewInfo) {
+                    return;
+                }
 
-            auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
-            CLodViewRasterInfo info{};
-            info.scissorMinX = 0;
-            info.scissorMinY = 0;
+                auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+                CLodViewRasterInfo info{};
+                info.scissorMinX = 0;
+                info.scissorMinY = 0;
 
-            if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
-                if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
-                    info.scissorMaxX = virtualShadowConfig.virtualResolution;
-                    info.scissorMaxY = virtualShadowConfig.virtualResolution;
+                if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
+                    if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+                        info.scissorMaxX = virtualShadowConfig.virtualResolution;
+                        info.scissorMaxY = virtualShadowConfig.virtualResolution;
+                        info.viewportScaleX = 1.0f;
+                        info.viewportScaleY = 1.0f;
+                    }
+                    viewRasterInfo[cameraIndex] = info;
+                    return;
+                }
+
+                if (viewInfo->gpu.visibilityBuffer != nullptr) {
+                    info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+                    info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
+                    info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
                     info.viewportScaleX = 1.0f;
                     info.viewportScaleY = 1.0f;
+                    viewRasterInfo[cameraIndex] = info;
+                    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+                        visibilityBuffersByCameraIndex.emplace_back(cameraIndex, viewInfo->gpu.visibilityBuffer);
+                    }
                 }
-                viewRasterInfo[cameraIndex] = info;
-                return;
-            }
-
-            if (viewInfo->gpu.visibilityBuffer != nullptr) {
-                info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-                info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
-                info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
-                info.viewportScaleX = 1.0f;
-                info.viewportScaleY = 1.0f;
-                viewRasterInfo[cameraIndex] = info;
-                if (UsesWorkGraphSWRaster(m_workGraphMode)) {
-                    visibilityBuffersByCameraIndex.emplace_back(cameraIndex, viewInfo->gpu.visibilityBuffer);
-                }
-            }
-        });
-
-        std::sort(
-            visibilityBuffersByCameraIndex.begin(),
-            visibilityBuffersByCameraIndex.end(),
-            [](const auto& left, const auto& right) {
-                return left.first < right.first;
             });
 
-        std::vector<uint64_t> currentVisibilityBufferIds;
-        currentVisibilityBufferIds.reserve(visibilityBuffersByCameraIndex.size());
-        m_visibilityBuffers.reserve(visibilityBuffersByCameraIndex.size());
-        for (auto& [cameraIndex, visibilityBuffer] : visibilityBuffersByCameraIndex) {
-            (void)cameraIndex;
-            m_visibilityBuffers.push_back(visibilityBuffer);
-            currentVisibilityBufferIds.push_back(visibilityBuffer->GetGlobalResourceID());
-        }
+            std::sort(
+                visibilityBuffersByCameraIndex.begin(),
+                visibilityBuffersByCameraIndex.end(),
+                [](const auto& left, const auto& right) {
+                    return left.first < right.first;
+                });
 
+            std::vector<uint64_t> currentVisibilityBufferIds;
+            currentVisibilityBufferIds.reserve(visibilityBuffersByCameraIndex.size());
+            m_visibilityBuffers.reserve(visibilityBuffersByCameraIndex.size());
+            for (auto& [cameraIndex, visibilityBuffer] : visibilityBuffersByCameraIndex) {
+                (void)cameraIndex;
+                m_visibilityBuffers.push_back(visibilityBuffer);
+                currentVisibilityBufferIds.push_back(visibilityBuffer->GetGlobalResourceID());
+            }
 
-        m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
-        BUFFER_UPLOAD(
-            viewRasterInfo.data(),
-            static_cast<uint32_t>(viewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
-            rg::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
-            0);
-        if (currentVisibilityBufferIds != m_declaredVisibilityBufferIds) {
-            m_declaredVisibilityBufferIds = std::move(currentVisibilityBufferIds);
-            m_declaredResourcesChanged = true;
+            const bool sizeChanged = m_cachedViewRasterInfo.size() != viewRasterInfo.size();
+            m_cachedViewRasterInfo = std::move(viewRasterInfo);
+            if (sizeChanged) {
+                m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(m_cachedViewRasterInfo.size()));
+            }
+            if (!m_cachedViewRasterInfo.empty()) {
+                BUFFER_UPLOAD(
+                    m_cachedViewRasterInfo.data(),
+                    static_cast<uint32_t>(m_cachedViewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
+                    rg::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
+                    0);
+            }
+            if (currentVisibilityBufferIds != m_declaredVisibilityBufferIds) {
+                m_declaredVisibilityBufferIds = std::move(currentVisibilityBufferIds);
+                m_declaredResourcesChanged = true;
+            }
         }
     }
     else {
+        ZoneScopedN("HierarchicalCullingPass::ClearVisibilityDeclarations");
         m_visibilityBuffers.clear();
         if (!m_declaredVisibilityBufferIds.empty()) {
             m_declaredVisibilityBufferIds.clear();
@@ -787,90 +842,103 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
     }
 
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
-        std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
-        const bool useHistoryDepth = m_isFirstPass;
-        for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
-            viewDepthSrvIndices[i].cameraBufferIndex = i;
-            viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
+        if (rebuildViewTables || !m_hasUploadedViewDepthSrvIndices) {
+            ZoneScopedN("HierarchicalCullingPass::RebuildViewDepthSrvIndices");
+            std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
+            const bool useHistoryDepth = m_isFirstPass;
+            for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
+                viewDepthSrvIndices[i].cameraBufferIndex = i;
+                viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
+            }
+
+            context.viewManager->ForEachView([&](uint64_t viewID) {
+                const auto* view = context.viewManager->Get(viewID);
+                if (!view) {
+                    return;
+                }
+
+                const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
+                if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
+                    return;
+                }
+
+                const auto linearDepthMap = useHistoryDepth
+                    ? (view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr)
+                    : view->gpu.linearDepthMap;
+                if (!linearDepthMap) {
+                    return;
+                }
+
+                uint32_t slice = 0;
+                if (view->cameraInfo.depthBufferArrayIndex >= 0) {
+                    slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
+                }
+
+                const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
+                if (maxSlices == 0) {
+                    return;
+                }
+
+                slice = (std::min)(slice, maxSlices - 1);
+                viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
+                viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
+            });
+
+            m_cachedViewDepthSrvIndices = std::move(viewDepthSrvIndices);
+            m_hasUploadedViewDepthSrvIndices = true;
+            BUFFER_UPLOAD(
+                m_cachedViewDepthSrvIndices.data(),
+                static_cast<uint32_t>(m_cachedViewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
+                rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
+                0);
         }
+    }
 
-        context.viewManager->ForEachView([&](uint64_t viewID) {
-            const auto* view = context.viewManager->Get(viewID);
-            if (!view) {
-                return;
-            }
+    {
+        ZoneScopedN("HierarchicalCullingPass::CheckFirstPassWork");
+        if (!m_isFirstPass) {
+            return;
+        }
+    }
 
-            const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
-            if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
-                return;
-            }
-
-            const auto linearDepthMap = useHistoryDepth
-                ? (view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr)
-                : view->gpu.linearDepthMap;
-            if (!linearDepthMap) {
-                return;
-            }
-
-            uint32_t slice = 0;
-            if (view->cameraInfo.depthBufferArrayIndex >= 0) {
-                slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
-            }
-
-            const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
-            if (maxSlices == 0) {
-                return;
-            }
-
-            slice = (std::min)(slice, maxSlices - 1);
-            viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
-            viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
-        });
-
+    {
+        ZoneScopedN("HierarchicalCullingPass::UploadReplayStateReset");
+        CLodReplayBufferState replayState{};
+        replayState.nodeWriteCount = 0;
+        replayState.meshletWriteCount = 0;
+        replayState.nodeDropped = 0;
+        replayState.meshletDropped = 0;
+        replayState.visibleClusterCombinedCount = 0;
         BUFFER_UPLOAD(
-            viewDepthSrvIndices.data(),
-            static_cast<uint32_t>(viewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
-            rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
+            &replayState,
+            sizeof(CLodReplayBufferState),
+            rg::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
             0);
     }
 
-    if (!m_isFirstPass) {
-        return;
-    }
-
-    CLodReplayBufferState replayState{};
-    replayState.nodeWriteCount = 0;
-    replayState.meshletWriteCount = 0;
-    replayState.nodeDropped = 0;
-    replayState.meshletDropped = 0;
-    replayState.visibleClusterCombinedCount = 0;
-    BUFFER_UPLOAD(
-        &replayState,
-        sizeof(CLodReplayBufferState),
-        rg::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
-        0);
-
-    CLodNodeGpuInput nodeGpuInputs[3] = {};
-    CLodMultiNodeGpuInput multiNodeGpuInput{};
-    multiNodeGpuInput.numNodeInputs = 2;
-    multiNodeGpuInput.pad0 = 0;
-    multiNodeGpuInput.nodeInputStride = sizeof(CLodNodeGpuInput);
+    {
+        ZoneScopedN("HierarchicalCullingPass::UpdateReplayNodeInputs");
+        CLodNodeGpuInput nodeGpuInputs[3] = {};
+        CLodMultiNodeGpuInput multiNodeGpuInput{};
+        multiNodeGpuInput.numNodeInputs = 2;
+        multiNodeGpuInput.pad0 = 0;
+        multiNodeGpuInput.nodeInputStride = sizeof(CLodNodeGpuInput);
 
     // Replay dispatch descriptors need stable GPU virtual addresses during Update.
     // These CLod-owned control buffers are small non-aliased resources, so it is safe to materialize
     // them eagerly here before building the replay node input table.
-    if (!m_occlusionNodeGpuInputsBuffer->IsMaterialized()) {
-        m_occlusionNodeGpuInputsBuffer->Materialize();
-    }
-    if (!m_occlusionReplayBuffer->IsMaterialized()) {
-        m_occlusionReplayBuffer->Materialize();
-    }
+        if (!m_occlusionNodeGpuInputsBuffer->IsMaterialized()) {
+            m_occlusionNodeGpuInputsBuffer->Materialize();
+        }
+        if (!m_occlusionReplayBuffer->IsMaterialized()) {
+            m_occlusionReplayBuffer->Materialize();
+        }
 
-    if (const uint64_t nodeInputBufferAddress = GetNativeBufferDeviceAddress(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
-        multiNodeGpuInput.nodeInputsAddress = nodeInputBufferAddress + sizeof(CLodNodeGpuInput);
-    }
+        if (const uint64_t nodeInputBufferAddress = GetNativeBufferDeviceAddress(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
+            multiNodeGpuInput.nodeInputsAddress = nodeInputBufferAddress + sizeof(CLodNodeGpuInput);
+        }
 
-    if (const uint64_t replayAddress = GetNativeBufferDeviceAddress(m_occlusionReplayBuffer->GetAPIResource())) {
+        if (const uint64_t replayAddress = GetNativeBufferDeviceAddress(m_occlusionReplayBuffer->GetAPIResource())) {
         // Entry point 1 = TraverseNodes — node replay region at offset 0
         nodeGpuInputs[1].entrypointIndex = 1;
         nodeGpuInputs[1].numRecords = 0; // patched by GPU in CreateRasterBucketsHistogramCommandCSMain
@@ -882,22 +950,35 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         nodeGpuInputs[2].numRecords = 0; // patched by GPU in CreateRasterBucketsHistogramCommandCSMain
         nodeGpuInputs[2].recordsAddress = replayAddress + CLodReplayMeshletRegionOffset;
         nodeGpuInputs[2].recordStride = CLodMeshletReplayStrideBytes;
+        }
+
+        static_assert(sizeof(CLodMultiNodeGpuInput) == sizeof(CLodNodeGpuInput));
+        std::memcpy(&nodeGpuInputs[0], &multiNodeGpuInput, sizeof(CLodMultiNodeGpuInput));
+
+        if (!m_hasCachedNodeGpuInputs
+            || !std::equal(
+                std::begin(nodeGpuInputs),
+                std::end(nodeGpuInputs),
+                m_cachedNodeGpuInputs.begin(),
+                [](const CLodNodeGpuInput& left, const CLodNodeGpuInput& right) {
+                    return BytesEqual(left, right);
+                })) {
+            std::copy(std::begin(nodeGpuInputs), std::end(nodeGpuInputs), m_cachedNodeGpuInputs.begin());
+            m_hasCachedNodeGpuInputs = true;
+            BUFFER_UPLOAD(
+                nodeGpuInputs,
+                sizeof(nodeGpuInputs),
+                rg::runtime::UploadTarget::FromShared(m_occlusionNodeGpuInputsBuffer),
+                0);
+        }
     }
 
-    static_assert(sizeof(CLodMultiNodeGpuInput) == sizeof(CLodNodeGpuInput));
-    std::memcpy(&nodeGpuInputs[0], &multiNodeGpuInput, sizeof(CLodMultiNodeGpuInput));
-
-    BUFFER_UPLOAD(
-        nodeGpuInputs,
-        sizeof(nodeGpuInputs),
-        rg::runtime::UploadTarget::FromShared(m_occlusionNodeGpuInputsBuffer),
-        0);
-
     if (IsCLodWorkGraphTelemetryEnabled()) {
-        std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);
+        ZoneScopedN("HierarchicalCullingPass::UploadTelemetryReset");
+        m_zeroTelemetryScratch.assign(CLodWorkGraphCounterCount, 0u);
         BUFFER_UPLOAD(
-            zeroTelemetry.data(),
-            static_cast<uint32_t>(zeroTelemetry.size() * sizeof(uint32_t)),
+            m_zeroTelemetryScratch.data(),
+            static_cast<uint32_t>(m_zeroTelemetryScratch.size() * sizeof(uint32_t)),
             rg::runtime::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
             0);
     }

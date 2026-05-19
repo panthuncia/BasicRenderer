@@ -87,6 +87,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
                     else {
                         buf->GetECSEntity().add<Components::GeneralDrawWorkload>();
                     }
+                    ++m_drawSetDeclarationRevision;
                 }
                 m_activeDrawSetIndices[workloadKey]->Insert(index);
                 workloadKeysForDraw.push_back(workloadKey);

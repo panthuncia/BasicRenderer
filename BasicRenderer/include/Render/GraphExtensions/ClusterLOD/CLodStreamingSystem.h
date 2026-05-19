@@ -93,6 +93,9 @@ private:
     void EnsurePageTrackingCapacity(MeshManager* meshManager);
     std::vector<uint32_t> PopFreePages(uint32_t count, MeshManager* meshManager);
     void ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager);
+    void MarkStreamingNonResidentBitsDirtyWord(uint32_t wordAddress);
+    void MarkStreamingNonResidentBitsDirtyAll();
+    void MarkStreamingActiveGroupsBitsDirty();
 
     struct PreAllocatedPages {
 		std::vector<uint32_t> pagesBySegment; // segment index to page ID
@@ -145,6 +148,9 @@ private:
     uint32_t m_streamingActiveGroupScanCount = 0u;
     uint32_t m_streamingStorageGroupCapacity = CLodStreamingInitialGroupCapacity;
     bool m_streamingNonResidentBitsUploadPending = false;
+    bool m_streamingActiveGroupsBitsUploadPending = true;
+    uint32_t m_streamingNonResidentBitsDirtyBegin = 0u;
+    uint32_t m_streamingNonResidentBitsDirtyEnd = 0u;
     uint32_t m_streamingReadbackRingSize = 3u;
     uint32_t m_streamingCpuUploadBudgetRequests = 0u;
     uint64_t m_prevTotalStreamedBytes = 0u;
@@ -182,12 +188,19 @@ private:
     // Background streaming worker thread
     std::thread m_streamingWorkerThread;
     std::mutex m_streamingWorkerMutex;
+    std::mutex m_decodedReadbackMutex;
     std::condition_variable m_streamingWorkerCV;
     std::atomic<bool> m_streamingWorkerQuit{false};
     // Decoded (groupIndex, priority) pairs produced by the worker, consumed by the main thread.
     std::vector<std::pair<uint32_t, uint32_t>> m_decodedReadbackBatch;
     // Deduplicated group indices from the GPU used-groups buffer, consumed by the main thread to touch LRU.
     std::vector<uint32_t> m_decodedUsedGroupsBatch;
+    std::vector<std::pair<uint32_t, uint32_t>> m_readbackBatchScratch;
+    std::vector<uint32_t> m_usedGroupsBatchScratch;
+    std::vector<uint32_t> m_expiredReadbackGapGroupsScratch;
+    std::vector<uint32_t> m_parentChainScratch;
+    std::vector<uint32_t> m_lruTouchedGroupsBitsScratch;
+    std::vector<uint32_t> m_lruTouchedGroupWordsScratch;
 
     // Dedicated upload instance + copy queue for async CLod streaming uploads.
     std::unique_ptr<UploadInstance> m_uploadInstance;

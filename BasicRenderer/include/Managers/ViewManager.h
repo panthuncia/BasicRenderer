@@ -145,6 +145,8 @@ public:
     void UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo);
 
 	uint32_t GetCameraBufferSize() const { return static_cast<uint32_t>(m_cameraBuffer->Size()); }
+    uint64_t GetResourceLayoutRevision() const { return m_resourceLayoutRevision; }
+    void MarkDepthHistoryValid(uint64_t viewID);
 
     // Access
     View* Get(uint64_t viewID);
@@ -205,6 +207,7 @@ private:
     std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> m_lastFrameLinearDepthBySource;
 
     IndirectCommandBufferManager* m_indirectManager = nullptr;
+    uint64_t m_resourceLayoutRevision = 1u;
 
     std::mutex m_cameraUpdateMutex;
     ViewEvents m_events;

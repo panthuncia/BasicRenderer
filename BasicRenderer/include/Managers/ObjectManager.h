@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <mutex>
+#include <cstdint>
 
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
@@ -46,9 +47,10 @@ public:
 			throw std::runtime_error("Active draw set indices for given flags not found");
 		}
 	}
-    std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(MaterialCompileFlags flags, const RenderPhase& renderPhase, bool clodOnly = false) {
+	std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(MaterialCompileFlags flags, const RenderPhase& renderPhase, bool clodOnly = false) {
         return GetActiveDrawSetIndices(DrawWorkloadKey { flags, renderPhase, clodOnly });
     }
+    uint64_t GetDrawSetDeclarationRevision() const { return m_drawSetDeclarationRevision; }
 
 private:
 	ObjectManager();
@@ -58,6 +60,7 @@ private:
 	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>> m_normalMatrixBuffer; // Normal matrices for each object
 	std::unordered_map<DrawWorkloadKey, std::shared_ptr<SortedUnsignedIntBuffer>, DrawWorkloadKey::Hasher> m_activeDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active objects per workload
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshInstanceCB>> m_perMeshInstanceBuffers; // Indices into m_perObjectBuffers for each mesh instance in each object
+    uint64_t m_drawSetDeclarationRevision = 1u;
 	std::mutex m_objectUpdateMutex; // Mutex for thread safety
 	std::mutex m_normalMatrixUpdateMutex; // Mutex for thread safety
 };
