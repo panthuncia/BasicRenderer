@@ -116,6 +116,7 @@ void SyncOpenRenderGraphSettings(uint8_t numFramesInFlight) {
     orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
     orgSettings.renderGraphVramDumpEnabled = sm.getSettingGetter<bool>("renderGraphVramDumpEnabled")();
     orgSettings.renderGraphBatchTraceEnabled = sm.getSettingGetter<bool>("renderGraphBatchTraceEnabled")();
+    orgSettings.renderGraphLightweightCompileSummaryEnabled = sm.getSettingGetter<bool>("renderGraphLightweightCompileSummaryEnabled")();
     orgSettings.readOnlyUniformTransitionElisionEnabled = true;
     orgSettings.autoAliasMode = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
     orgSettings.autoAliasPackingStrategy = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
@@ -133,6 +134,20 @@ void SyncOpenRenderGraphSettings(uint8_t numFramesInFlight) {
     orgSettings.queueSchedulingCrossQueueHandoffPenalty = sm.getSettingGetter<float>("queueSchedulingCrossQueueHandoffPenalty")();
     orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
     orgSettings.autoAliasPoolGrowthHeadroom = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
+    const bool renderGraphDisableCaching = sm.getSettingGetter<bool>("renderGraphDisableCaching")();
+    orgSettings.renderGraphRegionMode = renderGraphDisableCaching
+        ? rg::runtime::RenderGraphRegionMode::Disabled
+        : static_cast<rg::runtime::RenderGraphRegionMode>(sm.getSettingGetter<uint8_t>("renderGraphRegionMode")());
+    orgSettings.transitionPlacementMode = static_cast<rg::runtime::TransitionPlacementMode>(sm.getSettingGetter<uint8_t>("transitionPlacementMode")());
+    orgSettings.renderGraphRegionMinPassCount = sm.getSettingGetter<uint32_t>("renderGraphRegionMinPassCount")();
+    orgSettings.renderGraphRegionMaxPassCount = sm.getSettingGetter<uint32_t>("renderGraphRegionMaxPassCount")();
+    orgSettings.renderGraphRegionDiagnosticsEnabled = sm.getSettingGetter<bool>("renderGraphRegionDiagnosticsEnabled")();
+    orgSettings.renderGraphRegionShadowStrictBatchMatch = sm.getSettingGetter<bool>("renderGraphRegionShadowStrictBatchMatch")();
+    orgSettings.renderGraphReplaySegmentCacheMaxEntries = sm.getSettingGetter<uint32_t>("renderGraphReplaySegmentCacheMaxEntries")();
+    orgSettings.renderGraphReplaySegmentCacheMaxVariants = sm.getSettingGetter<uint32_t>("renderGraphReplaySegmentCacheMaxVariants")();
+    orgSettings.renderGraphReplaySegmentCacheMaxVariantsPerKey = sm.getSettingGetter<uint32_t>("renderGraphReplaySegmentCacheMaxVariantsPerKey")();
+    orgSettings.renderGraphReplaySegmentCacheMaxAgeFrames = sm.getSettingGetter<uint32_t>("renderGraphReplaySegmentCacheMaxAgeFrames")();
+    orgSettings.renderGraphReplayRelaxAliasPlacement = sm.getSettingGetter<bool>("renderGraphReplayRelaxAliasPlacement")();
     orgSettings.heavyDebug = sm.getSettingGetter<bool>("heavyDebug")();
     rg::runtime::SetOpenRenderGraphSettings(orgSettings);
 }
@@ -216,6 +231,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     settingsManager.registerSetting<bool>("reshapeTexelAddressing", true);
     settingsManager.registerSetting<uint64_t>("reshapeGlobalFeatureMask", 0ull);
     settingsManager.registerSetting<bool>("renderGraphBatchTraceEnabled", false);
+    settingsManager.registerSetting<bool>("renderGraphLightweightCompileSummaryEnabled", false);
     LoadPipeline(hwnd, x_res, y_res);
     DirectStorageManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
@@ -1237,6 +1253,17 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("queueSchedulingCrossQueueHandoffPenalty", 2.0f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
+    settingsManager.registerSetting<uint8_t>("renderGraphRegionMode", static_cast<uint8_t>(rg::runtime::RenderGraphRegionMode::ReplayAuthoritative));
+    settingsManager.registerSetting<uint8_t>("transitionPlacementMode", static_cast<uint8_t>(rg::runtime::TransitionPlacementMode::CanonicalThenOptimize));
+    settingsManager.registerSetting<uint32_t>("renderGraphRegionMinPassCount", 2u);
+    settingsManager.registerSetting<uint32_t>("renderGraphRegionMaxPassCount", 0u);
+    settingsManager.registerSetting<bool>("renderGraphRegionDiagnosticsEnabled", false);
+    settingsManager.registerSetting<bool>("renderGraphRegionShadowStrictBatchMatch", false);
+    settingsManager.registerSetting<uint32_t>("renderGraphReplaySegmentCacheMaxEntries", 256u);
+    settingsManager.registerSetting<uint32_t>("renderGraphReplaySegmentCacheMaxVariants", 128u);
+    settingsManager.registerSetting<uint32_t>("renderGraphReplaySegmentCacheMaxVariantsPerKey", 32u);
+    settingsManager.registerSetting<uint32_t>("renderGraphReplaySegmentCacheMaxAgeFrames", 0u);
+    settingsManager.registerSetting<bool>("renderGraphReplayRelaxAliasPlacement", true);
     settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>(CLodStreamingCpuUploadBudgetSettingName, 500u);
     settingsManager.registerSetting<bool>(CLodStreamingEnableDirectStorageSettingName, false);

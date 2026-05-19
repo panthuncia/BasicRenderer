@@ -5,6 +5,7 @@
 #include <fstream>
 #include <functional>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -52,6 +53,105 @@ struct Diagnostic {
     std::string message;
 };
 
+struct FlagDef {
+    uint32_t mask;
+    const char* name;
+};
+
+constexpr std::array<FlagDef, 32> kShaderFlags1 = {{
+    {1u << 0, "SPECULAR"},
+    {1u << 1, "SKINNED"},
+    {1u << 2, "TEMP_REFRACTION"},
+    {1u << 3, "VERTEX_ALPHA"},
+    {1u << 4, "GREYSCALE_COLOR"},
+    {1u << 5, "GREYSCALE_ALPHA"},
+    {1u << 6, "USE_FALLOFF"},
+    {1u << 7, "ENVIRONMENT_MAPPING"},
+    {1u << 8, "RECEIVE_SHADOWS"},
+    {1u << 9, "CAST_SHADOWS"},
+    {1u << 10, "FACEGEN_DETAIL_MAP"},
+    {1u << 11, "PARALLAX"},
+    {1u << 12, "MODEL_SPACE_NORMALS"},
+    {1u << 13, "NON_PROJECTIVE_SHADOWS"},
+    {1u << 14, "LANDSCAPE"},
+    {1u << 15, "REFRACTION"},
+    {1u << 16, "FIRE_REFRACTION"},
+    {1u << 17, "EYE_ENVIRONMENT_MAPPING"},
+    {1u << 18, "HAIR_SOFT_LIGHTING"},
+    {1u << 19, "SCREENDOOR_ALPHA_FADE"},
+    {1u << 20, "LOCALMAP_HIDE_SECRET"},
+    {1u << 21, "FACEGEN_RGB_TINT"},
+    {1u << 22, "OWN_EMIT"},
+    {1u << 23, "PROJECTED_UV"},
+    {1u << 24, "MULTIPLE_TEXTURES"},
+    {1u << 25, "REMAPPABLE_TEXTURES"},
+    {1u << 26, "DECAL"},
+    {1u << 27, "DYNAMIC_DECAL"},
+    {1u << 28, "PARALLAX_OCCLUSION"},
+    {1u << 29, "EXTERNAL_EMITTANCE"},
+    {1u << 30, "SOFT_EFFECT"},
+    {1u << 31, "ZBUFFER_TEST"}
+}};
+
+constexpr std::array<FlagDef, 32> kShaderFlags2 = {{
+    {1u << 0, "ZBUFFER_WRITE"},
+    {1u << 1, "LOD_LANDSCAPE"},
+    {1u << 2, "LOD_OBJECTS"},
+    {1u << 3, "NO_FADE"},
+    {1u << 4, "DOUBLE_SIDED"},
+    {1u << 5, "VERTEX_COLORS"},
+    {1u << 6, "GLOW_MAP"},
+    {1u << 7, "ASSUME_SHADOWMASK"},
+    {1u << 8, "PACKED_TANGENT"},
+    {1u << 9, "MULTI_INDEX_SNOW"},
+    {1u << 10, "VERTEX_LIGHTING"},
+    {1u << 11, "UNIFORM_SCALE"},
+    {1u << 12, "FIT_SLOPE"},
+    {1u << 13, "BILLBOARD"},
+    {1u << 14, "NO_LOD_LAND_BLEND"},
+    {1u << 15, "ENVMAP_LIGHT_FADE"},
+    {1u << 16, "WIREFRAME"},
+    {1u << 17, "WEAPON_BLOOD"},
+    {1u << 18, "HIDE_ON_LOCAL_MAP"},
+    {1u << 19, "PREMULT_ALPHA"},
+    {1u << 20, "CLOUD_LOD"},
+    {1u << 21, "ANISOTROPIC_LIGHTING"},
+    {1u << 22, "NO_TRANSPARENCY_MULTISAMPLING"},
+    {1u << 23, "UNUSED01"},
+    {1u << 24, "MULTI_LAYER_PARALLAX"},
+    {1u << 25, "SOFT_LIGHTING"},
+    {1u << 26, "RIM_LIGHTING"},
+    {1u << 27, "BACK_LIGHTING"},
+    {1u << 28, "UNUSED02"},
+    {1u << 29, "TREE_ANIM"},
+    {1u << 30, "EFFECT_LIGHTING"},
+    {1u << 31, "HD_LOD_OBJECTS"}
+}};
+
+constexpr std::array<const char*, 21> kLightingShaderTypeNames = {{
+    "DEFAULT",
+    "ENVMAP",
+    "GLOWMAP",
+    "PARALLAX",
+    "FACE",
+    "SKINTINT",
+    "HAIRTINT",
+    "PARALLAXOCC",
+    "MULTITEXTURELANDSCAPE",
+    "LODLANDSCAPE",
+    "SNOW",
+    "MULTILAYERPARALLAX",
+    "TREEANIM",
+    "LODOBJECTS",
+    "MULTIINDEXSNOW",
+    "LODOBJECTSHD",
+    "EYE",
+    "CLOUD",
+    "LODLANDSCAPENOISE",
+    "MULTITEXTURELANDSCAPELODBLEND",
+    "DISMEMBERMENT"
+}};
+
 json DiagnosticJson(const Diagnostic& diagnostic)
 {
     return json{{"level", diagnostic.level}, {"message", diagnostic.message}};
@@ -96,6 +196,32 @@ std::string HexHash(uint64_t hash)
     return stream.str();
 }
 
+std::string Hex32(uint32_t value)
+{
+    std::ostringstream stream;
+    stream << "0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << value;
+    return stream.str();
+}
+
+json DecodeShaderFlags(uint32_t flags, const std::array<FlagDef, 32>& definitions)
+{
+    json names = json::array();
+    for (const FlagDef& def : definitions) {
+        if ((flags & def.mask) != 0u) {
+            names.push_back(def.name);
+        }
+    }
+    return names;
+}
+
+std::string ShaderTypeName(uint32_t shaderType)
+{
+    if (shaderType < kLightingShaderTypeNames.size()) {
+        return kLightingShaderTypeNames[shaderType];
+    }
+    return "UNKNOWN_" + std::to_string(shaderType);
+}
+
 std::string HexBytes(const std::vector<char>& bytes)
 {
     static constexpr char kHex[] = "0123456789abcdef";
@@ -138,6 +264,7 @@ std::vector<std::string> ServiceList()
         "nif.open",
         "nif.close",
         "nif.describe",
+        "nif.inspect.shaderFlags",
         "nif.convert.usd",
         "nif.stream.blocks",
         "nif.stream.geometry",
@@ -1106,13 +1233,21 @@ void ReadShapeMaterial(const NiflyApi& api, void* nifHandle, void* shapeHandle, 
         }
     }
     if (api.getShaderType) {
-        shape.shader["shaderType"] = api.getShaderType(nifHandle, shapeHandle);
+        const uint32_t shaderType = api.getShaderType(nifHandle, shapeHandle);
+        shape.shader["shaderType"] = shaderType;
+        shape.shader["shaderTypeName"] = ShaderTypeName(shaderType);
     }
     if (api.getShaderFlags1) {
-        shape.shader["shaderFlags1"] = api.getShaderFlags1(nifHandle, shapeHandle);
+        const uint32_t flags = api.getShaderFlags1(nifHandle, shapeHandle);
+        shape.shader["shaderFlags1"] = flags;
+        shape.shader["shaderFlags1Hex"] = Hex32(flags);
+        shape.shader["shaderFlags1Names"] = DecodeShaderFlags(flags, kShaderFlags1);
     }
     if (api.getShaderFlags2) {
-        shape.shader["shaderFlags2"] = api.getShaderFlags2(nifHandle, shapeHandle);
+        const uint32_t flags = api.getShaderFlags2(nifHandle, shapeHandle);
+        shape.shader["shaderFlags2"] = flags;
+        shape.shader["shaderFlags2Hex"] = Hex32(flags);
+        shape.shader["shaderFlags2Names"] = DecodeShaderFlags(flags, kShaderFlags2);
     }
     if (api.getShaderAttrs) {
         BSLSPAttrs attrs{};
@@ -1247,7 +1382,171 @@ std::vector<ShapeData> ReadShapes(const NiflyApi& api, void* nifHandle, std::vec
 
     return shapes;
 }
+
+std::vector<ShapeData> ReadShapeShaderMetadata(const NiflyApi& api, void* nifHandle)
+{
+    if (!api.getShapes) {
+        return {};
+    }
+
+    const int shapeCount = api.getShapes(nifHandle, nullptr, 0, 0);
+    if (shapeCount <= 0) {
+        return {};
+    }
+
+    std::vector<void*> shapeHandles(static_cast<size_t>(shapeCount));
+    api.getShapes(nifHandle, shapeHandles.data(), shapeCount, 0);
+
+    std::vector<ShapeData> shapes;
+    shapes.reserve(shapeHandles.size());
+    for (size_t shapeIndex = 0; shapeIndex < shapeHandles.size(); ++shapeIndex) {
+        void* shapeHandle = shapeHandles[shapeIndex];
+        ShapeData shape{};
+        shape.handle = shapeHandle;
+        shape.blockId = api.getBlockId ? api.getBlockId(nifHandle, shapeHandle) : -1;
+        shape.name = api.getShapeName
+            ? ReadCString([&](char* buffer, int size) { return api.getShapeName(shapeHandle, buffer, size); }).value_or("Shape_" + std::to_string(shapeIndex))
+            : "Shape_" + std::to_string(shapeIndex);
+        shape.blockName = api.getShapeBlockName
+            ? ReadCString([&](char* buffer, int size) { return api.getShapeBlockName(shapeHandle, buffer, size); }).value_or("")
+            : std::string();
+        ReadShapeMaterial(api, nifHandle, shapeHandle, shape);
+        shapes.push_back(std::move(shape));
+    }
+
+    return shapes;
+}
 #endif
+
+json ShaderFlagDefinitionJson(const char* setName, const FlagDef& def)
+{
+    return json{
+        {"set", setName},
+        {"name", def.name},
+        {"mask", def.mask},
+        {"maskHex", Hex32(def.mask)}
+    };
+}
+
+json ShapeShaderSummaryJson(const ShapeData& shape)
+{
+    json item{
+        {"name", shape.name},
+        {"blockName", shape.blockName},
+        {"blockId", shape.blockId},
+        {"shader", shape.shader}
+    };
+
+    if (shape.shader.contains("shaderFlags1") && shape.shader.contains("shaderFlags2")) {
+        const std::string flags1Hex = shape.shader.value("shaderFlags1Hex", Hex32(shape.shader.value("shaderFlags1", 0u)));
+        const std::string flags2Hex = shape.shader.value("shaderFlags2Hex", Hex32(shape.shader.value("shaderFlags2", 0u)));
+        item["combinationKey"] = flags1Hex + "|" + flags2Hex;
+        item["combinationNames"] = json{
+            {"shaderFlags1", shape.shader.contains("shaderFlags1Names") ? shape.shader["shaderFlags1Names"] : json::array()},
+            {"shaderFlags2", shape.shader.contains("shaderFlags2Names") ? shape.shader["shaderFlags2Names"] : json::array()}
+        };
+    }
+
+    return item;
+}
+
+json ShaderFlagsJson(const char* argv0, const fs::path& nifPath)
+{
+    std::vector<Diagnostic> diagnostics;
+    json response;
+    response["status"] = "error";
+    response["sourcePath"] = nifPath.string();
+
+    auto api = LoadNiflyApi(argv0, diagnostics);
+    if (!api) {
+        response["message"] = "Unable to load niflyDLL.";
+        response["diagnostics"] = json::array();
+        for (const Diagnostic& diagnostic : diagnostics) {
+            response["diagnostics"].push_back(DiagnosticJson(diagnostic));
+        }
+        return response;
+    }
+
+#ifdef _WIN32
+    if (api->clearMessageLog) {
+        api->clearMessageLog();
+    }
+
+    void* nifHandle = api->load(nifPath.string().c_str());
+    if (!nifHandle) {
+        AddDiagnostic(diagnostics, "error", "niflyDLL failed to load '" + nifPath.string() + "'. " + GetMessageLog(*api));
+        response["message"] = "niflyDLL failed to load the NIF file.";
+        response["diagnostics"] = json::array();
+        for (const Diagnostic& diagnostic : diagnostics) {
+            response["diagnostics"].push_back(DiagnosticJson(diagnostic));
+        }
+        return response;
+    }
+
+    std::string gameName = "unknown";
+    if (api->getGameName) {
+        gameName = ReadCString([&](char* buffer, int size) { return api->getGameName(nifHandle, buffer, size); }).value_or("unknown");
+    }
+
+    std::vector<ShapeData> shapes = ReadShapeShaderMetadata(*api, nifHandle);
+    api->destroy(nifHandle);
+
+    json discoveredFlags = json::array();
+    std::set<std::string> discoveredKeys;
+    json combinations = json::array();
+    std::set<std::string> combinationKeys;
+    json shapeItems = json::array();
+
+    auto addDiscovered = [&](const char* setName, uint32_t flags, const std::array<FlagDef, 32>& definitions) {
+        for (const FlagDef& def : definitions) {
+            if ((flags & def.mask) == 0u) {
+                continue;
+            }
+            const std::string key = std::string(setName) + ":" + def.name;
+            if (discoveredKeys.insert(key).second) {
+                discoveredFlags.push_back(ShaderFlagDefinitionJson(setName, def));
+            }
+        }
+    };
+
+    for (const ShapeData& shape : shapes) {
+        shapeItems.push_back(ShapeShaderSummaryJson(shape));
+        const uint32_t flags1 = shape.shader.value("shaderFlags1", 0u);
+        const uint32_t flags2 = shape.shader.value("shaderFlags2", 0u);
+        addDiscovered("shaderFlags1", flags1, kShaderFlags1);
+        addDiscovered("shaderFlags2", flags2, kShaderFlags2);
+
+        const std::string combinationKey = Hex32(flags1) + "|" + Hex32(flags2);
+        if (combinationKeys.insert(combinationKey).second) {
+            combinations.push_back(json{
+                {"shaderFlags1", flags1},
+                {"shaderFlags1Hex", Hex32(flags1)},
+                {"shaderFlags1Names", DecodeShaderFlags(flags1, kShaderFlags1)},
+                {"shaderFlags2", flags2},
+                {"shaderFlags2Hex", Hex32(flags2)},
+                {"shaderFlags2Names", DecodeShaderFlags(flags2, kShaderFlags2)}
+            });
+        }
+    }
+
+    response["status"] = "ok";
+    response["protocolVersion"] = "1.0";
+    response["sourcePath"] = nifPath.string();
+    response["gameName"] = gameName;
+    response["shapeCount"] = shapes.size();
+    response["shapes"] = shapeItems;
+    response["discoveredFlags"] = discoveredFlags;
+    response["uniqueCombinations"] = combinations;
+    response["diagnostics"] = json::array();
+    for (const Diagnostic& diagnostic : diagnostics) {
+        response["diagnostics"].push_back(DiagnosticJson(diagnostic));
+    }
+    return response;
+#else
+    response["message"] = "BRNifly shader flag inspection is currently implemented for Windows only.";
+    return response;
+#endif
+}
 
 std::optional<std::string> ConvertShapesToUsd(
     const std::vector<ShapeData>& shapes,
@@ -1591,6 +1890,8 @@ int PrintUsage()
 {
     std::cerr << "Usage:\n"
         << "  BRNifly --describe-services\n"
+        << "  BRNifly --shader-flags-json <file.nif>\n"
+        << "  BRNifly --shader-flags-json-file <file.nif> <response.json>\n"
         << "  BRNifly --convert-usd-json <file.nif>\n"
         << "  BRNifly --convert-usd-json-file <file.nif> <response.json>\n"
         << "  BRNifly --convert <file.nif> --out <file.usda>\n";
@@ -1610,6 +1911,23 @@ int main(int argc, char** argv)
 
     if (argc == 3 && std::string(argv[1]) == "--convert-usd-json") {
         std::cout << ConvertUsdJson(argv[0], fs::path(argv[2])).dump(2) << std::endl;
+        return 0;
+    }
+
+    if (argc == 3 && std::string(argv[1]) == "--shader-flags-json") {
+        std::cout << ShaderFlagsJson(argv[0], fs::path(argv[2])).dump(2) << std::endl;
+        return 0;
+    }
+
+    if (argc == 4 && std::string(argv[1]) == "--shader-flags-json-file") {
+        json response = ShaderFlagsJson(argv[0], fs::path(argv[2]));
+        std::ofstream out(argv[3], std::ios::binary);
+        if (!out) {
+            std::cerr << "Failed to open response file: " << argv[3] << std::endl;
+            return 1;
+        }
+        out << response.dump(2);
+        std::cout << "{\"status\":\"ok\",\"responseFile\":" << json(argv[3]).dump() << "}" << std::endl;
         return 0;
     }
 

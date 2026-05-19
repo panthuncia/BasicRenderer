@@ -702,9 +702,17 @@ private:
 	std::function<bool()> getHeavyDebug;
 	std::function<void(bool)> setHeavyDebug;
 
+	bool m_renderGraphDisableCaching = false;
+	std::function<bool()> getRenderGraphDisableCaching;
+	std::function<void(bool)> setRenderGraphDisableCaching;
+
     bool m_renderGraphBatchTraceEnabled = false;
     std::function<bool()> getRenderGraphBatchTraceEnabled;
     std::function<void(bool)> setRenderGraphBatchTraceEnabled;
+
+	bool m_renderGraphLightweightCompileSummaryEnabled = false;
+	std::function<bool()> getRenderGraphLightweightCompileSummaryEnabled;
+	std::function<void(bool)> setRenderGraphLightweightCompileSummaryEnabled;
 
     bool m_reshapeTexelAddressing = true;
     std::function<bool()> getReshapeTexelAddressing;
@@ -1172,10 +1180,20 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 	m_heavyDebug = getHeavyDebug();
 	observerSetting(m_heavyDebug, "heavyDebug");
 
+	getRenderGraphDisableCaching = settingsManager.getSettingGetter<bool>("renderGraphDisableCaching");
+	setRenderGraphDisableCaching = settingsManager.getSettingSetter<bool>("renderGraphDisableCaching");
+	m_renderGraphDisableCaching = getRenderGraphDisableCaching();
+	observerSetting(m_renderGraphDisableCaching, "renderGraphDisableCaching");
+
     getRenderGraphBatchTraceEnabled = settingsManager.getSettingGetter<bool>("renderGraphBatchTraceEnabled");
     setRenderGraphBatchTraceEnabled = settingsManager.getSettingSetter<bool>("renderGraphBatchTraceEnabled");
     m_renderGraphBatchTraceEnabled = getRenderGraphBatchTraceEnabled();
     observerSetting(m_renderGraphBatchTraceEnabled, "renderGraphBatchTraceEnabled");
+
+	getRenderGraphLightweightCompileSummaryEnabled = settingsManager.getSettingGetter<bool>("renderGraphLightweightCompileSummaryEnabled");
+	setRenderGraphLightweightCompileSummaryEnabled = settingsManager.getSettingSetter<bool>("renderGraphLightweightCompileSummaryEnabled");
+	m_renderGraphLightweightCompileSummaryEnabled = getRenderGraphLightweightCompileSummaryEnabled();
+	observerSetting(m_renderGraphLightweightCompileSummaryEnabled, "renderGraphLightweightCompileSummaryEnabled");
 
     getReshapeTexelAddressing = settingsManager.getSettingGetter<bool>("reshapeTexelAddressing");
     setReshapeTexelAddressing = settingsManager.getSettingSetter<bool>("reshapeTexelAddressing");
@@ -1752,9 +1770,15 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Heavy Debug (1 pass/batch + GPU drain)", &m_heavyDebug)) {
 			setHeavyDebug(m_heavyDebug);
 		}
+		if (ImGui::Checkbox("Disable Render Graph Caching", &m_renderGraphDisableCaching)) {
+			setRenderGraphDisableCaching(m_renderGraphDisableCaching);
+		}
         if (ImGui::Checkbox("Render Graph Batch Trace", &m_renderGraphBatchTraceEnabled)) {
             setRenderGraphBatchTraceEnabled(m_renderGraphBatchTraceEnabled);
         }
+		if (ImGui::Checkbox("Render Graph Compile Summary", &m_renderGraphLightweightCompileSummaryEnabled)) {
+			setRenderGraphLightweightCompileSummaryEnabled(m_renderGraphLightweightCompileSummaryEnabled);
+		}
         if (ImGui::Checkbox("ReShape texel addressing (requires recreate)", &m_reshapeTexelAddressing)) {
             setReshapeTexelAddressing(m_reshapeTexelAddressing);
         }
@@ -1901,6 +1925,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
             opts.imguiHeapHandle = GetImGuiHeapHandle();
         }
+        opts.cacheOverlayProvider = [this]() -> std::vector<RGCacheOverlayRange> {
+            if (!m_renderGraph) {
+                return {};
+            }
+            return m_renderGraph->BuildReplayCacheOverlayRanges();
+        };
         RGInspector::Show(m_renderGraph->GetBatches(),
             m_renderGraph->GetQueueRegistry(),
             PassUsesResourceAdapter,

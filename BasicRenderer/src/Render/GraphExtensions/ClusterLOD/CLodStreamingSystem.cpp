@@ -428,10 +428,9 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                 .PreferQueue(QueueKind::Graphics));
     }
 
-    // Schedule a readback copy pass immediately after the final CLod shadow
-    // culling writer. Anchoring this to a later unrelated pass can let the
-    // scheduler synchronize the copy queue against the wrong producer queue,
-    // which risks reading stale or zeroed streaming counters.
+    // Keep the readback at the frame tail. The copy reads CLod streaming
+    // counters from earlier culling passes, but placing the immediate copy in
+    // the middle of the visibility graph destabilizes replay segment boundaries.
     if (m_streamingReadbackFenceHandle.IsValid() && !m_readbackStagingSlots.empty()) {
         uint32_t selectedSlot = UINT32_MAX;
         {
@@ -494,7 +493,7 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                             m_streamingWorkerCV.notify_one();
                             return { m_streamingReadbackFenceHandle, fenceValue };
                         }))
-                    .At(RenderGraph::ExternalInsertPoint::After("CLodShadow::HierarchicalCullingPass2"))
+                    .At(RenderGraph::ExternalInsertPoint::After("PresentPass"))
                     .PreferQueue(QueueKind::Copy));
         }
     }
