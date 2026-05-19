@@ -121,6 +121,7 @@ void DynamicBuffer::StageOrUpload(const void* data, size_t size, size_t offset) 
     const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
     if (staged) {
+        MarkUploadPolicyDirty();
         return;
     }
 

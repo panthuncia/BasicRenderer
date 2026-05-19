@@ -693,7 +693,7 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants, includ
     MiscEnableShadows = UintRootConstant24,
     MiscEnablePunctualLights = UintRootConstant25,
     MiscEnableGTAO = UintRootConstant26,
-	NumMiscUintRootConstants
+	NumMiscUintRootConstants = UintRootConstant27 + 1
 };
 
 enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manually

@@ -298,8 +298,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 				meshInstance->SyncSkinningStateFromSkeleton();
 			}
 
-			// Increment material usage count
-			meshInstance->GetMesh()->material->EnsureTexturesUploaded(*m_managerInterface.GetTextureFactory());
+			// Register material residency. MaterialManager drains texture/material GPU updates from dirty queues.
 			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
 			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
 			meshInstance->GetMesh()->SetMaterialDataIndex(materialDataIndex);

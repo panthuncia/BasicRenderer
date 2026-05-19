@@ -97,6 +97,9 @@ public:
 
     void EndBulkWrite(size_t dirtyOffset, size_t dirtySize) {
         m_uploadPolicyState.CommitBulkRegion(dirtyOffset, dirtySize);
+        if (m_uploadPolicyState.HasPendingWork()) {
+            MarkUploadPolicyDirty();
+        }
     }
 
     uint64_t Size() {
@@ -115,6 +118,10 @@ public:
     void OnUploadPolicyFlush() override {
         SyncUploadPolicyState();
         m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
+    }
+
+    bool HasPendingUploadPolicyWork() const override {
+        return m_uploadPolicyState.HasPendingWork();
     }
 
 private:
@@ -241,6 +248,7 @@ private:
         const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
         if (staged) {
+            MarkUploadPolicyDirty();
             return;
         }
 

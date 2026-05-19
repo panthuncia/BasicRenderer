@@ -56,6 +56,10 @@ private:
         m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
     }
 
+    bool HasPendingUploadPolicyWork() const override {
+        return m_uploadPolicyState.HasPendingWork();
+    }
+
     void OnSetName() override;
 
     void AssignDescriptorSlots();

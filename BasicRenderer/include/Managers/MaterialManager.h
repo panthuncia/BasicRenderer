@@ -14,6 +14,8 @@ namespace rg::runtime {
 class IReadbackService;
 }
 
+class TextureFactory;
+
 struct MaterialTextureStreamingStats {
 	uint32_t uniqueMaterialTextureCount = 0;
 	uint32_t uniqueStreamableTextureCount = 0;
@@ -40,10 +42,12 @@ public:
 	void IncrementMaterialUsageCount(Material& material);
 	void DecrementMaterialUsageCount(const Material& material);
 	void BeginTextureStreamingFeedbackFrame(uint64_t frameIndex);
+	void ProcessPendingMaterialUpdates(uint64_t frameIndex, TextureFactory& textureFactory);
 	void RequestTextureStreamingFeedbackReadback(rg::runtime::IReadbackService* readbackService);
 	MaterialTextureStreamingStats GetMaterialTextureStreamingStats() const;
 
 	void UpdateMaterialDataBuffer(Material& material);
+	void MarkMaterialDirty(Material& material);
 	void UpdateOpenPBRMaterialDataBuffer(unsigned int materialSlot, const PerMaterialOpenPBRCB& data) {
 		m_perMaterialOpenPBRDataBuffer->UpdateAt(materialSlot, data);
 	}
@@ -78,14 +82,22 @@ private:
 	void UpdateMaterialTextureUsage(const Material& material, int delta);
 	void RefreshMaterialTextureUsage(const Material& material);
 	void UpdateTrackedMaterialTextureRefs(const std::vector<std::shared_ptr<Resource>>& textures, int delta);
+	void TrackMaterialTextureAssets(const Material& material, int delta);
 	void UpdateTextureStreamingMetadata(const Material& material);
 	void UpdateTextureStreamingMetadata(const std::shared_ptr<TextureAsset>& texture);
+	void MarkTextureStreamingMetadataDirty(const std::shared_ptr<TextureAsset>& texture, bool needsUploadAdvance = false);
+	void FlushDirtyMaterial(Material& material);
+	void FlushDirtyTextureMetadata(const std::shared_ptr<TextureAsset>& texture);
+	void EnsureTextureUploadAdvanced(const std::shared_ptr<TextureAsset>& texture, TextureFactory& textureFactory);
 
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
 	std::shared_ptr<ResourceGroup> m_activeMaterialTextureGroup;
 	std::unordered_map<uint64_t, uint32_t> m_materialTextureUsageCounts;
 	std::unordered_map<uint32_t, std::vector<std::shared_ptr<Resource>>> m_trackedMaterialTextures;
+	std::unordered_map<uint32_t, Material*> m_activeMaterialsByID;
+	std::unordered_map<uint32_t, std::vector<uint32_t>> m_materialStreamingTextureIDs;
+	std::unordered_map<uint32_t, std::unordered_set<uint32_t>> m_streamingTextureMaterialIDs;
 	std::unordered_map <MaterialCompileFlags, unsigned int> m_compileFlagsSlotMapping;
 	std::atomic<unsigned int> m_nextCompileFlagsSlot;
 	std::vector<unsigned int> m_freeCompileFlagsSlots;
@@ -99,6 +111,13 @@ private:
 	std::vector<unsigned int> m_freeMaterialSlots;
 	std::vector<unsigned int> m_materialUsageCounts = { };
 	std::unordered_map <unsigned int, unsigned int> m_materialIDSlotMapping;
+	struct MaterialGpuUploadSignature {
+		PerMaterialCB materialData = {};
+		PerMaterialEvalCB evalData = {};
+		PerMaterialOpenPBRCB openPBRData = {};
+		bool valid = false;
+	};
+	std::vector<MaterialGpuUploadSignature> m_materialUploadSignatures;
 
 	static constexpr unsigned int kBufferGrowthSize = 100;
 
@@ -126,9 +145,16 @@ private:
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_textureStreamingFeedbackBuffer;
 	std::unordered_map<uint64_t, std::weak_ptr<TextureAsset>> m_materialTextureAssetsByImageResourceID;
 	std::unordered_map<uint32_t, std::weak_ptr<TextureAsset>> m_streamingTexturesByID;
+	std::unordered_map<uint32_t, uint64_t> m_textureStreamingMetadataRevisions;
 	std::vector<uint32_t> m_activeTextureStreamingFeedbackIDs;
 	std::unordered_set<uint32_t> m_activeTextureStreamingFeedbackIDSet;
 	std::mutex m_textureStreamingFeedbackMutex;
 	std::vector<std::pair<uint32_t, uint32_t>> m_pendingTextureStreamingFeedback;
+	std::vector<uint32_t> m_dirtyMaterialIDs;
+	std::unordered_set<uint32_t> m_dirtyMaterialIDSet;
+	std::vector<uint32_t> m_dirtyTextureStreamingIDs;
+	std::unordered_set<uint32_t> m_dirtyTextureStreamingIDSet;
+	std::vector<uint32_t> m_texturesNeedingUploadAdvance;
+	std::unordered_set<uint32_t> m_texturesNeedingUploadAdvanceSet;
 	uint32_t m_textureStreamingMetadataCapacity = 1u;
 };

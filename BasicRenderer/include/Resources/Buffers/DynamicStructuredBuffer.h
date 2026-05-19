@@ -102,6 +102,10 @@ private:
         m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
     }
 
+    bool HasPendingUploadPolicyWork() const override {
+        return m_uploadPolicyState.HasPendingWork();
+    }
+
     void OnSetName() override {
         SetBackingName(m_name, name);
     }
@@ -156,6 +160,7 @@ private:
         const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
         if (staged) {
+            MarkUploadPolicyDirty();
             return;
         }
 

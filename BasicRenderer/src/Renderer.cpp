@@ -762,8 +762,6 @@ void Renderer::RunRenderResourceSyncStage() {
         Components::MeshInstances* meshInstances;
     };
     std::vector<ObjectSyncItem> objectItems;
-    std::vector<Material*> activeMaterials;
-    std::unordered_set<uint32_t> activeMaterialIds;
     {
         ZoneScopedN("Renderer::Update::RenderResourceSync::CollectObjectsAndMaterials");
         m_renderSyncObjectQuery.run([&](flecs::iter& it) {
@@ -774,26 +772,6 @@ void Renderer::RunRenderResourceSyncStage() {
                 auto meshInstances = it.field<Components::MeshInstances>(3);
                 for (auto i : it) {
                     objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i], &meshInstances[i] });
-
-                    for (const auto& meshInstance : meshInstances[i].meshInstances) {
-                        if (!meshInstance) {
-                            continue;
-                        }
-
-                        auto mesh = meshInstance->GetMesh();
-                        if (!mesh || !mesh->material) {
-                            continue;
-                        }
-
-                        Material* material = mesh->material.get();
-                        if (!material) {
-                            continue;
-                        }
-
-                        if (activeMaterialIds.insert(material->GetMaterialID()).second) {
-                            activeMaterials.push_back(material);
-                        }
-                    }
                 }
             }
         });
@@ -801,60 +779,10 @@ void Renderer::RunRenderResourceSyncStage() {
 
     auto* textureFactory = m_managerInterface.GetTextureFactory();
     auto* materialManager = m_managerInterface.GetMaterialManager();
-    if (materialManager) {
-        ZoneScopedN("Renderer::Update::RenderResourceSync::BeginTextureFeedbackFrame");
-        const uint64_t nextFrameIndex = m_totalFramesRendered + 1u;
-        materialManager->BeginTextureStreamingFeedbackFrame(nextFrameIndex);
-    }
     if (textureFactory && materialManager) {
-        std::vector<DirectStorageAsyncRequestHandle> initialTextureUploadHandles;
-        std::unordered_set<uint32_t> queuedTextureIds;
-        queuedTextureIds.reserve(activeMaterials.size() * 4u);
-
-        {
-            ZoneScopedN("Renderer::Update::RenderResourceSync::QueueInitialTextureUploads");
-            for (Material* material : activeMaterials) {
-                if (!material) {
-                    continue;
-                }
-
-                material->ForEachReferencedTexture([&](const std::shared_ptr<TextureAsset>& texture) {
-                    if (!texture) {
-                        return;
-                    }
-
-                    if (!queuedTextureIds.insert(texture->GetStreamingTextureID()).second) {
-                        return;
-                    }
-
-                    DirectStorageAsyncRequestHandle handle = texture->QueueInitialDirectStorageUploadIfNeeded();
-                    if (handle.IsValid()) {
-                        initialTextureUploadHandles.push_back(std::move(handle));
-                    }
-                });
-            }
-        }
-
-        if (!initialTextureUploadHandles.empty()) {
-            ZoneScopedN("Renderer::Update::RenderResourceSync::WaitInitialTextureUploads");
-            std::string directStorageWaitMessage;
-            if (!DirectStorageManager::GetInstance().WaitForRequests(initialTextureUploadHandles, &directStorageWaitMessage) &&
-                !directStorageWaitMessage.empty()) {
-                spdlog::debug("Renderer: batched DirectStorage material upload wait reported '{}'", directStorageWaitMessage);
-            }
-        }
-
-        {
-            ZoneScopedN("Renderer::Update::RenderResourceSync::UpdateMaterialTextures");
-            for (Material* material : activeMaterials) {
-                if (!material) {
-                    continue;
-                }
-
-                material->EnsureTexturesUploaded(*textureFactory);
-                materialManager->UpdateMaterialDataBuffer(*material);
-            }
-        }
+        ZoneScopedN("Renderer::Update::RenderResourceSync::ProcessPendingMaterialUpdates");
+        const uint64_t nextFrameIndex = m_totalFramesRendered + 1u;
+        materialManager->ProcessPendingMaterialUpdates(nextFrameIndex, *textureFactory);
     }
 
     auto* objectManager = m_managerInterface.GetObjectManager();
