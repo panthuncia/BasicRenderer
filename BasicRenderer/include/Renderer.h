@@ -253,9 +253,9 @@ private:
     flecs::query<Components::Matrix, Components::Light> m_renderSyncLightQuery;
     flecs::query<> m_renderTransformUpdatedCleanupQuery;
     bool m_renderSyncQueriesBuilt = false;
-    std::shared_ptr<br::render::SceneFrameSnapshot> m_committedSceneSnapshot;
     std::shared_ptr<br::render::SceneFrameSnapshot> m_completedSceneSnapshot;
     mutable std::mutex m_sceneSnapshotMutex;
+    bool m_hasCommittedSceneSnapshot = false;
     std::atomic<bool> m_sceneTaskInFlight = false;
     std::atomic<bool> m_sceneTaskCompleted = false;
     std::atomic<uint64_t> m_sceneOverlapEpoch = 1;

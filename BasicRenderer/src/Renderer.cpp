@@ -505,7 +505,7 @@ void Renderer::InvalidateSceneOverlapState() {
     m_sceneTaskCompleted.store(false);
     {
         std::scoped_lock lock(m_sceneSnapshotMutex);
-        m_committedSceneSnapshot.reset();
+        m_hasCommittedSceneSnapshot = false;
         m_completedSceneSnapshot.reset();
     }
 }
@@ -596,7 +596,7 @@ void Renderer::FlushPendingSceneExplorerEdits() {
 void Renderer::BootstrapCommittedSceneSnapshot() {
     if (!currentScene) {
         std::scoped_lock lock(m_sceneSnapshotMutex);
-        m_committedSceneSnapshot.reset();
+        m_hasCommittedSceneSnapshot = false;
         return;
     }
 
@@ -605,18 +605,21 @@ void Renderer::BootstrapCommittedSceneSnapshot() {
     m_sceneRenderBridge.IngestSnapshot(*snapshot, m_managerInterface);
 
     std::scoped_lock lock(m_sceneSnapshotMutex);
-    m_committedSceneSnapshot = std::move(snapshot);
-    m_lastCommittedSceneSnapshotSequence = m_committedSceneSnapshot->snapshotSequence;
-    m_lastCommittedSceneSourceFrame = m_committedSceneSnapshot->sourceFrameNumber;
+    m_hasCommittedSceneSnapshot = true;
+    m_lastCommittedSceneSnapshotSequence = snapshot->snapshotSequence;
+    m_lastCommittedSceneSourceFrame = snapshot->sourceFrameNumber;
 }
 
 void Renderer::CommitCompletedSceneSnapshot() {
+    ZoneScopedN("Renderer::CommitCompletedSceneSnapshot");
+
     if (!m_sceneTaskCompleted.exchange(false)) {
         return;
     }
 
     std::shared_ptr<br::render::SceneFrameSnapshot> completedSnapshot;
     {
+        ZoneScopedN("Renderer::CommitCompletedSceneSnapshot::TakeCompletedSnapshot");
         std::scoped_lock lock(m_sceneSnapshotMutex);
         completedSnapshot = std::exchange(m_completedSceneSnapshot, nullptr);
     }
@@ -629,12 +632,16 @@ void Renderer::CommitCompletedSceneSnapshot() {
         return;
     }
 
-    m_sceneRenderBridge.IngestSnapshot(*completedSnapshot, m_managerInterface);
     {
+        ZoneScopedN("Renderer::CommitCompletedSceneSnapshot::IngestSnapshot");
+        m_sceneRenderBridge.IngestSnapshot(*completedSnapshot, m_managerInterface);
+    }
+    {
+        ZoneScopedN("Renderer::CommitCompletedSceneSnapshot::PublishCommittedSnapshot");
         std::scoped_lock lock(m_sceneSnapshotMutex);
-        m_committedSceneSnapshot = std::move(completedSnapshot);
-        m_lastCommittedSceneSnapshotSequence = m_committedSceneSnapshot->snapshotSequence;
-        m_lastCommittedSceneSourceFrame = m_committedSceneSnapshot->sourceFrameNumber;
+        m_hasCommittedSceneSnapshot = true;
+        m_lastCommittedSceneSnapshotSequence = completedSnapshot->snapshotSequence;
+        m_lastCommittedSceneSourceFrame = completedSnapshot->sourceFrameNumber;
     }
 }
 
@@ -699,7 +706,7 @@ void Renderer::ScheduleSceneUpdateTask(float elapsedSeconds) {
 
 bool Renderer::HasCommittedSceneSnapshot() const {
     std::scoped_lock lock(m_sceneSnapshotMutex);
-    return static_cast<bool>(m_committedSceneSnapshot);
+    return m_hasCommittedSceneSnapshot;
 }
 
 bool Renderer::NeedsSceneSnapshotBootstrap() const {
@@ -720,7 +727,7 @@ br::render::SceneOverlapStatus Renderer::GetSceneOverlapStatus() const {
     status.taskInFlight = m_sceneTaskInFlight.load();
 
     std::scoped_lock lock(m_sceneSnapshotMutex);
-    status.hasCommittedSnapshot = static_cast<bool>(m_committedSceneSnapshot);
+    status.hasCommittedSnapshot = m_hasCommittedSceneSnapshot;
     status.committedSnapshotSequence = m_lastCommittedSceneSnapshotSequence;
     status.lastCompletedSnapshotSequence = m_lastCompletedSceneSnapshotSequence;
     status.lastCommittedSourceFrame = m_lastCommittedSceneSourceFrame;
