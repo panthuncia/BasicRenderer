@@ -268,6 +268,34 @@ SkinningInfluences SWDecodePackedWeights(
     return skinning;
 }
 
+void SWRasterClipScanlineConstraint(
+    float value,
+    float step,
+    inout int firstPixelOffset,
+    inout int lastPixelOffset,
+    inout bool hasPixels)
+{
+    if (!hasPixels)
+    {
+        return;
+    }
+
+    if (step > 0.0f)
+    {
+        firstPixelOffset = max(firstPixelOffset, int(ceil(-value / step)));
+    }
+    else if (step < 0.0f)
+    {
+        lastPixelOffset = min(lastPixelOffset, int(floor(value / -step)));
+    }
+    else
+    {
+        hasPixels = value >= 0.0f;
+    }
+
+    hasPixels = hasPixels && firstPixelOffset <= lastPixelOffset;
+}
+
 void SWRasterCluster(
     uint4 packedCluster,
     uint unsortedClusterIndex,
@@ -478,53 +506,116 @@ void SWRasterCluster(
 
         float scanline_b0 = row_b0;
         float scanline_b1 = row_b1;
+        const float dx_b2 = -(dx_b0 + dx_b1);
+        const int rectWidth = maxPx.x - minPx.x + 1;
+        const bool useScanlineRanges = WaveActiveAnyTrue(rectWidth > 4);
 
-        for (int py = minPx.y; py <= maxPx.y; py++)
+        if (useScanlineRanges)
         {
-            float b0 = scanline_b0;
-            float b1 = scanline_b1;
-
-            for (int px = minPx.x; px <= maxPx.x; px++)
+            for (int py = minPx.y; py <= maxPx.y; py++)
             {
-                float b2 = 1.0f - b0 - b1;
+                const float scanline_b2 = 1.0f - scanline_b0 - scanline_b1;
+                int firstPixelOffset = 0;
+                int lastPixelOffset = rectWidth - 1;
+                bool hasPixels = true;
 
-                if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f)
+                SWRasterClipScanlineConstraint(scanline_b0, dx_b0, firstPixelOffset, lastPixelOffset, hasPixels);
+                SWRasterClipScanlineConstraint(scanline_b1, dx_b1, firstPixelOffset, lastPixelOffset, hasPixels);
+                SWRasterClipScanlineConstraint(scanline_b2, dx_b2, firstPixelOffset, lastPixelOffset, hasPixels);
+
+                if (hasPixels)
                 {
+                    float b0 = scanline_b0 + float(firstPixelOffset) * dx_b0;
+                    float b1 = scanline_b1 + float(firstPixelOffset) * dx_b1;
+
+                    for (int px = minPx.x + firstPixelOffset; px <= minPx.x + lastPixelOffset; px++)
+                    {
+                        float b2 = 1.0f - b0 - b1;
 #if defined(PSO_ALPHA_TEST) || defined(CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST)
-                    const float pc0 = b0 * invW0;
-                    const float pc1 = b1 * invW1;
-                    const float pc2 = b2 * invW2;
-                    const float invSum = rcp(pc0 + pc1 + pc2);
-                    const float2 texcoord =
-                        (gs_texcoord[tri.x] * pc0 + gs_texcoord[tri.y] * pc1 + gs_texcoord[tri.z] * pc2) * invSum;
-                    if (SWAlphaTestFailed(texcoord, materialDataIndex))
-                    {
-                        b0 += dx_b0;
-                        b1 += dx_b1;
-                        continue;
-                    }
+                        const float pc0 = b0 * invW0;
+                        const float pc1 = b1 * invW1;
+                        const float pc2 = b2 * invW2;
+                        const float invSum = rcp(pc0 + pc1 + pc2);
+                        const float2 texcoord =
+                            (gs_texcoord[tri.x] * pc0 + gs_texcoord[tri.y] * pc1 + gs_texcoord[tri.z] * pc2) * invSum;
+                        if (SWAlphaTestFailed(texcoord, materialDataIndex))
+                        {
+                            b0 += dx_b0;
+                            b1 += dx_b1;
+                            continue;
+                        }
 #endif
-                    if (swRasterDebugMode)
-                    {
-                        WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(1u));
-                    }
+                        if (swRasterDebugMode)
+                        {
+                            WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(1u));
+                        }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-                    float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
-                    SWRasterWriteVirtualShadow(uint2(px, py), viewID, depth);
+                        float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
+                        SWRasterWriteVirtualShadow(uint2(px, py), viewID, depth);
 #else
-                    float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
-                    uint64_t visKey = PackVisKey(depth, unsortedClusterIndex, t);
-                    InterlockedMin(visBuffer[uint2(px, py)], visKey);
+                        float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
+                        uint64_t visKey = PackVisKey(depth, unsortedClusterIndex, t);
+                        InterlockedMin(visBuffer[uint2(px, py)], visKey);
 #endif
+                        b0 += dx_b0;
+                        b1 += dx_b1;
+                    }
                 }
 
-                b0 += dx_b0;
-                b1 += dx_b1;
+                scanline_b0 += dy_b0;
+                scanline_b1 += dy_b1;
             }
+        }
+        else
+        {
+            for (int py = minPx.y; py <= maxPx.y; py++)
+            {
+                float b0 = scanline_b0;
+                float b1 = scanline_b1;
 
-            scanline_b0 += dy_b0;
-            scanline_b1 += dy_b1;
+                for (int px = minPx.x; px <= maxPx.x; px++)
+                {
+                    float b2 = 1.0f - b0 - b1;
+
+                    if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f)
+                    {
+#if defined(PSO_ALPHA_TEST) || defined(CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST)
+                        const float pc0 = b0 * invW0;
+                        const float pc1 = b1 * invW1;
+                        const float pc2 = b2 * invW2;
+                        const float invSum = rcp(pc0 + pc1 + pc2);
+                        const float2 texcoord =
+                            (gs_texcoord[tri.x] * pc0 + gs_texcoord[tri.y] * pc1 + gs_texcoord[tri.z] * pc2) * invSum;
+                        if (SWAlphaTestFailed(texcoord, materialDataIndex))
+                        {
+                            b0 += dx_b0;
+                            b1 += dx_b1;
+                            continue;
+                        }
+#endif
+                        if (swRasterDebugMode)
+                        {
+                            WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(1u));
+                        }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                        float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
+                        SWRasterWriteVirtualShadow(uint2(px, py), viewID, depth);
+#else
+                        float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
+                        uint64_t visKey = PackVisKey(depth, unsortedClusterIndex, t);
+                        InterlockedMin(visBuffer[uint2(px, py)], visKey);
+#endif
+                    }
+
+                    b0 += dx_b0;
+                    b1 += dx_b1;
+                }
+
+                scanline_b0 += dy_b0;
+                scanline_b1 += dy_b1;
+            }
         }
     }
 }
