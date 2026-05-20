@@ -124,6 +124,14 @@ public:
         return m_uploadPolicyState.HasPendingWork();
     }
 
+    uint64_t GetUploadPolicyLastFlushWrites() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedWrites;
+    }
+
+    uint64_t GetUploadPolicyLastFlushBytes() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedBytes;
+    }
+
 private:
     LazyDynamicStructuredBuffer(UINT capacity = 64, std::string name = "", uint64_t alignment = 1, bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {

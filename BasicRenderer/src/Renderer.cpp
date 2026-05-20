@@ -748,6 +748,7 @@ void Renderer::RunRenderResourceSyncStage() {
         ZoneScopedN("Renderer::Update::RenderResourceSync::BuildQueries");
         m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo, Components::MeshInstances>()
             .with<Components::Active>()
+            .with<Components::RenderTransformUpdated>()
             .build();
         m_renderSyncCameraQuery = world.query_builder<Components::Matrix, Components::Camera, Components::RenderViewRef>()
             .with<Components::Active>()
@@ -793,12 +794,10 @@ void Renderer::RunRenderResourceSyncStage() {
     }
 
     auto* objectManager = m_managerInterface.GetObjectManager();
-    size_t perObjectDirtyBegin = 0;
-    size_t perObjectDirtyEnd = 0;
-    size_t normalMatrixDirtyBegin = 0;
-    size_t normalMatrixDirtyEnd = 0;
-    bool hasObjectDirtyRange = false;
-    bool hasNormalMatrixDirtyRange = false;
+    std::vector<std::pair<size_t, size_t>> perObjectDirtyRanges;
+    std::vector<std::pair<size_t, size_t>> normalMatrixDirtyRanges;
+    perObjectDirtyRanges.reserve(objectItems.size());
+    normalMatrixDirtyRanges.reserve(objectItems.size());
 
     {
         ZoneScopedN("Renderer::Update::RenderResourceSync::ScanObjectDirtyRanges");
@@ -807,24 +806,8 @@ void Renderer::RunRenderResourceSyncStage() {
             const size_t perObjectEnd = perObjectBegin + sizeof(PerObjectCB);
             const size_t normalMatrixBegin = item.drawInfo->normalMatrixView->GetOffset();
             const size_t normalMatrixEnd = normalMatrixBegin + sizeof(DirectX::XMFLOAT4X4);
-
-            if (!hasObjectDirtyRange) {
-                perObjectDirtyBegin = perObjectBegin;
-                perObjectDirtyEnd = perObjectEnd;
-                hasObjectDirtyRange = true;
-            } else {
-                perObjectDirtyBegin = std::min(perObjectDirtyBegin, perObjectBegin);
-                perObjectDirtyEnd = std::max(perObjectDirtyEnd, perObjectEnd);
-            }
-
-            if (!hasNormalMatrixDirtyRange) {
-                normalMatrixDirtyBegin = normalMatrixBegin;
-                normalMatrixDirtyEnd = normalMatrixEnd;
-                hasNormalMatrixDirtyRange = true;
-            } else {
-                normalMatrixDirtyBegin = std::min(normalMatrixDirtyBegin, normalMatrixBegin);
-                normalMatrixDirtyEnd = std::max(normalMatrixDirtyEnd, normalMatrixEnd);
-            }
+            perObjectDirtyRanges.emplace_back(perObjectBegin, perObjectEnd);
+            normalMatrixDirtyRanges.emplace_back(normalMatrixBegin, normalMatrixEnd);
         }
     }
 
@@ -879,11 +862,40 @@ void Renderer::RunRenderResourceSyncStage() {
     // grown backing every frame scales badly on large scenes and can starve the frame.
     {
         ZoneScopedN("Renderer::Update::RenderResourceSync::CommitObjectBulkWrites");
-        if (hasObjectDirtyRange) {
-            objectManager->EndPerObjectBulkWrite(perObjectDirtyBegin, perObjectDirtyEnd - perObjectDirtyBegin);
+        const auto commitRanges = [](auto& ranges, auto&& commit) {
+            if (ranges.empty()) {
+                return;
+            }
+            std::sort(ranges.begin(), ranges.end(), [](const auto& lhs, const auto& rhs) {
+                return lhs.first < rhs.first;
+            });
+
+            size_t begin = ranges.front().first;
+            size_t end = ranges.front().second;
+            for (size_t i = 1; i < ranges.size(); ++i) {
+                const auto [nextBegin, nextEnd] = ranges[i];
+                if (nextBegin <= end) {
+                    end = std::max(end, nextEnd);
+                    continue;
+                }
+                commit(begin, end - begin);
+                begin = nextBegin;
+                end = nextEnd;
+            }
+            commit(begin, end - begin);
+        };
+
+        {
+            ZoneScopedN("Renderer::Update::RenderResourceSync::CommitPerObjectRanges");
+            commitRanges(perObjectDirtyRanges, [objectManager](size_t offset, size_t size) {
+                objectManager->EndPerObjectBulkWrite(offset, size);
+            });
         }
-        if (hasNormalMatrixDirtyRange) {
-            objectManager->EndNormalMatrixBulkWrite(normalMatrixDirtyBegin, normalMatrixDirtyEnd - normalMatrixDirtyBegin);
+        {
+            ZoneScopedN("Renderer::Update::RenderResourceSync::CommitNormalMatrixRanges");
+            commitRanges(normalMatrixDirtyRanges, [objectManager](size_t offset, size_t size) {
+                objectManager->EndNormalMatrixBulkWrite(offset, size);
+            });
         }
     }
 

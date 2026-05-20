@@ -60,6 +60,14 @@ private:
         return m_uploadPolicyState.HasPendingWork();
     }
 
+    uint64_t GetUploadPolicyLastFlushWrites() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedWrites;
+    }
+
+    uint64_t GetUploadPolicyLastFlushBytes() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedBytes;
+    }
+
     void OnSetName() override;
 
     void AssignDescriptorSlots();

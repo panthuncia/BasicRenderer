@@ -55,6 +55,14 @@ public:
         return m_uploadPolicyState.HasPendingWork();
     }
 
+    uint64_t GetUploadPolicyLastFlushWrites() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedWrites;
+    }
+
+    uint64_t GetUploadPolicyLastFlushBytes() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedBytes;
+    }
+
     size_t Size() const {
         return m_capacity;
     }
