@@ -147,7 +147,7 @@ float3 DecodeCompressedPosition(
     uint pagePoolSlabDescriptorIndex)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    return CLodLoadNativePositionFloat3(slab, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
+    return CLodLoadPagePosition(slab, quantExp, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
 }
 
 float2 UnpackSnorm16x2(uint packed)
@@ -995,7 +995,7 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     }
     setup.vertOffset = 0;
 
-    // Per-meshlet compression from descriptor
+    // Per-meshlet page stream addressing from descriptor
     setup.bitsX = CLodDescBitsX(desc);
     setup.bitsY = CLodDescBitsY(desc);
     setup.bitsZ = CLodDescBitsZ(desc);

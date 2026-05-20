@@ -1999,6 +1999,7 @@ void Renderer::Render() {
 
         if (m_context.rayTracedReflectionsEnabled && m_clodRayTracingSystem && m_pMeshManager) {
             m_clodRayTracingSystem->Refresh(*m_pMeshManager);
+            m_clodRayTracingSystem->UpdateGpuResources(deviceManager.GetDevice(), deviceManager.GetRayTracingFeatures());
         }
         else if (m_clodRayTracingSystem) {
             m_clodRayTracingSystem->Reset();

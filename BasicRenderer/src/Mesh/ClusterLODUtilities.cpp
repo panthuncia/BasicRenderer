@@ -1185,10 +1185,15 @@ namespace
 			struct PerMeshletCompression {
 				std::array<int32_t, 3> minQ;
 				uint32_t bitsX, bitsY, bitsZ;
-				uint32_t totalPositionBytes;
 				uint32_t attributeMask = 0;
 				std::vector<uint32_t> boneList;
 				std::vector<PerUvSetCompression> uvSets;
+			};
+
+			auto GetMeshletPositionBytes = [](const meshopt_Meshlet& meshlet) -> uint32_t
+			{
+				static_assert(CLOD_NATIVE_POSITION_FORMAT == CLOD_POSITION_FORMAT_FLOAT3);
+				return meshlet.vertex_count * CLOD_NATIVE_POSITION_STRIDE_BYTES;
 			};
 
 			const uint32_t totalMeshlets = static_cast<uint32_t>(output.meshlets.size());
@@ -1223,7 +1228,6 @@ namespace
 				comp.bitsX = BitsNeededForRange(static_cast<uint32_t>(meshletMaxQ[0] - meshletMinQ[0]));
 				comp.bitsY = BitsNeededForRange(static_cast<uint32_t>(meshletMaxQ[1] - meshletMinQ[1]));
 				comp.bitsZ = BitsNeededForRange(static_cast<uint32_t>(meshletMaxQ[2] - meshletMinQ[2]));
-				comp.totalPositionBytes = meshlet.vertex_count * CLOD_NATIVE_POSITION_STRIDE_BYTES;
 				if (hasNormals)
 				{
 					comp.attributeMask |= CLOD_PAGE_ATTRIBUTE_NORMAL;
@@ -1340,7 +1344,7 @@ namespace
 				{
 					const auto& meshlet = output.meshlets[meshletIndex];
 					const auto& comp = perMeshletComp[meshletIndex];
-					totals.totalPositionBytes += comp.totalPositionBytes;
+					totals.totalPositionBytes += GetMeshletPositionBytes(meshlet);
 					totals.totalVertexCount += meshlet.vertex_count;
 					for (uint32_t uvSetIndex = 0; uvSetIndex < pageUvSetCount; ++uvSetIndex)
 					{
@@ -1637,7 +1641,7 @@ namespace
 						const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
 						pagePositions.push_back(groupPositions[gv]);
 					}
-					pagePositionByteCursor += meshlet.vertex_count * CLOD_NATIVE_POSITION_STRIDE_BYTES;
+					pagePositionByteCursor += GetMeshletPositionBytes(meshlet);
 
 					// Append per-meshlet compressed normals
 					if (pageHasNormals)

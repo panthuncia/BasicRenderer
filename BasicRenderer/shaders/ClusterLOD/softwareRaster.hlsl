@@ -52,7 +52,7 @@ float3 SWDecodeCompressedPosition(
     uint pagePoolSlabDescriptorIndex)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    return CLodLoadNativePositionFloat3(slab, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
+    return CLodLoadPagePosition(slab, quantExp, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
 }
 
 // Triangle index decode (mirrors meshletCommon.hlsli)

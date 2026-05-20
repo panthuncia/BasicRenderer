@@ -50,6 +50,7 @@
 #include "ShaderBuffers.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodRayTracingSystem.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Telemetry/FrameTaskGraphTelemetry.h"
 #include "Managers/Singletons/RendererECSManager.h"
@@ -1775,6 +1776,20 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             rtFeatures.clusterAccelerationStructure ? "yes" : "no",
             rtFeatures.maxClusterVertices,
             rtFeatures.maxClusterTriangles);
+        if (context.clodRayTracingSystem) {
+            const auto& clodRtStats = context.clodRayTracingSystem->GetStats();
+            ImGui::TextDisabled(
+                "CLod RT: groups %u pages %u clusters %u, GPU %s, CLAS %s, BLAS %s, TLAS %s, pipeline %s, trace %s",
+                clodRtStats.residentGroups,
+                clodRtStats.residentPages,
+                clodRtStats.buildableClusters,
+                clodRtStats.gpuResourcesReady ? "yes" : "no",
+                clodRtStats.clasBuildSubmitted ? "yes" : "no",
+                clodRtStats.blasBuildSubmitted ? "yes" : "no",
+                clodRtStats.tlasBuildSubmitted ? "yes" : "no",
+                clodRtStats.rayPipelineReady ? "yes" : "no",
+                clodRtStats.traceRaysSubmitted ? "yes" : "no");
+        }
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);
         }

@@ -55,12 +55,12 @@ struct MeshletSetup
     uint prevPostSkinningBufferOffset;
     uint groupMeshletTrianglesByteOffset; // Non-CLod triangle buffer offset
 
-    // Per-meshlet compression from CLodMeshletDescriptor
+    // Per-meshlet page stream addressing from CLodMeshletDescriptor
     uint bitsX;
     uint bitsY;
     uint bitsZ;
     int3 minQ;
-    uint positionBitOffset;     // bit offset within page position bitstream
+    uint positionBitOffset;     // byte offset within page position stream
     uint vertexAttributeOffset; // element offset within page vertex-attribute arrays
     uint triangleByteOffset;    // byte offset within page triangle stream
     uint boneListOffset;        // uint offset within page bone-index stream

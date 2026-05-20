@@ -112,8 +112,18 @@ uint CLodDescBoneCount(CLodMeshletDescriptor desc) { return desc.boneCount; }
 uint CLodUvDescBitsU(CLodMeshletUvDescriptor desc) { return desc.uvBits & 0xFFu; }
 uint CLodUvDescBitsV(CLodMeshletUvDescriptor desc) { return (desc.uvBits >> 8u) & 0xFFu; }
 
-float3 CLodLoadNativePositionFloat3(ByteAddressBuffer slab, uint positionStreamBase, uint positionByteOffset, uint meshletLocalVertex)
+float3 CLodLoadPagePosition(
+    ByteAddressBuffer slab,
+    uint positionFormat,
+    uint positionStreamBase,
+    uint positionByteOffset,
+    uint meshletLocalVertex)
 {
+    if (positionFormat != CLOD_POSITION_FORMAT_FLOAT3)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
     const uint addr = positionStreamBase + positionByteOffset + meshletLocalVertex * CLOD_POSITION_FORMAT_FLOAT3_STRIDE_BYTES;
     return asfloat(slab.Load3(addr));
 }

@@ -621,7 +621,7 @@ void BuildClodMaterialUvData(
 float3 DecodeCompressedPosition(uint meshletLocalVertex, MeshletResolveData d)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    return CLodLoadNativePositionFloat3(slab, d.positionBitstreamBase, d.positionBitOffset, meshletLocalVertex);
+    return CLodLoadPagePosition(slab, d.compressedPositionQuantExp, d.positionBitstreamBase, d.positionBitOffset, meshletLocalVertex);
 }
 
 float2 UnpackSnorm16x2(uint packed)

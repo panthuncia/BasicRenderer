@@ -25,7 +25,7 @@ float3 PJ_DecodeCompressedPosition(
     uint pagePoolSlabDescriptorIndex)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    return CLodLoadNativePositionFloat3(slab, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
+    return CLodLoadPagePosition(slab, quantExp, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
 }
 
 uint3 PJ_DecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteOffset, uint triLocalIndex)
