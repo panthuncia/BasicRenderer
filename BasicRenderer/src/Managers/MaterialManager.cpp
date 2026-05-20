@@ -579,7 +579,7 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, Texture
 			continue;
 		}
 
-		FlushDirtyMaterial(*materialIt->second);
+		FlushDirtyMaterial(*materialIt->second, &textureFactory);
 	}
 
 	std::vector<uint32_t> dirtyTextureIDs;
@@ -625,9 +625,12 @@ void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
 	FlushDirtyMaterial(material);
 }
 
-void MaterialManager::FlushDirtyMaterial(Material& material) {
+void MaterialManager::FlushDirtyMaterial(Material& material, TextureFactory* textureFactory) {
 	const unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
 	material.SetOpenPBRMaterialDataIndex(materialSlot);
+	if (textureFactory) {
+		material.EnsureTexturesUploaded(*textureFactory);
+	}
 
 	const PerMaterialCB materialData = material.GetData();
 	const PerMaterialEvalCB evalData = BuildMaterialEvalData(material);
@@ -666,6 +669,7 @@ void MaterialManager::EnsureTextureUploadAdvanced(const std::shared_ptr<TextureA
 
 	const uint64_t previousBindingRevision = texture->GetBindingRevision();
 	const uint64_t previousStreamingRevision = texture->GetStreamingStateRevision();
+	texture->SetGenerateMipmaps(true);
 	texture->EnsureUploaded(textureFactory);
 
 	const uint32_t streamingTextureID = texture->GetStreamingTextureID();

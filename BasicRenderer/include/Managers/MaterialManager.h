@@ -86,7 +86,7 @@ private:
 	void UpdateTextureStreamingMetadata(const Material& material);
 	void UpdateTextureStreamingMetadata(const std::shared_ptr<TextureAsset>& texture);
 	void MarkTextureStreamingMetadataDirty(const std::shared_ptr<TextureAsset>& texture, bool needsUploadAdvance = false);
-	void FlushDirtyMaterial(Material& material);
+	void FlushDirtyMaterial(Material& material, TextureFactory* textureFactory = nullptr);
 	void FlushDirtyTextureMetadata(const std::shared_ptr<TextureAsset>& texture);
 	void EnsureTextureUploadAdvanced(const std::shared_ptr<TextureAsset>& texture, TextureFactory& textureFactory);
 
