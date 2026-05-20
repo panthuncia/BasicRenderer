@@ -620,19 +620,8 @@ void BuildClodMaterialUvData(
 
 float3 DecodeCompressedPosition(uint meshletLocalVertex, MeshletResolveData d)
 {
-    uint bitsPerVertex = d.bitsX + d.bitsY + d.bitsZ;
-    uint bitCursor = d.positionBitstreamBase * 8u + d.positionBitOffset + meshletLocalVertex * bitsPerVertex;
-
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint px = ReadPackedBits32_BA(slab, bitCursor, d.bitsX);
-    bitCursor += d.bitsX;
-    uint py = ReadPackedBits32_BA(slab, bitCursor, d.bitsY);
-    bitCursor += d.bitsY;
-    uint pz = ReadPackedBits32_BA(slab, bitCursor, d.bitsZ);
-
-    int3 q = int3(px, py, pz) + d.minQ;
-    float invScale = 1.0f / float(1u << d.compressedPositionQuantExp);
-    return float3(q) * invScale;
+    return CLodLoadNativePositionFloat3(slab, d.positionBitstreamBase, d.positionBitOffset, meshletLocalVertex);
 }
 
 float2 UnpackSnorm16x2(uint packed)

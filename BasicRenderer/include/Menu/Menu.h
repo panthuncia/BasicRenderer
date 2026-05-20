@@ -675,6 +675,10 @@ private:
 	std::function<bool()> getScreenSpaceReflectionsEnabled;
 	std::function<void(bool)> setScreenSpaceReflectionsEnabled;
 
+    bool m_rayTracedReflectionsEnabled = false;
+    std::function<bool()> getRayTracedReflectionsEnabled;
+    std::function<void(bool)> setRayTracedReflectionsEnabled;
+
     bool m_jitterEnabled = true;
     std::function<bool()> getJitterEnabled;
     std::function<void(bool)> setJitterEnabled;
@@ -1145,6 +1149,11 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 	getScreenSpaceReflectionsEnabled = settingsManager.getSettingGetter<bool>("enableScreenSpaceReflections");
 	m_screenSpaceReflectionsEnabled = getScreenSpaceReflectionsEnabled();
 	observerSetting(m_screenSpaceReflectionsEnabled, "enableScreenSpaceReflections");
+
+    setRayTracedReflectionsEnabled = settingsManager.getSettingSetter<bool>("enableRayTracedReflections");
+    getRayTracedReflectionsEnabled = settingsManager.getSettingGetter<bool>("enableRayTracedReflections");
+    m_rayTracedReflectionsEnabled = getRayTracedReflectionsEnabled();
+    observerSetting(m_rayTracedReflectionsEnabled, "enableRayTracedReflections");
 
     setJitterEnabled = settingsManager.getSettingSetter<bool>("enableJitter");
     getJitterEnabled = settingsManager.getSettingGetter<bool>("enableJitter");
@@ -1747,6 +1756,25 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         if (ImGui::Checkbox("Enable Screen Space Reflections", &m_screenSpaceReflectionsEnabled)) {
             setScreenSpaceReflectionsEnabled(m_screenSpaceReflectionsEnabled);
 		}
+        const bool clodRtSupported = DeviceManager::GetInstance().GetCLodRayTracingSupported();
+        if (!clodRtSupported) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Enable Ray Traced Reflections", &m_rayTracedReflectionsEnabled)) {
+            setRayTracedReflectionsEnabled(m_rayTracedReflectionsEnabled);
+        }
+        if (!clodRtSupported) {
+            ImGui::EndDisabled();
+        }
+        const RayTracingFeatureInfo& rtFeatures = DeviceManager::GetInstance().GetRayTracingFeatures();
+        ImGui::TextDisabled(
+            "RT: pipeline %s, AS %s, GPU RTAS %s, cluster AS %s, max cluster %u verts/%u tris",
+            rtFeatures.pipeline ? "yes" : "no",
+            rtFeatures.accelerationStructure ? "yes" : "no",
+            rtFeatures.gpuRtasOperations ? "yes" : "no",
+            rtFeatures.clusterAccelerationStructure ? "yes" : "no",
+            rtFeatures.maxClusterVertices,
+            rtFeatures.maxClusterTriangles);
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);
         }

@@ -436,6 +436,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
     m_pTextureFactory = TextureFactory::CreateUnique();
+    m_clodRayTracingSystem = std::make_unique<br::render::CLodRayTracingSystem>();
     if (currentRenderGraph) {
         m_pTextureFactory->SetReadbackService(currentRenderGraph->GetReadbackService());
     }
@@ -1178,6 +1179,10 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
+    settingsManager.registerSetting<bool>("enableRayTracedReflections", m_rayTracedReflections);
+    settingsManager.registerSetting<float>("rayTracedReflectionMaxDistance", 100.0f);
+    settingsManager.registerSetting<float>("rayTracedReflectionRoughnessCutoff", 1.0f);
+    settingsManager.registerSetting<float>("rayTracedReflectionLodBias", 0.0f);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
 	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
@@ -1428,6 +1433,14 @@ void Renderer::SetSettings() {
 		m_screenSpaceReflections = newValue;
 		rebuildRenderGraph = true;
 		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableRayTracedReflections", [this](const bool& newValue) {
+        m_rayTracedReflections = newValue;
+        if (newValue && !DeviceManager::GetInstance().GetCLodRayTracingSupported() && !m_warnedRayTracedReflectionsUnsupported) {
+            m_warnedRayTracedReflectionsUnsupported = true;
+            spdlog::warn("Ray traced reflections requested, but clustered ray tracing is not supported by the active RHI backend/device.");
+        }
+        rebuildRenderGraph = true;
+        }));
 
 
 	// Indirect draws require mesh shaders (due to not having implemented indirect draws with traditional pipelines)
@@ -1973,6 +1986,8 @@ void Renderer::Render() {
         m_context.frameFenceValue = m_currentFrameFenceValue;
         m_context.renderResolution = { renderRes.x, renderRes.y };
 	    m_context.outputResolution = { outputRes.x, outputRes.y };
+        m_context.clodRayTracingSupported = deviceManager.GetCLodRayTracingSupported();
+        m_context.rayTracedReflectionsEnabled = m_rayTracedReflections && m_context.clodRayTracingSupported;
 	    m_context.viewManager = m_pViewManager.get();
 	    m_context.objectManager = m_pObjectManager.get();
 	    m_context.meshManager = m_pMeshManager.get();
@@ -1980,6 +1995,14 @@ void Renderer::Render() {
 	    m_context.lightManager = m_pLightManager.get();
 	    m_context.environmentManager = m_pEnvironmentManager.get();
 	    m_context.materialManager = m_pMaterialManager.get();
+	    m_context.clodRayTracingSystem = m_clodRayTracingSystem.get();
+
+        if (m_context.rayTracedReflectionsEnabled && m_clodRayTracingSystem && m_pMeshManager) {
+            m_clodRayTracingSystem->Refresh(*m_pMeshManager);
+        }
+        else if (m_clodRayTracingSystem) {
+            m_clodRayTracingSystem->Reset();
+        }
 	    m_context.drawStats = drawStats;
 	    m_context.deltaTime = deltaTime;
         m_context.sceneOverlapStatus = GetSceneOverlapStatus();
@@ -2001,7 +2024,7 @@ void Renderer::Render() {
 	    if (m_clusteredLighting) {
 		    globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
 	    }
-        if (m_screenSpaceReflections) {
+        if (m_screenSpaceReflections || m_context.rayTracedReflectionsEnabled) {
             globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
         }
 	    m_context.globalPSOFlags = globalPSOFlags;
@@ -2217,6 +2240,7 @@ void Renderer::Cleanup() {
 	m_pSkeletonManager.reset();
     m_pReadbackManager.reset();
     m_pTextureFactory.reset();
+    m_clodRayTracingSystem.reset();
     m_context = {};
     m_openPBRLookupResources = {};
     m_blueNoiseTexture.reset();
@@ -2626,7 +2650,15 @@ void Renderer::CreateRenderGraph() {
 
 	// Start of post-processing passes
 
-	if (m_screenSpaceReflections) {
+    const bool useRayTracedReflections = m_rayTracedReflections && DeviceManager::GetInstance().GetCLodRayTracingSupported();
+    if (m_rayTracedReflections && !useRayTracedReflections && !m_warnedRayTracedReflectionsUnsupported) {
+        m_warnedRayTracedReflectionsUnsupported = true;
+        spdlog::warn("Ray traced reflections requested, but clustered ray tracing is not supported by the active RHI backend/device.");
+    }
+    if (useRayTracedReflections) {
+        BuildRayTracedReflectionPasses(newGraph.get());
+    }
+    else if (m_screenSpaceReflections) {
         BuildSSRPasses(newGraph.get());
     }
 

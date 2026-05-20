@@ -225,6 +225,9 @@ void DeviceManager::Cleanup() {
     m_copyQueue.Reset();
     m_backend = rhi::Backend::Null;
     m_meshShadersSupported = false;
+    m_rayTracingFeatures = {};
+    m_rayTracingSupported = false;
+    m_clodRayTracingSupported = false;
 
     if (m_device) {
         m_device.Reset();
@@ -233,6 +236,9 @@ void DeviceManager::Cleanup() {
 
 void DeviceManager::CheckGPUFeatures() {
     m_meshShadersSupported = false;
+    m_rayTracingFeatures = {};
+    m_rayTracingSupported = false;
+    m_clodRayTracingSupported = false;
     if (!m_device) {
         return;
     }
@@ -240,6 +246,28 @@ void DeviceManager::CheckGPUFeatures() {
     MeshShaderFeatureInfo meshShaderFeatures{};
     if (rhi::IsOk(m_device->QueryFeatureInfo(&meshShaderFeatures.header))) {
         m_meshShadersSupported = meshShaderFeatures.meshShader;
+    }
+
+    RayTracingFeatureInfo rayTracingFeatures{};
+    if (rhi::IsOk(m_device->QueryFeatureInfo(&rayTracingFeatures.header))) {
+        m_rayTracingFeatures = rayTracingFeatures;
+        m_rayTracingSupported = rayTracingFeatures.pipeline && rayTracingFeatures.accelerationStructure;
+        m_clodRayTracingSupported = m_rayTracingSupported
+            && rayTracingFeatures.gpuRtasOperations
+            && rayTracingFeatures.clusterAccelerationStructure
+            && rayTracingFeatures.maxClusterVertices > 0u
+            && rayTracingFeatures.maxClusterTriangles > 0u;
+
+        spdlog::info(
+            "DeviceManager RT caps pipeline={} rayQuery={} indirect={} gpuRtas={} clusters={} backendTier={} maxClusterVerts={} maxClusterTris={}",
+            rayTracingFeatures.pipeline,
+            rayTracingFeatures.rayQuery,
+            rayTracingFeatures.indirect,
+            rayTracingFeatures.gpuRtasOperations,
+            rayTracingFeatures.clusterAccelerationStructure,
+            static_cast<uint32_t>(rayTracingFeatures.backendTier),
+            rayTracingFeatures.maxClusterVertices,
+            rayTracingFeatures.maxClusterTriangles);
     }
 }
 

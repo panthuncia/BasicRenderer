@@ -40,18 +40,21 @@ static const uint CLOD_PAGE_ATTRIBUTE_JOINTS = 1u << 1;
 static const uint CLOD_PAGE_ATTRIBUTE_WEIGHTS = 1u << 2;
 static const uint CLOD_PAGE_ATTRIBUTE_COLOR = 1u << 3;
 
+static const uint CLOD_POSITION_FORMAT_FLOAT3 = 1u;
+static const uint CLOD_POSITION_FORMAT_FLOAT3_STRIDE_BYTES = 12u;
+
 // Embedded at byte 0 of each page-tile. Simplified header.
 // 16 x uint32 = 64 bytes.
 struct CLodPageHeader
 {
     uint meshletCount;                // [0]
-    uint compressedPositionQuantExp;  // [1] mesh-wide quantization exponent
+    uint compressedPositionQuantExp;  // [1] CLOD_POSITION_FORMAT_* value
     uint attributeMask;               // [2] page-wide optional non-UV attribute mask
     uint uvSetCount;                  // [3] UV set count packed into this page
 
     uint descriptorOffset;            // [4] byte offset to CLodMeshletDescriptor array
     uint uvDescriptorOffset;          // [5] byte offset to CLodMeshletUvDescriptor table
-    uint positionBitstreamOffset;     // [6] byte offset to position bitstream
+    uint positionBitstreamOffset;     // [6] byte offset to native position stream
     uint normalArrayOffset;           // [7] byte offset to normal array
     uint colorArrayOffset;            // [8] byte offset to RGBA8_UNORM color array per vertex
     uint jointArrayOffset;            // [9] byte offset to two-uint4 joint array per vertex
@@ -63,20 +66,20 @@ struct CLodPageHeader
     uint reserved1;
 };
 
-// Per-meshlet descriptor. Self-contained: non-UV compression params, bounds, LOD metadata.
+// Per-meshlet descriptor. Self-contained stream offsets, bounds, and LOD metadata.
 // 16 x uint32 = 64 bytes = 4 x Load4.
 struct CLodMeshletDescriptor
 {
-    uint positionBitOffset;           // [0] bit offset into page position bitstream
+    uint positionBitOffset;           // [0] byte offset into page native position stream
     uint vertexAttributeOffset;       // [1] element offset into page vertex-attribute arrays
     uint triangleByteOffset;          // [2] byte offset into page triangle stream
     uint boneListOffset;              // [3] uint offset into page bone-index stream
 
-    int  minQx;                       // [4] per-meshlet quantization offset X
-    int  minQy;                       // [5] per-meshlet quantization offset Y
-    int  minQz;                       // [6] per-meshlet quantization offset Z
+    int  minQx;                       // [4] reserved for future compact position formats
+    int  minQy;                       // [5] reserved for future compact position formats
+    int  minQz;                       // [6] reserved for future compact position formats
 
-    uint bitsAndVertexCount;          // [7] bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
+    uint bitsAndVertexCount;          // [7] reserved:24 | vertexCount:8
     uint triangleCountAndRefinedGroup; // [8] triangleCount:16 | (refinedGroupId+1):16
     uint boneCount;                   // [9]
     uint reserved2;                   // [10]
@@ -108,6 +111,12 @@ int  CLodDescRefinedGroupId(CLodMeshletDescriptor desc) { return (int)(desc.tria
 uint CLodDescBoneCount(CLodMeshletDescriptor desc) { return desc.boneCount; }
 uint CLodUvDescBitsU(CLodMeshletUvDescriptor desc) { return desc.uvBits & 0xFFu; }
 uint CLodUvDescBitsV(CLodMeshletUvDescriptor desc) { return (desc.uvBits >> 8u) & 0xFFu; }
+
+float3 CLodLoadNativePositionFloat3(ByteAddressBuffer slab, uint positionStreamBase, uint positionByteOffset, uint meshletLocalVertex)
+{
+    const uint addr = positionStreamBase + positionByteOffset + meshletLocalVertex * CLOD_POSITION_FORMAT_FLOAT3_STRIDE_BYTES;
+    return asfloat(slab.Load3(addr));
+}
 
 // Runtime-filled entry: maps group-local page index to physical slab location.
 struct GroupPageMapEntry

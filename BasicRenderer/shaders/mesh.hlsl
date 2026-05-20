@@ -146,19 +146,8 @@ float3 DecodeCompressedPosition(
     int3 minQ,
     uint pagePoolSlabDescriptorIndex)
 {
-    uint bitsPerVertex = bitsX + bitsY + bitsZ;
-    uint bitCursor = positionBitstreamBase * 8u + positionBitOffset + meshletLocalVertex * bitsPerVertex;
-
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint px = ReadPackedBits32_BA(slab, bitCursor, bitsX);
-    bitCursor += bitsX;
-    uint py = ReadPackedBits32_BA(slab, bitCursor, bitsY);
-    bitCursor += bitsY;
-    uint pz = ReadPackedBits32_BA(slab, bitCursor, bitsZ);
-
-    int3 q = int3(px, py, pz) + minQ;
-    float invScale = 1.0f / float(1u << quantExp);
-    return float3(q) * invScale;
+    return CLodLoadNativePositionFloat3(slab, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
 }
 
 float2 UnpackSnorm16x2(uint packed)

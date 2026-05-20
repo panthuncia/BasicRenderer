@@ -44,6 +44,21 @@ public:
 		uint64_t totalStreamedBytes = 0;
 	};
 
+	struct CLodRayTracingResidentGroup {
+		uint32_t groupGlobalIndex = 0;
+		uint32_t groupLocalIndex = 0;
+		ClusterLODGroup group{};
+		ClusterLODGroupChunk chunk{};
+		std::vector<ClusterLODGroupSegment> segments;
+		std::vector<PagePool::PageAllocation> pageAllocations;
+	};
+
+	struct CLodRayTracingResidencySnapshot {
+		std::vector<CLodRayTracingResidentGroup> residentGroups;
+		PagePool* pagePool = nullptr;
+		uint64_t pagePoolGeneration = 0;
+	};
+
 	// Represents the outcome of a single disk-streamed group IO.
 	struct CLodDiskStreamingCompletion {
 		uint32_t groupGlobalIndex = 0;
@@ -86,6 +101,7 @@ public:
 	bool ConsumeCLodStreamingStructureDirty();
 
 	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
+	void GetCLodRayTracingResidencySnapshot(CLodRayTracingResidencySnapshot& outSnapshot) const;
 	void ProcessCLodDiskStreamingIO(
 		uint32_t maxCompletedRequests = 64u);
 

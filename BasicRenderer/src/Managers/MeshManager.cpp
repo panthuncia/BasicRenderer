@@ -1698,6 +1698,61 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 	return stats;
 }
 
+void MeshManager::GetCLodRayTracingResidencySnapshot(CLodRayTracingResidencySnapshot& outSnapshot) const {
+	outSnapshot.residentGroups.clear();
+	outSnapshot.pagePool = m_clodPagePool.get();
+	outSnapshot.pagePoolGeneration = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
+
+	const_cast<MeshManager*>(this)->RebuildCLodSharedStreamingRangeIndex();
+
+	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+	for (const CLodSharedStreamingRange& range : m_clodSharedStreamingRanges) {
+		const auto& state = range.state;
+		if (!state) {
+			continue;
+		}
+
+		const uint32_t groupCount = std::min<uint32_t>(
+			state->groupCount,
+			static_cast<uint32_t>(state->groups.size()));
+		for (uint32_t localGroupIndex = 0; localGroupIndex < groupCount; ++localGroupIndex) {
+			if (!IsCLodGroupResident(*state, localGroupIndex)) {
+				continue;
+			}
+
+			if (localGroupIndex >= state->residentGroupAllocations.size() ||
+				localGroupIndex >= state->baselineGroupChunks.size()) {
+				continue;
+			}
+
+			const ClusterLODGroup& group = state->groups[localGroupIndex];
+			if (group.pageCount != state->residentGroupAllocations[localGroupIndex].pageAllocations.size()) {
+				continue;
+			}
+
+			CLodRayTracingResidentGroup rtGroup{};
+			rtGroup.groupGlobalIndex = range.begin + localGroupIndex;
+			rtGroup.groupLocalIndex = localGroupIndex;
+			rtGroup.group = group;
+			rtGroup.chunk = state->baselineGroupChunks[localGroupIndex];
+			rtGroup.pageAllocations = state->residentGroupAllocations[localGroupIndex].pageAllocations;
+
+			const uint32_t firstSegment = group.firstSegment;
+			const uint32_t segmentCount = group.segmentCount;
+			if (firstSegment < state->segments.size()) {
+				const uint32_t clampedSegmentCount = std::min<uint32_t>(
+					segmentCount,
+					static_cast<uint32_t>(state->segments.size() - firstSegment));
+				rtGroup.segments.assign(
+					state->segments.begin() + firstSegment,
+					state->segments.begin() + firstSegment + clampedSegmentCount);
+			}
+
+			outSnapshot.residentGroups.push_back(std::move(rtGroup));
+		}
+	}
+}
+
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {
 	view->GetBuffer()->UpdateView(view.get(), &data);
 }

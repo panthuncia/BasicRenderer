@@ -35,6 +35,18 @@ public:
         return m_meshShadersSupported;
     }
 
+    const RayTracingFeatureInfo& GetRayTracingFeatures() const {
+        return m_rayTracingFeatures;
+    }
+
+    bool GetRayTracingSupported() const {
+        return m_rayTracingSupported;
+    }
+
+    bool GetCLodRayTracingSupported() const {
+        return m_clodRayTracingSupported;
+    }
+
 private:
     DeviceManager() = default;
 
@@ -46,6 +58,9 @@ private:
     rhi::Queue m_copyQueue;
     rhi::Backend m_backend = rhi::Backend::Null;
     bool m_meshShadersSupported = false;
+    RayTracingFeatureInfo m_rayTracingFeatures{};
+    bool m_rayTracingSupported = false;
+    bool m_clodRayTracingSupported = false;
 };
 }
 

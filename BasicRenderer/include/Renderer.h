@@ -39,6 +39,7 @@
 #include "Render/RenderContext.h"
 #include "Render/OpenPBRLookupResources.h"
 #include "Render/SceneRenderBridge.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodRayTracingSystem.h"
 
 class DynamicResource;
 class ExternalTextureResource;
@@ -150,6 +151,7 @@ private:
 	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
     std::unique_ptr<br::ReadbackManager> m_pReadbackManager = nullptr;
     std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
+    std::unique_ptr<br::render::CLodRayTracingSystem> m_clodRayTracingSystem = nullptr;
 
 	ManagerInterface m_managerInterface;
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
@@ -220,6 +222,8 @@ private:
     bool m_bloom = false;
     bool m_jitter = true;
 	bool m_screenSpaceReflections = false;
+    bool m_rayTracedReflections = false;
+    bool m_warnedRayTracedReflectionsUnsupported = false;
 	bool m_useMeshShaders = true;
 
     std::function<uint16_t()> getShadowResolution;
