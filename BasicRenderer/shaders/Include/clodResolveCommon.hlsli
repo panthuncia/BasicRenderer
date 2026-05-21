@@ -941,9 +941,17 @@ bool ResolveRaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, uint2 occupancy
     return false;
 }
 
-MaterialInputs BuildVoxelMaterialInputs(MaterialInfo materialInfo, uint materialFlags, float3 normalWS, float3 posWS, float2 uv, float opacity)
+MaterialInputs BuildVoxelMaterialInputs(
+    MaterialInfo materialInfo,
+    uint materialFlags,
+    float3 normalWS,
+    float3 posWS,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    float opacity)
 {
-    MaterialUvCache uvCache = BuildSingleUvCache(uv, float2(0.0f, 0.0f), float2(0.0f, 0.0f));
+    MaterialUvCache uvCache = BuildSingleUvCache(uv, dUVdx, dUVdy);
     const uint voxelMaterialFlags = materialFlags & ~(MATERIAL_NORMAL_MAP | MATERIAL_PARALLAX | MATERIAL_GEOMETRIC_DISPLACEMENT);
     MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, voxelMaterialFlags, uvCache);
 
@@ -961,6 +969,85 @@ MaterialInputs BuildVoxelMaterialInputs(MaterialInfo materialInfo, uint material
         inputs);
     inputs.opacity *= opacity;
     return inputs;
+}
+
+uint CLodVoxelLocalCellIndex(int3 cell)
+{
+    return (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
+}
+
+void CLodVoxelAccumulateNeighborUvDelta(
+    GroupPageMapEntry pageEntry,
+    CLodVoxelPageHeader pageHeader,
+    CLodVoxelCubeRecord cube,
+    int3 neighborCell,
+    float2 uv,
+    inout float maxUvDelta)
+{
+    if (any(neighborCell < int3(0, 0, 0)) || any(neighborCell > int3(3, 3, 3)))
+    {
+        return;
+    }
+
+    const uint neighborIndex = CLodVoxelLocalCellIndex(neighborCell);
+    if (!ResolveVoxelMaskTest(cube.occupancyMask, neighborIndex))
+    {
+        return;
+    }
+
+    const CLodVoxelAttributeSample neighborSample =
+        CLodLoadVoxelAttributeSampleFromPage(pageEntry, pageHeader, cube, neighborIndex);
+    maxUvDelta = max(maxUvDelta, length(neighborSample.uv - uv));
+}
+
+float CLodVoxelEstimateUvFootprint(
+    GroupPageMapEntry pageEntry,
+    CLodVoxelPageHeader pageHeader,
+    CLodVoxelCubeRecord cube,
+    int3 cell,
+    float2 uv,
+    uint groupResolution)
+{
+    float maxUvDelta = 0.0f;
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(-1, 0, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(1, 0, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, -1, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, 1, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, 0, -1), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, 0, 1), uv, maxUvDelta);
+
+    const float fallbackUvDelta = rcp((float)max(groupResolution, 1u));
+    return max(maxUvDelta, fallbackUvDelta);
+}
+
+float2 CLodProjectWorldToPixel(float3 worldPosition, float4x4 viewProj, float2 winSize)
+{
+    float4 clip = mul(float4(worldPosition, 1.0f), viewProj);
+    const float invW = rcp(max(abs(clip.w), 1.0e-6f));
+    const float2 ndc = clip.xy * invW;
+    return float2(
+        (ndc.x * 0.5f + 0.5f) * winSize.x,
+        (0.5f - ndc.y * 0.5f) * winSize.y);
+}
+
+float CLodVoxelEstimatePixelFootprint(
+    float3 objectPosition,
+    float voxelWidth,
+    float4x4 localToWorld,
+    float4x4 viewProj,
+    float2 winSize)
+{
+    const float3 centerWorld = mul(float4(objectPosition, 1.0f), localToWorld).xyz;
+    const float2 centerPixel = CLodProjectWorldToPixel(centerWorld, viewProj, winSize);
+    const float3 xWorld = mul(float4(objectPosition + float3(voxelWidth, 0.0f, 0.0f), 1.0f), localToWorld).xyz;
+    const float3 yWorld = mul(float4(objectPosition + float3(0.0f, voxelWidth, 0.0f), 1.0f), localToWorld).xyz;
+    const float3 zWorld = mul(float4(objectPosition + float3(0.0f, 0.0f, voxelWidth), 1.0f), localToWorld).xyz;
+    float maxPixelDelta = max(
+        length(CLodProjectWorldToPixel(xWorld, viewProj, winSize) - centerPixel),
+        length(CLodProjectWorldToPixel(yWorld, viewProj, winSize) - centerPixel));
+    maxPixelDelta = max(maxPixelDelta, length(CLodProjectWorldToPixel(zWorld, viewProj, winSize) - centerPixel));
+
+    return max(maxPixelDelta, 0.25f);
 }
 
 float2 ComputeClodMotionVector(float3 posOS, float3 worldPosition, float4x4 prevModel, float4x4 unjitteredViewProj, float4x4 prevUnjitteredViewProj);
@@ -1202,6 +1289,23 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[mesh.materialDataIndex];
     const uint materialFlags = materialInfo.materialFlags;
+    const float4x4 viewProj = mul(cam.view, cam.projection);
+    const float uvFootprint = CLodVoxelEstimateUvFootprint(
+        pageEntry,
+        pageHeader,
+        cube,
+        cell,
+        attributeSample.uv,
+        descriptor.resolution);
+    const float pixelFootprint = CLodVoxelEstimatePixelFootprint(
+        objectPosition,
+        voxelWidth,
+        localToWorld,
+        viewProj,
+        winSize);
+    const float uvPerPixel = uvFootprint / pixelFootprint;
+    const float2 voxelDUdx = float2(uvPerPixel, 0.0f);
+    const float2 voxelDUdy = float2(0.0f, uvPerPixel);
 
     sample.linearDepth = linearDepth;
     sample.clusterIndex = visibleClusterIndex;
@@ -1228,7 +1332,15 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
     sample.materialInfo = materialInfo;
 #endif
     sample.materialFlags = materialFlags;
-    sample.materialInputs = BuildVoxelMaterialInputs(materialInfo, materialFlags, normalWS, worldPosition, attributeSample.uv, saturate(attributeSample.opacity));
+    sample.materialInputs = BuildVoxelMaterialInputs(
+        materialInfo,
+        materialFlags,
+        normalWS,
+        worldPosition,
+        attributeSample.uv,
+        voxelDUdx,
+        voxelDUdy,
+        saturate(attributeSample.opacity));
     return true;
 }
 
