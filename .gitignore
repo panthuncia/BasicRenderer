@@ -18,9 +18,7 @@ models/
 textures/
 /ThirdParty/
 cmake-build-*
-openpbr-bsdf
 docs/
-FidelityFX-SDK/
 PyNifly/
 Streamline/
 vk_streamline/

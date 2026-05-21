@@ -213,6 +213,7 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 add_executable(ShaderPreprocessTests "tests/ShaderPreprocessTests.cpp")
 
+set(BASICRENDERER_IMGUI_SOURCE_VERSION "1.91.9" CACHE STRING "ImGui source release used when vcpkg's transient build tree is unavailable.")
 set(_basicrenderer_imgui_vulkan_backend_candidates)
 if(DEFINED VCPKG_INSTALLED_DIR)
     file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
@@ -226,6 +227,55 @@ if(NOT _basicrenderer_imgui_vulkan_backend_candidates)
     file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
         "${BASICRENDERER_REPO_ROOT}/out/build/*/vcpkg_installed/vcpkg/blds/imgui/src/*/backends/imgui_impl_vulkan.cpp")
 endif()
+if(NOT _basicrenderer_imgui_vulkan_backend_candidates)
+    set(_basicrenderer_imgui_archive "${CMAKE_BINARY_DIR}/_deps/ocornut-imgui-v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz")
+    set(_basicrenderer_imgui_source_dir "${CMAKE_BINARY_DIR}/_deps/imgui-${BASICRENDERER_IMGUI_SOURCE_VERSION}")
+
+    set(_basicrenderer_imgui_cached_archives)
+    if(DEFINED ENV{VCPKG_DOWNLOADS})
+        list(APPEND _basicrenderer_imgui_cached_archives "$ENV{VCPKG_DOWNLOADS}/ocornut-imgui-v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz")
+    endif()
+    if(DEFINED ENV{LOCALAPPDATA})
+        list(APPEND _basicrenderer_imgui_cached_archives "$ENV{LOCALAPPDATA}/vcpkg/downloads/ocornut-imgui-v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz")
+    endif()
+
+    foreach(_basicrenderer_imgui_cached_archive IN LISTS _basicrenderer_imgui_cached_archives)
+        if(EXISTS "${_basicrenderer_imgui_cached_archive}")
+            set(_basicrenderer_imgui_archive "${_basicrenderer_imgui_cached_archive}")
+            break()
+        endif()
+    endforeach()
+
+    if(NOT EXISTS "${_basicrenderer_imgui_archive}")
+        file(DOWNLOAD
+            "https://github.com/ocornut/imgui/archive/refs/tags/v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz"
+            "${_basicrenderer_imgui_archive}"
+            EXPECTED_HASH SHA512=c9393bd9f6b49b036ad6ab3ba4d972876c6f60ce7f5c13a7a56ff11b3559ea3211b0caa03eed10b4f4fbe9c371e14f7f24866bd476652f543f3ed3aa878ea930
+            TLS_VERIFY ON
+            STATUS _basicrenderer_imgui_download_status)
+        list(GET _basicrenderer_imgui_download_status 0 _basicrenderer_imgui_download_result)
+        if(NOT _basicrenderer_imgui_download_result EQUAL 0)
+            list(GET _basicrenderer_imgui_download_status 1 _basicrenderer_imgui_download_message)
+            message(FATAL_ERROR "BasicRenderer: failed to download ImGui ${BASICRENDERER_IMGUI_SOURCE_VERSION} source archive: ${_basicrenderer_imgui_download_message}")
+        endif()
+    endif()
+
+    if(NOT EXISTS "${_basicrenderer_imgui_source_dir}/backends/imgui_impl_vulkan.cpp")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E tar xzf "${_basicrenderer_imgui_archive}"
+            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/_deps"
+            RESULT_VARIABLE _basicrenderer_imgui_extract_result)
+        if(NOT _basicrenderer_imgui_extract_result EQUAL 0)
+            message(FATAL_ERROR "BasicRenderer: failed to extract ImGui source archive '${_basicrenderer_imgui_archive}'.")
+        endif()
+    endif()
+
+    if(EXISTS "${_basicrenderer_imgui_source_dir}/backends/imgui_impl_vulkan.cpp")
+        list(APPEND _basicrenderer_imgui_vulkan_backend_candidates
+            "${_basicrenderer_imgui_source_dir}/backends/imgui_impl_vulkan.cpp")
+    endif()
+endif()
 if(_basicrenderer_imgui_vulkan_backend_candidates)
     list(SORT _basicrenderer_imgui_vulkan_backend_candidates)
     list(GET _basicrenderer_imgui_vulkan_backend_candidates 0 _basicrenderer_imgui_vulkan_backend)
@@ -235,7 +285,7 @@ if(_basicrenderer_imgui_vulkan_backend_candidates)
         COMPILE_DEFINITIONS "IMGUI_IMPL_VULKAN_NO_PROTOTYPES;VK_USE_PLATFORM_WIN32_KHR"
         COMPILE_OPTIONS "/w")
 else()
-    message(FATAL_ERROR "BasicRenderer: imgui_impl_vulkan.cpp source was not found in the vcpkg build tree. Vulkan ImGui must compile the backend locally with IMGUI_IMPL_VULKAN_NO_PROTOTYPES instead of using the prebuilt imgui library backend.")
+    message(FATAL_ERROR "BasicRenderer: imgui_impl_vulkan.cpp source was not found. Vulkan ImGui must compile the backend locally with IMGUI_IMPL_VULKAN_NO_PROTOTYPES instead of using the prebuilt imgui library backend.")
 endif()
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/pch.h")
@@ -793,6 +843,9 @@ endif()
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
+if(BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR)
+    target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR}")
+endif()
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/")
 target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/ThirdParty")
 target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/volk")

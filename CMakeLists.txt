@@ -3,7 +3,46 @@
 #
 cmake_minimum_required (VERSION 3.10)
 
-set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+foreach(_basicrenderer_cached_tool
+    CMAKE_C_COMPILER
+    CMAKE_CXX_COMPILER
+    CMAKE_LINKER
+    CMAKE_AR
+    CMAKE_MT
+    CMAKE_RC_COMPILER
+    Z_VCPKG_CL)
+  if(DEFINED ${_basicrenderer_cached_tool}
+      AND IS_ABSOLUTE "${${_basicrenderer_cached_tool}}"
+      AND NOT EXISTS "${${_basicrenderer_cached_tool}}")
+    message(STATUS "Clearing stale cached tool path ${_basicrenderer_cached_tool}: ${${_basicrenderer_cached_tool}}")
+    unset(${_basicrenderer_cached_tool} CACHE)
+  endif()
+endforeach()
+
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR CMAKE_TOOLCHAIN_FILE STREQUAL "")
+  set(_basicrenderer_vcpkg_toolchain "")
+
+  if(DEFINED ENV{VCPKG_ROOT})
+    set(_basicrenderer_vcpkg_toolchain "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+  endif()
+
+  if(CMAKE_HOST_WIN32 AND NOT EXISTS "${_basicrenderer_vcpkg_toolchain}")
+    file(GLOB _basicrenderer_vs_vcpkg_toolchains
+      "C:/Program Files/Microsoft Visual Studio/*/*/VC/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    )
+    if(_basicrenderer_vs_vcpkg_toolchains)
+      list(GET _basicrenderer_vs_vcpkg_toolchains 0 _basicrenderer_vcpkg_toolchain)
+    endif()
+  endif()
+
+  if(EXISTS "${_basicrenderer_vcpkg_toolchain}")
+    set(CMAKE_TOOLCHAIN_FILE "${_basicrenderer_vcpkg_toolchain}" CACHE FILEPATH "")
+  elseif(DEFINED ENV{VCPKG_ROOT})
+    message(FATAL_ERROR "VCPKG_ROOT is set, but the vcpkg toolchain file was not found at '${_basicrenderer_vcpkg_toolchain}'.")
+  else()
+    message(FATAL_ERROR "Could not find vcpkg. Set VCPKG_ROOT or pass -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake.")
+  endif()
+endif()
 
 # Enable Zi for debug builds on MSVC
 if (POLICY CMP0141)
@@ -31,6 +70,47 @@ project ("BasicRenderer")
 
 option(BASICRHI_ENABLE_RESHAPE "Enable GPU-Reshape-backed debug instrumentation in BasicRHI" OFF)
 option(BASICRENDERER_BUILD_BRNIFLY "Build the GPL-separated BRNifly NIF middleware executable" ON)
+set(BASICRENDERER_VULKAN_INCLUDE_DIR "" CACHE PATH "Preferred Vulkan SDK include directory. Leave empty to auto-detect a Vulkan SDK with VK_EXT_descriptor_heap.")
+
+function(basicrenderer_detect_vulkan_headers out_var)
+  set(_basicrenderer_vulkan_include_candidates)
+
+  if(BASICRENDERER_VULKAN_INCLUDE_DIR)
+    list(APPEND _basicrenderer_vulkan_include_candidates "${BASICRENDERER_VULKAN_INCLUDE_DIR}")
+  endif()
+
+  if(DEFINED ENV{VULKAN_SDK} AND NOT "$ENV{VULKAN_SDK}" STREQUAL "")
+    list(APPEND _basicrenderer_vulkan_include_candidates "$ENV{VULKAN_SDK}/Include")
+  endif()
+
+  if(CMAKE_HOST_WIN32)
+    file(GLOB _basicrenderer_vulkan_sdk_dirs LIST_DIRECTORIES true "C:/VulkanSDK/*")
+    list(SORT _basicrenderer_vulkan_sdk_dirs COMPARE NATURAL ORDER DESCENDING)
+    foreach(_basicrenderer_vulkan_sdk_dir IN LISTS _basicrenderer_vulkan_sdk_dirs)
+      list(APPEND _basicrenderer_vulkan_include_candidates "${_basicrenderer_vulkan_sdk_dir}/Include")
+    endforeach()
+  endif()
+
+  foreach(_basicrenderer_vulkan_include IN LISTS _basicrenderer_vulkan_include_candidates)
+    set(_basicrenderer_vulkan_core "${_basicrenderer_vulkan_include}/vulkan/vulkan_core.h")
+    if(EXISTS "${_basicrenderer_vulkan_core}")
+      file(STRINGS "${_basicrenderer_vulkan_core}" _basicrenderer_vulkan_has_descriptor_heap
+        REGEX "^#define VK_EXT_descriptor_heap 1$")
+      if(_basicrenderer_vulkan_has_descriptor_heap)
+        set(${out_var} "${_basicrenderer_vulkan_include}" PARENT_SCOPE)
+        return()
+      endif()
+    endif()
+  endforeach()
+
+  set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
+basicrenderer_detect_vulkan_headers(BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR)
+if(BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR)
+  set(Vulkan_INCLUDE_DIR "${BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR}" CACHE PATH "Vulkan include directory" FORCE)
+  message(STATUS "BasicRenderer: using Vulkan headers from ${BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR}")
+endif()
 
 if (WIN32)
   add_compile_definitions(NOMINMAX)
