@@ -14,6 +14,7 @@ public:
     CLodStreamingBeginFramePass(
         std::function<UploadInstance*()> getUploadInstance,
         std::shared_ptr<Buffer> loadCounter,
+        std::shared_ptr<Buffer> loadRequestKeys,
         std::shared_ptr<Buffer> usedGroupsCounter,
         std::shared_ptr<Buffer> nonResidentBits,
         std::shared_ptr<Buffer> activeGroupsBits,
@@ -31,6 +32,7 @@ public:
 
 private:
     std::shared_ptr<Buffer> m_loadCounter;
+    std::shared_ptr<Buffer> m_loadRequestKeys;
     std::shared_ptr<Buffer> m_usedGroupsCounter;
     std::shared_ptr<Buffer> m_nonResidentBits;
     std::shared_ptr<Buffer> m_activeGroupsBits;
@@ -42,4 +44,5 @@ private:
     std::function<UploadInstance*()> m_getUploadInstance;
     std::vector<uint32_t> m_activeGroupsBitsUploadScratch;
     std::vector<uint32_t> m_nonResidentBitsUploadScratch;
+    PipelineState m_clearUintPipeline;
 };

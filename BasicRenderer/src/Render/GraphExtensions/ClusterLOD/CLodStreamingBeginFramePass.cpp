@@ -6,15 +6,19 @@
 #include <tracy/Tracy.hpp>
 
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/PassBuilders.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Managers/UploadInstance.h"
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
+#include "../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
 
 CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     std::function<UploadInstance*()> getUploadInstance,
     std::shared_ptr<Buffer> loadCounter,
+    std::shared_ptr<Buffer> loadRequestKeys,
     std::shared_ptr<Buffer> usedGroupsCounter,
     std::shared_ptr<Buffer> nonResidentBits,
     std::shared_ptr<Buffer> activeGroupsBits,
@@ -24,6 +28,7 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     std::function<void()> scheduleStreamingReadbacks,
     std::function<void()> processStreamingRequests)
     : m_loadCounter(std::move(loadCounter))
+    , m_loadRequestKeys(std::move(loadRequestKeys))
     , m_usedGroupsCounter(std::move(usedGroupsCounter))
     , m_nonResidentBits(std::move(nonResidentBits))
     , m_activeGroupsBits(std::move(activeGroupsBits))
@@ -32,10 +37,18 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     , m_getActiveGroupsBitsUpload(std::move(getActiveGroupsBitsUpload))
     , m_scheduleStreamingReadbacks(std::move(scheduleStreamingReadbacks))
     , m_processStreamingRequests(std::move(processStreamingRequests))
-    , m_getUploadInstance(std::move(getUploadInstance)) {}
+    , m_getUploadInstance(std::move(getUploadInstance))
+{
+    m_clearUintPipeline = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"Shaders/ClusterLOD/clodUtil.hlsl",
+        L"ClearUintStructuredBufferCSMain",
+        {},
+        "CLodStreamingBeginFrameClearUint");
+}
 
 void CLodStreamingBeginFramePass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithUnorderedAccess(m_loadCounter, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
+    builder->WithUnorderedAccess(m_loadCounter, m_loadRequestKeys, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
 }
 
 void CLodStreamingBeginFramePass::Setup() {}
@@ -45,6 +58,26 @@ PassReturn CLodStreamingBeginFramePass::Execute(PassExecutionContext& executionC
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+
+    if (m_loadRequestKeys) {
+        ZoneScopedN("CLodStreamingBeginFramePass::ClearRequestKeys");
+        BindResourceDescriptorIndices(commandList, m_clearUintPipeline.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_clearUintPipeline.GetAPIPipelineState().GetHandle());
+
+        uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_loadRequestKeys->GetUAVShaderVisibleInfo(0).slot.index;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0xffffffffu;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = CLodStreamingRequestCapacity;
+        commandList.PushConstants(
+            rhi::ShaderStage::Compute,
+            0,
+            MiscUintRootSignatureIndex,
+            0,
+            NumMiscUintRootConstants,
+            clearRootConstants);
+        commandList.Dispatch((CLodStreamingRequestCapacity + 63u) / 64u, 1u, 1u);
+    }
     return {};
 }
 

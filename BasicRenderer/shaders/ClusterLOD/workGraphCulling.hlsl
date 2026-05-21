@@ -1576,6 +1576,8 @@ void CLodRequestGroupLoad(
 
     RWStructuredBuffer<CLodStreamingRequest> loadRequests =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+    RWStructuredBuffer<uint> loadRequestKeys =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestKeys)];
     RWStructuredBuffer<uint> loadRequestCounter =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
     uint requestIndex = 0u;
@@ -1588,6 +1590,9 @@ void CLodRequestGroupLoad(
         req.meshBufferIndex = meshBufferIndex;
         req.viewId = CLodPackViewPriority(viewId, requestPriorityErrorOverDistance);
         loadRequests[requestIndex] = req;
+
+        const uint priority16 = (req.viewId >> 16u) & 0xffffu;
+        loadRequestKeys[requestIndex] = 0xffffu - priority16;
     }
 }
 

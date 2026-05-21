@@ -256,6 +256,7 @@ void HierarchicalCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_occlusionReplayStateBuffer,
             m_occlusionNodeGpuInputsBuffer)
         .WithUnorderedAccess(
+            Builtin::CLod::StreamingLoadRequestKeys,
             Builtin::CLod::StreamingLoadRequests,
             Builtin::CLod::StreamingLoadCounter,
             Builtin::CLod::StreamingRuntimeState,

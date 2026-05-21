@@ -26,6 +26,13 @@ void CommandSignatureManager::Initialize() {
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args2, std::size(args2)), sizeof(DispatchIndirectCommand) },
         computeLayout.GetHandle(), m_dispatchCommandSignature);
 
+    rhi::IndirectArg rawDispatchArgs[] = {
+        {.kind = rhi::IndirectArgKind::Dispatch }
+    };
+    result = device.CreateCommandSignature(
+        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(rawDispatchArgs, std::size(rawDispatchArgs)), sizeof(D3D12_DISPATCH_ARGUMENTS) },
+        computeLayout.GetHandle(), m_rawDispatchCommandSignature);
+
     // Used by the visibility buffer material evaluation pass
     rhi::IndirectArg materialEvaluationArgs[] = {
         {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 4 } } },
@@ -40,5 +47,6 @@ void CommandSignatureManager::Initialize() {
 void CommandSignatureManager::Cleanup() {
     m_dispatchMeshCommandSignature.Reset();
     m_dispatchCommandSignature.Reset();
+    m_rawDispatchCommandSignature.Reset();
     m_materialEvaluationCommandSignature.Reset();
 }

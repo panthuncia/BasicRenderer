@@ -1205,7 +1205,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("queueSchedulingCrossQueueHandoffPenalty", 2.0f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
-    settingsManager.registerSetting<uint8_t>("renderGraphRegionMode", static_cast<uint8_t>(rg::runtime::RenderGraphRegionMode::ReplayAuthoritative));
+    settingsManager.registerSetting<uint8_t>("renderGraphRegionMode", static_cast<uint8_t>(rg::runtime::RenderGraphRegionMode::Disabled));
     settingsManager.registerSetting<uint8_t>("transitionPlacementMode", static_cast<uint8_t>(rg::runtime::TransitionPlacementMode::CanonicalThenOptimize));
     settingsManager.registerSetting<uint32_t>("renderGraphRegionMinPassCount", 2u);
     settingsManager.registerSetting<uint32_t>("renderGraphRegionMaxPassCount", 0u);

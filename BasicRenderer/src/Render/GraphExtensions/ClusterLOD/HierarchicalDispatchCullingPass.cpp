@@ -375,6 +375,7 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
             m_pureComputeClusterCounterBuffer,
             m_pureComputeNodeDispatchArgsBuffer,
             m_pureComputeClusterDispatchArgsBuffer,
+            Builtin::CLod::StreamingLoadRequestKeys,
             Builtin::CLod::StreamingLoadRequests,
             Builtin::CLod::StreamingLoadCounter,
             Builtin::CLod::StreamingTouchedGroupsCounter,

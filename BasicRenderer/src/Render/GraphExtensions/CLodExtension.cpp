@@ -1421,7 +1421,19 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
     }
 
+    bool streamingTailAppended = false;
+    const auto appendStreamingTailPasses = [&]() {
+        if (m_streamingSystem && !streamingTailAppended) {
+            // Keep after-present streaming passes at the extension tail. If they
+            // are emitted before CLod raster passes, extension-local chaining can
+            // create Present -> streaming tail -> CLod raster -> Present cycles.
+            m_streamingSystem->GatherStructuralTailPasses(rg, outPasses);
+            streamingTailAppended = true;
+        }
+    };
+
     if (!traits.schedulesStructuralPasses) {
+        appendStreamingTailPasses();
         return;
     }
 
@@ -1440,6 +1452,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     const StructuralSchedulingPolicy schedulingPolicy = BuildStructuralSchedulingPolicy(traits, m_type);
     if (traits.type == CLodExtensionType::AlphaBlend && schedulingPolicy.transparencyMode == CLodTransparencyMode::Disabled) {
         applyTechniqueTags();
+        appendStreamingTailPasses();
         return;
     }
     if (!schedulingPolicy.disableReyesTessellation) {
@@ -2042,6 +2055,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly) {
         applyTechniqueTags();
+        appendStreamingTailPasses();
         return;
     }
 
@@ -2057,6 +2071,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             disableReyesTessellation,
             outPasses);
         applyTechniqueTags();
+        appendStreamingTailPasses();
         return;
     }
 
@@ -2074,6 +2089,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     appendLinearDepthDownsamplePass(2u);
 
     applyTechniqueTags();
+    appendStreamingTailPasses();
 }
 
 void CLodExtension::GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses)

@@ -32,6 +32,7 @@ public:
     void Initialize(RenderGraph& rg);
     void OnRegistryReset(ResourceRegistry* reg);
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
+    void GatherStructuralTailPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
 
 private:
@@ -40,6 +41,12 @@ private:
         Resident,
         PreAllocatedCpuUpload,
         PendingDirectStorageWrite,
+    };
+
+    enum class StreamingRequestState : uint8_t {
+        None,
+        PendingCpu,
+        DiskIo,
     };
 
     struct StreamingServiceSummary {
@@ -52,6 +59,7 @@ private:
     struct PendingStreamingRequest {
         CLodStreamingRequest request{};
         uint32_t priority = 0u;
+        uint32_t generation = 0u;
     };
 
     struct CachedChildGroupLayout {
@@ -72,21 +80,29 @@ private:
     void EnsureStreamingStorageCapacity(uint32_t requiredGroupCount);
     void RefreshStreamingActiveGroupDomain();
     bool IsStreamingRequestInProgress(uint32_t groupIndex) const;
-    void MarkStreamingRequestInProgress(uint32_t groupIndex);
+    void MarkStreamingRequestPending(uint32_t groupIndex);
+    void MarkStreamingRequestDiskIo(uint32_t groupIndex);
     void ClearStreamingRequestInProgress(uint32_t groupIndex);
     uint32_t GetPendingLoadPriority(uint32_t groupIndex) const;
     void SetPendingLoadPriority(uint32_t groupIndex, uint32_t priority);
     void ClearPendingLoadPriority(uint32_t groupIndex);
+    void PushOrUpdatePendingStreamingRequest(const CLodStreamingRequest& req, uint32_t priority);
+    bool PopHighestPriorityPendingStreamingRequest(PendingStreamingRequest& outRequest);
     void SetGroupUsesPinnedStorage(uint32_t groupIndex, bool usesPinnedStorage);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
     void CommitPendingResidencyPromotions();
     void TouchGroupPages(uint32_t groupIndex);
     void PrefetchChildGroupLayouts(uint32_t parentGroupIndex, MeshManager* meshManager);
+    void InstallPrefetchedChildGroupLayouts(
+        uint32_t parentGroupIndex,
+        std::vector<MeshManager::CLodPrefetchedChildLayout>&& prefetchedLayouts);
     void EvictPrefetchedChildLayoutsForOwner(uint32_t ownerGroupIndex);
     void ClearPrefetchedChildLayouts();
     void PollCompletedReadbackSlots();
     void StreamingWorkerMain();
     void ProcessStreamingRequestsBudgeted();
+    bool EnsureParallelSortResources();
+    void DestroyParallelSortResources();
 
     // Page-level LRU helpers
     void InitializePageLru(MeshManager* meshManager);
@@ -110,6 +126,7 @@ private:
 
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
     std::shared_ptr<Buffer> m_streamingActiveGroupsBits;
+    std::shared_ptr<Buffer> m_streamingLoadRequestKeys;
     std::shared_ptr<Buffer> m_streamingLoadRequests;
     std::shared_ptr<Buffer> m_streamingLoadCounter;
     std::shared_ptr<Buffer> m_streamingRuntimeState;
@@ -133,11 +150,13 @@ private:
     std::vector<CLodPhysicalPageState> m_pageState;
     std::vector<uint32_t> m_pendingPageOwnerGroup;
     std::vector<uint32_t> m_pendingPageOwnerSegment;
-	std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
+    std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
-    std::unordered_set<uint32_t> m_streamingRequestsInProgress;
     std::unordered_set<uint32_t> m_pendingResidencyCommitGroups;
-    std::unordered_map<uint32_t, uint32_t> m_pendingLoadPriorityByGroup;
+    std::vector<StreamingRequestState> m_streamingRequestStateByGroup;
+    std::vector<uint32_t> m_pendingLoadPriorityByGroup;
+    uint32_t m_streamingRequestsInProgressCount = 0u;
+    uint32_t m_pendingStreamingRequestCount = 0u;
     std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
     // Groups whose pages are temporarily LRU-pinned until the GPU confirms
 	// usage via readback. Maps groupIndex to readback generation at pin time.
@@ -157,11 +176,12 @@ private:
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
 
     std::vector<PendingStreamingRequest> m_pendingStreamingRequests;
+    std::vector<uint32_t> m_pendingStreamingRequestHeapIndexByGroup;
+    std::vector<uint32_t> m_pendingStreamingRequestGenerationByGroup;
     CLodPriorityMode m_priorityMode = CLodPriorityMode::Max;
     bool m_streamingDomainDirty = true;
     uint64_t m_streamingDiagnosticTick = 0;
     std::unordered_map<uint32_t, uint64_t> m_lastInProgressSuppressionLogTick;
-    std::unordered_map<uint32_t, uint64_t> m_lastMeshManagerQueuedLogTick;
 
     MeshManager::CLodStreamingDomainSnapshot m_cachedDomainSnapshot;
 
@@ -201,6 +221,16 @@ private:
     std::vector<uint32_t> m_parentChainScratch;
     std::vector<uint32_t> m_lruTouchedGroupsBitsScratch;
     std::vector<uint32_t> m_lruTouchedGroupWordsScratch;
+    std::vector<uint32_t> m_decodeSeenGenerationByGroup;
+    std::vector<uint32_t> m_decodePriorityAccumByGroup;
+    std::vector<uint32_t> m_decodeUsedSeenGenerationByGroup;
+    uint32_t m_decodeSeenGeneration = 1u;
+    uint32_t m_decodeUsedSeenGeneration = 1u;
+
+    struct ParallelSortState;
+    std::unique_ptr<ParallelSortState> m_parallelSortState;
+    bool m_parallelSortAvailable = false;
+    bool m_parallelSortAttempted = false;
 
     // Dedicated upload instance + copy queue for async CLod streaming uploads.
     std::unique_ptr<UploadInstance> m_uploadInstance;

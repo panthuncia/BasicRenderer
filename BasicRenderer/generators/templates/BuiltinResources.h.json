@@ -36,6 +36,7 @@
       "StreamingActiveGroupsBits": {},
       "StreamingLoadCounter": {},
       "StreamingLoadRequestBits": {},
+      "StreamingLoadRequestKeys": {},
       "StreamingLoadRequests": {},
       "StreamingTouchedGroups": {},
       "StreamingTouchedGroupsBits": {},

@@ -21,6 +21,7 @@ struct Builtin {
     inline static constexpr std::string_view StreamingEvictionExemptBits = "Builtin::CLod::StreamingEvictionExemptBits";
     inline static constexpr std::string_view StreamingLoadCounter = "Builtin::CLod::StreamingLoadCounter";
     inline static constexpr std::string_view StreamingLoadRequestBits = "Builtin::CLod::StreamingLoadRequestBits";
+    inline static constexpr std::string_view StreamingLoadRequestKeys = "Builtin::CLod::StreamingLoadRequestKeys";
     inline static constexpr std::string_view StreamingLoadRequests = "Builtin::CLod::StreamingLoadRequests";
     inline static constexpr std::string_view StreamingNonResidentBits = "Builtin::CLod::StreamingNonResidentBits";
     inline static constexpr std::string_view StreamingRuntimeState = "Builtin::CLod::StreamingRuntimeState";
