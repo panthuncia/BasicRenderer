@@ -42,7 +42,9 @@ public:
     std::shared_ptr<PixelBuffer> CreateAlwaysResidentPixelBuffer(
         TextureDescription desc,
         TextureInitialData initialData,
-        std::string_view debugName = {}) const;
+        std::string_view debugName = {},
+        bool preserveAlphaCoverage = false,
+        bool forceSrgbMipEncoding = false) const;
 
     std::shared_ptr<ComputePass> GetMipmappingPass() const { return m_mipmappingPass; }
     std::shared_ptr<ComputePass> GetBC7CompressionPass() const { return m_bc7CompressionPass; }
@@ -70,6 +72,7 @@ private:
         std::shared_ptr<Buffer> blockBuffer;
         std::vector<BC7CompressionSubresource> subresources;
         uint64_t outputByteSize = 0;
+        bool outputHasFullMipChain = true;
     };
 
     class MipmappingPass : public ComputePass, public IDynamicDeclaredResources {
@@ -85,7 +88,7 @@ private:
         }
 
         // Called by TextureFactory when you create a texture with only mip0 uploaded.
-        void EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb);
+        void EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb, bool preserveAlphaCoverage = false);
 
         void DeclareResourceUsages(ComputePassBuilder* builder) override;
 
@@ -129,6 +132,8 @@ private:
             std::shared_ptr<PixelBuffer> texture;
             std::shared_ptr<BufferView>  constantsView;
             std::shared_ptr<GloballyIndexedResource> counter;
+            std::shared_ptr<Buffer> alphaStats;
+            std::shared_ptr<Buffer> alphaScales;
 
             MipmapSpdConstants cpuConstants{};
             uint32_t constantsIndex = 0;
@@ -139,6 +144,7 @@ private:
 
             bool isArray = false;
             bool isSrgb = false;
+            bool preserveAlphaCoverage = false;
             MipmapValueType valueType = MipmapValueType::Float4;
         };
 
@@ -152,6 +158,10 @@ private:
         PipelineState m_psoFloat2_Array;
         PipelineState m_psoFloat4_2D;
         PipelineState m_psoFloat4_Array;
+        PipelineState m_psoAlphaReset;
+        PipelineState m_psoAlphaDownsample;
+        PipelineState m_psoAlphaResolveScale;
+        PipelineState m_psoAlphaApplyScale;
 
         bool m_hasPsoFloat1_2D = false;
         bool m_hasPsoFloat1_Array = false;
@@ -159,10 +169,15 @@ private:
         bool m_hasPsoFloat2_Array = false;
         bool m_hasPsoFloat4_2D = false;
         bool m_hasPsoFloat4_Array = false;
+        bool m_hasPsoAlphaReset = false;
+        bool m_hasPsoAlphaDownsample = false;
+        bool m_hasPsoAlphaResolveScale = false;
+        bool m_hasPsoAlphaApplyScale = false;
 
         static bool TryGetValueType(const PixelBuffer& tex, MipmapValueType& outValueType);
         PipelineState& GetOrCreatePipeline(MipmapValueType valueType, bool isArray);
         PipelineState CreatePipeline(MipmapValueType valueType, bool isArray) const;
+        PipelineState& GetOrCreateAlphaPipeline(const wchar_t* entryPoint, PipelineState& pso, bool& hasPso, const char* debugName);
 
         bool m_declaredResourcesChanged = true;
     };

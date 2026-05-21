@@ -70,6 +70,17 @@ bool SupportsNormalGreenFlip(DXGI_FORMAT format) {
 	}
 }
 
+bool ShouldPreserveAlphaCoverage(const TextureFileMeta& meta, const TextureSourceData& sourceData) {
+	if (!meta.processing.isParticipatingMaterialTexture || meta.alphaIsAllOpaque) {
+		return false;
+	}
+	if (sourceData.desc.isArray || sourceData.desc.isCubemap || sourceData.desc.channels != 4 || sourceData.desc.imageDimensions.empty()) {
+		return false;
+	}
+
+	return rhi::helpers::stripSrgb(sourceData.desc.format) == rhi::Format::R8G8B8A8_UNorm;
+}
+
 void FlipNormalGreenChannel(ScratchImage& image) {
 	const TexMetadata metadata = image.GetMetadata();
 	const DXGI_FORMAT format = metadata.format;
@@ -530,6 +541,8 @@ std::shared_ptr<TextureSourceData> PrepareTextureSourceDataForBackend(
 	const bool needCompression = meta.processing.requestBlockCompression && !sourceData->isBlockCompressed;
 	const bool needDecompression = !meta.processing.requestBlockCompression && sourceData->isBlockCompressed;
 	const bool needNormalConventionConversion = NeedsNormalConventionConversion(meta);
+	const bool needGpuAlphaMipChain = needMipChain && ShouldPreserveAlphaCoverage(meta, *sourceData);
+	const bool needCpuMipChain = needMipChain && !needGpuAlphaMipChain;
 
 	if (!needMipChain && !needCompression && !needDecompression && !needNormalConventionConversion) {
 		return sourceData;
@@ -579,7 +592,7 @@ std::shared_ptr<TextureSourceData> PrepareTextureSourceDataForBackend(
 
 	ScratchImage mipChainImage;
 	ScratchImage* currentImage = &linearImage;
-	if (needMipChain) {
+	if (needCpuMipChain) {
 		hr = GenerateMipMaps(
 			linearImage.GetImages(),
 			linearImage.GetImageCount(),
@@ -748,6 +761,8 @@ std::string TextureProcessingManager::BuildProcessingCacheKey(
 	boost::hash_combine(seed, meta.processing.preferSRGB);
 	boost::hash_combine(seed, meta.processing.preservePackedChannels);
 	boost::hash_combine(seed, static_cast<uint32_t>(meta.processing.normalConvention));
+	boost::hash_combine(seed, meta.alphaIsAllOpaque);
+	boost::hash_combine(seed, 2u); // texture processing algorithm/cache version
 	return normalizedIdentity + "#" + TextureSemanticToString(meta.processing.semantic) + "#" + std::to_string(seed);
 }
 
