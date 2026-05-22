@@ -51,6 +51,7 @@ public:
 		ClusterLODGroup group{};
 		ClusterLODGroupChunk chunk{};
 		std::vector<ClusterLODGroupSegment> segments;
+		std::vector<uint32_t> meshPageIndices;
 		std::vector<PagePool::PageAllocation> pageAllocations;
 	};
 
@@ -150,6 +151,10 @@ public:
 
 	struct CLodGroupStreamingInfo {
 		ClusterLODRuntimeSummary::GroupChunkHint hint{};
+		uint32_t groupsBase = 0;
+		uint32_t pageMapBase = 0;
+		uint32_t pageCount = 0;
+		std::vector<uint32_t> meshPageIndices;
 		uint32_t vertexByteSize = 0;
 		bool valid = false;
 	};
@@ -217,6 +222,8 @@ private:
 		// (The Mesh releases its CPU copies after setup via ReleaseCLodHierarchyCpuData.)
 		std::vector<ClusterLODGroup> groups;
 		std::vector<ClusterLODGroupSegment> segments;
+		std::vector<uint32_t> groupPageReferences;
+		std::vector<uint32_t> groupPageReferenceOffsets;
 
 		// Parent-child mapping and original error values, copied from
 		// the runtime summary at AddMesh time so that the streaming
@@ -268,6 +275,10 @@ private:
 		uint32_t groupsBase = 0;
 		uint32_t groupLocalIndex = 0;
 		std::optional<CLodCache::GroupPayloadLayoutMetadata> prefetchedLayout;
+		std::vector<ClusterLODGroupDiskLocator> pageDiskLocators;
+		uint32_t pageMapBase = 0;
+		uint32_t pageCount = 0;
+		std::vector<uint32_t> meshPageIndices;
 		std::vector<bool> segmentNeedsFetch; // true = fetch from disk; false = reuse existing slab data
 		std::vector<uint32_t> preAllocatedPages; // page IDs pre-allocated by the LRU
 		std::vector<uint32_t> childLayoutPrefetchGroups;
@@ -282,6 +293,7 @@ private:
 		std::string uploadPathLabel = "CpuReadThenCpuUpload";
 		std::optional<ClusterLODGroupChunk> groupChunkMetadata;
 		std::vector<bool> segmentNeedsFetch;
+		std::vector<uint32_t> meshPageIndices;
 		std::vector<uint32_t> directStoragePageBlobSizes;
 		std::vector<uint64_t> directStoragePageBlobOffsets;
 		bool directStorageGpuUploadPending = false;
@@ -299,6 +311,7 @@ private:
 		ClusterLODGroupChunk chunk{};
 		std::vector<PagePool::PageAllocation> pageAllocations;
 		std::vector<GroupPageMapEntry> pageMapEntries;
+		std::vector<uint32_t> meshPageIndices;
 		uint32_t fetchedPageCount = 0;
 		uint64_t totalBlobBytes = 0;
 		std::string uploadPathLabel = "DirectStorageGpuDirect";
@@ -318,6 +331,7 @@ private:
 		ClusterLODGroupChunk chunk{};
 		std::vector<PagePool::PageAllocation> pageAllocations;
 		std::vector<GroupPageMapEntry> pageMapEntries;
+		std::vector<uint32_t> meshPageIndices;
 		std::vector<br::DirectStorageBufferRegionCopy> copies;
 		std::vector<uint32_t> pageIds;
 		std::vector<CLodPrefetchedChildLayout> prefetchedChildLayouts;
@@ -381,6 +395,7 @@ private:
 	void RebuildCLodSharedStreamingRangeIndex();
 	void RecomputeCLodActiveMaxTraversalDepth();
 	std::shared_ptr<CLodSharedStreamingState> FindCLodSharedStreamingStateByGlobalGroup(uint32_t groupGlobalIndex, uint32_t& outGroupLocalIndex);
+	std::vector<uint32_t> GetCLodGroupMeshPageIndices(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const;
 
 	ViewManager* m_pViewManager;
 

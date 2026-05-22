@@ -161,7 +161,7 @@ struct ClusterLODGroupSegment
     int refinedGroup; // -1 => terminal meshlets bucket
     uint firstMeshletInPage; // page-local start meshlet index
     uint meshletCount;
-    uint pageIndex; // group-local page index (0..pageCount-1)
+    uint pageIndex; // mesh-local page-map index
 };
 
 struct ClusterLODGroup
@@ -179,8 +179,8 @@ struct ClusterLODGroup
 
     uint terminalSegmentCount;
     uint flags;
-    uint pageMapBase; // absolute index into GroupPageMap buffer
-    uint pageCount;   // number of pages for this group
+    uint pageMapBase; // mesh-local compatibility page-map interval base
+    uint pageCount;   // compatibility interval size for group-triggered streaming
     int parentGroupId; // mesh-local group index of the parent group (-1 for root)
     float maxParentError; // max error of any parent group that refines into this group
     float representationError; // actual render representation error; currently used by voxel groups
@@ -295,7 +295,7 @@ struct CLodVoxelPageHeader
 GroupPageMapEntry CLodLoadVoxelPageMapEntry(CLodMeshMetadata metadata, ClusterLODGroup group, uint pageIndex)
 {
     StructuredBuffer<GroupPageMapEntry> pageMap = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupPageMap)];
-    return pageMap[metadata.pageMapBase + group.pageMapBase + pageIndex];
+    return pageMap[metadata.pageMapBase + pageIndex];
 }
 
 CLodVoxelPageHeader CLodLoadVoxelPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
@@ -393,7 +393,7 @@ bool CLodTryFindVoxelPage(
 
     for (uint pageIndex = 0u; pageIndex < group.pageCount; ++pageIndex)
     {
-        GroupPageMapEntry candidateEntry = CLodLoadVoxelPageMapEntry(metadata, group, pageIndex);
+        GroupPageMapEntry candidateEntry = CLodLoadVoxelPageMapEntry(metadata, group, group.pageMapBase + pageIndex);
         CLodVoxelPageHeader candidateHeader = CLodLoadVoxelPageHeader(candidateEntry.slabDescriptorIndex, candidateEntry.slabByteOffset);
         if (candidateHeader.magic != CLOD_VOXEL_PAGE_MAGIC || candidateHeader.version != CLOD_VOXEL_PAGE_VERSION)
         {
@@ -426,7 +426,7 @@ bool CLodTryFindVoxelPageByCluster(
 
     for (uint pageIndex = 0u; pageIndex < group.pageCount; ++pageIndex)
     {
-        GroupPageMapEntry candidateEntry = CLodLoadVoxelPageMapEntry(metadata, group, pageIndex);
+        GroupPageMapEntry candidateEntry = CLodLoadVoxelPageMapEntry(metadata, group, group.pageMapBase + pageIndex);
         CLodVoxelPageHeader candidateHeader = CLodLoadVoxelPageHeader(candidateEntry.slabDescriptorIndex, candidateEntry.slabByteOffset);
         if (candidateHeader.magic != CLOD_VOXEL_PAGE_MAGIC || candidateHeader.version != CLOD_VOXEL_PAGE_VERSION)
         {
@@ -458,7 +458,7 @@ bool CLodTryLoadVoxelGroupDescriptor(
         return false;
     }
 
-    GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, 0u);
+    GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, group.pageMapBase);
     CLodVoxelPageHeader pageHeader = CLodLoadVoxelPageHeader(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset);
     if (pageHeader.magic != CLOD_VOXEL_PAGE_MAGIC || pageHeader.version != CLOD_VOXEL_PAGE_VERSION)
     {
@@ -480,7 +480,8 @@ bool CLodTryLoadVoxelDescriptorForSegment(
     if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u ||
         group.pageCount == 0u ||
         segment.meshletCount == 0u ||
-        segment.pageIndex >= group.pageCount)
+        segment.pageIndex < group.pageMapBase ||
+        segment.pageIndex >= group.pageMapBase + group.pageCount)
     {
         return false;
     }
@@ -533,7 +534,7 @@ bool CLodTryLoadVoxelDescriptorByClusterIndex(
         return false;
     }
 
-    GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, 0u);
+    GroupPageMapEntry pageEntry = CLodLoadVoxelPageMapEntry(metadata, group, group.pageMapBase);
     CLodVoxelPageHeader pageHeader = CLodLoadVoxelPageHeader(pageEntry.slabDescriptorIndex, pageEntry.slabByteOffset);
     if (pageHeader.magic != CLOD_VOXEL_PAGE_MAGIC || pageHeader.version != CLOD_VOXEL_PAGE_VERSION)
     {

@@ -374,7 +374,7 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         }
 
         WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
-        const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + leaf.group.pageMapBase, seg.pageIndex);
+        const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase, seg.pageIndex);
         const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
 
         const uint phase2ExpansionFactor =

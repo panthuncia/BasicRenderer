@@ -109,6 +109,9 @@ private:
     void EnsurePageTrackingCapacity(MeshManager* meshManager);
     std::vector<uint32_t> PopFreePages(uint32_t count, MeshManager* meshManager);
     void ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager);
+    bool IsGroupUsedLastFrame(uint32_t groupIndex) const;
+    bool IsPhysicalPageProtectedForReuse(uint32_t page, uint64_t meshPageKey, bool& stopAtVisiblePage) const;
+    void InvalidatePhysicalPageReferencesForReuse(uint32_t page, uint64_t meshPageKey, MeshManager* meshManager);
     void MarkStreamingNonResidentBitsDirtyWord(uint32_t wordAddress);
     void MarkStreamingNonResidentBitsDirtyAll();
     void MarkStreamingActiveGroupsBitsDirty();
@@ -116,6 +119,9 @@ private:
     struct PreAllocatedPages {
 		std::vector<uint32_t> pagesBySegment; // segment index to page ID
         std::vector<bool> segmentNeedsFetch;  // true = need disk data; false = reused still-valid page
+        std::vector<uint64_t> meshPageKeys;    // physical page identity key for each page slot
+        std::vector<bool> meshPageRefClaimed;  // true when the mesh-page refcount was already incremented
+        std::vector<bool> meshPageRefReleaseOnCancel; // preallocation-time ref claims to undo on cancellation
         uint32_t segmentCount = 0;
         bool usesPinnedStorage = false;
     };
@@ -150,7 +156,12 @@ private:
     std::vector<CLodPhysicalPageState> m_pageState;
     std::vector<uint32_t> m_pendingPageOwnerGroup;
     std::vector<uint32_t> m_pendingPageOwnerSegment;
+    std::vector<uint64_t> m_pageOwnerMeshPageKey;
+    std::vector<uint32_t> m_pageReadbackGapPinCount;
     std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
+    std::unordered_map<uint32_t, std::vector<uint64_t>> m_groupOwnedMeshPageKeys; // group to mesh-page keys by page slot
+    std::unordered_map<uint64_t, uint32_t> m_residentMeshPageToPhysicalPage;
+    std::unordered_map<uint64_t, uint32_t> m_residentMeshPageRefCounts;
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
     std::unordered_set<uint32_t> m_pendingResidencyCommitGroups;
     std::vector<StreamingRequestState> m_streamingRequestStateByGroup;

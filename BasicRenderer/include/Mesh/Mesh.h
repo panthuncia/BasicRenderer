@@ -107,6 +107,18 @@ public:
 		return m_clodGroupDiskLocators;
 	}
 
+	const std::vector<ClusterLODGroupDiskLocator>& GetCLodPageDiskLocators() const {
+		return m_clodPageDiskLocators;
+	}
+
+	const std::vector<uint32_t>& GetCLodGroupPageReferences() const {
+		return m_clodGroupPageReferences;
+	}
+
+	const std::vector<uint32_t>& GetCLodGroupPageReferenceOffsets() const {
+		return m_clodGroupPageReferenceOffsets;
+	}
+
 	const ClusterLODCacheSource& GetCLodCacheSource() const {
 		return m_clodCacheSource;
 	}
@@ -208,8 +220,15 @@ private:
 	ClusterLODRuntimeSummary m_clodRuntimeSummary;
 	struct ClusterLODCacheBuildChunkData {
 		std::vector<std::vector<std::vector<std::byte>>> groupPageBlobs;
+		std::vector<std::vector<std::byte>> meshPageBlobs;
 	} m_clodCacheBuildChunkData;
 	std::vector<ClusterLODGroupDiskLocator> m_clodGroupDiskLocators;
+	std::vector<ClusterLODGroupDiskLocator> m_clodPageDiskLocators;
+	std::vector<uint32_t> m_clodGroupPageReferences;
+	std::vector<uint32_t> m_clodGroupPageReferenceOffsets;
+	uint32_t m_clodTrianglePageCount = 0;
+	uint32_t m_clodVoxelPageBase = 0;
+	uint32_t m_clodVoxelPageCount = 0;
 	ClusterLODCacheSource m_clodCacheSource;
 
 	std::vector<ClusterLODNode>      m_clodNodes;

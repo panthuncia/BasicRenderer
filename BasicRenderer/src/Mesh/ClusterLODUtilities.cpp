@@ -1869,6 +1869,673 @@ namespace
 		std::vector<VoxelGroupPayload> voxelCarryPayloads;
 	};
 
+	struct TriangleMeshPageSegmentRef
+	{
+		uint32_t groupIndex = 0;
+		uint32_t segmentIndex = 0;
+		uint32_t sourcePageIndex = 0;
+		uint32_t firstMeshletInPage = 0;
+		uint32_t meshletCount = 0;
+	};
+
+	struct TriangleMeshPageBuildTotals
+	{
+		uint32_t meshletCount = 0;
+		uint32_t totalPositionBytes = 0;
+		std::vector<uint64_t> totalUvBitsPerSet;
+		uint32_t totalVertexCount = 0;
+		uint32_t totalNormalWords = 0;
+		uint32_t totalColorWords = 0;
+		uint32_t totalBoneIndexCount = 0;
+		uint32_t totalTriangleBytes = 0;
+	};
+
+	template<typename T>
+	bool ReadPodAt(const std::vector<std::byte>& bytes, size_t offset, T& outValue)
+	{
+		if (offset + sizeof(T) > bytes.size())
+		{
+			return false;
+		}
+		std::memcpy(&outValue, bytes.data() + offset, sizeof(T));
+		return true;
+	}
+
+	uint32_t ReadUint32At(const std::vector<std::byte>& bytes, size_t offset)
+	{
+		uint32_t value = 0u;
+		(void)ReadPodAt(bytes, offset, value);
+		return value;
+	}
+
+	uint32_t DecodeMeshletVertexCount(const CLodMeshletDescriptor& desc)
+	{
+		return (desc.bitsAndVertexCount >> 24u) & 0xFFu;
+	}
+
+	uint32_t DecodeMeshletTriangleCount(const CLodMeshletDescriptor& desc)
+	{
+		return desc.triangleCountAndRefinedGroup & 0xFFFFu;
+	}
+
+	uint32_t DecodeUvBitsU(const CLodMeshletUvDescriptor& desc)
+	{
+		return desc.uvBits & 0xFFu;
+	}
+
+	uint32_t DecodeUvBitsV(const CLodMeshletUvDescriptor& desc)
+	{
+		return (desc.uvBits >> 8u) & 0xFFu;
+	}
+
+	bool IsVoxelPageBlob(const std::vector<std::byte>& blob)
+	{
+		return blob.size() >= sizeof(uint32_t) &&
+			ReadUint32At(blob, 0u) == CLOD_VOXEL_PAGE_MAGIC;
+	}
+
+	bool ReadTrianglePageHeader(const std::vector<std::byte>& blob, CLodPageHeader& outHeader)
+	{
+		if (blob.size() < sizeof(CLodPageHeader) || IsVoxelPageBlob(blob))
+		{
+			return false;
+		}
+		if (!ReadPodAt(blob, 0u, outHeader))
+		{
+			return false;
+		}
+		return outHeader.compressedPositionQuantExp == CLOD_POSITION_FORMAT_FLOAT3 &&
+			outHeader.descriptorOffset != 0u &&
+			outHeader.positionBitstreamOffset != 0u &&
+			outHeader.triangleStreamOffset != 0u;
+	}
+
+	bool ReadTriangleMeshletDescriptor(
+		const std::vector<std::byte>& blob,
+		const CLodPageHeader& header,
+		uint32_t meshletIndex,
+		CLodMeshletDescriptor& outDescriptor)
+	{
+		if (meshletIndex >= header.meshletCount)
+		{
+			return false;
+		}
+		return ReadPodAt(
+			blob,
+			static_cast<size_t>(header.descriptorOffset) + static_cast<size_t>(meshletIndex) * sizeof(CLodMeshletDescriptor),
+			outDescriptor);
+	}
+
+	bool ReadTriangleUvDescriptor(
+		const std::vector<std::byte>& blob,
+		const CLodPageHeader& header,
+		uint32_t meshletIndex,
+		uint32_t uvSetIndex,
+		CLodMeshletUvDescriptor& outDescriptor)
+	{
+		if (header.uvSetCount == 0u || header.uvDescriptorOffset == 0u ||
+			meshletIndex >= header.meshletCount || uvSetIndex >= header.uvSetCount)
+		{
+			return false;
+		}
+		const size_t descriptorIndex =
+			static_cast<size_t>(meshletIndex) * static_cast<size_t>(header.uvSetCount) + uvSetIndex;
+		return ReadPodAt(
+			blob,
+			static_cast<size_t>(header.uvDescriptorOffset) + descriptorIndex * sizeof(CLodMeshletUvDescriptor),
+			outDescriptor);
+	}
+
+	void AppendBitsFromBytes(
+		const std::vector<std::byte>& source,
+		uint32_t sourceByteOffset,
+		uint64_t sourceBitOffset,
+		uint64_t bitCount,
+		std::vector<uint32_t>& destWords,
+		uint64_t& destBitCursor)
+	{
+		for (uint64_t bitIndex = 0; bitIndex < bitCount; ++bitIndex)
+		{
+			const uint64_t absoluteSourceBit = static_cast<uint64_t>(sourceByteOffset) * 8ull + sourceBitOffset + bitIndex;
+			const size_t sourceByteIndex = static_cast<size_t>(absoluteSourceBit >> 3ull);
+			if (sourceByteIndex >= source.size())
+			{
+				AppendBits(destWords, destBitCursor, 0u, 1u);
+				continue;
+			}
+
+			const uint32_t sourceBitInByte = static_cast<uint32_t>(absoluteSourceBit & 7ull);
+			const uint32_t bitValue = (std::to_integer<uint32_t>(source[sourceByteIndex]) >> sourceBitInByte) & 1u;
+			AppendBits(destWords, destBitCursor, bitValue, 1u);
+		}
+	}
+
+	TriangleMeshPageBuildTotals ComputeTriangleMeshPageTotals(
+		const ClusterLODBuildState& state,
+		std::span<const TriangleMeshPageSegmentRef> segments,
+		uint32_t attributeMask,
+		uint32_t uvSetCount)
+	{
+		TriangleMeshPageBuildTotals totals{};
+		totals.totalUvBitsPerSet.assign(uvSetCount, 0ull);
+
+		for (const TriangleMeshPageSegmentRef& segment : segments)
+		{
+			if (segment.groupIndex >= state.groupPageBlobs.size() ||
+				segment.sourcePageIndex >= state.groupPageBlobs[segment.groupIndex].size())
+			{
+				continue;
+			}
+
+			const std::vector<std::byte>& blob = state.groupPageBlobs[segment.groupIndex][segment.sourcePageIndex];
+			CLodPageHeader header{};
+			if (!ReadTrianglePageHeader(blob, header))
+			{
+				continue;
+			}
+
+			for (uint32_t localMeshlet = 0; localMeshlet < segment.meshletCount; ++localMeshlet)
+			{
+				const uint32_t sourceMeshletIndex = segment.firstMeshletInPage + localMeshlet;
+				CLodMeshletDescriptor desc{};
+				if (!ReadTriangleMeshletDescriptor(blob, header, sourceMeshletIndex, desc))
+				{
+					continue;
+				}
+
+				const uint32_t vertexCount = DecodeMeshletVertexCount(desc);
+				const uint32_t triangleCount = DecodeMeshletTriangleCount(desc);
+				totals.meshletCount++;
+				totals.totalPositionBytes += vertexCount * CLOD_NATIVE_POSITION_STRIDE_BYTES;
+				totals.totalVertexCount += vertexCount;
+				totals.totalNormalWords += ((attributeMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u) ? vertexCount : 0u;
+				totals.totalColorWords += ((attributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? vertexCount : 0u;
+				totals.totalBoneIndexCount += desc.boneCount;
+				totals.totalTriangleBytes += triangleCount * 3u;
+
+				for (uint32_t uvSetIndex = 0; uvSetIndex < uvSetCount; ++uvSetIndex)
+				{
+					CLodMeshletUvDescriptor uvDesc{};
+					if (uvSetIndex < header.uvSetCount &&
+						ReadTriangleUvDescriptor(blob, header, sourceMeshletIndex, uvSetIndex, uvDesc))
+					{
+						totals.totalUvBitsPerSet[uvSetIndex] +=
+							static_cast<uint64_t>(vertexCount) *
+							static_cast<uint64_t>(DecodeUvBitsU(uvDesc) + DecodeUvBitsV(uvDesc));
+					}
+					else
+					{
+						totals.totalUvBitsPerSet[uvSetIndex] += static_cast<uint64_t>(vertexCount) * 2ull;
+					}
+				}
+			}
+		}
+
+		return totals;
+	}
+
+	std::vector<std::byte> BuildPackedTriangleMeshPageBlob(
+		const ClusterLODBuildState& state,
+		std::span<const TriangleMeshPageSegmentRef> segments,
+		uint32_t attributeMask,
+		uint32_t uvSetCount)
+	{
+		auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
+		const TriangleMeshPageBuildTotals totals = ComputeTriangleMeshPageTotals(state, segments, attributeMask, uvSetCount);
+		if (totals.meshletCount == 0u)
+		{
+			return {};
+		}
+
+		const bool pageHasNormals = (attributeMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u;
+		const bool pageHasColors = (attributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u;
+		const bool pageHasJoints = (attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) != 0u;
+		const bool pageHasWeights = (attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) != 0u;
+		const bool pageHasUvSets = uvSetCount > 0u;
+
+		const uint32_t descriptorOffset = static_cast<uint32_t>(align4(CLOD_PAGE_HEADER_SIZE));
+		const size_t descriptorBytes = static_cast<size_t>(totals.meshletCount) * sizeof(CLodMeshletDescriptor);
+		const uint32_t uvDescriptorOffset = pageHasUvSets
+			? static_cast<uint32_t>(align4(descriptorOffset + descriptorBytes))
+			: 0u;
+		const size_t uvDescriptorBytes = pageHasUvSets
+			? static_cast<size_t>(totals.meshletCount) * static_cast<size_t>(uvSetCount) * sizeof(CLodMeshletUvDescriptor)
+			: 0u;
+		const uint32_t positionBitstreamOffset = static_cast<uint32_t>(align4(pageHasUvSets ? (uvDescriptorOffset + uvDescriptorBytes) : (descriptorOffset + descriptorBytes)));
+		const size_t positionBytes = static_cast<size_t>(totals.totalPositionBytes);
+		const uint32_t normalArrayOffset = pageHasNormals ? static_cast<uint32_t>(align4(positionBitstreamOffset + positionBytes)) : 0u;
+		const size_t normalBytes = pageHasNormals ? static_cast<size_t>(totals.totalNormalWords) * sizeof(uint32_t) : 0u;
+		const uint32_t colorArrayOffset = pageHasColors ? static_cast<uint32_t>(align4(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes))) : 0u;
+		const size_t colorBytes = pageHasColors ? static_cast<size_t>(totals.totalColorWords) * sizeof(uint32_t) : 0u;
+		const uint32_t jointArrayOffset = pageHasJoints ? static_cast<uint32_t>(align4(pageHasColors ? (colorArrayOffset + colorBytes) : (pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))) : 0u;
+		const size_t jointBytes = pageHasJoints ? static_cast<size_t>(totals.totalVertexCount) * sizeof(DirectX::XMUINT4) * 2u : 0u;
+		const uint32_t weightArrayOffset = pageHasWeights ? static_cast<uint32_t>(align4(pageHasJoints ? (jointArrayOffset + jointBytes) : (pageHasColors ? (colorArrayOffset + colorBytes) : (pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes))))) : 0u;
+		const size_t weightBytes = pageHasWeights ? static_cast<size_t>(totals.totalVertexCount) * sizeof(DirectX::XMFLOAT4) * 2u : 0u;
+		const uint32_t uvBitstreamDirectoryOffset = pageHasUvSets ? static_cast<uint32_t>(align4(pageHasWeights ? (weightArrayOffset + weightBytes) : (pageHasJoints ? (jointArrayOffset + jointBytes) : (pageHasColors ? (colorArrayOffset + colorBytes) : (pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))))) : 0u;
+
+		std::vector<uint32_t> uvBitstreamOffsets(uvSetCount, 0u);
+		size_t uvBitstreamCursor = pageHasUvSets
+			? align4(static_cast<size_t>(uvBitstreamDirectoryOffset) + static_cast<size_t>(uvSetCount) * sizeof(uint32_t))
+			: align4(pageHasWeights ? (weightArrayOffset + weightBytes) : (pageHasJoints ? (jointArrayOffset + jointBytes) : (pageHasColors ? (colorArrayOffset + colorBytes) : (pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))));
+		for (uint32_t uvSetIndex = 0; uvSetIndex < uvSetCount; ++uvSetIndex)
+		{
+			uvBitstreamOffsets[uvSetIndex] = static_cast<uint32_t>(uvBitstreamCursor);
+			const size_t uvBytes = static_cast<size_t>((totals.totalUvBitsPerSet[uvSetIndex] + 31ull) / 32ull) * sizeof(uint32_t);
+			uvBitstreamCursor = align4(uvBitstreamCursor + uvBytes);
+		}
+
+		const uint32_t boneIndexStreamOffset = static_cast<uint32_t>(align4(uvBitstreamCursor));
+		const size_t boneIndexBytes = static_cast<size_t>(totals.totalBoneIndexCount) * sizeof(uint32_t);
+		const uint32_t triangleStreamOffset = static_cast<uint32_t>(align4(boneIndexStreamOffset + boneIndexBytes));
+		const size_t totalBlobSize = align4(triangleStreamOffset + totals.totalTriangleBytes);
+		if (totalBlobSize > CLOD_PAGE_SIZE)
+		{
+			return {};
+		}
+
+		std::vector<std::byte> blob(totalBlobSize, std::byte{ 0 });
+		std::vector<CLodMeshletDescriptor> descriptors(totals.meshletCount);
+		std::vector<CLodMeshletUvDescriptor> uvDescriptors(static_cast<size_t>(totals.meshletCount) * static_cast<size_t>(uvSetCount));
+		std::vector<std::vector<uint32_t>> uvWordsPerSet(uvSetCount);
+		std::vector<uint64_t> uvBitCursors(uvSetCount, 0ull);
+
+		uint32_t outputMeshletIndex = 0u;
+		uint32_t positionByteCursor = 0u;
+		uint32_t vertexAttributeCursor = 0u;
+		uint32_t boneIndexCursor = 0u;
+		uint32_t triangleByteCursor = 0u;
+
+		for (const TriangleMeshPageSegmentRef& segment : segments)
+		{
+			const std::vector<std::byte>& sourceBlob = state.groupPageBlobs[segment.groupIndex][segment.sourcePageIndex];
+			CLodPageHeader sourceHeader{};
+			if (!ReadTrianglePageHeader(sourceBlob, sourceHeader))
+			{
+				continue;
+			}
+
+			for (uint32_t localMeshlet = 0; localMeshlet < segment.meshletCount; ++localMeshlet)
+			{
+				const uint32_t sourceMeshletIndex = segment.firstMeshletInPage + localMeshlet;
+				CLodMeshletDescriptor sourceDesc{};
+				if (!ReadTriangleMeshletDescriptor(sourceBlob, sourceHeader, sourceMeshletIndex, sourceDesc))
+				{
+					continue;
+				}
+
+				const uint32_t vertexCount = DecodeMeshletVertexCount(sourceDesc);
+				const uint32_t triangleCount = DecodeMeshletTriangleCount(sourceDesc);
+				const uint32_t positionBytesForMeshlet = vertexCount * CLOD_NATIVE_POSITION_STRIDE_BYTES;
+				const uint32_t triangleBytesForMeshlet = triangleCount * 3u;
+
+				CLodMeshletDescriptor& destDesc = descriptors[outputMeshletIndex];
+				destDesc = sourceDesc;
+				destDesc.positionBitOffset = positionByteCursor;
+				destDesc.vertexAttributeOffset = vertexAttributeCursor;
+				destDesc.triangleByteOffset = triangleByteCursor;
+				destDesc.boneListOffset = boneIndexCursor;
+
+				auto copyBytes = [&](uint32_t destOffset, uint32_t sourceOffset, uint32_t byteCount)
+				{
+					if (byteCount == 0u ||
+						static_cast<size_t>(sourceOffset) + byteCount > sourceBlob.size() ||
+						static_cast<size_t>(destOffset) + byteCount > blob.size())
+					{
+						return;
+					}
+					std::memcpy(blob.data() + destOffset, sourceBlob.data() + sourceOffset, byteCount);
+				};
+
+				copyBytes(
+					positionBitstreamOffset + positionByteCursor,
+					sourceHeader.positionBitstreamOffset + sourceDesc.positionBitOffset,
+					positionBytesForMeshlet);
+
+				if (pageHasNormals && sourceHeader.normalArrayOffset != 0u)
+				{
+					copyBytes(
+						normalArrayOffset + vertexAttributeCursor * static_cast<uint32_t>(sizeof(uint32_t)),
+						sourceHeader.normalArrayOffset + sourceDesc.vertexAttributeOffset * static_cast<uint32_t>(sizeof(uint32_t)),
+						vertexCount * static_cast<uint32_t>(sizeof(uint32_t)));
+				}
+				if (pageHasColors && sourceHeader.colorArrayOffset != 0u)
+				{
+					copyBytes(
+						colorArrayOffset + vertexAttributeCursor * static_cast<uint32_t>(sizeof(uint32_t)),
+						sourceHeader.colorArrayOffset + sourceDesc.vertexAttributeOffset * static_cast<uint32_t>(sizeof(uint32_t)),
+						vertexCount * static_cast<uint32_t>(sizeof(uint32_t)));
+				}
+				if (pageHasJoints && sourceHeader.jointArrayOffset != 0u)
+				{
+					copyBytes(
+						jointArrayOffset + vertexAttributeCursor * static_cast<uint32_t>(sizeof(DirectX::XMUINT4)) * 2u,
+						sourceHeader.jointArrayOffset + sourceDesc.vertexAttributeOffset * static_cast<uint32_t>(sizeof(DirectX::XMUINT4)) * 2u,
+						vertexCount * static_cast<uint32_t>(sizeof(DirectX::XMUINT4)) * 2u);
+				}
+				if (pageHasWeights && sourceHeader.weightArrayOffset != 0u)
+				{
+					copyBytes(
+						weightArrayOffset + vertexAttributeCursor * static_cast<uint32_t>(sizeof(DirectX::XMFLOAT4)) * 2u,
+						sourceHeader.weightArrayOffset + sourceDesc.vertexAttributeOffset * static_cast<uint32_t>(sizeof(DirectX::XMFLOAT4)) * 2u,
+						vertexCount * static_cast<uint32_t>(sizeof(DirectX::XMFLOAT4)) * 2u);
+				}
+				if (sourceDesc.boneCount != 0u && sourceHeader.boneIndexStreamOffset != 0u)
+				{
+					copyBytes(
+						boneIndexStreamOffset + boneIndexCursor * static_cast<uint32_t>(sizeof(uint32_t)),
+						sourceHeader.boneIndexStreamOffset + sourceDesc.boneListOffset * static_cast<uint32_t>(sizeof(uint32_t)),
+						sourceDesc.boneCount * static_cast<uint32_t>(sizeof(uint32_t)));
+				}
+				copyBytes(
+					triangleStreamOffset + triangleByteCursor,
+					sourceHeader.triangleStreamOffset + sourceDesc.triangleByteOffset,
+					triangleBytesForMeshlet);
+
+				for (uint32_t uvSetIndex = 0; uvSetIndex < uvSetCount; ++uvSetIndex)
+				{
+					CLodMeshletUvDescriptor destUvDesc{};
+					destUvDesc.uvBitOffset = static_cast<uint32_t>(uvBitCursors[uvSetIndex]);
+					if (uvSetIndex < sourceHeader.uvSetCount &&
+						ReadTriangleUvDescriptor(sourceBlob, sourceHeader, sourceMeshletIndex, uvSetIndex, destUvDesc))
+					{
+						const uint32_t sourceUvStreamOffset = ReadUint32At(
+							sourceBlob,
+							static_cast<size_t>(sourceHeader.uvBitstreamDirectoryOffset) + static_cast<size_t>(uvSetIndex) * sizeof(uint32_t));
+						const uint64_t sourceUvBitOffset = destUvDesc.uvBitOffset;
+						destUvDesc.uvBitOffset = static_cast<uint32_t>(uvBitCursors[uvSetIndex]);
+						const uint64_t bitCount =
+							static_cast<uint64_t>(vertexCount) *
+							static_cast<uint64_t>(DecodeUvBitsU(destUvDesc) + DecodeUvBitsV(destUvDesc));
+						AppendBitsFromBytes(sourceBlob, sourceUvStreamOffset, sourceUvBitOffset, bitCount, uvWordsPerSet[uvSetIndex], uvBitCursors[uvSetIndex]);
+					}
+					else
+					{
+						destUvDesc.uvScaleU = 0.0f;
+						destUvDesc.uvScaleV = 0.0f;
+						destUvDesc.uvBits = 1u | (1u << 8u);
+						for (uint32_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
+						{
+							AppendBits(uvWordsPerSet[uvSetIndex], uvBitCursors[uvSetIndex], 0u, 1u);
+							AppendBits(uvWordsPerSet[uvSetIndex], uvBitCursors[uvSetIndex], 0u, 1u);
+						}
+					}
+					uvDescriptors[static_cast<size_t>(outputMeshletIndex) * static_cast<size_t>(uvSetCount) + uvSetIndex] = destUvDesc;
+				}
+
+				positionByteCursor += positionBytesForMeshlet;
+				vertexAttributeCursor += vertexCount;
+				boneIndexCursor += sourceDesc.boneCount;
+				triangleByteCursor += triangleBytesForMeshlet;
+				outputMeshletIndex++;
+			}
+		}
+
+		std::memcpy(blob.data() + descriptorOffset, descriptors.data(), descriptorBytes);
+		if (pageHasUvSets)
+		{
+			std::memcpy(blob.data() + uvDescriptorOffset, uvDescriptors.data(), uvDescriptorBytes);
+			std::memcpy(blob.data() + uvBitstreamDirectoryOffset, uvBitstreamOffsets.data(), static_cast<size_t>(uvSetCount) * sizeof(uint32_t));
+			for (uint32_t uvSetIndex = 0; uvSetIndex < uvSetCount; ++uvSetIndex)
+			{
+				if (!uvWordsPerSet[uvSetIndex].empty())
+				{
+					std::memcpy(
+						blob.data() + uvBitstreamOffsets[uvSetIndex],
+						uvWordsPerSet[uvSetIndex].data(),
+						uvWordsPerSet[uvSetIndex].size() * sizeof(uint32_t));
+				}
+			}
+		}
+
+		CLodPageHeader header{};
+		header.meshletCount = totals.meshletCount;
+		header.compressedPositionQuantExp = CLOD_NATIVE_POSITION_FORMAT;
+		header.attributeMask = attributeMask;
+		header.uvSetCount = uvSetCount;
+		header.descriptorOffset = descriptorOffset;
+		header.uvDescriptorOffset = uvDescriptorOffset;
+		header.positionBitstreamOffset = positionBitstreamOffset;
+		header.normalArrayOffset = normalArrayOffset;
+		header.colorArrayOffset = colorArrayOffset;
+		header.jointArrayOffset = jointArrayOffset;
+		header.weightArrayOffset = weightArrayOffset;
+		header.uvBitstreamDirectoryOffset = uvBitstreamDirectoryOffset;
+		header.triangleStreamOffset = triangleStreamOffset;
+		header.boneIndexStreamOffset = boneIndexStreamOffset;
+		std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));
+
+		return blob;
+	}
+
+	void FinalizeMeshWidePagePacking(
+		ClusterLODBuildState& state,
+		std::vector<std::vector<std::byte>>& outMeshPageBlobs,
+		std::vector<uint32_t>& outGroupPageReferences,
+		std::vector<uint32_t>& outGroupPageReferenceOffsets,
+		uint32_t& outTrianglePageCount,
+		uint32_t& outVoxelPageBase,
+		uint32_t& outVoxelPageCount)
+	{
+		outMeshPageBlobs.clear();
+		outGroupPageReferences.clear();
+		outGroupPageReferenceOffsets.clear();
+		outTrianglePageCount = 0u;
+		outVoxelPageBase = 0u;
+		outVoxelPageCount = 0u;
+
+		std::vector<TriangleMeshPageSegmentRef> currentTrianglePage;
+		uint32_t currentAttributeMask = 0u;
+		uint32_t currentUvSetCount = 0u;
+		std::vector<std::vector<uint32_t>> groupReferencedPages(state.groups.size());
+
+		auto flushTrianglePage = [&]()
+		{
+			if (currentTrianglePage.empty())
+			{
+				return;
+			}
+
+			std::vector<std::byte> pageBlob = BuildPackedTriangleMeshPageBlob(
+				state,
+				std::span<const TriangleMeshPageSegmentRef>(currentTrianglePage.data(), currentTrianglePage.size()),
+				currentAttributeMask,
+				currentUvSetCount);
+			if (pageBlob.empty())
+			{
+				currentTrianglePage.clear();
+				currentAttributeMask = 0u;
+				currentUvSetCount = 0u;
+				return;
+			}
+
+			const uint32_t meshPageIndex = static_cast<uint32_t>(outMeshPageBlobs.size());
+			uint32_t pageLocalMeshlet = 0u;
+			for (const TriangleMeshPageSegmentRef& segment : currentTrianglePage)
+			{
+				if (segment.segmentIndex < state.segments.size())
+				{
+					ClusterLODGroupSegment& outSegment = state.segments[segment.segmentIndex];
+					outSegment.pageIndex = meshPageIndex;
+					outSegment.firstMeshletInPage = pageLocalMeshlet;
+					groupReferencedPages[segment.groupIndex].push_back(meshPageIndex);
+				}
+				pageLocalMeshlet += segment.meshletCount;
+			}
+
+			outMeshPageBlobs.push_back(std::move(pageBlob));
+			currentTrianglePage.clear();
+			currentAttributeMask = 0u;
+			currentUvSetCount = 0u;
+		};
+
+		std::vector<uint32_t> groupOrder(state.groups.size());
+		std::iota(groupOrder.begin(), groupOrder.end(), 0u);
+		std::stable_sort(groupOrder.begin(), groupOrder.end(), [&](uint32_t a, uint32_t b)
+		{
+			const ClusterLODGroup& groupA = state.groups[a];
+			const ClusterLODGroup& groupB = state.groups[b];
+			if (groupA.depth != groupB.depth) return groupA.depth < groupB.depth;
+			if (groupA.parentGroupId != groupB.parentGroupId) return groupA.parentGroupId < groupB.parentGroupId;
+			return a < b;
+		});
+
+		for (uint32_t groupIndex : groupOrder)
+		{
+			if (groupIndex >= state.groups.size())
+			{
+				continue;
+			}
+			const ClusterLODGroup& group = state.groups[groupIndex];
+			if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u)
+			{
+				continue;
+			}
+
+			const uint32_t segEnd = std::min<uint32_t>(
+				group.firstSegment + group.segmentCount,
+				static_cast<uint32_t>(state.segments.size()));
+			for (uint32_t segmentIndex = group.firstSegment; segmentIndex < segEnd; ++segmentIndex)
+			{
+				const ClusterLODGroupSegment& segment = state.segments[segmentIndex];
+				if (segment.meshletCount == 0u ||
+					groupIndex >= state.groupPageBlobs.size() ||
+					segment.pageIndex >= state.groupPageBlobs[groupIndex].size())
+				{
+					continue;
+				}
+
+				const std::vector<std::byte>& sourceBlob = state.groupPageBlobs[groupIndex][segment.pageIndex];
+				CLodPageHeader sourceHeader{};
+				if (!ReadTrianglePageHeader(sourceBlob, sourceHeader))
+				{
+					continue;
+				}
+
+				TriangleMeshPageSegmentRef candidate{};
+				candidate.groupIndex = groupIndex;
+				candidate.segmentIndex = segmentIndex;
+				candidate.sourcePageIndex = segment.pageIndex;
+				candidate.firstMeshletInPage = segment.firstMeshletInPage;
+				candidate.meshletCount = segment.meshletCount;
+
+				const uint32_t candidateMask = currentTrianglePage.empty()
+					? sourceHeader.attributeMask
+					: (currentAttributeMask | sourceHeader.attributeMask);
+				const uint32_t candidateUvSetCount = currentTrianglePage.empty()
+					? sourceHeader.uvSetCount
+					: std::max(currentUvSetCount, sourceHeader.uvSetCount);
+
+				std::vector<TriangleMeshPageSegmentRef> candidatePage = currentTrianglePage;
+				candidatePage.push_back(candidate);
+				const TriangleMeshPageBuildTotals candidateTotals = ComputeTriangleMeshPageTotals(
+					state,
+					std::span<const TriangleMeshPageSegmentRef>(candidatePage.data(), candidatePage.size()),
+					candidateMask,
+					candidateUvSetCount);
+				const size_t candidateSize = ComputePageBlobSize(
+					candidateMask,
+					candidateTotals.meshletCount,
+					candidateUvSetCount,
+					candidateTotals.totalPositionBytes,
+					candidateTotals.totalUvBitsPerSet,
+					candidateTotals.totalVertexCount,
+					candidateTotals.totalNormalWords,
+					candidateTotals.totalColorWords,
+					candidateTotals.totalBoneIndexCount,
+					candidateTotals.totalTriangleBytes);
+
+				if (candidateSize > CLOD_PAGE_SIZE && !currentTrianglePage.empty())
+				{
+					flushTrianglePage();
+				}
+
+				currentTrianglePage.push_back(candidate);
+				currentAttributeMask = currentTrianglePage.size() == 1u
+					? sourceHeader.attributeMask
+					: (currentAttributeMask | sourceHeader.attributeMask);
+				currentUvSetCount = currentTrianglePage.size() == 1u
+					? sourceHeader.uvSetCount
+					: std::max(currentUvSetCount, sourceHeader.uvSetCount);
+			}
+		}
+
+		flushTrianglePage();
+		outTrianglePageCount = static_cast<uint32_t>(outMeshPageBlobs.size());
+		outVoxelPageBase = outTrianglePageCount;
+
+		for (uint32_t groupIndex : groupOrder)
+		{
+			if (groupIndex >= state.groups.size())
+			{
+				continue;
+			}
+			ClusterLODGroup& group = state.groups[groupIndex];
+			if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) == 0u ||
+				groupIndex >= state.groupPageBlobs.size())
+			{
+				continue;
+			}
+
+			const uint32_t voxelGroupPageBase = static_cast<uint32_t>(outMeshPageBlobs.size());
+			for (uint32_t sourcePageIndex = 0; sourcePageIndex < static_cast<uint32_t>(state.groupPageBlobs[groupIndex].size()); ++sourcePageIndex)
+			{
+				const uint32_t meshPageIndex = static_cast<uint32_t>(outMeshPageBlobs.size());
+				outMeshPageBlobs.push_back(state.groupPageBlobs[groupIndex][sourcePageIndex]);
+				groupReferencedPages[groupIndex].push_back(meshPageIndex);
+			}
+
+			const uint32_t segEnd = std::min<uint32_t>(
+				group.firstSegment + group.segmentCount,
+				static_cast<uint32_t>(state.segments.size()));
+			for (uint32_t segmentIndex = group.firstSegment; segmentIndex < segEnd; ++segmentIndex)
+			{
+				ClusterLODGroupSegment& segment = state.segments[segmentIndex];
+				segment.pageIndex += voxelGroupPageBase;
+			}
+		}
+
+		outVoxelPageCount = static_cast<uint32_t>(outMeshPageBlobs.size()) - outVoxelPageBase;
+
+		outGroupPageReferenceOffsets.reserve(state.groups.size() + 1ull);
+		for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
+		{
+			outGroupPageReferenceOffsets.push_back(static_cast<uint32_t>(outGroupPageReferences.size()));
+			std::vector<uint32_t>& refs = groupReferencedPages[groupIndex];
+			std::sort(refs.begin(), refs.end());
+			refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
+
+			ClusterLODGroup& group = state.groups[groupIndex];
+			if (refs.empty())
+			{
+				group.pageMapBase = 0u;
+				group.pageCount = 0u;
+				continue;
+			}
+
+			group.pageMapBase = refs.front();
+			group.pageCount = refs.back() - refs.front() + 1u;
+			outGroupPageReferences.insert(outGroupPageReferences.end(), refs.begin(), refs.end());
+		}
+		outGroupPageReferenceOffsets.push_back(static_cast<uint32_t>(outGroupPageReferences.size()));
+
+		std::vector<std::vector<std::vector<std::byte>>> compatibilityGroupPageBlobs(state.groups.size());
+		for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(state.groups.size()); ++groupIndex)
+		{
+			const ClusterLODGroup& group = state.groups[groupIndex];
+			auto& pages = compatibilityGroupPageBlobs[groupIndex];
+			pages.reserve(group.pageCount);
+			for (uint32_t pageIndex = 0; pageIndex < group.pageCount; ++pageIndex)
+			{
+				const uint32_t meshPageIndex = group.pageMapBase + pageIndex;
+				if (meshPageIndex < outMeshPageBlobs.size())
+				{
+					pages.push_back(outMeshPageBlobs[meshPageIndex]);
+				}
+			}
+		}
+		state.groupPageBlobs = std::move(compatibilityGroupPageBlobs);
+	}
+
 	struct VoxelFallbackGroupAnalysis
 	{
 		bool valid = false;
@@ -5056,14 +5723,20 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		}
 	}
 
-	// Assign mesh-local pageMapBase for each group (running cumulative offset).
-	{
-		uint32_t localPageMapCursor = 0;
-		for (auto& grp : state.groups) {
-			grp.pageMapBase = localPageMapCursor;
-			localPageMapCursor += grp.pageCount;
-		}
-	}
+	std::vector<std::vector<std::byte>> meshPageBlobs;
+	std::vector<uint32_t> groupPageReferences;
+	std::vector<uint32_t> groupPageReferenceOffsets;
+	uint32_t trianglePageCount = 0u;
+	uint32_t voxelPageBase = 0u;
+	uint32_t voxelPageCount = 0u;
+	FinalizeMeshWidePagePacking(
+		state,
+		meshPageBlobs,
+		groupPageReferences,
+		groupPageReferenceOffsets,
+		trianglePageCount,
+		voxelPageBase,
+		voxelPageCount);
 
 	ClusterLODPrebuildArtifacts artifacts{};
 	artifacts.prebuiltData.groups = std::move(state.groups);
@@ -5071,6 +5744,11 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	artifacts.prebuiltData.segmentBounds = std::move(state.segmentBounds);
 	artifacts.prebuiltData.objectBoundingSphere = BuildObjectBoundingSphereFromRootNode(state.nodes, state.topRootNode);
 	artifacts.prebuiltData.groupChunks = std::move(state.groupChunks);
+	artifacts.prebuiltData.groupPageReferences = std::move(groupPageReferences);
+	artifacts.prebuiltData.groupPageReferenceOffsets = std::move(groupPageReferenceOffsets);
+	artifacts.prebuiltData.trianglePageCount = trianglePageCount;
+	artifacts.prebuiltData.voxelPageBase = voxelPageBase;
+	artifacts.prebuiltData.voxelPageCount = voxelPageCount;
 	artifacts.prebuiltData.nodes = std::move(state.nodes);
 	artifacts.prebuiltData.lodNodeRanges = std::move(state.lodNodeRanges);
 	artifacts.prebuiltData.lodLevelRoots = std::move(state.lodLevelRoots);
@@ -5078,6 +5756,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	artifacts.prebuiltData.maxTraversalDepth = state.maxTraversalDepth;
 
 	artifacts.cacheBuildData.groupPageBlobs = std::move(state.groupPageBlobs);
+	artifacts.cacheBuildData.meshPageBlobs = std::move(meshPageBlobs);
 
 	return artifacts;
 }

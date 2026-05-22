@@ -76,11 +76,13 @@ void CLodRayTracingSystem::Refresh(const MeshManager& meshManager) {
         if (m_snapshot.pagePool && groupHasBuildablePages && groupUsesNativePositions) {
             std::vector<uint32_t> pageMeshletCounts(group.pageAllocations.size(), 0u);
             for (const ClusterLODGroupSegment& segment : group.segments) {
-                if (segment.pageIndex >= pageMeshletCounts.size()) {
+                const auto pageIt = std::find(group.meshPageIndices.begin(), group.meshPageIndices.end(), segment.pageIndex);
+                if (pageIt == group.meshPageIndices.end()) {
                     continue;
                 }
-                pageMeshletCounts[segment.pageIndex] = std::max(
-                    pageMeshletCounts[segment.pageIndex],
+                const uint32_t groupLocalPageIndex = static_cast<uint32_t>(std::distance(group.meshPageIndices.begin(), pageIt));
+                pageMeshletCounts[groupLocalPageIndex] = std::max(
+                    pageMeshletCounts[groupLocalPageIndex],
                     segment.firstMeshletInPage + segment.meshletCount);
             }
 

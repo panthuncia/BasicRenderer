@@ -113,7 +113,7 @@ struct ClusterLODGroupSegment
 	int32_t  refinedGroup;              // group id to refine into, or -1
 	uint32_t firstMeshletInPage;         // page-local start meshlet index
 	uint32_t meshletCount;               // number of meshlets in this segment
-	uint32_t pageIndex = 0;              // group-local page index (0..pageCount-1)
+	uint32_t pageIndex = 0;              // mesh-local page-map index
 };
 
 struct ClusterLODGroup
@@ -130,8 +130,8 @@ struct ClusterLODGroup
 
 	uint32_t terminalSegmentCount = 0;
 	uint32_t flags = 0;         // Bit 0: IS_VOXEL_GROUP
-	uint32_t pageMapBase = 0;   // absolute index into GroupPageMap buffer
-	uint32_t pageCount = 0;     // number of pages for this group
+	uint32_t pageMapBase = 0;   // mesh-local compatibility page-map interval base
+	uint32_t pageCount = 0;     // compatibility interval size for group-triggered streaming
 	int32_t  parentGroupId = -1; // mesh-local group index of the parent group (-1 for root)
 	float maxParentError = 0.0f; // max error of any parent group that refines into this group
 	float representationError = 0.0f; // actual render representation error; currently used by voxel groups

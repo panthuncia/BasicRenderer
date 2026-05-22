@@ -169,7 +169,7 @@ namespace CLodCache {
 		std::vector<std::byte> SerializeMetadata(
 			uint64_t buildConfigHash,
 			const ClusterLODPrebuiltData& prebuiltData,
-			const std::vector<ClusterLODGroupDiskLocator>& groupDiskLocators,
+			const std::vector<ClusterLODGroupDiskLocator>& pageDiskLocators,
 			const ClusterLODCacheSource& cacheSource)
 		{
 			std::vector<std::byte> out;
@@ -185,7 +185,13 @@ namespace CLodCache {
 			if (hasInlineGroupChunks != 0u) {
 				WriteVectorPod(out, prebuiltData.groupChunks);
 			}
-			WriteVectorPod(out, groupDiskLocators);
+			WriteVectorPod(out, prebuiltData.groupDiskLocators);
+			WriteVectorPod(out, pageDiskLocators);
+			WriteVectorPod(out, prebuiltData.groupPageReferences);
+			WriteVectorPod(out, prebuiltData.groupPageReferenceOffsets);
+			WritePod(out, prebuiltData.trianglePageCount);
+			WritePod(out, prebuiltData.voxelPageBase);
+			WritePod(out, prebuiltData.voxelPageCount);
 			WriteString(out, cacheSource.sourceIdentifier);
 			WriteString(out, cacheSource.primPath);
 			WriteString(out, cacheSource.subsetName);
@@ -221,6 +227,12 @@ namespace CLodCache {
 				out.prebuiltData.groupChunks.clear();
 			}
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groupDiskLocators)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.pageDiskLocators)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.groupPageReferences)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.groupPageReferenceOffsets)) return false;
+			if (!ReadPod(blob, offset, out.prebuiltData.trianglePageCount)) return false;
+			if (!ReadPod(blob, offset, out.prebuiltData.voxelPageBase)) return false;
+			if (!ReadPod(blob, offset, out.prebuiltData.voxelPageCount)) return false;
 			if (!ReadString(blob, offset, out.prebuiltData.cacheSource.sourceIdentifier)) return false;
 			if (!ReadString(blob, offset, out.prebuiltData.cacheSource.primPath)) return false;
 			if (!ReadString(blob, offset, out.prebuiltData.cacheSource.subsetName)) return false;
@@ -241,73 +253,28 @@ namespace CLodCache {
 
 		struct ContainerHeader {
 			uint32_t magic = kContainerMagic;
-			uint32_t version = 3;
+			uint32_t version = 4;
 			uint32_t reserved = 0;
-			uint32_t groupCount = 0;
-		};
-
-		struct GroupPayloadHeader {
-			ClusterLODGroupChunk groupChunkMetadata{};
 			uint32_t pageCount = 0;
-			// Followed by pageCount x uint32_t page blob sizes,
-			// then pageCount page blobs in sequence.
 		};
 
-		bool ReadGroupPayloadLayout(std::ifstream& file,
+		bool ReadPageBlobDirect(std::ifstream& file,
 			const ClusterLODGroupDiskLocator& locator,
-			std::optional<ClusterLODGroupChunk>& outGroupChunkMetadata,
-			std::vector<uint32_t>& outPageBlobSizes,
-			std::vector<uint64_t>& outPageBlobOffsets)
+			std::vector<std::byte>& outBlob)
 		{
-			if (locator.blobSizeBytes < sizeof(GroupPayloadHeader)) {
-				return false;
-			}
-
 			if (locator.blobOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
 				return false;
 			}
-
 			file.seekg(static_cast<std::streamoff>(locator.blobOffset), std::ios::beg);
 			if (!file.good()) {
 				return false;
 			}
-
-			GroupPayloadHeader groupHeader{};
-			file.read(reinterpret_cast<char*>(&groupHeader), sizeof(groupHeader));
-			if (!file.good()) {
-				return false;
+			outBlob.resize(locator.blobSizeBytes);
+			if (locator.blobSizeBytes == 0u) {
+				return true;
 			}
-
-			outGroupChunkMetadata = groupHeader.groupChunkMetadata;
-
-			const uint32_t pageCount = groupHeader.pageCount;
-			const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
-
-			outPageBlobSizes.resize(pageCount);
-			if (pageCount > 0) {
-				file.read(reinterpret_cast<char*>(outPageBlobSizes.data()),
-					static_cast<std::streamsize>(sizeTableBytes));
-				if (!file.good()) {
-					return false;
-				}
-			}
-
-			uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
-			for (uint32_t s : outPageBlobSizes) {
-				totalBlobBytes += s;
-			}
-			if (totalBlobBytes != static_cast<uint64_t>(locator.blobSizeBytes)) {
-				return false;
-			}
-
-			outPageBlobOffsets.resize(pageCount);
-			uint64_t currentBlobOffset = locator.blobOffset + sizeof(GroupPayloadHeader) + sizeTableBytes;
-			for (uint32_t pi = 0; pi < pageCount; ++pi) {
-				outPageBlobOffsets[pi] = currentBlobOffset;
-				currentBlobOffset += outPageBlobSizes[pi];
-			}
-
-			return true;
+			file.read(reinterpret_cast<char*>(outBlob.data()), static_cast<std::streamsize>(locator.blobSizeBytes));
+			return file.good();
 		}
 
 		std::wstring BuildGroupContainerFileName(const CacheKey& key, uint64_t buildConfigHash)
@@ -348,10 +315,13 @@ namespace CLodCache {
 			const std::wstring& containerPath,
 			const ClusterLODPrebuiltData& prebuiltData,
 			const ClusterLODCacheBuildPayload& payload,
-			std::vector<ClusterLODGroupDiskLocator>& outLocators)
+			std::vector<ClusterLODGroupDiskLocator>& outPageLocators)
 		{
-			const uint32_t groupCount = static_cast<uint32_t>(prebuiltData.groups.size());
-			outLocators.assign(groupCount, {});
+			(void)prebuiltData;
+			const std::vector<std::vector<std::byte>> emptyPageBlobs;
+			const auto& pageBlobs = payload.meshPageBlobs != nullptr ? *payload.meshPageBlobs : emptyPageBlobs;
+			const uint32_t pageCount = static_cast<uint32_t>(pageBlobs.size());
+			outPageLocators.assign(pageCount, {});
 
 			std::ofstream file(containerPath, std::ios::binary | std::ios::trunc);
 			if (!file.is_open()) {
@@ -359,64 +329,28 @@ namespace CLodCache {
 			}
 
 			ContainerHeader header{};
-			header.groupCount = groupCount;
+			header.pageCount = pageCount;
 			file.write(reinterpret_cast<const char*>(&header), sizeof(header));
 			if (!file.good()) {
 				return false;
 			}
 
 			const std::streamoff directoryOffset = static_cast<std::streamoff>(file.tellp());
-			if (groupCount > 0) {
-				std::vector<ClusterLODGroupDiskLocator> emptyDirectory(groupCount);
+			if (pageCount > 0) {
+				std::vector<ClusterLODGroupDiskLocator> emptyDirectory(pageCount);
 				file.write(reinterpret_cast<const char*>(emptyDirectory.data()), static_cast<std::streamsize>(emptyDirectory.size() * sizeof(ClusterLODGroupDiskLocator)));
 				if (!file.good()) {
 					return false;
 				}
 			}
 
-			for (uint32_t groupIndex = 0; groupIndex < groupCount; ++groupIndex) {
-				const std::vector<std::vector<std::byte>> emptyPageBlobs;
-				ClusterLODGroupChunk groupChunkMetadata{};
-				if (groupIndex < prebuiltData.groupChunks.size()) {
-					groupChunkMetadata = prebuiltData.groupChunks[groupIndex];
-				}
-				else if (groupIndex < prebuiltData.groups.size()) {
-					const auto& group = prebuiltData.groups[groupIndex];
-					groupChunkMetadata.groupVertexCount = group.groupVertexCount;
-					groupChunkMetadata.meshletCount = group.meshletCount;
-				}
-
-				const auto* pageBlobsPtr = payload.groupPageBlobs;
-				const auto& pageBlobs = (pageBlobsPtr != nullptr && groupIndex < pageBlobsPtr->size()) ? (*pageBlobsPtr)[groupIndex] : emptyPageBlobs;
-
-				GroupPayloadHeader groupHeader{};
-				groupHeader.groupChunkMetadata = groupChunkMetadata;
-				groupHeader.pageCount = static_cast<uint32_t>(pageBlobs.size());
-
+			for (uint32_t pageIndex = 0; pageIndex < pageCount; ++pageIndex) {
 				const uint64_t blobOffset64 = static_cast<uint64_t>(file.tellp());
-
-				file.write(reinterpret_cast<const char*>(&groupHeader), sizeof(groupHeader));
-				if (!file.good()) return false;
-
-				// Write per-page blob sizes
-				std::vector<uint32_t> pageBlobSizes(pageBlobs.size());
-				for (size_t pi = 0; pi < pageBlobs.size(); ++pi) {
-					if (pageBlobs[pi].size() > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) return false;
-					pageBlobSizes[pi] = static_cast<uint32_t>(pageBlobs[pi].size());
-				}
-				if (!pageBlobSizes.empty()) {
-					file.write(reinterpret_cast<const char*>(pageBlobSizes.data()),
-						static_cast<std::streamsize>(pageBlobSizes.size() * sizeof(uint32_t)));
+				const auto& pageBlob = pageBlobs[pageIndex];
+				if (!pageBlob.empty()) {
+					file.write(reinterpret_cast<const char*>(pageBlob.data()),
+						static_cast<std::streamsize>(pageBlob.size()));
 					if (!file.good()) return false;
-				}
-
-				// Write page blob data
-				for (const auto& pageBlob : pageBlobs) {
-					if (!pageBlob.empty()) {
-						file.write(reinterpret_cast<const char*>(pageBlob.data()),
-							static_cast<std::streamsize>(pageBlob.size()));
-						if (!file.good()) return false;
-					}
 				}
 
 				const uint64_t blobEnd64 = static_cast<uint64_t>(file.tellp());
@@ -424,16 +358,16 @@ namespace CLodCache {
 				const uint64_t blobSize64 = blobEnd64 - blobOffset64;
 				if (blobSize64 > static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())) return false;
 
-				auto& locator = outLocators[groupIndex];
+				auto& locator = outPageLocators[pageIndex];
 				locator.blobOffset = blobOffset64;
 				locator.blobSizeBytes = static_cast<uint32_t>(blobSize64);
 				locator.reserved = 0;
 			}
 
-			if (groupCount > 0) {
+			if (pageCount > 0) {
 				file.seekp(directoryOffset, std::ios::beg);
 				if (!file.good()) return false;
-				file.write(reinterpret_cast<const char*>(outLocators.data()), static_cast<std::streamsize>(outLocators.size() * sizeof(ClusterLODGroupDiskLocator)));
+				file.write(reinterpret_cast<const char*>(outPageLocators.data()), static_cast<std::streamsize>(outPageLocators.size() * sizeof(ClusterLODGroupDiskLocator)));
 				if (!file.good()) return false;
 			}
 
@@ -585,8 +519,8 @@ namespace CLodCache {
 			spdlog::info("CLodCache::SaveImpl  metadata='{}' container='{}'",
 				ws2s(cachePath), ws2s(containerPath));
 
-			std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
-			if (!SaveContainerPayload(containerPath, prebuiltData, payload, groupDiskLocators)) {
+			std::vector<ClusterLODGroupDiskLocator> pageDiskLocators;
+			if (!SaveContainerPayload(containerPath, prebuiltData, payload, pageDiskLocators)) {
 				spdlog::warn("Failed to write CLod container payload: {}", ws2s(containerPath));
 				return false;
 			}
@@ -619,7 +553,7 @@ namespace CLodCache {
 			cacheSource.buildConfigHash = buildConfigHash;
 			cacheSource.containerFileName = containerFileName;
 
-			auto blob = SerializeMetadata(buildConfigHash, prebuiltData, groupDiskLocators, cacheSource);
+			auto blob = SerializeMetadata(buildConfigHash, prebuiltData, pageDiskLocators, cacheSource);
 			auto vtBlob = ToVtUChar(blob);
 			prim.CreateAttribute(pxr::TfToken("clodBlob"), pxr::SdfValueTypeNames->UCharArray, true)
 				.Set(vtBlob);
@@ -641,7 +575,7 @@ namespace CLodCache {
 
 			if (outSavedPrebuiltData != nullptr) {
 				*outSavedPrebuiltData = prebuiltData;
-				outSavedPrebuiltData->groupDiskLocators = std::move(groupDiskLocators);
+				outSavedPrebuiltData->pageDiskLocators = std::move(pageDiskLocators);
 				outSavedPrebuiltData->cacheSource = std::move(cacheSource);
 			}
 
@@ -765,16 +699,16 @@ namespace CLodCache {
 			out.prebuiltData.cacheSource.containerFileName = BuildGroupContainerFileName(key, expectedBuildConfigHash);
 		}
 
-		const uint32_t groupCount = static_cast<uint32_t>(out.prebuiltData.groups.size());
-		const bool hasContainerLocators = (out.prebuiltData.groupDiskLocators.size() == groupCount);
+		const uint32_t pageCount = out.prebuiltData.voxelPageBase + out.prebuiltData.voxelPageCount;
+		const bool hasContainerLocators = pageCount > 0u && (out.prebuiltData.pageDiskLocators.size() == pageCount);
 		if (hasContainerLocators) {
 			return out;
 		}
 
 		spdlog::warn(
-			"CLod cache '{}' is missing disk locator metadata for {} groups; treating as cache miss.",
+			"CLod cache '{}' is missing disk locator metadata for {} mesh pages; treating as cache miss.",
 			ws2s(cachePath),
-			groupCount);
+			pageCount);
 		return std::nullopt;
 	}
 
@@ -800,10 +734,46 @@ namespace CLodCache {
 	bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload)
 	{
 		const auto& prebuilt = cacheData.prebuiltData;
-		if (groupLocalIndex >= prebuilt.groupDiskLocators.size()) {
+		if (groupLocalIndex >= prebuilt.groups.size()) {
 			return false;
 		}
-		return LoadGroupPayload(prebuilt.cacheSource, groupLocalIndex, outPayload);
+		std::ifstream file;
+		uint32_t pageCount = 0u;
+		if (!OpenContainerFile(prebuilt.cacheSource, file, pageCount) ||
+			pageCount != prebuilt.pageDiskLocators.size()) {
+			return false;
+		}
+		const ClusterLODGroup& group = prebuilt.groups[groupLocalIndex];
+		const uint64_t groupPageEnd = static_cast<uint64_t>(group.pageMapBase) + static_cast<uint64_t>(group.pageCount);
+		if (groupPageEnd > prebuilt.pageDiskLocators.size()) {
+			return false;
+		}
+		if (groupLocalIndex < prebuilt.groupChunks.size()) {
+			outPayload.groupChunkMetadata = prebuilt.groupChunks[groupLocalIndex];
+		}
+		std::vector<uint32_t> meshPageIndices;
+		if (groupLocalIndex + 1u < prebuilt.groupPageReferenceOffsets.size()) {
+			const uint32_t refBegin = prebuilt.groupPageReferenceOffsets[groupLocalIndex];
+			const uint32_t refEnd = prebuilt.groupPageReferenceOffsets[groupLocalIndex + 1u];
+			if (refBegin <= refEnd && refEnd <= prebuilt.groupPageReferences.size()) {
+				meshPageIndices.assign(prebuilt.groupPageReferences.begin() + refBegin, prebuilt.groupPageReferences.begin() + refEnd);
+			}
+		}
+		if (!meshPageIndices.empty()) {
+			return LoadMeshPagesSelective(
+				file,
+				std::span<const ClusterLODGroupDiskLocator>(prebuilt.pageDiskLocators.data(), prebuilt.pageDiskLocators.size()),
+				std::span<const uint32_t>(meshPageIndices.data(), meshPageIndices.size()),
+				{},
+				outPayload);
+		}
+		return LoadMeshPagesSelective(
+			file,
+			std::span<const ClusterLODGroupDiskLocator>(prebuilt.pageDiskLocators.data(), prebuilt.pageDiskLocators.size()),
+			group.pageMapBase,
+			group.pageCount,
+			{},
+			outPayload);
 	}
 
 	std::wstring ResolveContainerPath(const ClusterLODCacheSource& cacheSource)
@@ -815,270 +785,140 @@ namespace CLodCache {
 		return GetCacheFilePathBySource(cacheSource.containerFileName, cacheSource.sourceIdentifier);
 	}
 
-	bool LoadGroupPayload(const ClusterLODCacheSource& cacheSource, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload)
-	{
-		if (cacheSource.containerFileName.empty()) {
-			return false;
-		}
-
-		const std::wstring containerPath = GetCacheFilePathBySource(cacheSource.containerFileName, cacheSource.sourceIdentifier);
-		std::ifstream file(containerPath, std::ios::binary);
-		if (!file.is_open()) {
-			return false;
-		}
-
-		ContainerHeader header{};
-		file.read(reinterpret_cast<char*>(&header), sizeof(header));
-		if (!file.good() || header.magic != kContainerMagic || header.version != 3u) {
-			return false;
-		}
-
-		if (groupLocalIndex >= header.groupCount) {
-			return false;
-		}
-
-		const uint64_t directoryEntryOffset = static_cast<uint64_t>(sizeof(ContainerHeader)) + static_cast<uint64_t>(groupLocalIndex) * static_cast<uint64_t>(sizeof(ClusterLODGroupDiskLocator));
-		if (directoryEntryOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
-			return false;
-		}
-
-		file.seekg(static_cast<std::streamoff>(directoryEntryOffset), std::ios::beg);
-		if (!file.good()) {
-			return false;
-		}
-
-		ClusterLODGroupDiskLocator groupDiskLocator{};
-		file.read(reinterpret_cast<char*>(&groupDiskLocator), sizeof(groupDiskLocator));
-		if (!file.good() || groupDiskLocator.blobSizeBytes < sizeof(GroupPayloadHeader)) {
-			return false;
-		}
-
-		if (groupDiskLocator.blobOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
-			return false;
-		}
-		file.seekg(static_cast<std::streamoff>(groupDiskLocator.blobOffset), std::ios::beg);
-		if (!file.good()) {
-			return false;
-		}
-
-		GroupPayloadHeader groupHeader{};
-		file.read(reinterpret_cast<char*>(&groupHeader), sizeof(groupHeader));
-		if (!file.good()) {
-			return false;
-		}
-
-		outPayload.groupChunkMetadata = groupHeader.groupChunkMetadata;
-
-		const uint32_t pageCount = groupHeader.pageCount;
-		const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
-
-		// Read per-page blob sizes
-		std::vector<uint32_t> pageBlobSizes(pageCount);
-		if (pageCount > 0) {
-			file.read(reinterpret_cast<char*>(pageBlobSizes.data()),
-				static_cast<std::streamsize>(sizeTableBytes));
-			if (!file.good()) return false;
-		}
-
-		// Validate total size
-		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
-		for (uint32_t s : pageBlobSizes) totalBlobBytes += s;
-		if (totalBlobBytes != static_cast<uint64_t>(groupDiskLocator.blobSizeBytes)) {
-			return false;
-		}
-
-		// Read page blobs
-		outPayload.pageBlobs.resize(pageCount);
-		for (uint32_t pi = 0; pi < pageCount; ++pi) {
-			if (!ReadVectorRaw(file, pageBlobSizes[pi], outPayload.pageBlobs[pi])) return false;
-		}
-
-		return true;
-	}
-
-	bool LoadGroupPayloadDirect(std::ifstream& file,
-		const ClusterLODGroupDiskLocator& locator,
+	bool LoadMeshPagesSelective(std::ifstream& file,
+		std::span<const ClusterLODGroupDiskLocator> pageLocators,
+		uint32_t firstPage,
+		uint32_t pageCount,
+		const std::vector<bool>& pageNeedsFetch,
 		LoadedGroupPayload& outPayload)
 	{
-		if (locator.blobSizeBytes < sizeof(GroupPayloadHeader)) {
+		outPayload.pageBlobs.assign(pageCount, {});
+		const uint64_t endPage = static_cast<uint64_t>(firstPage) + static_cast<uint64_t>(pageCount);
+		if (endPage > pageLocators.size()) {
 			return false;
 		}
-
-		if (locator.blobOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
-			return false;
-		}
-
-		file.seekg(static_cast<std::streamoff>(locator.blobOffset), std::ios::beg);
-		if (!file.good()) {
-			return false;
-		}
-
-		GroupPayloadHeader groupHeader{};
-		file.read(reinterpret_cast<char*>(&groupHeader), sizeof(groupHeader));
-		if (!file.good()) {
-			return false;
-		}
-
-		outPayload.groupChunkMetadata = groupHeader.groupChunkMetadata;
-
-		const uint32_t pageCount = groupHeader.pageCount;
-		const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
-
-		std::vector<uint32_t> pageBlobSizes(pageCount);
-		if (pageCount > 0) {
-			file.read(reinterpret_cast<char*>(pageBlobSizes.data()),
-				static_cast<std::streamsize>(sizeTableBytes));
-			if (!file.good()) return false;
-		}
-
-		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
-		for (uint32_t s : pageBlobSizes) totalBlobBytes += s;
-		if (totalBlobBytes != static_cast<uint64_t>(locator.blobSizeBytes)) {
-			return false;
-		}
-
-		outPayload.pageBlobs.resize(pageCount);
-		for (uint32_t pi = 0; pi < pageCount; ++pi) {
-			if (!ReadVectorRaw(file, pageBlobSizes[pi], outPayload.pageBlobs[pi])) return false;
-		}
-
-		return true;
-	}
-
-	bool LoadGroupPayloadSelective(std::ifstream& file,
-		const ClusterLODGroupDiskLocator& locator,
-		const std::vector<bool>& segmentNeedsFetch,
-		LoadedGroupPayload& outPayload)
-	{
-		// Fall back to full read if no skip mask provided.
-		if (segmentNeedsFetch.empty()) {
-			return LoadGroupPayloadDirect(file, locator, outPayload);
-		}
-
-		if (locator.blobSizeBytes < sizeof(GroupPayloadHeader)) {
-			return false;
-		}
-
-		if (locator.blobOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
-			return false;
-		}
-
-		file.seekg(static_cast<std::streamoff>(locator.blobOffset), std::ios::beg);
-		if (!file.good()) {
-			return false;
-		}
-
-		GroupPayloadHeader groupHeader{};
-		file.read(reinterpret_cast<char*>(&groupHeader), sizeof(groupHeader));
-		if (!file.good()) {
-			return false;
-		}
-
-		outPayload.groupChunkMetadata = groupHeader.groupChunkMetadata;
-
-		const uint32_t pageCount = groupHeader.pageCount;
-		const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
-
-		std::vector<uint32_t> pageBlobSizes(pageCount);
-		if (pageCount > 0) {
-			file.read(reinterpret_cast<char*>(pageBlobSizes.data()),
-				static_cast<std::streamsize>(sizeTableBytes));
-			if (!file.good()) return false;
-		}
-
-		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
-		for (uint32_t s : pageBlobSizes) totalBlobBytes += s;
-		if (totalBlobBytes != static_cast<uint64_t>(locator.blobSizeBytes)) {
-			return false;
-		}
-
-		outPayload.pageBlobs.resize(pageCount);
-		for (uint32_t pi = 0; pi < pageCount; ++pi) {
-			if (pi < static_cast<uint32_t>(segmentNeedsFetch.size()) && !segmentNeedsFetch[pi]) {
-				// Skip this blob — seek forward.
-				if (pageBlobSizes[pi] > 0) {
-					file.seekg(static_cast<std::streamoff>(pageBlobSizes[pi]), std::ios::cur);
-					if (!file.good()) return false;
-				}
-				// Leave outPayload.pageBlobs[pi] empty.
-			} else {
-				if (!ReadVectorRaw(file, pageBlobSizes[pi], outPayload.pageBlobs[pi])) return false;
+		for (uint32_t pageOffset = 0; pageOffset < pageCount; ++pageOffset) {
+			if (!pageNeedsFetch.empty() &&
+				pageOffset < static_cast<uint32_t>(pageNeedsFetch.size()) &&
+				!pageNeedsFetch[pageOffset]) {
+				continue;
+			}
+			if (!ReadPageBlobDirect(file, pageLocators[firstPage + pageOffset], outPayload.pageBlobs[pageOffset])) {
+				return false;
 			}
 		}
-
 		return true;
 	}
 
-	bool GetGroupPayloadLayout(std::ifstream& file,
-		const ClusterLODGroupDiskLocator& locator,
-		GroupPayloadLayoutMetadata& outLayout)
+	bool LoadMeshPagesSelective(std::ifstream& file,
+		std::span<const ClusterLODGroupDiskLocator> pageLocators,
+		std::span<const uint32_t> meshPageIndices,
+		const std::vector<bool>& pageNeedsFetch,
+		LoadedGroupPayload& outPayload)
 	{
-		outLayout.Clear();
-		return ReadGroupPayloadLayout(
-			file,
-			locator,
-			outLayout.groupChunkMetadata,
-			outLayout.pageBlobSizes,
-			outLayout.pageBlobOffsets);
+		outPayload.pageBlobs.assign(meshPageIndices.size(), {});
+		for (uint32_t pageOffset = 0; pageOffset < static_cast<uint32_t>(meshPageIndices.size()); ++pageOffset) {
+			if (!pageNeedsFetch.empty() &&
+				pageOffset < static_cast<uint32_t>(pageNeedsFetch.size()) &&
+				!pageNeedsFetch[pageOffset]) {
+				continue;
+			}
+			const uint32_t meshPageIndex = meshPageIndices[pageOffset];
+			if (meshPageIndex >= pageLocators.size() ||
+				!ReadPageBlobDirect(file, pageLocators[meshPageIndex], outPayload.pageBlobs[pageOffset])) {
+				return false;
+			}
+		}
+		return true;
 	}
 
-	bool LoadGroupPayloadSelectiveDirectStorage(std::ifstream& file,
+	bool GetMeshPagePayloadLayout(std::span<const ClusterLODGroupDiskLocator> pageLocators,
+		uint32_t firstPage,
+		uint32_t pageCount,
+		PagePayloadLayoutMetadata& outLayout)
+	{
+		outLayout.Clear();
+		const uint64_t endPage = static_cast<uint64_t>(firstPage) + static_cast<uint64_t>(pageCount);
+		if (endPage > pageLocators.size()) {
+			return false;
+		}
+		outLayout.pageBlobSizes.reserve(pageCount);
+		outLayout.pageBlobOffsets.reserve(pageCount);
+		for (uint32_t pageOffset = 0; pageOffset < pageCount; ++pageOffset) {
+			const ClusterLODGroupDiskLocator& locator = pageLocators[firstPage + pageOffset];
+			outLayout.pageBlobSizes.push_back(locator.blobSizeBytes);
+			outLayout.pageBlobOffsets.push_back(locator.blobOffset);
+		}
+		return true;
+	}
+
+	bool GetMeshPagePayloadLayout(std::span<const ClusterLODGroupDiskLocator> pageLocators,
+		std::span<const uint32_t> meshPageIndices,
+		PagePayloadLayoutMetadata& outLayout)
+	{
+		outLayout.Clear();
+		outLayout.pageBlobSizes.reserve(meshPageIndices.size());
+		outLayout.pageBlobOffsets.reserve(meshPageIndices.size());
+		for (uint32_t meshPageIndex : meshPageIndices) {
+			if (meshPageIndex >= pageLocators.size()) {
+				outLayout.Clear();
+				return false;
+			}
+			const ClusterLODGroupDiskLocator& locator = pageLocators[meshPageIndex];
+			outLayout.pageBlobSizes.push_back(locator.blobSizeBytes);
+			outLayout.pageBlobOffsets.push_back(locator.blobOffset);
+		}
+		return true;
+	}
+
+	bool LoadMeshPagesSelectiveDirectStorage(
 		const std::wstring& containerPath,
-		const ClusterLODGroupDiskLocator& locator,
-		const std::vector<bool>& segmentNeedsFetch,
+		std::span<const ClusterLODGroupDiskLocator> pageLocators,
+		uint32_t firstPage,
+		uint32_t pageCount,
+		const std::vector<bool>& pageNeedsFetch,
 		LoadedGroupPayload& outPayload,
 		std::string* outMessage)
 	{
-	#if !BASICRENDERER_HAS_DIRECTSTORAGE
-		(void)file;
+#if !BASICRENDERER_HAS_DIRECTSTORAGE
 		(void)containerPath;
-		(void)locator;
-		(void)segmentNeedsFetch;
+		(void)pageLocators;
+		(void)firstPage;
+		(void)pageCount;
+		(void)pageNeedsFetch;
 		(void)outPayload;
 		if (outMessage) {
 			*outMessage = "DirectStorage support is not compiled into this target";
 		}
 		return false;
-	#else
+#else
 		if (outMessage) {
 			outMessage->clear();
 		}
-
-		if (segmentNeedsFetch.empty()) {
-			if (outMessage) {
-				*outMessage = "segment mask empty; use standard full-read path";
-			}
-			return false;
-		}
-
 		if (!DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
 			if (outMessage) {
 				*outMessage = "DirectStorage system-memory queue unavailable";
 			}
 			return false;
 		}
-
-		std::vector<uint32_t> pageBlobSizes;
-		std::vector<uint64_t> pageBlobOffsets;
-		if (!ReadGroupPayloadLayout(file, locator, outPayload.groupChunkMetadata, pageBlobSizes, pageBlobOffsets)) {
-			if (outMessage) {
-				*outMessage = "failed to read CLod group header or size table";
-			}
+		outPayload.pageBlobs.assign(pageCount, {});
+		const uint64_t endPage = static_cast<uint64_t>(firstPage) + static_cast<uint64_t>(pageCount);
+		if (endPage > pageLocators.size()) {
 			return false;
 		}
-
-		outPayload.pageBlobs.resize(pageBlobSizes.size());
-		for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBlobSizes.size()); ++pi) {
-			if (pi < static_cast<uint32_t>(segmentNeedsFetch.size()) && !segmentNeedsFetch[pi]) {
+		for (uint32_t pageOffset = 0; pageOffset < pageCount; ++pageOffset) {
+			if (!pageNeedsFetch.empty() &&
+				pageOffset < static_cast<uint32_t>(pageNeedsFetch.size()) &&
+				!pageNeedsFetch[pageOffset]) {
 				continue;
 			}
-
+			const ClusterLODGroupDiskLocator& locator = pageLocators[firstPage + pageOffset];
 			std::string readMessage;
 			if (!DirectStorageManager::GetInstance().ReadFileRegionToMemory(
 				containerPath,
-				pageBlobOffsets[pi],
-				pageBlobSizes[pi],
-				outPayload.pageBlobs[pi],
+				locator.blobOffset,
+				locator.blobSizeBytes,
+				outPayload.pageBlobs[pageOffset],
 				&readMessage)) {
 				if (outMessage) {
 					*outMessage = readMessage.empty() ? "DirectStorage CLod page read failed" : readMessage;
@@ -1086,19 +926,79 @@ namespace CLodCache {
 				return false;
 			}
 		}
-
 		if (outMessage) {
-			*outMessage = "loaded selected CLod page blobs through DirectStorage";
+			*outMessage = "loaded selected CLod mesh pages through DirectStorage";
 		}
 		return true;
-	#endif
+#endif
 	}
+
+	bool LoadMeshPagesSelectiveDirectStorage(
+		const std::wstring& containerPath,
+		std::span<const ClusterLODGroupDiskLocator> pageLocators,
+		std::span<const uint32_t> meshPageIndices,
+		const std::vector<bool>& pageNeedsFetch,
+		LoadedGroupPayload& outPayload,
+		std::string* outMessage)
+	{
+#if !BASICRENDERER_HAS_DIRECTSTORAGE
+		(void)containerPath;
+		(void)pageLocators;
+		(void)meshPageIndices;
+		(void)pageNeedsFetch;
+		(void)outPayload;
+		if (outMessage) {
+			*outMessage = "DirectStorage support is not compiled into this target";
+		}
+		return false;
+#else
+		if (outMessage) {
+			outMessage->clear();
+		}
+		if (!DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
+			if (outMessage) {
+				*outMessage = "DirectStorage system-memory queue unavailable";
+			}
+			return false;
+		}
+		outPayload.pageBlobs.assign(meshPageIndices.size(), {});
+		for (uint32_t pageOffset = 0; pageOffset < static_cast<uint32_t>(meshPageIndices.size()); ++pageOffset) {
+			if (!pageNeedsFetch.empty() &&
+				pageOffset < static_cast<uint32_t>(pageNeedsFetch.size()) &&
+				!pageNeedsFetch[pageOffset]) {
+				continue;
+			}
+			const uint32_t meshPageIndex = meshPageIndices[pageOffset];
+			if (meshPageIndex >= pageLocators.size()) {
+				return false;
+			}
+			const ClusterLODGroupDiskLocator& locator = pageLocators[meshPageIndex];
+			std::string readMessage;
+			if (!DirectStorageManager::GetInstance().ReadFileRegionToMemory(
+				containerPath,
+				locator.blobOffset,
+				locator.blobSizeBytes,
+				outPayload.pageBlobs[pageOffset],
+				&readMessage)) {
+				if (outMessage) {
+					*outMessage = readMessage.empty() ? "DirectStorage CLod page read failed" : readMessage;
+				}
+				return false;
+			}
+		}
+		if (outMessage) {
+			*outMessage = "loaded selected CLod mesh pages through DirectStorage";
+		}
+		return true;
+#endif
+	}
+
 
 	bool OpenContainerFile(const ClusterLODCacheSource& cacheSource,
 		std::ifstream& outFile,
-		uint32_t& outGroupCount)
+		uint32_t& outPageCount)
 	{
-		outGroupCount = 0u;
+		outPageCount = 0u;
 		if (cacheSource.containerFileName.empty()) {
 			return false;
 		}
@@ -1111,12 +1011,12 @@ namespace CLodCache {
 
 		ContainerHeader header{};
 		outFile.read(reinterpret_cast<char*>(&header), sizeof(header));
-		if (!outFile.good() || header.magic != kContainerMagic || header.version != 3u) {
+		if (!outFile.good() || header.magic != kContainerMagic || header.version != 4u) {
 			outFile.close();
 			return false;
 		}
 
-		outGroupCount = header.groupCount;
+		outPageCount = header.pageCount;
 		return true;
 	}
 

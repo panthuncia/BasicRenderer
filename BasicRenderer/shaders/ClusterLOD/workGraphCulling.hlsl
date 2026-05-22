@@ -2100,7 +2100,7 @@ void WG_TraverseNodes(
                             WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
                             emittedSegmentMeshletCount = seg.meshletCount;
 
-                            const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + leaf.group.pageMapBase, seg.pageIndex);
+                            const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase, seg.pageIndex);
 
                             bucketRecord.instanceIndex = rec.instanceIndex;
                             bucketRecord.viewId = rec.viewId;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <limits>
 #include <unordered_set>
 
 #include <spdlog/spdlog.h>
@@ -34,6 +35,14 @@ struct CLodStreamingSystem::ParallelSortState {
     std::shared_ptr<Buffer> countScatterArgs;
     std::shared_ptr<Buffer> reduceScanArgs;
 };
+
+namespace {
+    constexpr uint64_t kInvalidCLodMeshPageKey = (std::numeric_limits<uint64_t>::max)();
+
+    uint64_t MakeCLodMeshPageKey(uint32_t groupsBase, uint32_t meshPageIndex) {
+        return (static_cast<uint64_t>(groupsBase) << 32ull) | static_cast<uint64_t>(meshPageIndex);
+    }
+}
 
 CLodStreamingSystem::CLodStreamingSystem() {
     auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
@@ -249,7 +258,12 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     m_pageLru.Clear();
     m_pageOwnerGroup.clear();
     m_pageOwnerSegment.clear();
+    m_pageOwnerMeshPageKey.clear();
+    m_pageReadbackGapPinCount.clear();
     m_groupOwnedPages.clear();
+    m_groupOwnedMeshPageKeys.clear();
+    m_residentMeshPageToPhysicalPage.clear();
+    m_residentMeshPageRefCounts.clear();
     ClearPrefetchedChildLayouts();
     m_preAllocatedPagesByGroup.clear();
     m_pendingResidencyCommitGroups.clear();
@@ -930,6 +944,8 @@ void CLodStreamingSystem::InitializePageLru(MeshManager* meshManager) {
     m_pageState.assign(totalPages, CLodPhysicalPageState::Free);
     m_pendingPageOwnerGroup.assign(totalPages, ~0u);
     m_pendingPageOwnerSegment.assign(totalPages, 0u);
+    m_pageOwnerMeshPageKey.assign(totalPages, kInvalidCLodMeshPageKey);
+    m_pageReadbackGapPinCount.assign(totalPages, 0u);
 
     {
         ZoneScopedN("CLodStreamingSystem::InitializePageLru::PopulateFreePages");
@@ -969,6 +985,8 @@ void CLodStreamingSystem::EnsurePageTrackingCapacity(MeshManager* meshManager) {
         m_pageState.resize(totalPages, CLodPhysicalPageState::Free);
         m_pendingPageOwnerGroup.resize(totalPages, ~0u);
         m_pendingPageOwnerSegment.resize(totalPages, 0u);
+        m_pageOwnerMeshPageKey.resize(totalPages, kInvalidCLodMeshPageKey);
+        m_pageReadbackGapPinCount.resize(totalPages, 0u);
     }
 }
 
@@ -992,13 +1010,58 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
         pinnedPagesToFree.reserve(it->second.size());
     }
 
-    for (uint32_t page : it->second) {
+    for (uint32_t pageSlot = 0; pageSlot < static_cast<uint32_t>(it->second.size()); ++pageSlot) {
+        const uint32_t page = it->second[pageSlot];
         if (page == ~0u) {
             continue;
         }
 
-        if (hadReadbackGapPin && !usesPinnedStorage) {
-            m_pageLru.Unpin(page);
+        if (hadReadbackGapPin && !usesPinnedStorage && page < m_pageReadbackGapPinCount.size()) {
+            if (m_pageReadbackGapPinCount[page] > 0u) {
+                --m_pageReadbackGapPinCount[page];
+            }
+            if (m_pageReadbackGapPinCount[page] == 0u) {
+                m_pageLru.Unpin(page);
+            }
+        }
+
+        uint64_t meshPageKey = kInvalidCLodMeshPageKey;
+        auto keyIt = m_groupOwnedMeshPageKeys.find(groupIndex);
+        if (keyIt != m_groupOwnedMeshPageKeys.end() && pageSlot < keyIt->second.size()) {
+            meshPageKey = keyIt->second[pageSlot];
+        } else if (page < m_pageOwnerMeshPageKey.size()) {
+            meshPageKey = m_pageOwnerMeshPageKey[page];
+        }
+
+        bool pageStillReferenced = false;
+        if (meshPageKey != kInvalidCLodMeshPageKey) {
+            auto refIt = m_residentMeshPageRefCounts.find(meshPageKey);
+            if (refIt != m_residentMeshPageRefCounts.end()) {
+                if (refIt->second > 1u) {
+                    --refIt->second;
+                    pageStillReferenced = true;
+                } else {
+                    m_residentMeshPageRefCounts.erase(refIt);
+                    m_residentMeshPageToPhysicalPage.erase(meshPageKey);
+                }
+            }
+        }
+
+        if (pageStillReferenced) {
+            for (const auto& [otherGroup, otherKeys] : m_groupOwnedMeshPageKeys) {
+                if (otherGroup == groupIndex) {
+                    continue;
+                }
+                auto matchIt = std::find(otherKeys.begin(), otherKeys.end(), meshPageKey);
+                if (matchIt == otherKeys.end()) {
+                    continue;
+                }
+                const uint32_t otherSlot = static_cast<uint32_t>(std::distance(otherKeys.begin(), matchIt));
+                m_pageOwnerGroup[page] = static_cast<int32_t>(otherGroup);
+                m_pageOwnerSegment[page] = otherSlot;
+                break;
+            }
+            continue;
         }
 
         if (page < m_pageOwnerGroup.size()) {
@@ -1007,6 +1070,7 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
             m_pageState[page] = CLodPhysicalPageState::Free;
             m_pendingPageOwnerGroup[page] = ~0u;
             m_pendingPageOwnerSegment[page] = 0u;
+            m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
         }
 
         if (usesPinnedStorage) {
@@ -1023,6 +1087,7 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
     }
 
     m_groupOwnedPages.erase(it);
+    m_groupOwnedMeshPageKeys.erase(groupIndex);
     SetGroupUsesPinnedStorage(groupIndex, false);
 }
 
@@ -1116,6 +1181,172 @@ void CLodStreamingSystem::ClearPrefetchedChildLayouts() {
     m_prefetchedChildLayoutKeysByOwner.clear();
 }
 
+bool CLodStreamingSystem::IsGroupUsedLastFrame(uint32_t groupIndex) const {
+    const uint32_t wordAddress = BitWordAddress(groupIndex);
+    return wordAddress < m_usedGroupsBitsCpu.size() &&
+        (m_usedGroupsBitsCpu[wordAddress] & BitMask(groupIndex)) != 0u;
+}
+
+bool CLodStreamingSystem::IsPhysicalPageProtectedForReuse(
+    uint32_t page,
+    uint64_t meshPageKey,
+    bool& stopAtVisiblePage) const {
+    stopAtVisiblePage = false;
+
+    if (page >= m_pageState.size()) {
+        return true;
+    }
+
+    if (m_pageState[page] == CLodPhysicalPageState::PreAllocatedCpuUpload ||
+        m_pageState[page] == CLodPhysicalPageState::PendingDirectStorageWrite) {
+        return true;
+    }
+
+    if (meshPageKey == kInvalidCLodMeshPageKey) {
+        const int32_t ownerGroup = page < m_pageOwnerGroup.size() ? m_pageOwnerGroup[page] : -1;
+        if (ownerGroup < 0) {
+            return false;
+        }
+
+        const uint32_t groupIndex = static_cast<uint32_t>(ownerGroup);
+        if (IsGroupUsedLastFrame(groupIndex)) {
+            stopAtVisiblePage = true;
+            return true;
+        }
+
+        return IsStreamingRequestInProgress(groupIndex) ||
+            m_preAllocatedPagesByGroup.count(groupIndex) != 0u ||
+            m_pendingResidencyCommitGroups.count(groupIndex) != 0u;
+    }
+
+    for (const auto& [groupIndex, ownedPages] : m_groupOwnedPages) {
+        const auto keyIt = m_groupOwnedMeshPageKeys.find(groupIndex);
+        if (keyIt == m_groupOwnedMeshPageKeys.end()) {
+            continue;
+        }
+
+        const uint32_t slotCount = std::min(
+            static_cast<uint32_t>(ownedPages.size()),
+            static_cast<uint32_t>(keyIt->second.size()));
+        for (uint32_t slot = 0; slot < slotCount; ++slot) {
+            if (ownedPages[slot] != page || keyIt->second[slot] != meshPageKey) {
+                continue;
+            }
+
+            if (IsGroupUsedLastFrame(groupIndex)) {
+                stopAtVisiblePage = true;
+                return true;
+            }
+
+            if (IsStreamingRequestInProgress(groupIndex) ||
+                m_preAllocatedPagesByGroup.count(groupIndex) != 0u ||
+                m_pendingResidencyCommitGroups.count(groupIndex) != 0u) {
+                return true;
+            }
+        }
+    }
+
+    for (const auto& [groupIndex, preAllocatedPages] : m_preAllocatedPagesByGroup) {
+        const uint32_t slotCount = std::min(
+            static_cast<uint32_t>(preAllocatedPages.pagesBySegment.size()),
+            static_cast<uint32_t>(preAllocatedPages.meshPageKeys.size()));
+        for (uint32_t slot = 0; slot < slotCount; ++slot) {
+            if (preAllocatedPages.pagesBySegment[slot] != page ||
+                preAllocatedPages.meshPageKeys[slot] != meshPageKey) {
+                continue;
+            }
+
+            if (IsGroupUsedLastFrame(groupIndex)) {
+                stopAtVisiblePage = true;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void CLodStreamingSystem::InvalidatePhysicalPageReferencesForReuse(
+    uint32_t page,
+    uint64_t meshPageKey,
+    MeshManager* meshManager) {
+    if (meshPageKey == kInvalidCLodMeshPageKey) {
+        return;
+    }
+
+    std::vector<uint32_t> affectedGroups;
+    for (auto& [groupIndex, ownedPages] : m_groupOwnedPages) {
+        const auto keyIt = m_groupOwnedMeshPageKeys.find(groupIndex);
+        if (keyIt == m_groupOwnedMeshPageKeys.end()) {
+            continue;
+        }
+
+        bool groupAffected = false;
+        const uint32_t slotCount = std::min(
+            static_cast<uint32_t>(ownedPages.size()),
+            static_cast<uint32_t>(keyIt->second.size()));
+        for (uint32_t slot = 0; slot < slotCount; ++slot) {
+            if (ownedPages[slot] != page || keyIt->second[slot] != meshPageKey) {
+                continue;
+            }
+
+            ownedPages[slot] = ~0u;
+            keyIt->second[slot] = kInvalidCLodMeshPageKey;
+            groupAffected = true;
+        }
+
+        if (groupAffected) {
+            affectedGroups.push_back(groupIndex);
+        }
+    }
+
+    for (uint32_t groupIndex : affectedGroups) {
+        if (m_readbackGapPinnedGroups.find(groupIndex) != m_readbackGapPinnedGroups.end() &&
+            page < m_pageReadbackGapPinCount.size()) {
+            if (m_pageReadbackGapPinCount[page] > 0u) {
+                --m_pageReadbackGapPinCount[page];
+            }
+            if (m_pageReadbackGapPinCount[page] == 0u) {
+                m_pageLru.Unpin(page);
+            }
+        }
+
+        if (!IsGroupResident(groupIndex)) {
+            continue;
+        }
+
+        const uint32_t wordAddress = BitWordAddress(groupIndex);
+        if (wordAddress >= m_streamingNonResidentBitsCpu.size()) {
+            continue;
+        }
+
+        m_streamingNonResidentBitsCpu[wordAddress] |= BitMask(groupIndex);
+        MarkStreamingNonResidentBitsDirtyWord(wordAddress);
+        if (m_streamingResidentGroupsCount > 0u) {
+            --m_streamingResidentGroupsCount;
+        }
+
+        if (meshManager != nullptr) {
+            meshManager->FreeCLodGroupEviction(groupIndex);
+        }
+        m_pendingResidencyCommitGroups.erase(groupIndex);
+    }
+
+    m_residentMeshPageRefCounts.erase(meshPageKey);
+    m_residentMeshPageToPhysicalPage.erase(meshPageKey);
+
+    if (page < m_pageOwnerGroup.size()) {
+        m_pageOwnerGroup[page] = -1;
+        m_pageOwnerSegment[page] = 0u;
+        m_pageState[page] = CLodPhysicalPageState::Free;
+        m_pendingPageOwnerGroup[page] = ~0u;
+        m_pendingPageOwnerSegment[page] = 0u;
+    }
+    if (page < m_pageOwnerMeshPageKey.size()) {
+        m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
+    }
+}
+
 std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshManager* meshManager) {
     std::vector<uint32_t> pages;
     pages.reserve(count);
@@ -1126,51 +1357,73 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
         uint32_t page = m_pageLru.PopOldest();
         if (page == ~0u) break;
 
+        const uint64_t meshPageKey = page < m_pageOwnerMeshPageKey.size()
+            ? m_pageOwnerMeshPageKey[page]
+            : kInvalidCLodMeshPageKey;
         int32_t ownerGroup = m_pageOwnerGroup[page];
-        if (ownerGroup >= 0) {
-            uint32_t g = static_cast<uint32_t>(ownerGroup);
-
-            if (IsStreamingRequestInProgress(g) ||
-                m_preAllocatedPagesByGroup.count(g) != 0u ||
-                m_pendingResidencyCommitGroups.count(g) != 0u) {
-                continue;
-            }
-
-            // Never evict pages belonging to groups the GPU reported as
-            // visible last frame - doing so causes single-frame holes.
-            const uint32_t wa = BitWordAddress(g);
-            if (wa < m_usedGroupsBitsCpu.size() && (m_usedGroupsBitsCpu[wa] & BitMask(g)) != 0u) {
-                // Push the page back to MRU and stop - we've hit the
-                // on-screen frontier so no older pages are safe either.
+        if (ownerGroup >= 0 || meshPageKey != kInvalidCLodMeshPageKey) {
+            bool stopAtVisiblePage = false;
+            if (IsPhysicalPageProtectedForReuse(page, meshPageKey, stopAtVisiblePage)) {
+                if (!stopAtVisiblePage) {
+                    m_pageLru.Touch(page);
+                    continue;
+                }
                 break;
             }
 
-            uint32_t seg = m_pageOwnerSegment[page];
-
-            // Clear this segment's page in the group's ownership map.
-            auto it = m_groupOwnedPages.find(g);
-            if (it != m_groupOwnedPages.end() && seg < it->second.size()) {
-                it->second[seg] = ~0u;
-            }
-
-            m_pageOwnerGroup[page] = -1;
-
-            // If the group is currently resident, mark it non-resident.
-            if (IsGroupResident(g)) {
-                const uint32_t wordAddress = BitWordAddress(g);
-                const uint32_t bitMask = BitMask(g);
-                m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
-                MarkStreamingNonResidentBitsDirtyWord(wordAddress);
-                if (m_streamingResidentGroupsCount > 0u) {
-                    m_streamingResidentGroupsCount--;
+            if (meshPageKey != kInvalidCLodMeshPageKey) {
+                InvalidatePhysicalPageReferencesForReuse(page, meshPageKey, meshManager);
+            } else {
+                if (ownerGroup < 0) {
+                    if (page < m_pageOwnerGroup.size()) {
+                        m_pageOwnerGroup[page] = -1;
+                        m_pageOwnerSegment[page] = 0u;
+                        m_pageState[page] = CLodPhysicalPageState::Free;
+                        m_pendingPageOwnerGroup[page] = ~0u;
+                        m_pendingPageOwnerSegment[page] = 0u;
+                    }
+                    pages.push_back(page);
+                    continue;
                 }
 
-                // Metadata-only eviction: clear group state in MeshManager
-                // but don't free pages (they're managed by the page LRU now).
-                if (meshManager) {
-                    meshManager->FreeCLodGroupEviction(g);
+                const uint32_t g = static_cast<uint32_t>(ownerGroup);
+                uint32_t seg = m_pageOwnerSegment[page];
+
+                auto it = m_groupOwnedPages.find(g);
+                if (it != m_groupOwnedPages.end() && seg < it->second.size()) {
+                    it->second[seg] = ~0u;
                 }
-                m_pendingResidencyCommitGroups.erase(g);
+                auto keyIt = m_groupOwnedMeshPageKeys.find(g);
+                if (keyIt != m_groupOwnedMeshPageKeys.end() && seg < keyIt->second.size()) {
+                    keyIt->second[seg] = kInvalidCLodMeshPageKey;
+                }
+
+                m_pageOwnerGroup[page] = -1;
+                m_pageOwnerSegment[page] = 0u;
+                if (page < m_pageOwnerMeshPageKey.size()) {
+                    m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
+                }
+                if (page < m_pageState.size()) {
+                    m_pageState[page] = CLodPhysicalPageState::Free;
+                    m_pendingPageOwnerGroup[page] = ~0u;
+                    m_pendingPageOwnerSegment[page] = 0u;
+                }
+
+                if (IsGroupResident(g)) {
+                    const uint32_t wordAddress = BitWordAddress(g);
+                    if (wordAddress < m_streamingNonResidentBitsCpu.size()) {
+                        m_streamingNonResidentBitsCpu[wordAddress] |= BitMask(g);
+                        MarkStreamingNonResidentBitsDirtyWord(wordAddress);
+                    }
+                    if (m_streamingResidentGroupsCount > 0u) {
+                        --m_streamingResidentGroupsCount;
+                    }
+
+                    if (meshManager) {
+                        meshManager->FreeCLodGroupEviction(g);
+                    }
+                    m_pendingResidencyCommitGroups.erase(g);
+                }
             }
         }
 
@@ -1186,28 +1439,66 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
     result.segmentCount = segmentCount;
     result.pagesBySegment.assign(segmentCount, ~0u);
     result.segmentNeedsFetch.assign(segmentCount, true);
+    result.meshPageKeys.assign(segmentCount, kInvalidCLodMeshPageKey);
+    result.meshPageRefClaimed.assign(segmentCount, false);
+    result.meshPageRefReleaseOnCancel.assign(segmentCount, false);
     result.usesPinnedStorage = IsGroupPinned(groupIndex);
 
     EnsurePageTrackingCapacity(meshManager);
 
+    const auto info = meshManager != nullptr ? meshManager->GetCLodGroupStreamingInfo(groupIndex) : MeshManager::CLodGroupStreamingInfo{};
+    const bool hasMeshPageKeys = info.valid && info.meshPageIndices.size() >= segmentCount;
+    for (uint32_t seg = 0; seg < segmentCount; ++seg) {
+        if (hasMeshPageKeys) {
+            result.meshPageKeys[seg] = MakeCLodMeshPageKey(info.groupsBase, info.meshPageIndices[seg]);
+        }
+    }
+
     uint32_t missingCount = 0;
     std::vector<uint32_t> reusedPages;
+    auto undoPreallocationRefClaims = [&]() {
+        for (uint32_t seg = 0; seg < static_cast<uint32_t>(result.meshPageRefReleaseOnCancel.size()); ++seg) {
+            if (!result.meshPageRefReleaseOnCancel[seg]) {
+                continue;
+            }
+            const uint64_t meshPageKey = seg < result.meshPageKeys.size() ? result.meshPageKeys[seg] : kInvalidCLodMeshPageKey;
+            auto refIt = m_residentMeshPageRefCounts.find(meshPageKey);
+            if (refIt == m_residentMeshPageRefCounts.end()) {
+                continue;
+            }
+            if (refIt->second > 1u) {
+                --refIt->second;
+            } else {
+                m_residentMeshPageRefCounts.erase(refIt);
+                m_residentMeshPageToPhysicalPage.erase(meshPageKey);
+            }
+        }
+    };
 
     // Check for still-valid pages from a previous partial eviction.
     auto ownedIt = m_groupOwnedPages.find(groupIndex);
     if (ownedIt != m_groupOwnedPages.end()) {
         const auto& owned = ownedIt->second;
+        const auto keyIt = m_groupOwnedMeshPageKeys.find(groupIndex);
         const bool ownedUsesPinnedStorage = UsesPinnedStorage(groupIndex);
         for (uint32_t seg = 0; seg < segmentCount && seg < static_cast<uint32_t>(owned.size()); ++seg) {
             uint32_t existingPage = owned[seg];
+            const uint64_t expectedKey = result.meshPageKeys[seg];
+            const bool keyMatches = expectedKey != kInvalidCLodMeshPageKey &&
+                keyIt != m_groupOwnedMeshPageKeys.end() &&
+                seg < static_cast<uint32_t>(keyIt->second.size()) &&
+                keyIt->second[seg] == expectedKey &&
+                existingPage < m_pageOwnerMeshPageKey.size() &&
+                m_pageOwnerMeshPageKey[existingPage] == expectedKey;
             if (existingPage != ~0u && existingPage < m_pageOwnerGroup.size()
-                && m_pageOwnerGroup[existingPage] == static_cast<int32_t>(groupIndex)
+                && keyMatches
                 && ownedUsesPinnedStorage == result.usesPinnedStorage) {
                 if (!result.usesPinnedStorage) {
                     m_pageLru.Touch(existingPage);
                 }
                 result.pagesBySegment[seg] = existingPage;
                 result.segmentNeedsFetch[seg] = false;
+                result.meshPageRefClaimed[seg] = true;
                 reusedPages.push_back(existingPage);
             } else {
                 missingCount++;
@@ -1219,6 +1510,53 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
         }
     } else {
         missingCount = segmentCount;
+    }
+
+    for (uint32_t seg = 0; seg < segmentCount; ++seg) {
+        if (result.pagesBySegment[seg] != ~0u) {
+            continue;
+        }
+
+        const uint64_t meshPageKey = result.meshPageKeys[seg];
+        if (meshPageKey == kInvalidCLodMeshPageKey) {
+            continue;
+        }
+
+        auto residentIt = m_residentMeshPageToPhysicalPage.find(meshPageKey);
+        if (residentIt == m_residentMeshPageToPhysicalPage.end()) {
+            continue;
+        }
+
+        const uint32_t existingPage = residentIt->second;
+        if (existingPage >= m_pageOwnerGroup.size()) {
+            continue;
+        }
+        if (existingPage >= m_pageOwnerMeshPageKey.size() ||
+            m_pageOwnerMeshPageKey[existingPage] != meshPageKey) {
+            continue;
+        }
+        if (existingPage >= m_pageState.size() ||
+            m_pageState[existingPage] != CLodPhysicalPageState::Resident) {
+            continue;
+        }
+        auto* pool = meshManager ? meshManager->GetCLodPagePool() : nullptr;
+        const bool existingUsesPinnedStorage = pool != nullptr && existingPage >= pool->GetGeneralPageCount();
+        if (existingUsesPinnedStorage != result.usesPinnedStorage) {
+            continue;
+        }
+
+        result.pagesBySegment[seg] = existingPage;
+        result.segmentNeedsFetch[seg] = false;
+        result.meshPageRefClaimed[seg] = true;
+        result.meshPageRefReleaseOnCancel[seg] = true;
+        m_residentMeshPageRefCounts[meshPageKey]++;
+        if (!result.usesPinnedStorage) {
+            m_pageLru.Touch(existingPage);
+        }
+        reusedPages.push_back(existingPage);
+        if (missingCount > 0u) {
+            --missingCount;
+        }
     }
 
     if (missingCount == 0) {
@@ -1236,6 +1574,7 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
         EnsurePageTrackingCapacity(meshManager);
         if (freshPages.size() < missingCount) {
             pool->FreePinnedPages(freshPages);
+            undoPreallocationRefClaims();
             return PreAllocatedPages{};
         }
     } else {
@@ -1249,6 +1588,7 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
             for (uint32_t page : freshPages) {
                 m_pageLru.Insert(page);
             }
+            undoPreallocationRefClaims();
             return PreAllocatedPages{}; // empty = failure
         }
     }
@@ -1276,6 +1616,9 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
             m_pageState[page] = CLodPhysicalPageState::PreAllocatedCpuUpload;
             m_pendingPageOwnerGroup[page] = groupIndex;
             m_pendingPageOwnerSegment[page] = seg;
+            if (page < m_pageOwnerMeshPageKey.size()) {
+                m_pageOwnerMeshPageKey[page] = result.meshPageKeys[seg];
+            }
         }
     }
 
@@ -1284,13 +1627,22 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
 
 void CLodStreamingSystem::AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages) {
     m_groupOwnedPages[groupIndex] = pages.pagesBySegment;
+    m_groupOwnedMeshPageKeys[groupIndex] = pages.meshPageKeys;
     SetGroupUsesPinnedStorage(groupIndex, pages.usesPinnedStorage);
 
     for (uint32_t seg = 0; seg < pages.segmentCount; ++seg) {
         uint32_t page = pages.pagesBySegment[seg];
         if (page != ~0u && page < m_pageOwnerGroup.size()) {
+            const uint64_t meshPageKey = seg < pages.meshPageKeys.size() ? pages.meshPageKeys[seg] : kInvalidCLodMeshPageKey;
+            if (meshPageKey != kInvalidCLodMeshPageKey && (seg >= pages.meshPageRefClaimed.size() || !pages.meshPageRefClaimed[seg])) {
+                m_residentMeshPageToPhysicalPage[meshPageKey] = page;
+                m_residentMeshPageRefCounts[meshPageKey]++;
+            }
             m_pageOwnerGroup[page] = static_cast<int32_t>(groupIndex);
             m_pageOwnerSegment[page] = seg;
+            if (page < m_pageOwnerMeshPageKey.size()) {
+                m_pageOwnerMeshPageKey[page] = meshPageKey;
+            }
             m_pageState[page] = CLodPhysicalPageState::Resident;
             m_pendingPageOwnerGroup[page] = ~0u;
             m_pendingPageOwnerSegment[page] = 0u;
@@ -1311,6 +1663,26 @@ void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& page
         uint32_t page = pages.pagesBySegment[seg];
         if (page == ~0u) continue;
 
+        const bool releaseClaimedMeshRef =
+            seg < pages.meshPageRefReleaseOnCancel.size() &&
+            pages.meshPageRefReleaseOnCancel[seg];
+        if (releaseClaimedMeshRef) {
+            const uint64_t meshPageKey = seg < pages.meshPageKeys.size() ? pages.meshPageKeys[seg] : kInvalidCLodMeshPageKey;
+            auto refIt = m_residentMeshPageRefCounts.find(meshPageKey);
+            if (refIt != m_residentMeshPageRefCounts.end()) {
+                if (refIt->second > 1u) {
+                    --refIt->second;
+                } else {
+                    m_residentMeshPageRefCounts.erase(refIt);
+                    m_residentMeshPageToPhysicalPage.erase(meshPageKey);
+                    if (page < m_pageOwnerMeshPageKey.size() && m_pageOwnerMeshPageKey[page] == meshPageKey) {
+                        m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
+                    }
+                }
+            }
+            continue;
+        }
+
         if (pages.usesPinnedStorage) {
             if (page < m_pageOwnerGroup.size()) {
                 m_pageOwnerGroup[page] = -1;
@@ -1318,6 +1690,7 @@ void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& page
                 m_pageState[page] = CLodPhysicalPageState::Free;
                 m_pendingPageOwnerGroup[page] = ~0u;
                 m_pendingPageOwnerSegment[page] = 0u;
+                m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
             }
             pinnedPagesToFree.push_back(page);
             continue;
@@ -1331,6 +1704,7 @@ void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& page
                 m_pageState[page] = CLodPhysicalPageState::Free;
                 m_pendingPageOwnerGroup[page] = ~0u;
                 m_pendingPageOwnerSegment[page] = 0u;
+                m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
             }
         }
         // Both fresh and reused pages go back into the LRU.
@@ -1571,6 +1945,9 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
             if (it == m_preAllocatedPagesByGroup.end()) {
                 continue;
             }
+            if (IsStreamingRequestInProgress(groupIndex)) {
+                continue;
+            }
 
             ReleasePreAllocatedPages(it->second, meshManager);
             m_preAllocatedPagesByGroup.erase(it);
@@ -1615,23 +1992,21 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
             }
 
             // Pinned groups: allocate from dedicated non-evictable slabs.
-            auto* pool = meshManager->GetCLodPagePool();
-            const uint32_t pageSize = pool ? static_cast<uint32_t>(pool->GetPageSize()) : 0u;
             const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
-            const uint32_t pagesNeeded = (info.valid && pageSize > 0)
-                ? CLodEstimatePagesNeeded(info.hint, info.vertexByteSize, pageSize)
-                : 1u;
+            const uint32_t pagesNeeded = info.valid ? info.pageCount : 1u;
 
-            auto preAlloc = PreAllocatePagesForGroup(groupIndex, pagesNeeded, meshManager);
-            if (preAlloc.segmentCount == 0) {
-                // Dedicated pinned slab pool exhausted - can't load this pinned group yet.
-                m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
-                m_streamingResidencyInitializedBitsCpu[wordAddress] &= ~bitMask;
-                MarkStreamingNonResidentBitsDirtyWord(wordAddress);
-                continue;
+            if (pagesNeeded > 0u) {
+                auto preAlloc = PreAllocatePagesForGroup(groupIndex, pagesNeeded, meshManager);
+                if (preAlloc.segmentCount == 0) {
+                    // Dedicated pinned slab pool exhausted - can't load this pinned group yet.
+                    m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
+                    m_streamingResidencyInitializedBitsCpu[wordAddress] &= ~bitMask;
+                    MarkStreamingNonResidentBitsDirtyWord(wordAddress);
+                    continue;
+                }
+
+                m_preAllocatedPagesByGroup[groupIndex] = std::move(preAlloc);
             }
-
-            m_preAllocatedPagesByGroup[groupIndex] = std::move(preAlloc);
 
             auto paIt = m_preAllocatedPagesByGroup.find(groupIndex);
             const std::vector<bool> emptySegmentNeedsFetch;
@@ -1992,6 +2367,38 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
             auto preAllocIt = m_preAllocatedPagesByGroup.find(groupIndex);
 
             if (completion.success) {
+                const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
+                const uint32_t expectedPageCount = info.valid ? info.pageCount : 1u;
+                if (!IsGroupActive(groupIndex)) {
+                    meshManager->FreeCLodGroupEviction(groupIndex);
+                    if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
+                        ReleasePreAllocatedPages(preAllocIt->second, meshManager);
+                        m_preAllocatedPagesByGroup.erase(preAllocIt);
+                    }
+                    m_pendingResidencyCommitGroups.erase(groupIndex);
+                    continue;
+                }
+                if (preAllocIt == m_preAllocatedPagesByGroup.end() && expectedPageCount > 0u) {
+                    spdlog::warn(
+                        "CLod streaming: dropping successful IO completion for group {} because its preallocation is no longer live",
+                        groupIndex);
+                    meshManager->FreeCLodGroupEviction(groupIndex);
+                    m_pendingResidencyCommitGroups.erase(groupIndex);
+                    continue;
+                }
+                if (preAllocIt != m_preAllocatedPagesByGroup.end() &&
+                    preAllocIt->second.segmentCount != expectedPageCount) {
+                    spdlog::warn(
+                        "CLod streaming: dropping successful IO completion for group {} because preallocation page count {} does not match expected {}",
+                        groupIndex,
+                        preAllocIt->second.segmentCount,
+                        expectedPageCount);
+                    meshManager->FreeCLodGroupEviction(groupIndex);
+                    ReleasePreAllocatedPages(preAllocIt->second, meshManager);
+                    m_preAllocatedPagesByGroup.erase(preAllocIt);
+                    m_pendingResidencyCommitGroups.erase(groupIndex);
+                    continue;
+                }
                 if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
                     const bool usesPinnedStorage = preAllocIt->second.usesPinnedStorage;
                     {
@@ -2006,13 +2413,20 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                         auto ownedIt = m_groupOwnedPages.find(groupIndex);
                         if (ownedIt != m_groupOwnedPages.end()) {
                             for (uint32_t page : ownedIt->second) {
-                                if (page != ~0u) {
-                                    m_pageLru.Pin(page);
+                                if (page != ~0u && page < m_pageReadbackGapPinCount.size()) {
+                                    if (m_pageReadbackGapPinCount[page]++ == 0u) {
+                                        m_pageLru.Pin(page);
+                                    }
                                 }
                             }
                         }
                         m_readbackGapPinnedGroups[groupIndex] = m_readbackGeneration;
                     }
+                }
+                else if (expectedPageCount == 0u) {
+                    m_groupOwnedPages[groupIndex] = {};
+                    m_groupOwnedMeshPageKeys[groupIndex] = {};
+                    SetGroupUsesPinnedStorage(groupIndex, IsGroupPinned(groupIndex));
                 }
 
                 TouchGroupPages(groupIndex);
@@ -2128,18 +2542,23 @@ void CLodStreamingSystem::PollCompletedReadbackSlots() {
     {
         ZoneScopedN("CLodStreamingSystem::PollCompletedReadbackSlots::UnpinReadbackGapGroups");
         for (const uint32_t groupIndex : m_usedGroupsBatchScratch) {
-        auto gapIt = m_readbackGapPinnedGroups.find(groupIndex);
-        if (gapIt != m_readbackGapPinnedGroups.end()) {
-            auto ownedIt = m_groupOwnedPages.find(groupIndex);
-            if (ownedIt != m_groupOwnedPages.end()) {
-                for (uint32_t page : ownedIt->second) {
-                    if (page != ~0u) {
-                        m_pageLru.Unpin(page);
+            auto gapIt = m_readbackGapPinnedGroups.find(groupIndex);
+            if (gapIt != m_readbackGapPinnedGroups.end()) {
+                auto ownedIt = m_groupOwnedPages.find(groupIndex);
+                if (ownedIt != m_groupOwnedPages.end()) {
+                    for (uint32_t page : ownedIt->second) {
+                        if (page != ~0u && page < m_pageReadbackGapPinCount.size()) {
+                            if (m_pageReadbackGapPinCount[page] > 0u) {
+                                --m_pageReadbackGapPinCount[page];
+                            }
+                            if (m_pageReadbackGapPinCount[page] == 0u) {
+                                m_pageLru.Unpin(page);
+                            }
+                        }
                     }
                 }
+                m_readbackGapPinnedGroups.erase(gapIt);
             }
-            m_readbackGapPinnedGroups.erase(gapIt);
-        }
         }
     }
 
@@ -2159,8 +2578,13 @@ void CLodStreamingSystem::PollCompletedReadbackSlots() {
             auto ownedIt = m_groupOwnedPages.find(g);
             if (ownedIt != m_groupOwnedPages.end()) {
                 for (uint32_t page : ownedIt->second) {
-                    if (page != ~0u) {
-                        m_pageLru.Unpin(page);
+                    if (page != ~0u && page < m_pageReadbackGapPinCount.size()) {
+                        if (m_pageReadbackGapPinCount[page] > 0u) {
+                            --m_pageReadbackGapPinCount[page];
+                        }
+                        if (m_pageReadbackGapPinCount[page] == 0u) {
+                            m_pageLru.Unpin(page);
+                        }
                     }
                 }
             }
@@ -2476,44 +2900,44 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             if (m_preAllocatedPagesByGroup.count(groupIndex) == 0u && pool && pageSize > 0) {
                 ZoneScopedN("CLodStreamingSystem::ProcessStreamingRequestsBudgeted::SerialPagePreallocate");
                 const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
-                const uint32_t pagesNeeded = info.valid
-                    ? CLodEstimatePagesNeeded(info.hint, info.vertexByteSize, pageSize)
-                    : 1u;
+                const uint32_t pagesNeeded = info.valid ? info.pageCount : 1u;
 
-                auto preAlloc = PreAllocatePagesForGroup(groupIndex, pagesNeeded, meshManager);
-                if (preAlloc.segmentCount == 0) {
-                    frameStats.loadFailed++;
-                    ClearStreamingRequestInProgress(groupIndex);
-                    ClearPendingLoadPriority(groupIndex);
-                    processed++;
-                    continue;
-                }
-
-                // Verify we got all the pages we asked for.  A short return
-                // means PopFreePages hit used (on-screen) groups and stopped
-                // early - we're exceeding the on-screen geometry budget.
-                {
-                    ZoneScopedN("CLodStreamingSystem::ProcessStreamingRequestsBudgeted::VerifyPreallocatedPages");
-                    uint32_t allocated = 0;
-                    for (uint32_t p : preAlloc.pagesBySegment) {
-                        if (p != ~0u) allocated++;
-                    }
-                    if (allocated < pagesNeeded) {
-                        spdlog::error(
-                            "CLod streaming: on-screen geometry budget exceeded - "
-                            "group {} needs {} pages but only {} available without "
-                            "evicting visible groups. Dropping load request.",
-                            groupIndex, pagesNeeded, allocated);
-                        ReleasePreAllocatedPages(preAlloc, meshManager);
+                if (pagesNeeded > 0u) {
+                    auto preAlloc = PreAllocatePagesForGroup(groupIndex, pagesNeeded, meshManager);
+                    if (preAlloc.segmentCount == 0) {
+                        frameStats.loadFailed++;
                         ClearStreamingRequestInProgress(groupIndex);
                         ClearPendingLoadPriority(groupIndex);
-                        frameStats.loadFailed++;
                         processed++;
                         continue;
                     }
-                }
 
-                m_preAllocatedPagesByGroup[groupIndex] = std::move(preAlloc);
+                    // Verify we got all the pages we asked for.  A short return
+                    // means PopFreePages hit used (on-screen) groups and stopped
+                    // early - we're exceeding the on-screen geometry budget.
+                    {
+                        ZoneScopedN("CLodStreamingSystem::ProcessStreamingRequestsBudgeted::VerifyPreallocatedPages");
+                        uint32_t allocated = 0;
+                        for (uint32_t p : preAlloc.pagesBySegment) {
+                            if (p != ~0u) allocated++;
+                        }
+                        if (allocated < pagesNeeded) {
+                            spdlog::error(
+                                "CLod streaming: on-screen geometry budget exceeded - "
+                                "group {} needs {} pages but only {} available without "
+                                "evicting visible groups. Dropping load request.",
+                                groupIndex, pagesNeeded, allocated);
+                            ReleasePreAllocatedPages(preAlloc, meshManager);
+                            ClearStreamingRequestInProgress(groupIndex);
+                            ClearPendingLoadPriority(groupIndex);
+                            frameStats.loadFailed++;
+                            processed++;
+                            continue;
+                        }
+                    }
+
+                    m_preAllocatedPagesByGroup[groupIndex] = std::move(preAlloc);
+                }
             }
 
             {

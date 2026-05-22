@@ -129,6 +129,12 @@ struct ClusterLODPrebuiltData
 	BoundingSphere objectBoundingSphere{};
 	std::vector<ClusterLODGroupChunk> groupChunks;
 	std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
+	std::vector<ClusterLODGroupDiskLocator> pageDiskLocators;
+	std::vector<uint32_t> groupPageReferences;
+	std::vector<uint32_t> groupPageReferenceOffsets;
+	uint32_t trianglePageCount = 0;
+	uint32_t voxelPageBase = 0;
+	uint32_t voxelPageCount = 0;
 	ClusterLODCacheSource cacheSource;
 	std::vector<ClusterLODNode> nodes;
 	std::vector<ClusterLODNodeRangeAlloc> lodNodeRanges;
@@ -140,15 +146,18 @@ struct ClusterLODPrebuiltData
 struct ClusterLODCacheBuildPayload
 {
 	const std::vector<std::vector<std::vector<std::byte>>>* groupPageBlobs = nullptr;
+	const std::vector<std::vector<std::byte>>* meshPageBlobs = nullptr;
 };
 
 struct ClusterLODCacheBuildOwnedData
 {
 	std::vector<std::vector<std::vector<std::byte>>> groupPageBlobs;
+	std::vector<std::vector<std::byte>> meshPageBlobs;
 
 	ClusterLODCacheBuildPayload AsPayload() const {
 		ClusterLODCacheBuildPayload payload{};
 		payload.groupPageBlobs = &groupPageBlobs;
+		payload.meshPageBlobs = &meshPageBlobs;
 		return payload;
 	}
 };

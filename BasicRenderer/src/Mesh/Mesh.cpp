@@ -283,7 +283,8 @@ namespace
 			return false;
 		}
 
-		if (prebuilt.groupDiskLocators.size() != prebuilt.groups.size()) {
+		const uint32_t expectedPageCount = prebuilt.voxelPageBase + prebuilt.voxelPageCount;
+		if (expectedPageCount == 0u || prebuilt.pageDiskLocators.size() != expectedPageCount) {
 			outReason = "missing disk-backed ClusterLOD locators";
 			return false;
 		}
@@ -311,7 +312,7 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 			m_vertexSize,
 			m_indices.size(),
 			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->groups.size() : 0ull,
-			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->groupDiskLocators.size() : 0ull);
+			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->pageDiskLocators.size() : 0ull);
 		return nullptr;
 	}
 
@@ -378,6 +379,7 @@ void Mesh::ClearCLodCacheBuildChunkData(bool shrinkToFit)
 	};
 
 	clearChunkStorage(m_clodCacheBuildChunkData.groupPageBlobs);
+	clearChunkStorage(m_clodCacheBuildChunkData.meshPageBlobs);
 }
 
 void Mesh::ReleaseCLodChunkUploadData()
@@ -401,7 +403,7 @@ void Mesh::ReleaseCLodGroupChunkMetadataCpuData()
 
 void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 {
-	const bool hasDiskBackedStreamingSource = !data.groupDiskLocators.empty() && !data.cacheSource.containerFileName.empty();
+	const bool hasDiskBackedStreamingSource = !data.pageDiskLocators.empty() && !data.cacheSource.containerFileName.empty();
 
 	m_clodGroups = data.groups;
 	m_clodSegments = data.segments;
@@ -416,6 +418,12 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodSegments, m_clodGroupChunks);
 	ClearCLodCacheBuildChunkData(false);
 	m_clodGroupDiskLocators = data.groupDiskLocators;
+	m_clodPageDiskLocators = data.pageDiskLocators;
+	m_clodGroupPageReferences = data.groupPageReferences;
+	m_clodGroupPageReferenceOffsets = data.groupPageReferenceOffsets;
+	m_clodTrianglePageCount = data.trianglePageCount;
+	m_clodVoxelPageBase = data.voxelPageBase;
+	m_clodVoxelPageCount = data.voxelPageCount;
 	m_clodCacheSource = data.cacheSource;
 	m_clodNodes = data.nodes;
 	m_clodLodNodeRanges = data.lodNodeRanges;
@@ -468,11 +476,17 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 
 void Mesh::AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data)
 {
-	if (data.groupDiskLocators.empty() || data.cacheSource.containerFileName.empty()) {
+	if (data.pageDiskLocators.empty() || data.cacheSource.containerFileName.empty()) {
 		return;
 	}
 
 	m_clodGroupDiskLocators = data.groupDiskLocators;
+	m_clodPageDiskLocators = data.pageDiskLocators;
+	m_clodGroupPageReferences = data.groupPageReferences;
+	m_clodGroupPageReferenceOffsets = data.groupPageReferenceOffsets;
+	m_clodTrianglePageCount = data.trianglePageCount;
+	m_clodVoxelPageBase = data.voxelPageBase;
+	m_clodVoxelPageCount = data.voxelPageCount;
 	m_clodCacheSource = data.cacheSource;
 
 	if (m_clodGroupChunks.size() != m_clodGroups.size()) {
@@ -496,6 +510,12 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.objectBoundingSphere = m_perMeshBufferData.boundingSphere;
 	out.groupChunks = m_clodGroupChunks;
 	out.groupDiskLocators = m_clodGroupDiskLocators;
+	out.pageDiskLocators = m_clodPageDiskLocators;
+	out.groupPageReferences = m_clodGroupPageReferences;
+	out.groupPageReferenceOffsets = m_clodGroupPageReferenceOffsets;
+	out.trianglePageCount = m_clodTrianglePageCount;
+	out.voxelPageBase = m_clodVoxelPageBase;
+	out.voxelPageCount = m_clodVoxelPageCount;
 	out.cacheSource = m_clodCacheSource;
 	out.nodes = m_clodNodes;
 	out.lodNodeRanges = m_clodLodNodeRanges;
@@ -509,6 +529,7 @@ ClusterLODCacheBuildPayload Mesh::GetClusterLODCacheBuildPayload() const
 {
 	ClusterLODCacheBuildPayload payload{};
 	payload.groupPageBlobs = &m_clodCacheBuildChunkData.groupPageBlobs;
+	payload.meshPageBlobs = &m_clodCacheBuildChunkData.meshPageBlobs;
 	return payload;
 }
 
@@ -516,6 +537,7 @@ ClusterLODCacheBuildOwnedData Mesh::GetClusterLODCacheBuildOwnedData() const
 {
 	ClusterLODCacheBuildOwnedData owned{};
 	owned.groupPageBlobs = m_clodCacheBuildChunkData.groupPageBlobs;
+	owned.meshPageBlobs = m_clodCacheBuildChunkData.meshPageBlobs;
 	return owned;
 }
 
