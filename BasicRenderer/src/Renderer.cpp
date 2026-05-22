@@ -2474,7 +2474,7 @@ void Renderer::CreateRenderGraph() {
 
         if (!m_renderGraphRuntimeInitialized) {
         currentRenderGraph->GetMemorySnapshotProvider().SetProvider(
-            rg::memory::CreateECSMemorySnapshotProvider());
+            rg::memory::CreateECSMemorySnapshotProvider(RendererECSManager::GetInstance().GetWorld()));
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
 
         if (auto* textureFactory = m_managerInterface.GetTextureFactory()) {

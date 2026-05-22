@@ -175,6 +175,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     brdfDesc.imageDimensions.push_back(dims);
     auto brdfIntegrationTexture = PixelBuffer::CreateSharedUnmaterialized(brdfDesc);
     brdfIntegrationTexture->SetName("BRDF Integration Texture");
+    rg::memory::SetResourceUsageHint(*brdfIntegrationTexture, "Environment lighting");
     brdfIntegrationTexture->EnableIdleDematerialization(120);
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
 	graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");

@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string_view>
 
 #include "Managers/Singletons/DescriptorHeapManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Resources/Buffers/Buffer.h"
@@ -40,6 +42,12 @@ uint64_t AlignUp(uint64_t value, uint64_t alignment) noexcept
 
     const uint64_t mask = alignment - 1u;
     return (value + mask) & ~mask;
+}
+
+void SetBufferNameAndUsage(const std::shared_ptr<Buffer>& buffer, const char* name, std::string_view usage)
+{
+    buffer->SetName(name);
+    rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
 }
 
 } // namespace
@@ -124,7 +132,7 @@ void CLodRayTracingSystem::EnsureBuffers(
             false,
             false,
             false);
-        m_pageSourceBuffer->SetName("CLod RT page sources");
+        SetBufferNameAndUsage(m_pageSourceBuffer, "CLod RT page sources", "Cluster LOD ray tracing");
     }
     else {
         m_pageSourceBuffer->ResizeStructured(pageSourceCount);
@@ -138,7 +146,7 @@ void CLodRayTracingSystem::EnsureBuffers(
             false,
             false,
             false);
-        m_clasBuildInfoBuffer->SetName("CLod RT CLAS build infos");
+        SetBufferNameAndUsage(m_clasBuildInfoBuffer, "CLod RT CLAS build infos", "Cluster LOD ray tracing");
     }
     else {
         m_clasBuildInfoBuffer->ResizeStructured(clusterCount);
@@ -152,7 +160,7 @@ void CLodRayTracingSystem::EnsureBuffers(
             false,
             false,
             false);
-        m_clasAddressBuffer->SetName("CLod RT CLAS addresses");
+        SetBufferNameAndUsage(m_clasAddressBuffer, "CLod RT CLAS addresses", "Cluster LOD ray tracing");
     }
     else {
         m_clasAddressBuffer->ResizeStructured(clusterCount);
@@ -166,7 +174,7 @@ void CLodRayTracingSystem::EnsureBuffers(
             false,
             false,
             false);
-        m_clasSizeBuffer->SetName("CLod RT CLAS sizes");
+        SetBufferNameAndUsage(m_clasSizeBuffer, "CLod RT CLAS sizes", "Cluster LOD ray tracing");
     }
     else {
         m_clasSizeBuffer->ResizeStructured(clusterCount);
@@ -174,7 +182,7 @@ void CLodRayTracingSystem::EnsureBuffers(
 
     if (!m_clasDataBuffer) {
         m_clasDataBuffer = CreateAliasedUnmaterializedRawBuffer(clasDataBytes, true, false, false);
-        m_clasDataBuffer->SetName("CLod RT CLAS data");
+        SetBufferNameAndUsage(m_clasDataBuffer, "CLod RT CLAS data", "Cluster LOD ray tracing acceleration structures");
     }
     else {
         m_clasDataBuffer->ResizeBytes(clasDataBytes);
@@ -182,7 +190,7 @@ void CLodRayTracingSystem::EnsureBuffers(
 
     if (!m_clasScratchBuffer) {
         m_clasScratchBuffer = CreateAliasedUnmaterializedRawBuffer(clasScratchBytes, true, false, false);
-        m_clasScratchBuffer->SetName("CLod RT CLAS scratch");
+        SetBufferNameAndUsage(m_clasScratchBuffer, "CLod RT CLAS scratch", "Cluster LOD ray tracing scratch");
     }
     else {
         m_clasScratchBuffer->ResizeBytes(clasScratchBytes);
@@ -196,7 +204,7 @@ void CLodRayTracingSystem::EnsureBuffers(
             false,
             false,
             false);
-        m_blasBuildInfoBuffer->SetName("CLod RT aggregate BLAS build info");
+        SetBufferNameAndUsage(m_blasBuildInfoBuffer, "CLod RT aggregate BLAS build info", "Cluster LOD ray tracing");
     }
     else {
         m_blasBuildInfoBuffer->ResizeStructured(1u);
@@ -210,7 +218,7 @@ void CLodRayTracingSystem::EnsureBuffers(
             false,
             false,
             false);
-        m_blasAddressBuffer->SetName("CLod RT aggregate BLAS address");
+        SetBufferNameAndUsage(m_blasAddressBuffer, "CLod RT aggregate BLAS address", "Cluster LOD ray tracing");
     }
     else {
         m_blasAddressBuffer->ResizeStructured(1u);
@@ -224,7 +232,7 @@ void CLodRayTracingSystem::EnsureBuffers(
             false,
             false,
             false);
-        m_blasSizeBuffer->SetName("CLod RT aggregate BLAS size");
+        SetBufferNameAndUsage(m_blasSizeBuffer, "CLod RT aggregate BLAS size", "Cluster LOD ray tracing");
     }
     else {
         m_blasSizeBuffer->ResizeStructured(1u);
@@ -232,7 +240,7 @@ void CLodRayTracingSystem::EnsureBuffers(
 
     if (!m_blasDataBuffer) {
         m_blasDataBuffer = CreateAliasedUnmaterializedRawBuffer(blasDataBytes, true, false, false);
-        m_blasDataBuffer->SetName("CLod RT aggregate BLAS data");
+        SetBufferNameAndUsage(m_blasDataBuffer, "CLod RT aggregate BLAS data", "Cluster LOD ray tracing acceleration structures");
     }
     else {
         m_blasDataBuffer->ResizeBytes(blasDataBytes);
@@ -240,7 +248,7 @@ void CLodRayTracingSystem::EnsureBuffers(
 
     if (!m_blasScratchBuffer) {
         m_blasScratchBuffer = CreateAliasedUnmaterializedRawBuffer(blasScratchBytes, true, false, false);
-        m_blasScratchBuffer->SetName("CLod RT aggregate BLAS scratch");
+        SetBufferNameAndUsage(m_blasScratchBuffer, "CLod RT aggregate BLAS scratch", "Cluster LOD ray tracing scratch");
     }
     else {
         m_blasScratchBuffer->ResizeBytes(blasScratchBytes);
@@ -379,7 +387,7 @@ void CLodRayTracingSystem::UpdateGpuResources(rhi::Device device, const RayTraci
             false,
             false,
             false);
-        m_tlasInstanceBuffer->SetName("CLod RT aggregate TLAS instance");
+        SetBufferNameAndUsage(m_tlasInstanceBuffer, "CLod RT aggregate TLAS instance", "Cluster LOD ray tracing");
     }
     else {
         m_tlasInstanceBuffer->ResizeStructured(1u);
@@ -411,7 +419,7 @@ void CLodRayTracingSystem::UpdateGpuResources(rhi::Device device, const RayTraci
     m_tlasScratchBytes = AlignUp(tlasPrebuild.scratchDataSizeInBytes, 256u);
     if (!m_tlasScratchBuffer) {
         m_tlasScratchBuffer = CreateAliasedUnmaterializedRawBuffer(m_tlasScratchBytes, true, false, false);
-        m_tlasScratchBuffer->SetName("CLod RT aggregate TLAS scratch");
+        SetBufferNameAndUsage(m_tlasScratchBuffer, "CLod RT aggregate TLAS scratch", "Cluster LOD ray tracing scratch");
     }
     else {
         m_tlasScratchBuffer->ResizeBytes(m_tlasScratchBytes);
@@ -654,7 +662,7 @@ void CLodRayTracingSystem::EnsureRayTracingPipeline(rhi::Device device, const Ra
 
     if (!m_shaderTableBuffer) {
         m_shaderTableBuffer = CreateAliasedUnmaterializedRawBuffer(m_shaderTableBytes, false, false, false);
-        m_shaderTableBuffer->SetName("CLod RT reflections shader table");
+        SetBufferNameAndUsage(m_shaderTableBuffer, "CLod RT reflections shader table", "Cluster LOD ray tracing");
     }
     else {
         m_shaderTableBuffer->ResizeBytes(m_shaderTableBytes);
