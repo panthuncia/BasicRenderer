@@ -37,21 +37,15 @@ void CLodPageLRU::Touch(uint32_t pageID) {
 }
 
 uint32_t CLodPageLRU::PopOldest() {
-    uint32_t remaining = static_cast<uint32_t>(m_map.size());
-    while (remaining > 0u && m_head) {
-        Node* node = m_head;
-        uint32_t pageID = node->pageID;
-        Unlink(node);
-        PushBack(node);
-
-        if (m_pinned.count(pageID)) {
-            // Pinned pages stay represented in the LRU, but cannot be evicted.
-            --remaining;
-            continue;
-        }
-        return pageID;
+    if (m_head == nullptr) {
+        return ~0u;
     }
-    return ~0u;
+
+    Node* node = m_head;
+    const uint32_t pageID = node->pageID;
+    Unlink(node);
+    PushBack(node);
+    return pageID;
 }
 
 bool CLodPageLRU::Contains(uint32_t pageID) const {
@@ -71,21 +65,17 @@ void CLodPageLRU::Clear() {
     m_pinned.clear();
 }
 
-// Pinned page tracking
+// Pinned page tracking is disabled for the simplified streaming experiment.
 
 void CLodPageLRU::Pin(uint32_t pageID) {
     Insert(pageID);
-    m_pinned.insert(pageID);
 }
 
-void CLodPageLRU::Unpin(uint32_t pageID) {
-    if (m_pinned.erase(pageID)) {
-        Insert(pageID);
-    }
+void CLodPageLRU::Unpin(uint32_t) {
 }
 
-bool CLodPageLRU::IsPinned(uint32_t pageID) const {
-    return m_pinned.count(pageID) != 0;
+bool CLodPageLRU::IsPinned(uint32_t) const {
+    return false;
 }
 
 // list helpers

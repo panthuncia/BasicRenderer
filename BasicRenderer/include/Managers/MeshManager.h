@@ -70,6 +70,16 @@ public:
 	struct CLodDiskStreamingCompletion {
 		uint32_t groupGlobalIndex = 0;
 		bool success = false;
+		ClusterLODGroupChunk chunk{};
+		std::vector<uint32_t> meshPageIndices;
+		std::vector<uint32_t> preAllocatedPages;
+		std::vector<bool> segmentNeedsFetch;
+		std::vector<PagePool::PageAllocation> pageAllocations;
+		std::vector<GroupPageMapEntry> pageMapEntries;
+		uint64_t generation = 0;
+		uint64_t totalStreamedBytes = 0;
+		uint32_t fetchedPageCount = 0;
+		std::string uploadPathLabel;
 		std::vector<CLodPrefetchedChildLayout> prefetchedChildLayouts;
 	};
 
@@ -121,6 +131,14 @@ public:
 	// Focused eviction: frees a resident group's page-pool pages, marks it
 	// non-resident, and uploads the chunk table.  Returns true on success.
 	bool FreeCLodGroupEviction(uint32_t groupGlobalIndex);
+	bool EvictCLodGroupResidency(uint32_t groupGlobalIndex, bool clearPageMapEntries);
+	bool CommitCLodGroupResidency(
+		uint32_t groupGlobalIndex,
+		const ClusterLODGroupChunk& chunk,
+		std::span<const uint32_t> meshPageIndices,
+		std::span<const GroupPageMapEntry> pageMapEntries,
+		std::span<const PagePool::PageAllocation> pageAllocations,
+		uint64_t streamedBytes = 0u);
 
 	// Queues disk I/O for a group without any residency side-effects.
 	// Returns true if the request was queued (or was already in the queue).
@@ -312,6 +330,7 @@ private:
 		std::vector<PagePool::PageAllocation> pageAllocations;
 		std::vector<GroupPageMapEntry> pageMapEntries;
 		std::vector<uint32_t> meshPageIndices;
+		std::vector<bool> segmentNeedsFetch;
 		uint32_t fetchedPageCount = 0;
 		uint64_t totalBlobBytes = 0;
 		std::string uploadPathLabel = "DirectStorageGpuDirect";
@@ -332,6 +351,7 @@ private:
 		std::vector<PagePool::PageAllocation> pageAllocations;
 		std::vector<GroupPageMapEntry> pageMapEntries;
 		std::vector<uint32_t> meshPageIndices;
+		std::vector<bool> segmentNeedsFetch;
 		std::vector<br::DirectStorageBufferRegionCopy> copies;
 		std::vector<uint32_t> pageIds;
 		std::vector<CLodPrefetchedChildLayout> prefetchedChildLayouts;
@@ -374,11 +394,11 @@ private:
 	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout = nullptr);
 
 	enum class DiskStreamingApplyResult {
-		Applied,
+		Prepared,
 		DeferredPendingUpload,
 		FailedPermanent,
 	};
-	DiskStreamingApplyResult ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result, const std::vector<uint32_t>& preAllocatedPages);
+	DiskStreamingApplyResult PrepareCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result, const std::vector<uint32_t>& preAllocatedPages, CLodDiskStreamingCompletion& outCompletion);
 	void FinalizePendingCLodDirectStorageUploads(uint64_t currentGeneration, std::vector<CLodDiskStreamingCompletion>& outCompletions, std::vector<uint32_t>& outFinishedGroups);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);
 	void UploadCLodGroupChunk(const CLodSharedStreamingState& state, uint32_t groupLocalIndex);

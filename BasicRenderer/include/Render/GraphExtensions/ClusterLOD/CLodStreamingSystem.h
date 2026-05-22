@@ -109,9 +109,13 @@ private:
     void EnsurePageTrackingCapacity(MeshManager* meshManager);
     std::vector<uint32_t> PopFreePages(uint32_t count, MeshManager* meshManager);
     void ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager);
-    bool IsGroupUsedLastFrame(uint32_t groupIndex) const;
-    bool IsPhysicalPageProtectedForReuse(uint32_t page, uint64_t meshPageKey, bool& stopAtVisiblePage) const;
-    void InvalidatePhysicalPageReferencesForReuse(uint32_t page, uint64_t meshPageKey, MeshManager* meshManager);
+    void ReleaseGroupResidency(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries);
+    void AddAncestorPageReferences(uint32_t groupIndex);
+    void RemoveAncestorPageReferences(uint32_t groupIndex);
+    void ProtectGroupAndAncestors(uint32_t groupIndex);
+    void BeginPageProtectionUpdate();
+    bool IsPhysicalPageEvictable(uint32_t page) const;
+    bool EvictPhysicalPage(uint32_t page, MeshManager* meshManager);
     void MarkStreamingNonResidentBitsDirtyWord(uint32_t wordAddress);
     void MarkStreamingNonResidentBitsDirtyAll();
     void MarkStreamingActiveGroupsBitsDirty();
@@ -122,6 +126,8 @@ private:
         std::vector<uint64_t> meshPageKeys;    // physical page identity key for each page slot
         std::vector<bool> meshPageRefClaimed;  // true when the mesh-page refcount was already incremented
         std::vector<bool> meshPageRefReleaseOnCancel; // preallocation-time ref claims to undo on cancellation
+        std::vector<uint64_t> writeTokens;      // nonzero for fresh physical-page writes
+        uint32_t requestGeneration = 0u;
         uint32_t segmentCount = 0;
         bool usesPinnedStorage = false;
     };
@@ -129,6 +135,7 @@ private:
     PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, uint32_t segmentCount, MeshManager* meshManager);
     void AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages);
     void ReleasePreAllocatedPages(const PreAllocatedPages& pages, MeshManager* meshManager);
+    bool ValidateReusedPages(const PreAllocatedPages& pages) const;
 
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
     std::shared_ptr<Buffer> m_streamingActiveGroupsBits;
@@ -157,7 +164,10 @@ private:
     std::vector<uint32_t> m_pendingPageOwnerGroup;
     std::vector<uint32_t> m_pendingPageOwnerSegment;
     std::vector<uint64_t> m_pageOwnerMeshPageKey;
-    std::vector<uint32_t> m_pageReadbackGapPinCount;
+    std::vector<std::unordered_set<uint32_t>> m_pageResidentGroups;
+    std::vector<uint32_t> m_pageHierarchyRefCount;
+    std::vector<uint8_t> m_pageProtectedThisUpdate;
+    std::vector<uint64_t> m_pagePendingWriteToken;
     std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
     std::unordered_map<uint32_t, std::vector<uint64_t>> m_groupOwnedMeshPageKeys; // group to mesh-page keys by page slot
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageToPhysicalPage;
@@ -169,10 +179,7 @@ private:
     uint32_t m_streamingRequestsInProgressCount = 0u;
     uint32_t m_pendingStreamingRequestCount = 0u;
     std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
-    // Groups whose pages are temporarily LRU-pinned until the GPU confirms
-	// usage via readback. Maps groupIndex to readback generation at pin time.
-    std::unordered_map<uint32_t, uint64_t> m_readbackGapPinnedGroups;
-    uint64_t m_readbackGeneration = 0;
+    uint64_t m_nextPhysicalWriteToken = 1u;
     bool m_pageLruInitialized = false;
     uint32_t m_streamingResidentGroupsCount = 0u;
     uint32_t m_streamingActiveGroupScanCount = 0u;
