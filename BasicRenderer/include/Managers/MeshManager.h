@@ -407,6 +407,7 @@ private:
 		uint32_t pageMapOffset,
 		std::span<const GroupPageMapEntry> pageMapEntries);
 	bool IsCLodGroupResident(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const;
+	bool IsCLodMeshPageReferencedByResidentGroup(const CLodSharedStreamingState& state, uint32_t meshPageIndex) const;
 	void DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
 	void ReleaseAllCLodGroupChunkAllocations(CLodSharedStreamingState& state);
  	static void ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk);

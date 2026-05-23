@@ -375,6 +375,11 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
 
         WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
         const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase, seg.pageIndex);
+        if (pageEntry.slabDescriptorIndex == 0u)
+        {
+            WGTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB, 1);
+            return;
+        }
         const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
 
         const uint phase2ExpansionFactor =

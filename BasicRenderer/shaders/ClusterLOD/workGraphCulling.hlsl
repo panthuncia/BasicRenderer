@@ -113,6 +113,7 @@ static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS = 105;
 static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES = 106;
 static const uint WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS = 107;
 static const uint WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED = 108;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB = 122u;
 
 static const uint WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES = 18;
 static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS = 19;
@@ -2101,6 +2102,11 @@ void WG_TraverseNodes(
                             emittedSegmentMeshletCount = seg.meshletCount;
 
                             const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase, seg.pageIndex);
+                            if (pageEntry.slabDescriptorIndex == 0u)
+                            {
+                                WGTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB, 1);
+                                return;
+                            }
 
                             bucketRecord.instanceIndex = rec.instanceIndex;
                             bucketRecord.viewId = rec.viewId;

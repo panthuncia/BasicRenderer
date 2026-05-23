@@ -101,7 +101,7 @@ MeshManager::MeshManager() {
 		PagePool::Config ppConfig;
 		ppConfig.pageSize     = 256 * 1024;         // 256 KB
 		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.numStreamingSlabs = 24;
+		ppConfig.numStreamingSlabs = 32;
 		ppConfig.debugName    = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}
@@ -858,6 +858,13 @@ std::vector<uint32_t> MeshManager::GetCLodGroupMeshPageIndices(const CLodSharedS
 	if (std::any_of(meshPageIndices.begin(), meshPageIndices.end(), [&](uint32_t pageIndex) { return pageIndex >= pageDiskLocators.size(); })) {
 		return false;
 	}
+	if ((!segmentNeedsFetch.empty() && segmentNeedsFetch.size() != meshPageIndices.size()) ||
+		(!preAllocatedPages.empty() && preAllocatedPages.size() != meshPageIndices.size())) {
+		spdlog::warn(
+			"CLod streaming: refusing to queue group {} because request page arrays do not cover all group pages",
+			groupGlobalIndex);
+		return false;
+	}
 
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
@@ -961,11 +968,19 @@ MeshManager::DiskStreamingApplyResult MeshManager::PrepareCompletedCLodDiskStrea
 
 	for (uint32_t ci = 0; ci < sCount; ++ci) {
 		const bool needsFetch = result.segmentNeedsFetch.empty()
-			|| (ci < static_cast<uint32_t>(result.segmentNeedsFetch.size()) && result.segmentNeedsFetch[ci]);
+			|| ci >= static_cast<uint32_t>(result.segmentNeedsFetch.size())
+			|| result.segmentNeedsFetch[ci];
 		const size_t blobSize = useDirectStorageGpuUpload
 			? static_cast<size_t>(result.directStoragePageBlobSizes[ci])
 			: result.pageBlobs[ci].size();
 		if (needsFetch) {
+			if (blobSize == 0u) {
+				spdlog::error(
+					"CLod streaming: group {} page {} was marked for fetch but has no payload bytes",
+					result.groupGlobalIndex,
+					ci);
+				return DiskStreamingApplyResult::FailedPermanent;
+			}
 			++fetchedPageCount;
 			totalBlobBytes += blobSize;
 		}
@@ -1154,6 +1169,9 @@ bool MeshManager::EvictCLodGroupResidency(uint32_t groupGlobalIndex, bool clearP
 		const auto meshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
 		const GroupPageMapEntry zero{};
 		for (uint32_t meshPageIndex : meshPageIndices) {
+			if (IsCLodMeshPageReferencedByResidentGroup(*sharedState, meshPageIndex)) {
+				continue;
+			}
 			if (meshPageIndex < sharedState->pageMapEntriesCPU.size()) {
 				sharedState->pageMapEntriesCPU[meshPageIndex] = zero;
 				UploadCLodGroupPageMapRange(*sharedState, meshPageIndex, std::span<const GroupPageMapEntry>(&zero, 1));
@@ -1179,6 +1197,57 @@ bool MeshManager::CommitCLodGroupResidency(
 		return false;
 	}
 
+	const auto expectedMeshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
+	if (meshPageIndices.size() != expectedMeshPageIndices.size() ||
+		pageMapEntries.size() != expectedMeshPageIndices.size() ||
+		pageAllocations.size() != expectedMeshPageIndices.size()) {
+		spdlog::warn(
+			"CLod streaming: refusing to commit group {} residency because payload page counts do not match expected group pages (meshPages={}, pageMapEntries={}, allocations={}, expected={})",
+			groupGlobalIndex,
+			meshPageIndices.size(),
+			pageMapEntries.size(),
+			pageAllocations.size(),
+			expectedMeshPageIndices.size());
+		return false;
+	}
+	if (!expectedMeshPageIndices.empty() && sharedState->ownedPageMapView == nullptr) {
+		spdlog::warn(
+			"CLod streaming: refusing to commit group {} residency because the mesh page-map view is missing",
+			groupGlobalIndex);
+		return false;
+	}
+
+	for (size_t i = 0; i < expectedMeshPageIndices.size(); ++i) {
+		if (meshPageIndices[i] != expectedMeshPageIndices[i] ||
+			meshPageIndices[i] >= sharedState->pageMapEntriesCPU.size() ||
+			!pageAllocations[i].IsValid() ||
+			pageMapEntries[i].slabDescriptorIndex == 0u) {
+			spdlog::warn(
+				"CLod streaming: refusing to commit group {} residency because page {} is not fully renderable",
+				groupGlobalIndex,
+				i);
+			return false;
+		}
+		if (m_clodPagePool != nullptr) {
+			const uint32_t expectedSlabDescriptor = m_clodPagePool->GetSlabDescriptorIndex(pageAllocations[i]);
+			const uint32_t expectedSlabByteOffset =
+				static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(pageAllocations[i].firstPageID));
+			if (pageMapEntries[i].slabDescriptorIndex != expectedSlabDescriptor ||
+				pageMapEntries[i].slabByteOffset != expectedSlabByteOffset) {
+				spdlog::warn(
+					"CLod streaming: refusing to commit group {} residency because page {} map entry points at slab/offset {}:{} but allocation page {} resolves to {}:{}",
+					groupGlobalIndex,
+					i,
+					pageMapEntries[i].slabDescriptorIndex,
+					pageMapEntries[i].slabByteOffset,
+					pageAllocations[i].firstPageID,
+					expectedSlabDescriptor,
+					expectedSlabByteOffset);
+				return false;
+			}
+		}
+	}
+
 	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
 
 	auto& residentAllocations = sharedState->residentGroupAllocations[localIndex];
@@ -1188,7 +1257,7 @@ bool MeshManager::CommitCLodGroupResidency(
 	residentAllocations.Reset();
 	residentAllocations.pageAllocations.assign(pageAllocations.begin(), pageAllocations.end());
 
-	if (sharedState->ownedPageMapView && meshPageIndices.size() == pageMapEntries.size()) {
+	if (sharedState->ownedPageMapView) {
 		for (size_t i = 0; i < meshPageIndices.size(); ++i) {
 			const uint32_t meshPageIndex = meshPageIndices[i];
 			if (meshPageIndex < sharedState->pageMapEntriesCPU.size()) {
@@ -1402,6 +1471,13 @@ uint32_t MeshManager::QueueCLodGroupDiskIOBatch(const std::vector<CLodGroupDiskI
 		if (std::any_of(meshPageIndices.begin(), meshPageIndices.end(), [&](uint32_t pageIndex) { return pageIndex >= pageDiskLocators.size(); })) {
 			continue;
 		}
+		if ((!batchRequest.segmentNeedsFetch.empty() && batchRequest.segmentNeedsFetch.size() != meshPageIndices.size()) ||
+			(!batchRequest.preAllocatedPages.empty() && batchRequest.preAllocatedPages.size() != meshPageIndices.size())) {
+			spdlog::warn(
+				"CLod streaming: refusing to queue group {} because request page arrays do not cover all group pages",
+				batchRequest.groupGlobalIndex);
+			continue;
+		}
 
 		PreparedRequest preparedRequest{};
 		preparedRequest.sourceIndex = requestIndex;
@@ -1431,7 +1507,7 @@ uint32_t MeshManager::QueueCLodGroupDiskIOBatch(const std::vector<CLodGroupDiskI
 			const uint32_t groupGlobalIndex = preparedRequest.request.groupGlobalIndex;
 			const bool queued = m_clodDiskStreamingQueuedGroups.insert(groupGlobalIndex).second;
 			if (outQueuedByRequest != nullptr) {
-				(*outQueuedByRequest)[preparedRequest.sourceIndex] = true;
+				(*outQueuedByRequest)[preparedRequest.sourceIndex] = queued;
 			}
 			if (queued) {
 				m_clodDiskStreamingRequests.push_back(std::move(preparedRequest.request));
@@ -1555,6 +1631,23 @@ bool MeshManager::IsCLodGroupResident(const CLodSharedStreamingState& state, uin
 		return false;
 	}
 	return state.groupResidentFlags[groupLocalIndex] != 0u;
+}
+
+bool MeshManager::IsCLodMeshPageReferencedByResidentGroup(const CLodSharedStreamingState& state, uint32_t meshPageIndex) const {
+	const size_t groupCount = std::min(state.groups.size(), state.groupResidentFlags.size());
+	for (size_t groupLocalIndex = 0; groupLocalIndex < groupCount; ++groupLocalIndex) {
+		if (state.groupResidentFlags[groupLocalIndex] == 0u) {
+			continue;
+		}
+
+		const std::vector<uint32_t> meshPageIndices = GetCLodGroupMeshPageIndices(
+			state,
+			static_cast<uint32_t>(groupLocalIndex));
+		if (std::find(meshPageIndices.begin(), meshPageIndices.end(), meshPageIndex) != meshPageIndices.end()) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex) {
@@ -1927,7 +2020,8 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 			if (result.directStorageGpuUploadPending) {
 				for (uint32_t i = 0; i < static_cast<uint32_t>(result.directStoragePageBlobSizes.size()); ++i) {
 					const bool needsFetch = result.segmentNeedsFetch.empty()
-						|| (i < static_cast<uint32_t>(result.segmentNeedsFetch.size()) && result.segmentNeedsFetch[i]);
+						|| i >= static_cast<uint32_t>(result.segmentNeedsFetch.size())
+						|| result.segmentNeedsFetch[i];
 					if (needsFetch) {
 						total += static_cast<uint64_t>(result.directStoragePageBlobSizes[i]);
 					}

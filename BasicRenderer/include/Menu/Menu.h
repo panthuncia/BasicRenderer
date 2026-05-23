@@ -3513,6 +3513,16 @@ inline void Menu::DrawCLodTelemetryWindow() {
             };
 
             ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(captureState.captureCount));
+            const uint32_t zeroPageSlabCount = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedZeroPageSlab);
+            if (zeroPageSlabCount != 0u) {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.15f, 0.10f, 1.0f),
+                    "Zero page slab: %u",
+                    zeroPageSlabCount);
+            }
+            else {
+                ImGui::Text("Zero page slab: %u", zeroPageSlabCount);
+            }
             drawUtilizationRow(
                 "ObjectCull active draw threads",
                 counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
