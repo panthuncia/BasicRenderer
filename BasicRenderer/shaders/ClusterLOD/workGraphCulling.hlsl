@@ -1538,7 +1538,7 @@ bool CLodGroupIsResident(uint groupGlobalIndex)
     const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
     if (groupGlobalIndex >= activeGroupScanCount)
     {
-        return true;
+        return false;
     }
 
     ByteAddressBuffer nonResidentBits =

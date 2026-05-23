@@ -188,6 +188,7 @@ public:
 
 	// Access the CLod page pool (may be null if no CLod meshes loaded).
 	PagePool* GetCLodPagePool() const { return m_clodPagePool.get(); }
+	void SetCLodStreamingUploadFunction(PagePool::UploadFn fn);
 	uint64_t GetActiveMeshletCount() const { return m_activeMeshletCount; }
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
@@ -378,6 +379,7 @@ private:
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
 	std::vector<CLodPendingDirectStorageLaunch> m_clodPendingDirectStorageLaunches;
 	std::vector<CLodPendingDirectStorageUpload> m_clodPendingDirectStorageUploads;
+	PagePool::UploadFn m_clodStreamingUploadFn;
 
 	rhi::TimelinePtr m_clodDirectStorageCompletionFencePtr;
 	rhi::Timeline m_clodDirectStorageCompletionFenceHandle;

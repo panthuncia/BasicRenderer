@@ -1188,6 +1188,13 @@ bool MeshManager::HasPendingCLodDirectStorageUploads() const {
 	return !m_clodPendingDirectStorageUploads.empty();
 }
 
+void MeshManager::SetCLodStreamingUploadFunction(PagePool::UploadFn fn) {
+	m_clodStreamingUploadFn = std::move(fn);
+	if (m_clodPagePool != nullptr) {
+		m_clodPagePool->SetUploadFunction(m_clodStreamingUploadFn);
+	}
+}
+
 void MeshManager::CollectCLodDirectStorageCompletionWaits(std::vector<ExternalTimelinePoint>& outWaits) const {
 	std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
 	outWaits.reserve(outWaits.size() + m_clodPendingDirectStorageUploads.size());
@@ -1572,6 +1579,15 @@ void MeshManager::UploadCLodGroupChunkTable(const CLodSharedStreamingState& stat
 		}
 	}
 
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			materializedGroupChunks.data(),
+			materializedGroupChunks.size() * sizeof(ClusterLODGroupChunk),
+			rg::runtime::UploadTarget::FromShared(m_clodSharedGroupChunks),
+			state.groupChunksView->GetOffset());
+		return;
+	}
+
 	m_clodSharedGroupChunks->UpdateView(state.groupChunksView, materializedGroupChunks.data());
 }
 
@@ -1587,10 +1603,19 @@ void MeshManager::UploadCLodGroupChunk(const CLodSharedStreamingState& state, ui
 		ZeroCLodGroupChunkCounts(materializedGroupChunk);
 	}
 
-	auto bulkWrite = m_clodSharedGroupChunks->BeginBulkWrite();
 	const size_t byteOffset =
 		state.groupChunksView->GetOffset() + static_cast<size_t>(groupLocalIndex) * sizeof(ClusterLODGroupChunk);
 	const size_t byteSize = sizeof(ClusterLODGroupChunk);
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			&materializedGroupChunk,
+			byteSize,
+			rg::runtime::UploadTarget::FromShared(m_clodSharedGroupChunks),
+			byteOffset);
+		return;
+	}
+
+	auto bulkWrite = m_clodSharedGroupChunks->BeginBulkWrite();
 	if (bulkWrite.data != nullptr && byteOffset + byteSize <= bulkWrite.capacity) {
 		std::memcpy(bulkWrite.data + byteOffset, &materializedGroupChunk, byteSize);
 		m_clodSharedGroupChunks->EndBulkWrite(byteOffset, byteSize);
@@ -1611,6 +1636,15 @@ void MeshManager::UploadCLodGroupPageMapRange(
 	const size_t byteOffset =
 		state.ownedPageMapView->GetOffset() + static_cast<size_t>(pageMapOffset) * sizeof(GroupPageMapEntry);
 	const size_t byteSize = pageMapEntries.size_bytes();
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			pageMapEntries.data(),
+			byteSize,
+			rg::runtime::UploadTarget::FromShared(m_clodGroupPageMap),
+			byteOffset);
+		return;
+	}
+
 	auto bulkWrite = m_clodGroupPageMap->BeginBulkWrite();
 	if (bulkWrite.data != nullptr && byteOffset + byteSize <= bulkWrite.capacity) {
 		std::memcpy(bulkWrite.data + byteOffset, pageMapEntries.data(), byteSize);
@@ -1618,7 +1652,15 @@ void MeshManager::UploadCLodGroupPageMapRange(
 		return;
 	}
 
-	m_clodGroupPageMap->UpdateView(state.ownedPageMapView.get(), state.pageMapEntriesCPU.data());
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			state.pageMapEntriesCPU.data(),
+			state.pageMapEntriesCPU.size() * sizeof(GroupPageMapEntry),
+			rg::runtime::UploadTarget::FromShared(m_clodGroupPageMap),
+			state.ownedPageMapView->GetOffset());
+	} else {
+		m_clodGroupPageMap->UpdateView(state.ownedPageMapView.get(), state.pageMapEntriesCPU.data());
+	}
 }
 
 bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex) {
