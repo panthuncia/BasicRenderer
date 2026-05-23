@@ -1347,7 +1347,11 @@ void CLodStreamingSystem::RetirePhysicalPage(uint32_t page, MeshManager* meshMan
 
     if (m_pageState[page] == CLodPhysicalPageState::Retiring) {
         if (page < m_pageRetireAfterTick.size()) {
-            const uint64_t retireDelayTicks = static_cast<uint64_t>(std::max<uint32_t>(m_streamingReadbackRingSize, 1u) + 1u);
+            const uint32_t framesInFlight = static_cast<uint32_t>(std::max<uint8_t>(
+                rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight,
+                uint8_t{1}));
+            const uint64_t retireDelayTicks = static_cast<uint64_t>(
+                std::max<uint32_t>(m_streamingReadbackRingSize, framesInFlight) + 2u);
             m_pageRetireAfterTick[page] = std::max(m_pageRetireAfterTick[page], m_streamingDiagnosticTick + retireDelayTicks);
         }
         if (pinned && page < m_pageRetirePinned.size()) {
@@ -1373,7 +1377,11 @@ void CLodStreamingSystem::RetirePhysicalPage(uint32_t page, MeshManager* meshMan
 
     m_pageState[page] = CLodPhysicalPageState::Retiring;
     if (page < m_pageRetireAfterTick.size()) {
-        const uint64_t retireDelayTicks = static_cast<uint64_t>(std::max<uint32_t>(m_streamingReadbackRingSize, 1u) + 1u);
+        const uint32_t framesInFlight = static_cast<uint32_t>(std::max<uint8_t>(
+            rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight,
+            uint8_t{1}));
+        const uint64_t retireDelayTicks = static_cast<uint64_t>(
+            std::max<uint32_t>(m_streamingReadbackRingSize, framesInFlight) + 2u);
         m_pageRetireAfterTick[page] = m_streamingDiagnosticTick + retireDelayTicks;
     }
     if (page < m_pageRetirePinned.size()) {
@@ -1604,7 +1612,7 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
             if (outStats != nullptr) {
                 ++outStats->rejectedProtected;
             }
-            continue;
+            break;
         }
         if (page >= m_pageState.size()) {
             if (outStats != nullptr) {
@@ -1783,6 +1791,11 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
                     m_streamingResidentGroupsCount,
                     static_cast<uint32_t>(m_preAllocatedPagesByGroup.size()),
                     livePreallocatedFreshPages);
+            }
+            for (uint32_t page : freshPages) {
+                if (IsPhysicalPageCleanForFreshAllocation(page)) {
+                    m_pageLru.Insert(page);
+                }
             }
             ReleasePreAllocatedPages(result, meshManager);
             return PreAllocatedPages{}; // empty = failure
@@ -2060,8 +2073,12 @@ void CLodStreamingSystem::CommitPendingResidencyPromotions() {
                 continue;
             }
             const auto committedIt = m_groupCommittedPageMaps.find(groupIndex);
+            const uint32_t framesInFlight = static_cast<uint32_t>(std::max<uint8_t>(
+                rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight,
+                uint8_t{1}));
+            const uint64_t publishDelayTicks = static_cast<uint64_t>(framesInFlight + 1u);
             if (committedIt != m_groupCommittedPageMaps.end() &&
-                m_streamingDiagnosticTick <= committedIt->second.commitTick + 1u) {
+                m_streamingDiagnosticTick <= committedIt->second.commitTick + publishDelayTicks) {
                 m_pendingResidencyCommitGroups.insert(groupIndex);
                 continue;
             }
@@ -2857,6 +2874,7 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
 
     {
         ZoneScopedN("CLodStreamingSystem::ApplyDiskStreamingCompletions::ApplyCompletions");
+        bool allocationBlockedThisUpdate = false;
         for (uint32_t completionIndex = 0; completionIndex < static_cast<uint32_t>(completions.size()); ++completionIndex) {
             auto& completion = completions[completionIndex];
             const uint32_t groupIndex = completion.groupGlobalIndex;
@@ -2872,6 +2890,11 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
             auto preAllocIt = m_preAllocatedPagesByGroup.find(groupIndex);
 
             if (completion.success) {
+                if (allocationBlockedThisUpdate) {
+                    m_readyStreamingCompletionsByGroup[groupIndex] = std::move(completion);
+                    continue;
+                }
+
                 const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
                 const uint32_t expectedPageCount = info.valid ? info.pageCount : 1u;
                 if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
@@ -2905,6 +2928,7 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                             m_streamingResidencyInitializedBitsCpu[wordAddress] &= ~bitMask;
                         }
                         m_readyStreamingCompletionsByGroup[groupIndex] = std::move(completion);
+                        allocationBlockedThisUpdate = true;
                         m_pendingResidencyCommitGroups.erase(groupIndex);
                         continue;
                     }

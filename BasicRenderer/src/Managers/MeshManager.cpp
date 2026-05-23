@@ -1060,19 +1060,7 @@ bool MeshManager::EvictCLodGroupResidency(uint32_t groupGlobalIndex, bool clearP
 
 	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
 	const bool evicted = ApplyCLodGroupEviction(*sharedState, localIndex);
-	if (evicted && clearPageMapEntries && localIndex < sharedState->groups.size()) {
-		const auto meshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
-		const GroupPageMapEntry zero{};
-		for (uint32_t meshPageIndex : meshPageIndices) {
-			if (IsCLodMeshPageReferencedByResidentGroup(*sharedState, meshPageIndex)) {
-				continue;
-			}
-			if (meshPageIndex < sharedState->pageMapEntriesCPU.size()) {
-				sharedState->pageMapEntriesCPU[meshPageIndex] = zero;
-				UploadCLodGroupPageMapRange(*sharedState, meshPageIndex, std::span<const GroupPageMapEntry>(&zero, 1));
-			}
-		}
-	}
+	(void)clearPageMapEntries;
 	return evicted;
 }
 
@@ -1661,8 +1649,6 @@ bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32
 		}
 	}
 	DeallocateCLodGroupChunkAllocations(state, groupLocalIndex);
-
-	UploadCLodGroupChunk(state, groupLocalIndex);
 	return true;
 }
 
