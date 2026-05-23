@@ -41,6 +41,7 @@ private:
         Resident,
         PreAllocatedCpuUpload,
         PendingDirectStorageWrite,
+        Retiring,
     };
 
     enum class StreamingRequestState : uint8_t {
@@ -92,9 +93,13 @@ private:
     void SetGroupUsesPinnedStorage(uint32_t groupIndex, bool usesPinnedStorage);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
     void CommitPendingResidencyPromotions();
+    void ReconcileStaleDiskIoRequests(MeshManager* meshManager);
     void PromoteGroupPagesAfterUploadDrain(uint32_t groupIndex);
-    bool HasGroupPendingPageDependencies(uint32_t groupIndex) const;
-    bool IsGroupResidencyComplete(uint32_t groupIndex, MeshManager* meshManager) const;
+    std::vector<uint64_t> BuildExpectedGroupPageKeys(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info) const;
+    bool IsPhysicalPageResidentForKey(uint32_t page, uint64_t key) const;
+    bool ValidateGroupResidencyPages(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys) const;
+    bool ValidateGroupCommittedPageMap(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys, MeshManager* meshManager) const;
+    bool SetGroupResidentBit(uint32_t groupIndex, bool resident);
     void ForceGroupNonResident(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries);
     void TouchGroupPages(uint32_t groupIndex);
     void PrefetchChildGroupLayouts(uint32_t parentGroupIndex, MeshManager* meshManager);
@@ -127,12 +132,16 @@ private:
     std::vector<uint32_t> PopFreePages(uint32_t count, MeshManager* meshManager, PagePopFailureStats* outStats);
     void ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager);
     void ReleaseGroupResidency(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries);
-    void AddAncestorPageReferences(uint32_t groupIndex);
-    void RemoveAncestorPageReferences(uint32_t groupIndex);
+    void RetirePhysicalPage(uint32_t page, MeshManager* meshManager, bool pinned);
+    void DrainRetiredPhysicalPages(MeshManager* meshManager);
+    bool IsPhysicalPageRetired(uint32_t page) const;
+    bool DoesGroupReferencePhysicalPage(uint32_t groupIndex, uint32_t page) const;
+    bool DoesGroupReferencePageKey(uint32_t groupIndex, uint32_t page, uint64_t key) const;
+    uint32_t CountResidentGroupsForPageKey(uint32_t page, uint64_t key) const;
+    uint32_t FindResidentGroupForPageKey(uint32_t page, uint64_t key) const;
+    uint32_t ScrubStaleResidentGroups(uint32_t page);
     void ProtectGroupAndAncestors(uint32_t groupIndex);
     void BeginPageProtectionUpdate();
-    bool IsPhysicalPageHeldByMeshPageRef(uint32_t page) const;
-    bool HasUncommittedMeshPageRef(uint32_t page) const;
     bool IsPhysicalPageCleanForFreshAllocation(uint32_t page) const;
     bool IsPhysicalPageEvictable(uint32_t page) const;
     bool EvictPhysicalPage(uint32_t page, MeshManager* meshManager);
@@ -143,20 +152,20 @@ private:
     struct PreAllocatedPages {
 		std::vector<uint32_t> pagesBySegment; // segment index to page ID
         std::vector<bool> segmentNeedsFetch;  // true = need disk data; false = reused still-valid page
-        std::vector<bool> segmentWaitsOnPendingWrite; // true = shares an in-flight write owned by another group
         std::vector<uint64_t> meshPageKeys;    // physical page identity key for each page slot
-        std::vector<bool> meshPageRefClaimed;  // true when the mesh-page refcount was already incremented
-        std::vector<bool> meshPageRefReleaseOnCancel; // preallocation-time ref claims to undo on cancellation
-        std::vector<uint64_t> writeTokens;      // nonzero for fresh physical-page writes
         uint32_t requestGeneration = 0u;
         uint32_t segmentCount = 0;
         bool usesPinnedStorage = false;
     };
 
+    struct CommittedGroupPageMap {
+        std::vector<PagePool::PageAllocation> pageAllocations;
+        std::vector<GroupPageMapEntry> pageMapEntries;
+    };
+
     PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, MeshManager* meshManager);
-    void AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages);
+    bool AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages, MeshManager* meshManager);
     void ReleasePreAllocatedPages(const PreAllocatedPages& pages, MeshManager* meshManager);
-    bool ValidateReusedPages(const PreAllocatedPages& pages) const;
     bool ValidateRenderableCompletion(
         uint32_t groupIndex,
         const PreAllocatedPages& pages,
@@ -177,6 +186,7 @@ private:
     std::vector<uint32_t> m_streamingPinnedGroupsBitsCpu;
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_usedGroupsBitsCpu; // groups reported as visible by the GPU last frame
+    std::vector<uint64_t> m_groupLastUsedTick;
     std::vector<int32_t> m_streamingParentGroupByGlobal;
 	std::unordered_map<uint32_t, std::vector<uint32_t>> m_childGroupsByGlobal; // parent to children
     std::unordered_map<uint32_t, CachedChildGroupLayout> m_prefetchedChildLayoutsByGroup;
@@ -187,23 +197,18 @@ private:
 	std::vector<int32_t> m_pageOwnerGroup;       // page ID to group global index (-1 = unowned)
 	std::vector<uint32_t> m_pageOwnerSegment;    // page ID to segment index within owning group
     std::vector<CLodPhysicalPageState> m_pageState;
+    std::vector<uint64_t> m_pageRetireAfterTick;
+    std::vector<uint8_t> m_pageRetirePinned;
     std::vector<uint32_t> m_pendingPageOwnerGroup;
     std::vector<uint32_t> m_pendingPageOwnerSegment;
     std::vector<uint64_t> m_pageOwnerMeshPageKey;
     std::vector<std::unordered_set<uint32_t>> m_pageResidentGroups;
-    std::vector<uint32_t> m_pageHierarchyRefCount;
     std::vector<uint8_t> m_pageProtectedThisUpdate;
-    std::vector<uint64_t> m_pagePendingWriteToken;
     std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
     std::unordered_map<uint32_t, std::vector<uint64_t>> m_groupOwnedMeshPageKeys; // group to mesh-page keys by page slot
+    std::unordered_map<uint32_t, CommittedGroupPageMap> m_groupCommittedPageMaps;
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageToPhysicalPage;
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageRefCounts;
-    struct PendingMeshPageWrite {
-        uint32_t page = ~0u;
-        uint32_t groupIndex = ~0u;
-        uint64_t writeToken = 0u;
-    };
-    std::unordered_map<uint64_t, PendingMeshPageWrite> m_pendingMeshPageWrites;
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
     std::unordered_set<uint32_t> m_pendingResidencyCommitGroups;
     std::vector<StreamingRequestState> m_streamingRequestStateByGroup;
@@ -211,7 +216,6 @@ private:
     uint32_t m_streamingRequestsInProgressCount = 0u;
     uint32_t m_pendingStreamingRequestCount = 0u;
     std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
-    uint64_t m_nextPhysicalWriteToken = 1u;
     bool m_pageLruInitialized = false;
     uint32_t m_streamingResidentGroupsCount = 0u;
     uint32_t m_streamingActiveGroupScanCount = 0u;
