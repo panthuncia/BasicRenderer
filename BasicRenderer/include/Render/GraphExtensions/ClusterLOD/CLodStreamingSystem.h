@@ -99,6 +99,9 @@ private:
     std::vector<uint64_t> BuildExpectedGroupPageKeys(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info) const;
     bool IsPhysicalPageResidentForKey(uint32_t page, uint64_t key) const;
     bool IsPhysicalPagePendingForKey(uint32_t page, uint64_t key) const;
+    uint32_t GetPendingMeshPageRefCount(uint32_t page, uint64_t key) const;
+    void AddPendingMeshPageReference(uint32_t page, uint64_t key);
+    void ReleasePendingMeshPageReference(uint32_t page, uint64_t key);
     bool ValidateGroupResidencyPages(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys) const;
     bool ValidateGroupCommittedPageMap(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys, MeshManager* meshManager) const;
     bool SetGroupResidentBit(uint32_t groupIndex, bool resident);
@@ -152,6 +155,7 @@ private:
     uint32_t ScrubStaleResidentGroups(uint32_t page);
     void ProtectGroupAndAncestors(uint32_t groupIndex);
     void BeginPageProtectionUpdate();
+    bool MarkGroupProtectedThisUpdate(uint32_t groupIndex);
     bool IsPhysicalPageCleanForFreshAllocation(uint32_t page) const;
     bool IsPhysicalPageEvictable(uint32_t page) const;
     bool EvictPhysicalPage(uint32_t page, MeshManager* meshManager);
@@ -223,6 +227,7 @@ private:
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageToPhysicalPage;
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageRefCounts;
     std::unordered_map<uint64_t, uint32_t> m_pendingMeshPageToPhysicalPage;
+    std::unordered_map<uint64_t, uint32_t> m_pendingMeshPageRefCounts;
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
     std::unordered_map<uint32_t, MeshManager::CLodDiskStreamingCompletion> m_readyStreamingCompletionsByGroup;
     std::unordered_set<uint32_t> m_pendingResidencyCommitGroups;
@@ -295,6 +300,8 @@ private:
     std::vector<uint32_t> m_parentChainScratch;
     std::vector<uint32_t> m_lruTouchedGroupsBitsScratch;
     std::vector<uint32_t> m_lruTouchedGroupWordsScratch;
+    std::vector<uint32_t> m_protectedGroupsBitsScratch;
+    std::vector<uint32_t> m_protectedGroupWordsScratch;
     std::vector<uint32_t> m_decodeSeenGenerationByGroup;
     std::vector<uint32_t> m_decodePriorityAccumByGroup;
     std::vector<uint32_t> m_decodeUsedSeenGenerationByGroup;
