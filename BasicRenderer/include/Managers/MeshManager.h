@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -72,8 +73,9 @@ public:
 		bool success = false;
 		ClusterLODGroupChunk chunk{};
 		std::vector<uint32_t> meshPageIndices;
-		std::vector<uint32_t> preAllocatedPages;
 		std::vector<bool> segmentNeedsFetch;
+		std::vector<std::vector<std::byte>> pageBlobs;
+		std::vector<uint32_t> preAllocatedPages;
 		std::vector<PagePool::PageAllocation> pageAllocations;
 		std::vector<GroupPageMapEntry> pageMapEntries;
 		uint64_t generation = 0;

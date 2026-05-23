@@ -161,6 +161,7 @@ private:
     struct CommittedGroupPageMap {
         std::vector<PagePool::PageAllocation> pageAllocations;
         std::vector<GroupPageMapEntry> pageMapEntries;
+        uint64_t commitTick = 0u;
     };
 
     PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, MeshManager* meshManager);
@@ -210,6 +211,7 @@ private:
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageToPhysicalPage;
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageRefCounts;
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
+    std::unordered_map<uint32_t, MeshManager::CLodDiskStreamingCompletion> m_readyStreamingCompletionsByGroup;
     std::unordered_set<uint32_t> m_pendingResidencyCommitGroups;
     std::vector<StreamingRequestState> m_streamingRequestStateByGroup;
     std::vector<uint32_t> m_pendingLoadPriorityByGroup;

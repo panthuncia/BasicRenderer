@@ -271,6 +271,7 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     m_residentMeshPageRefCounts.clear();
     ClearPrefetchedChildLayouts();
     m_preAllocatedPagesByGroup.clear();
+    m_readyStreamingCompletionsByGroup.clear();
     m_pendingResidencyCommitGroups.clear();
     m_groupsUsingPinnedStorage.clear();
     m_pageLruInitialized = false;
@@ -2058,6 +2059,12 @@ void CLodStreamingSystem::CommitPendingResidencyPromotions() {
                 ClearPendingLoadPriority(groupIndex);
                 continue;
             }
+            const auto committedIt = m_groupCommittedPageMaps.find(groupIndex);
+            if (committedIt != m_groupCommittedPageMaps.end() &&
+                m_streamingDiagnosticTick <= committedIt->second.commitTick + 1u) {
+                m_pendingResidencyCommitGroups.insert(groupIndex);
+                continue;
+            }
             PromoteGroupPagesAfterUploadDrain(groupIndex);
             MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr;
             const auto info = meshManager != nullptr
@@ -2151,6 +2158,9 @@ void CLodStreamingSystem::ReconcileStaleDiskIoRequests(MeshManager* meshManager)
             continue;
         }
         if (m_pendingResidencyCommitGroups.find(groupIndex) != m_pendingResidencyCommitGroups.end()) {
+            continue;
+        }
+        if (m_readyStreamingCompletionsByGroup.find(groupIndex) != m_readyStreamingCompletionsByGroup.end()) {
             continue;
         }
 
@@ -2463,46 +2473,11 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
                 continue;
             }
 
-            // Pinned groups: allocate from dedicated non-evictable slabs.
-            const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
-            const uint32_t pagesNeeded = info.valid ? info.pageCount : 1u;
-
-            if (pagesNeeded > 0u) {
-                auto preAlloc = PreAllocatePagesForGroup(groupIndex, info, meshManager);
-                preAlloc.requestGeneration = groupIndex < m_pendingStreamingRequestGenerationByGroup.size()
-                    ? m_pendingStreamingRequestGenerationByGroup[groupIndex]
-                    : 0u;
-                if (preAlloc.segmentCount == 0) {
-                    // Dedicated pinned slab pool exhausted - can't load this pinned group yet.
-                    SetGroupResidentBit(groupIndex, false);
-                    m_streamingResidencyInitializedBitsCpu[wordAddress] &= ~bitMask;
-                    continue;
-                }
-
-                m_preAllocatedPagesByGroup[groupIndex] = std::move(preAlloc);
-            }
-
-            auto paIt = m_preAllocatedPagesByGroup.find(groupIndex);
-            const std::vector<bool> emptySegmentNeedsFetch;
-            const std::vector<uint32_t> emptyPreAllocPageIDs;
-            const std::vector<bool>* segmentNeedsFetch = &emptySegmentNeedsFetch;
-            const std::vector<uint32_t>* preAllocPageIDs = &emptyPreAllocPageIDs;
-            if (paIt != m_preAllocatedPagesByGroup.end()) {
-                const auto& pa = paIt->second;
-                segmentNeedsFetch = &pa.segmentNeedsFetch;
-                preAllocPageIDs = &pa.pagesBySegment;
-            }
-
-            const bool queued = meshManager->QueueCLodGroupDiskIO(groupIndex, *segmentNeedsFetch, *preAllocPageIDs);
+            const bool queued = meshManager->QueueCLodGroupDiskIO(groupIndex);
             if (queued) {
                 MarkStreamingRequestDiskIo(groupIndex);
                 SetGroupResidentBit(groupIndex, false);
             } else {
-                // Failed to queue - release pages.
-                if (paIt != m_preAllocatedPagesByGroup.end()) {
-                    ReleasePreAllocatedPages(paIt->second, meshManager);
-                    m_preAllocatedPagesByGroup.erase(paIt);
-                }
                 SetGroupResidentBit(groupIndex, false);
                 m_streamingResidencyInitializedBitsCpu[wordAddress] &= ~bitMask;
             }
@@ -2642,6 +2617,7 @@ void CLodStreamingSystem::ClearStreamingRequestInProgress(uint32_t groupIndex) {
         --m_streamingRequestsInProgressCount;
     }
     state = StreamingRequestState::None;
+    m_readyStreamingCompletionsByGroup.erase(groupIndex);
     if (groupIndex < m_pendingStreamingRequestHeapIndexByGroup.size()) {
         m_pendingStreamingRequestHeapIndexByGroup[groupIndex] = UINT32_MAX;
     }
@@ -2871,26 +2847,16 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
         ZoneScopedN("CLodStreamingSystem::ApplyDiskStreamingCompletions::DrainCompletions");
         meshManager->DrainCompletedCLodDiskStreamingGroups(completions);
     }
+    if (!m_readyStreamingCompletionsByGroup.empty()) {
+        completions.reserve(completions.size() + m_readyStreamingCompletionsByGroup.size());
+        for (auto& [_, completion] : m_readyStreamingCompletionsByGroup) {
+            completions.push_back(std::move(completion));
+        }
+        m_readyStreamingCompletionsByGroup.clear();
+    }
 
     {
         ZoneScopedN("CLodStreamingSystem::ApplyDiskStreamingCompletions::ApplyCompletions");
-        std::unordered_map<uint32_t, uint32_t> lastFreshWriterByPage;
-        lastFreshWriterByPage.reserve(completions.size());
-        for (uint32_t completionIndex = 0; completionIndex < static_cast<uint32_t>(completions.size()); ++completionIndex) {
-            const auto& completion = completions[completionIndex];
-            if (!completion.success) {
-                continue;
-            }
-            for (uint32_t seg = 0; seg < static_cast<uint32_t>(completion.preAllocatedPages.size()); ++seg) {
-                const bool needsFetch = completion.segmentNeedsFetch.empty()
-                    || seg >= static_cast<uint32_t>(completion.segmentNeedsFetch.size())
-                    || completion.segmentNeedsFetch[seg];
-                if (needsFetch && completion.preAllocatedPages[seg] != ~0u) {
-                    lastFreshWriterByPage[completion.preAllocatedPages[seg]] = completionIndex;
-                }
-            }
-        }
-
         for (uint32_t completionIndex = 0; completionIndex < static_cast<uint32_t>(completions.size()); ++completionIndex) {
             auto& completion = completions[completionIndex];
             const uint32_t groupIndex = completion.groupGlobalIndex;
@@ -2904,111 +2870,112 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
             };
 
             auto preAllocIt = m_preAllocatedPagesByGroup.find(groupIndex);
-            const bool preallocationGenerationMatches =
-                preAllocIt == m_preAllocatedPagesByGroup.end() ||
-                groupIndex >= m_pendingStreamingRequestGenerationByGroup.size() ||
-                preAllocIt->second.requestGeneration == m_pendingStreamingRequestGenerationByGroup[groupIndex];
 
             if (completion.success) {
                 const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
                 const uint32_t expectedPageCount = info.valid ? info.pageCount : 1u;
-                if (!preallocationGenerationMatches) {
-                    if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
-                        ReleasePreAllocatedPages(preAllocIt->second, meshManager);
-                        m_preAllocatedPagesByGroup.erase(preAllocIt);
-                    }
-                    clearCompletionRequestState();
-                    m_pendingResidencyCommitGroups.erase(groupIndex);
-                    continue;
+                if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
+                    ReleasePreAllocatedPages(preAllocIt->second, meshManager);
+                    m_preAllocatedPagesByGroup.erase(preAllocIt);
                 }
                 if (!IsGroupActive(groupIndex)) {
-                    if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
-                        ReleasePreAllocatedPages(preAllocIt->second, meshManager);
-                        m_preAllocatedPagesByGroup.erase(preAllocIt);
+                    m_pendingResidencyCommitGroups.erase(groupIndex);
+                    clearCompletionRequestState();
+                    continue;
+                }
+                if (groupIndex >= m_streamingRequestStateByGroup.size() ||
+                    m_streamingRequestStateByGroup[groupIndex] != StreamingRequestState::DiskIo) {
+                    m_pendingResidencyCommitGroups.erase(groupIndex);
+                    clearCompletionRequestState();
+                    continue;
+                }
+
+                PreAllocatedPages preAlloc{};
+                if (expectedPageCount > 0u) {
+                    ZoneScopedN("CLodStreamingSystem::ApplyDiskStreamingCompletions::AllocatePagesAfterRead");
+                    preAlloc = PreAllocatePagesForGroup(groupIndex, info, meshManager);
+                    preAlloc.requestGeneration = groupIndex < m_pendingStreamingRequestGenerationByGroup.size()
+                        ? m_pendingStreamingRequestGenerationByGroup[groupIndex]
+                        : 0u;
+                    if (preAlloc.segmentCount == 0u) {
+                        const uint32_t wordAddress = BitWordAddress(groupIndex);
+                        const uint32_t bitMask = BitMask(groupIndex);
+                        if (wordAddress < m_streamingPinnedGroupsBitsCpu.size() &&
+                            (m_streamingPinnedGroupsBitsCpu[wordAddress] & bitMask) != 0u) {
+                            m_streamingResidencyInitializedBitsCpu[wordAddress] &= ~bitMask;
+                        }
+                        m_readyStreamingCompletionsByGroup[groupIndex] = std::move(completion);
+                        m_pendingResidencyCommitGroups.erase(groupIndex);
+                        continue;
                     }
-                    m_pendingResidencyCommitGroups.erase(groupIndex);
-                    clearCompletionRequestState();
-                    continue;
                 }
-                if (preAllocIt == m_preAllocatedPagesByGroup.end() && expectedPageCount > 0u) {
+
+                if (preAlloc.segmentCount != expectedPageCount) {
                     spdlog::warn(
-                        "CLod streaming: dropping successful IO completion for group {} because its preallocation is no longer live",
-                        groupIndex);
-                    m_pendingResidencyCommitGroups.erase(groupIndex);
-                    clearCompletionRequestState();
-                    continue;
-                }
-                if (preAllocIt != m_preAllocatedPagesByGroup.end() &&
-                    preAllocIt->second.segmentCount != expectedPageCount) {
-                    spdlog::warn(
-                        "CLod streaming: dropping successful IO completion for group {} because preallocation page count {} does not match expected {}",
+                        "CLod streaming: dropping successful IO completion for group {} because allocated page count {} does not match expected {}",
                         groupIndex,
-                        preAllocIt->second.segmentCount,
+                        preAlloc.segmentCount,
                         expectedPageCount);
-                    ReleasePreAllocatedPages(preAllocIt->second, meshManager);
-                    m_preAllocatedPagesByGroup.erase(preAllocIt);
-                    m_pendingResidencyCommitGroups.erase(groupIndex);
-                    clearCompletionRequestState();
-                    continue;
-                }
-                if (preAllocIt != m_preAllocatedPagesByGroup.end() &&
-                    !ValidateRenderableCompletion(groupIndex, preAllocIt->second, completion, expectedPageCount)) {
-                    ReleasePreAllocatedPages(preAllocIt->second, meshManager);
-                    m_preAllocatedPagesByGroup.erase(preAllocIt);
-                    m_pendingResidencyCommitGroups.erase(groupIndex);
-                    clearCompletionRequestState();
-                    continue;
-                }
-                if (preAllocIt == m_preAllocatedPagesByGroup.end() &&
-                    expectedPageCount == 0u &&
-                    !ValidateRenderableCompletion(groupIndex, PreAllocatedPages{}, completion, expectedPageCount)) {
+                    ReleasePreAllocatedPages(preAlloc, meshManager);
                     m_pendingResidencyCommitGroups.erase(groupIndex);
                     clearCompletionRequestState();
                     continue;
                 }
 
-                bool completionWins = true;
-                if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
-                    const auto& preAlloc = preAllocIt->second;
-                    for (uint32_t seg = 0; seg < preAlloc.segmentCount && completionWins; ++seg) {
-                        const bool needsFetch = preAlloc.segmentNeedsFetch.empty() ||
-                            seg >= static_cast<uint32_t>(preAlloc.segmentNeedsFetch.size()) ||
-                            preAlloc.segmentNeedsFetch[seg];
-                        if (!needsFetch) {
-                            continue;
-                        }
-                        const uint32_t page = seg < preAlloc.pagesBySegment.size() ? preAlloc.pagesBySegment[seg] : ~0u;
-                        auto winnerIt = lastFreshWriterByPage.find(page);
-                        if (winnerIt != lastFreshWriterByPage.end() && winnerIt->second != completionIndex) {
-                            completionWins = false;
-                        }
-                    }
-                }
+                completion.segmentNeedsFetch = preAlloc.segmentNeedsFetch;
+                completion.preAllocatedPages = preAlloc.pagesBySegment;
+                completion.pageAllocations.clear();
+                completion.pageAllocations.reserve(expectedPageCount);
+                completion.pageMapEntries.assign(expectedPageCount, GroupPageMapEntry{});
 
-                if (!completionWins) {
-                    if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
-                        ReleasePreAllocatedPages(preAllocIt->second, meshManager);
-                        m_preAllocatedPagesByGroup.erase(preAllocIt);
+                PagePool* pool = meshManager->GetCLodPagePool();
+                bool payloadValid = true;
+                for (uint32_t seg = 0; seg < expectedPageCount; ++seg) {
+                    const uint32_t page = preAlloc.pagesBySegment[seg];
+                    PagePool::PageAllocation allocation{ page, 1u };
+                    completion.pageAllocations.push_back(allocation);
+                    const bool needsFetch = seg < preAlloc.segmentNeedsFetch.size() && preAlloc.segmentNeedsFetch[seg];
+                    if (needsFetch) {
+                        if (pool == nullptr ||
+                            seg >= completion.pageBlobs.size() ||
+                            completion.pageBlobs[seg].empty() ||
+                            completion.pageBlobs[seg].size() > pool->GetPageSize()) {
+                            spdlog::warn(
+                                "CLod streaming: dropping completion for group {} because segment {} has invalid page payload",
+                                groupIndex,
+                                seg);
+                            payloadValid = false;
+                            break;
+                        }
+                        pool->UploadToPage(page, 0, completion.pageBlobs[seg].data(), completion.pageBlobs[seg].size());
                     }
+                    completion.pageMapEntries[seg].slabDescriptorIndex = pool != nullptr ? pool->GetSlabDescriptorIndex(allocation) : 0u;
+                    completion.pageMapEntries[seg].slabByteOffset = pool != nullptr ? static_cast<uint32_t>(pool->PageToSlabByteOffset(page)) : 0u;
+                }
+                if (!payloadValid) {
+                    ReleasePreAllocatedPages(preAlloc, meshManager);
                     m_pendingResidencyCommitGroups.erase(groupIndex);
                     clearCompletionRequestState();
                     continue;
                 }
 
-                if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
-                    {
-                        ZoneScopedN("CLodStreamingSystem::ApplyDiskStreamingCompletions::AssignPagesToGroup");
-                        if (!AssignPagesToGroup(groupIndex, preAllocIt->second, meshManager)) {
-                            ReleasePreAllocatedPages(preAllocIt->second, meshManager);
-                            m_preAllocatedPagesByGroup.erase(preAllocIt);
-                            m_pendingResidencyCommitGroups.erase(groupIndex);
-                            clearCompletionRequestState();
-                            continue;
-                        }
-                    }
-                    m_preAllocatedPagesByGroup.erase(preAllocIt);
+                if (!ValidateRenderableCompletion(groupIndex, preAlloc, completion, expectedPageCount)) {
+                    ReleasePreAllocatedPages(preAlloc, meshManager);
+                    m_pendingResidencyCommitGroups.erase(groupIndex);
+                    clearCompletionRequestState();
+                    continue;
                 }
-                else if (expectedPageCount == 0u) {
+
+                if (expectedPageCount > 0u) {
+                    ZoneScopedN("CLodStreamingSystem::ApplyDiskStreamingCompletions::AssignPagesToGroup");
+                    if (!AssignPagesToGroup(groupIndex, preAlloc, meshManager)) {
+                        ReleasePreAllocatedPages(preAlloc, meshManager);
+                        m_pendingResidencyCommitGroups.erase(groupIndex);
+                        clearCompletionRequestState();
+                        continue;
+                    }
+                }
+                else {
                     if (m_groupOwnedPages.find(groupIndex) != m_groupOwnedPages.end()) {
                         ReleaseGroupResidency(groupIndex, meshManager, true);
                     }
@@ -3031,6 +2998,7 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                     auto& committedMap = m_groupCommittedPageMaps[groupIndex];
                     committedMap.pageAllocations = completion.pageAllocations;
                     committedMap.pageMapEntries = completion.pageMapEntries;
+                    committedMap.commitTick = m_streamingDiagnosticTick;
                     InstallPrefetchedChildGroupLayouts(groupIndex, std::move(completion.prefetchedChildLayouts));
                     m_pendingResidencyCommitGroups.insert(groupIndex);
                 } else {
@@ -3489,46 +3457,6 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                 ClearPendingLoadPriority(groupIndex);
                 processed++;
                 continue;
-            }
-
-            // Pre-allocate pages (popping from LRU, evicting as needed).
-            if (m_preAllocatedPagesByGroup.count(groupIndex) == 0u && pool && pageSize > 0) {
-                ZoneScopedN("CLodStreamingSystem::ProcessStreamingRequestsBudgeted::SerialPagePreallocate");
-                const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
-                const uint32_t pagesNeeded = info.valid ? info.pageCount : 1u;
-
-                if (pagesNeeded > 0u) {
-                    auto preAlloc = PreAllocatePagesForGroup(groupIndex, info, meshManager);
-                    preAlloc.requestGeneration = pending.generation;
-                    if (preAlloc.segmentCount == 0) {
-                        RequeuePendingStreamingRequest(pending);
-                        break;
-                    }
-
-                    // Verify we got all the pages we asked for. With the
-                    // simplified LRU policy, a short return means the tracked
-                    // page pool itself did not have enough entries.
-                    {
-                        ZoneScopedN("CLodStreamingSystem::ProcessStreamingRequestsBudgeted::VerifyPreallocatedPages");
-                        uint32_t allocated = 0;
-                        for (uint32_t p : preAlloc.pagesBySegment) {
-                            if (p != ~0u) allocated++;
-                        }
-                        if (allocated < pagesNeeded) {
-                            spdlog::error(
-                                "CLod streaming: page pool exhausted - group {} needs {} pages but only {} are tracked. Dropping load request.",
-                                groupIndex, pagesNeeded, allocated);
-                            ReleasePreAllocatedPages(preAlloc, meshManager);
-                            ClearStreamingRequestInProgress(groupIndex);
-                            ClearPendingLoadPriority(groupIndex);
-                            frameStats.loadFailed++;
-                            processed++;
-                            continue;
-                        }
-                    }
-
-                    m_preAllocatedPagesByGroup[groupIndex] = std::move(preAlloc);
-                }
             }
 
             {
