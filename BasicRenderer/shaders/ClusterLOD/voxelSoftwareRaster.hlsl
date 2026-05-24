@@ -13,7 +13,7 @@
 #endif
 
 #ifndef CLOD_MAX_DDA_STEPS
-#define CLOD_MAX_DDA_STEPS 5u
+#define CLOD_MAX_DDA_STEPS 16u
 #endif
 
 #define CLOD_VOXEL_RASTER_USE_PIXEL_QUEUE 1
@@ -352,8 +352,10 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
 
         float2 screenMin = float2(3.402823e+38f, 3.402823e+38f);
         float2 screenMax = float2(-3.402823e+38f, -3.402823e+38f);
+        float cubeMinLinearDepth = 3.402823e+38f;
         float cubeMaxLinearDepth = 0.0f;
         bool validProjection = false;
+        bool hasBehindNearCorner = false;
         [unroll]
         for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex)
         {
@@ -364,7 +366,12 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
             const float cornerLinearDepth = -dot(float4(corner, 1.0f), localViewZ);
             if (cornerLinearDepth > 0.0f)
             {
+                cubeMinLinearDepth = min(cubeMinLinearDepth, cornerLinearDepth);
                 cubeMaxLinearDepth = max(cubeMaxLinearDepth, cornerLinearDepth);
+            }
+            else
+            {
+                hasBehindNearCorner = true;
             }
             const float4 clip = mul(float4(corner, 1.0f), localToClip);
             if (clip.w <= 0.0f)
@@ -382,6 +389,10 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
         if (!validProjection || cubeMaxLinearDepth <= 0.0f)
         {
             continue;
+        }
+        if (hasBehindNearCorner)
+        {
+            cubeMinLinearDepth = 0.0f;
         }
 
         int2 minPx = int2(floor(screenMin));
@@ -420,7 +431,7 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
                 uint currentClusterId = 0u;
                 uint currentPrimId = 0u;
                 UnpackVisKey(currentVisKey, currentDepth, currentClusterId, currentPrimId);
-                if (currentDepth < cubeMaxLinearDepth)
+                if (currentDepth <= cubeMinLinearDepth)
                 {
                     continue;
                 }
@@ -482,7 +493,7 @@ void VoxelRasterCS(uint3 groupId : SV_GroupID, uint3 groupThreadID : SV_GroupThr
                     uint currentClusterId = 0u;
                     uint currentPrimId = 0u;
                     UnpackVisKey(currentVisKey, currentDepth, currentClusterId, currentPrimId);
-                    enqueuePixel = currentDepth >= cubeMaxLinearDepth;
+                    enqueuePixel = currentDepth > cubeMinLinearDepth;
                 }
 #endif
 
