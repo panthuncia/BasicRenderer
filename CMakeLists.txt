@@ -44,22 +44,9 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR CMAKE_TOOLCHAIN_FILE STREQUAL "")
   endif()
 endif()
 
-# Enable Zi for debug builds on MSVC
+# Enable debug information for MSVC builds.
 if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
-
-  if (MSVC AND NOT CMAKE_CROSSCOMPILING)
-    # Native MSVC: use PDB (Program Database) debug info
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
-      "$<IF:$<CONFIG:Debug,RelWithDebInfo>,ProgramDatabase,>"
-    )
-  elseif(MSVC AND CMAKE_CROSSCOMPILING)
-    # clang-cl cross-compile: use embedded CodeView (/Z7) since
-    # lld-link has limited PDB generation support
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
-      "$<IF:$<CONFIG:Debug,RelWithDebInfo>,Embedded,>"
-    )
-  endif()
 endif()
 
 if (POLICY CMP0091)
@@ -67,6 +54,31 @@ if (POLICY CMP0091)
 endif()
 
 project ("BasicRenderer")
+
+if(MSVC)
+  # Keep compiler debug info in .obj files (/Z7). This avoids large shared
+  # compiler PDBs, which can hit MSVC/PDB API limits before the final link.
+  # The linker still emits an executable PDB when /DEBUG is enabled.
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+    "$<IF:$<CONFIG:Debug,RelWithDebInfo>,Embedded,>"
+  )
+
+  foreach(_basicrenderer_debug_info_config DEBUG RELWITHDEBINFO)
+    foreach(_basicrenderer_debug_info_lang C CXX)
+      set(_basicrenderer_debug_info_flags_var
+        "CMAKE_${_basicrenderer_debug_info_lang}_FLAGS_${_basicrenderer_debug_info_config}"
+      )
+      if(DEFINED ${_basicrenderer_debug_info_flags_var})
+        string(REPLACE "/Zi" "/Z7" ${_basicrenderer_debug_info_flags_var} "${${_basicrenderer_debug_info_flags_var}}")
+        string(REPLACE "/ZI" "/Z7" ${_basicrenderer_debug_info_flags_var} "${${_basicrenderer_debug_info_flags_var}}")
+        set(${_basicrenderer_debug_info_flags_var}
+          "${${_basicrenderer_debug_info_flags_var}}"
+          CACHE STRING "MSVC ${_basicrenderer_debug_info_config} ${_basicrenderer_debug_info_lang} flags" FORCE
+        )
+      endif()
+    endforeach()
+  endforeach()
+endif()
 
 option(BASICRHI_ENABLE_RESHAPE "Enable GPU-Reshape-backed debug instrumentation in BasicRHI" OFF)
 option(BASICRENDERER_BUILD_BRNIFLY "Build the GPL-separated BRNifly NIF middleware executable" ON)

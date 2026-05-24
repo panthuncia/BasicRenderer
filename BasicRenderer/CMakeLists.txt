@@ -857,27 +857,16 @@ target_compile_definitions(ShaderPreprocessTests PRIVATE NOMINMAX)
 # Disable warnings for signed/unsigned mismatch
 add_compile_options("/wd4267")
 
-# Compile‐only: debug info on RelWithDebInfo
-# Native MSVC uses /Zi (PDB); clang-cl cross-compile uses /Z7 (embedded CodeView)
-if(CMAKE_CROSSCOMPILING)
-  target_compile_options(${PROJECT_NAME} PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Z7>
-  )
-else()
-  target_compile_options(${PROJECT_NAME} PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Zi>
-  )
-endif()
-
 # Link-only: /DEBUG on Debug/RelWithDebInfo.
-# Use larger PDB pages for native MSVC to avoid "limit exceeded for program database"
-# when debug symbols grow large.
 set(BASICRENDERER_MSVC_PDB_LINK_OPTIONS
     $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CROSSCOMPILING)
+    # VS 2026 no longer supports /DEBUG:FASTLINK, and this executable's full
+    # PDB exceeds MSVC's database limits even with larger pages. Keep compile
+    # debug info embedded in .obj files via /Z7, but skip the merged exe PDB.
     list(APPEND BASICRENDERER_MSVC_PDB_LINK_OPTIONS
-        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/PDBPAGESIZE:16384>
+        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/PDB:NONE>
     )
 endif()
 
