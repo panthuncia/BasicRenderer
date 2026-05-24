@@ -608,6 +608,10 @@ private:
     std::function<float()> getCLodDirectionalVirtualShadowAutoLodBiasScale;
     std::function<void(float)> setCLodDirectionalVirtualShadowAutoLodBiasScale;
 
+    bool m_clodDirectionalVirtualShadowPredictiveLodInvalidation = false;
+    std::function<bool()> getCLodDirectionalVirtualShadowPredictiveLodInvalidation;
+    std::function<void(bool)> setCLodDirectionalVirtualShadowPredictiveLodInvalidation;
+
     float m_clodDirectionalVirtualShadowSourceAngleDegrees = CLodVirtualShadowDefaultDirectionalSourceAngleDegrees;
     std::function<float()> getCLodDirectionalVirtualShadowSourceAngleDegrees;
     std::function<void(float)> setCLodDirectionalVirtualShadowSourceAngleDegrees;
@@ -1070,6 +1074,11 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     setCLodDirectionalVirtualShadowAutoLodBiasScale = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
     m_clodDirectionalVirtualShadowAutoLodBiasScale = getCLodDirectionalVirtualShadowAutoLodBiasScale();
     observerSetting(m_clodDirectionalVirtualShadowAutoLodBiasScale, CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+
+    getCLodDirectionalVirtualShadowPredictiveLodInvalidation = settingsManager.getSettingGetter<bool>(CLodDirectionalVirtualShadowPredictiveLodInvalidationSettingName);
+    setCLodDirectionalVirtualShadowPredictiveLodInvalidation = settingsManager.getSettingSetter<bool>(CLodDirectionalVirtualShadowPredictiveLodInvalidationSettingName);
+    m_clodDirectionalVirtualShadowPredictiveLodInvalidation = getCLodDirectionalVirtualShadowPredictiveLodInvalidation();
+    observerSetting(m_clodDirectionalVirtualShadowPredictiveLodInvalidation, CLodDirectionalVirtualShadowPredictiveLodInvalidationSettingName);
 
     getCLodDirectionalVirtualShadowSourceAngleDegrees = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
     setCLodDirectionalVirtualShadowSourceAngleDegrees = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
@@ -1647,6 +1656,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         if (ImGui::SliderFloat("Directional VSM Auto Bias Scale", &m_clodDirectionalVirtualShadowAutoLodBiasScale, 0.0f, 4.0f, "%.2f")) {
             m_clodDirectionalVirtualShadowAutoLodBiasScale = std::max(m_clodDirectionalVirtualShadowAutoLodBiasScale, 0.0f);
             setCLodDirectionalVirtualShadowAutoLodBiasScale(m_clodDirectionalVirtualShadowAutoLodBiasScale);
+        }
+        if (ImGui::Checkbox("Predictive VSM LOD Invalidation", &m_clodDirectionalVirtualShadowPredictiveLodInvalidation)) {
+            setCLodDirectionalVirtualShadowPredictiveLodInvalidation(m_clodDirectionalVirtualShadowPredictiveLodInvalidation);
         }
         if (ImGui::SliderFloat("Directional VSM Source Angle", &m_clodDirectionalVirtualShadowSourceAngleDegrees, 0.0f, 10.0f, "%.2f deg")) {
             m_clodDirectionalVirtualShadowSourceAngleDegrees = std::max(m_clodDirectionalVirtualShadowSourceAngleDegrees, 0.0f);

@@ -320,6 +320,15 @@ bool CLodWorkGraphShadowDirtyPageCullingEnabled()
 #endif
 }
 
+bool CLodWorkGraphVirtualShadowPredictiveLodInvalidationEnabled()
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_VSM_PREDICTIVE_LOD_INVALIDATION) != 0u;
+#else
+    return false;
+#endif
+}
+
 float CLodSWRasterDiameterThreshold()
 {
 #if CLOD_WG_ENABLE_SW_CLASSIFICATION
@@ -1677,12 +1686,15 @@ bool CLodRefinedChildSuppressesParent(
     }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-    const bool useChildPredictiveBounds = predictiveRadiusWorld < 0.0f;
-    CLodAppendVirtualShadowPredictiveInvalidationCandidate(
-        useChildPredictiveBounds ? childWorldCenter : predictiveCenterWorld,
-        useChildPredictiveBounds ? childWorldRadius : predictiveRadiusWorld,
-        viewId,
-        childGroupGlobalIndex);
+    if (CLodWorkGraphVirtualShadowPredictiveLodInvalidationEnabled())
+    {
+        const bool useChildPredictiveBounds = predictiveRadiusWorld < 0.0f;
+        CLodAppendVirtualShadowPredictiveInvalidationCandidate(
+            useChildPredictiveBounds ? childWorldCenter : predictiveCenterWorld,
+            useChildPredictiveBounds ? childWorldRadius : predictiveRadiusWorld,
+            viewId,
+            childGroupGlobalIndex);
+    }
 #endif
 
     return false;

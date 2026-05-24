@@ -21,6 +21,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodDirectStorageLaunchPass.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Managers/UploadInstance.h"
+#include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "RenderPasses/StreamingUploadPass.h"
@@ -40,6 +41,313 @@ struct CLodStreamingSystem::ParallelSortState {
 
 namespace {
     constexpr uint64_t kInvalidCLodMeshPageKey = (std::numeric_limits<uint64_t>::max)();
+
+    struct CLodStreamingUploadSnapshotKey {
+        uint64_t dstResourceId = 0;
+        uint64_t srcResourceId = 0;
+        size_t dstOffset = 0;
+        size_t srcOffset = 0;
+        size_t size = 0;
+
+        bool operator==(const CLodStreamingUploadSnapshotKey&) const = default;
+    };
+
+    std::vector<CLodStreamingUploadSnapshotKey> MakeStreamingUploadSnapshotKey(
+        const std::vector<StreamingUploadDescriptor>& uploads) {
+        std::vector<CLodStreamingUploadSnapshotKey> key;
+        key.reserve(uploads.size());
+        for (const auto& upload : uploads) {
+            key.push_back({
+                upload.dstResource ? upload.dstResource->GetGlobalResourceID() : 0ull,
+                upload.srcUploadBuffer ? upload.srcUploadBuffer->GetGlobalResourceID() : 0ull,
+                upload.dstOffset,
+                upload.srcOffset,
+                upload.size,
+            });
+        }
+        return key;
+    }
+
+    class CLodStructuralStreamingUploadPass final : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
+    public:
+        using PrepareFrameWorkFn = std::function<void()>;
+        using ConsumeUploadsFn = std::function<std::vector<StreamingUploadDescriptor>()>;
+        using MakePoolResolverFn = std::function<std::unique_ptr<IResourceResolver>()>;
+
+        CLodStructuralStreamingUploadPass(
+            PrepareFrameWorkFn prepareFrameWork,
+            ConsumeUploadsFn consumeUploads,
+            MakePoolResolverFn makePoolResolver)
+            : m_prepareFrameWork(std::move(prepareFrameWork))
+            , m_consumeUploads(std::move(consumeUploads))
+            , m_makePoolResolver(std::move(makePoolResolver)) {}
+
+        bool DeclaredResourcesChanged() const override {
+            if (m_prepareFrameWork) {
+                m_prepareFrameWork();
+            }
+
+            StreamingUploadInputs nextInputs{};
+            if (m_consumeUploads) {
+                nextInputs.uploads = m_consumeUploads();
+            }
+            if (!nextInputs.uploads.empty() && m_makePoolResolver) {
+                nextInputs.poolResolver = m_makePoolResolver();
+            }
+
+            auto nextKey = MakeStreamingUploadSnapshotKey(nextInputs.uploads);
+            const bool changed = !m_initialized || nextKey != m_snapshotKey;
+            m_initialized = true;
+            m_snapshotKey = std::move(nextKey);
+            m_inputs = std::move(nextInputs);
+            return changed;
+        }
+
+        void DeclareResourceUsages(CopyPassBuilder* builder) override {
+            for (const auto& upload : m_inputs.uploads) {
+                if (upload.dstResource) {
+                    builder->WithCopyDest(upload.dstResource);
+                }
+            }
+            if (m_inputs.poolResolver) {
+                builder->WithCopyDest(*m_inputs.poolResolver);
+            }
+            builder->PreferQueue(QueueKind::Copy);
+        }
+
+        void Setup() override {}
+
+        void RecordImmediateCommands(ImmediateExecutionContext& context) override {
+            for (const auto& upload : m_inputs.uploads) {
+                if (!upload.dstResource || !upload.srcUploadBuffer || upload.size == 0) {
+                    continue;
+                }
+                context.list.CopyBufferRegion(
+                    upload.dstResource.get(), upload.dstOffset,
+                    upload.srcUploadBuffer, upload.srcOffset,
+                    upload.size);
+            }
+        }
+
+        PassReturn Execute(PassExecutionContext&) override { return {}; }
+        void Cleanup() override {}
+
+    private:
+        PrepareFrameWorkFn m_prepareFrameWork;
+        ConsumeUploadsFn m_consumeUploads;
+        MakePoolResolverFn m_makePoolResolver;
+        mutable StreamingUploadInputs m_inputs;
+        mutable std::vector<CLodStreamingUploadSnapshotKey> m_snapshotKey;
+        mutable bool m_initialized = false;
+    };
+
+    class CLodStructuralAsyncUploadPass final : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
+    public:
+        using PrepareFrameWorkFn = std::function<void()>;
+        using GetUploadInstanceFn = std::function<UploadInstance*()>;
+        using MakePoolResolverFn = std::function<std::unique_ptr<IResourceResolver>()>;
+
+        CLodStructuralAsyncUploadPass(
+            PrepareFrameWorkFn prepareFrameWork,
+            GetUploadInstanceFn getUploadInstance,
+            MakePoolResolverFn makePoolResolver)
+            : m_prepareFrameWork(std::move(prepareFrameWork))
+            , m_getUploadInstance(std::move(getUploadInstance))
+            , m_makePoolResolver(std::move(makePoolResolver)) {}
+
+        bool DeclaredResourcesChanged() const override {
+            if (m_prepareFrameWork) {
+                m_prepareFrameWork();
+            }
+
+            CLodAsyncUploadInputs nextInputs{};
+            nextInputs.uploadInstance = m_getUploadInstance ? m_getUploadInstance() : nullptr;
+            std::vector<uint64_t> nextDestinationIds;
+            if (nextInputs.uploadInstance && nextInputs.uploadInstance->HasPendingWork()) {
+                std::vector<std::shared_ptr<Resource>> destinations;
+                nextInputs.uploadInstance->CollectPendingDestinations(destinations);
+                nextDestinationIds.reserve(destinations.size());
+                for (const auto& destination : destinations) {
+                    nextDestinationIds.push_back(destination ? destination->GetGlobalResourceID() : 0ull);
+                }
+                if (m_makePoolResolver) {
+                    nextInputs.poolResolver = m_makePoolResolver();
+                }
+            }
+
+            const bool changed = !m_initialized || nextDestinationIds != m_declaredDestinationIds;
+            m_initialized = true;
+            m_declaredDestinationIds = std::move(nextDestinationIds);
+            m_inputs = std::move(nextInputs);
+            return changed;
+        }
+
+        void DeclareResourceUsages(CopyPassBuilder* builder) override {
+            if (m_inputs.uploadInstance && m_inputs.uploadInstance->HasPendingWork()) {
+                std::vector<std::shared_ptr<Resource>> dests;
+                m_inputs.uploadInstance->CollectPendingDestinations(dests);
+                for (auto& dst : dests) {
+                    builder->WithCopyDest(dst);
+                }
+            }
+            if (m_inputs.poolResolver) {
+                builder->WithCopyDest(*m_inputs.poolResolver);
+            }
+            builder->PreferQueue(QueueKind::Copy);
+        }
+
+        void Setup() override {}
+
+        void RecordImmediateCommands(ImmediateExecutionContext& context) override {
+            if (m_inputs.uploadInstance) {
+                m_inputs.uploadInstance->ProcessUploads(
+                    static_cast<uint8_t>(context.frameIndex), context.list);
+            }
+        }
+
+        PassReturn Execute(PassExecutionContext&) override { return {}; }
+        void Cleanup() override {}
+
+    private:
+        PrepareFrameWorkFn m_prepareFrameWork;
+        GetUploadInstanceFn m_getUploadInstance;
+        MakePoolResolverFn m_makePoolResolver;
+        mutable CLodAsyncUploadInputs m_inputs;
+        mutable std::vector<uint64_t> m_declaredDestinationIds;
+        mutable bool m_initialized = false;
+    };
+
+    struct CLodStreamingReadbackSnapshot {
+        CLodStreamingReadbackCopyInputs inputs;
+        std::shared_ptr<Buffer> counterStaging;
+        std::shared_ptr<Buffer> requestsStaging;
+        std::shared_ptr<Buffer> usedGroupsCounterStaging;
+        std::shared_ptr<Buffer> usedGroupsBufferStaging;
+        std::shared_ptr<Buffer> sourceGroupMismatchCounterStaging;
+        std::shared_ptr<Buffer> sourceGroupMismatchDetailsStaging;
+        uint32_t selectedSlot = UINT32_MAX;
+    };
+
+    class CLodStructuralStreamingReadbackCopyPass final : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
+    public:
+        using PrepareFrameWorkFn = std::function<void()>;
+        using TryAcquireSnapshotFn = std::function<bool(CLodStreamingReadbackSnapshot&)>;
+        using CompleteSnapshotFn = std::function<PassReturn(uint32_t)>;
+
+        CLodStructuralStreamingReadbackCopyPass(
+            PrepareFrameWorkFn prepareFrameWork,
+            TryAcquireSnapshotFn tryAcquireSnapshot,
+            CompleteSnapshotFn completeSnapshot)
+            : m_prepareFrameWork(std::move(prepareFrameWork))
+            , m_tryAcquireSnapshot(std::move(tryAcquireSnapshot))
+            , m_completeSnapshot(std::move(completeSnapshot)) {}
+
+        bool DeclaredResourcesChanged() const override {
+            if (m_prepareFrameWork) {
+                m_prepareFrameWork();
+            }
+
+            CLodStreamingReadbackSnapshot nextSnapshot{};
+            const bool armed = m_tryAcquireSnapshot && m_tryAcquireSnapshot(nextSnapshot);
+            std::vector<uint64_t> nextKey;
+            if (armed) {
+                nextKey = {
+                    nextSnapshot.inputs.counterSource ? nextSnapshot.inputs.counterSource->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.inputs.requestsSource ? nextSnapshot.inputs.requestsSource->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.inputs.usedGroupsCounterSource ? nextSnapshot.inputs.usedGroupsCounterSource->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.inputs.usedGroupsBufferSource ? nextSnapshot.inputs.usedGroupsBufferSource->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.inputs.sourceGroupMismatchCounterSource ? nextSnapshot.inputs.sourceGroupMismatchCounterSource->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.inputs.sourceGroupMismatchDetailsSource ? nextSnapshot.inputs.sourceGroupMismatchDetailsSource->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.counterStaging ? nextSnapshot.counterStaging->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.requestsStaging ? nextSnapshot.requestsStaging->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.usedGroupsCounterStaging ? nextSnapshot.usedGroupsCounterStaging->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.usedGroupsBufferStaging ? nextSnapshot.usedGroupsBufferStaging->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.sourceGroupMismatchCounterStaging ? nextSnapshot.sourceGroupMismatchCounterStaging->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.sourceGroupMismatchDetailsStaging ? nextSnapshot.sourceGroupMismatchDetailsStaging->GetGlobalResourceID() : 0ull,
+                    nextSnapshot.selectedSlot,
+                };
+            }
+
+            const bool changed = !m_initialized || nextKey != m_snapshotKey;
+            m_initialized = true;
+            m_armed = armed;
+            m_snapshot = std::move(nextSnapshot);
+            m_snapshotKey = std::move(nextKey);
+            return changed;
+        }
+
+        void DeclareResourceUsages(CopyPassBuilder* builder) override {
+            if (!m_armed) {
+                builder->PreferQueue(QueueKind::Copy);
+                return;
+            }
+
+            builder->WithCopySource(m_snapshot.inputs.counterSource);
+            builder->WithCopySource(m_snapshot.inputs.requestsSource);
+            builder->WithCopySource(m_snapshot.inputs.usedGroupsCounterSource);
+            builder->WithCopySource(m_snapshot.inputs.usedGroupsBufferSource);
+            builder->WithCopyDest(m_snapshot.counterStaging);
+            builder->WithCopyDest(m_snapshot.requestsStaging);
+            builder->WithCopyDest(m_snapshot.usedGroupsCounterStaging);
+            builder->WithCopyDest(m_snapshot.usedGroupsBufferStaging);
+            if (m_snapshot.inputs.sourceGroupMismatchCounterSource && m_snapshot.sourceGroupMismatchCounterStaging) {
+                builder->WithCopySource(m_snapshot.inputs.sourceGroupMismatchCounterSource);
+                builder->WithCopyDest(m_snapshot.sourceGroupMismatchCounterStaging);
+            }
+            if (m_snapshot.inputs.sourceGroupMismatchDetailsSource && m_snapshot.sourceGroupMismatchDetailsStaging) {
+                builder->WithCopySource(m_snapshot.inputs.sourceGroupMismatchDetailsSource);
+                builder->WithCopyDest(m_snapshot.sourceGroupMismatchDetailsStaging);
+            }
+            builder->PreferQueue(QueueKind::Copy);
+        }
+
+        void Setup() override {}
+
+        void RecordImmediateCommands(ImmediateExecutionContext& context) override {
+            if (!m_armed) {
+                return;
+            }
+
+            CopyWholeBuffer(context, m_snapshot.counterStaging, m_snapshot.inputs.counterSource);
+            CopyWholeBuffer(context, m_snapshot.requestsStaging, m_snapshot.inputs.requestsSource);
+            CopyWholeBuffer(context, m_snapshot.usedGroupsCounterStaging, m_snapshot.inputs.usedGroupsCounterSource);
+            CopyWholeBuffer(context, m_snapshot.usedGroupsBufferStaging, m_snapshot.inputs.usedGroupsBufferSource);
+            CopyWholeBuffer(context, m_snapshot.sourceGroupMismatchCounterStaging, m_snapshot.inputs.sourceGroupMismatchCounterSource);
+            CopyWholeBuffer(context, m_snapshot.sourceGroupMismatchDetailsStaging, m_snapshot.inputs.sourceGroupMismatchDetailsSource);
+        }
+
+        PassReturn Execute(PassExecutionContext&) override {
+            if (!m_armed || !m_completeSnapshot) {
+                return {};
+            }
+            return m_completeSnapshot(m_snapshot.selectedSlot);
+        }
+
+        void Cleanup() override {}
+
+    private:
+        static void CopyWholeBuffer(
+            ImmediateExecutionContext& context,
+            const std::shared_ptr<Buffer>& staging,
+            const std::shared_ptr<Buffer>& source) {
+            if (!source || !staging) {
+                return;
+            }
+
+            uint64_t bytes = 0;
+            if (source->TryGetBufferByteSize(bytes) && bytes > 0) {
+                context.list.CopyBufferRegion(staging, 0, source.get(), 0, bytes);
+            }
+        }
+
+        PrepareFrameWorkFn m_prepareFrameWork;
+        TryAcquireSnapshotFn m_tryAcquireSnapshot;
+        CompleteSnapshotFn m_completeSnapshot;
+        mutable CLodStreamingReadbackSnapshot m_snapshot;
+        mutable std::vector<uint64_t> m_snapshotKey;
+        mutable bool m_armed = false;
+        mutable bool m_initialized = false;
+    };
 
     uint64_t MakeCLodMeshPageKey(uint32_t groupsBase, uint32_t meshPageIndex) {
         return (static_cast<uint64_t>(groupsBase) << 32ull) | static_cast<uint64_t>(meshPageIndex);
@@ -683,6 +991,30 @@ void CLodStreamingSystem::Initialize(RenderGraph& rg) {
     EnsureParallelSortResources();
 }
 
+void CLodStreamingSystem::PrepareStreamingFrameWork() {
+    if (m_streamingFrameWorkPrepared) {
+        return;
+    }
+    m_streamingFrameWorkPrepared = true;
+
+    MeshManager* meshManager = nullptr;
+    if (m_getMeshManager) {
+        meshManager = m_getMeshManager();
+    }
+
+    if (meshManager != nullptr && meshManager->ConsumeCLodStreamingStructureDirty()) {
+        m_streamingDomainDirty = true;
+    }
+
+    RefreshStreamingActiveGroupDomain();
+
+    if (meshManager != nullptr) {
+        PollCompletedReadbackSlots();
+        ProcessStreamingRequestsBudgeted();
+    }
+    QueuePendingNonResidentBitsUpload();
+}
+
 void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
     rg.RegisterResource(Builtin::CLod::StreamingNonResidentBits, m_streamingNonResidentBits);
     rg.RegisterResource(Builtin::CLod::StreamingActiveGroupsBits, m_streamingActiveGroupsBits);
@@ -692,6 +1024,57 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
     rg.RegisterResource(Builtin::CLod::StreamingRuntimeState, m_streamingRuntimeState);
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsCounter, m_usedGroupsCounter);
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroups, m_usedGroupsBuffer);
+
+    auto prepareFrameWork = [this]() {
+        PrepareStreamingFrameWork();
+    };
+    auto makePoolResolver = [this]() -> std::unique_ptr<IResourceResolver> {
+        MeshManager* mm = m_getMeshManager ? m_getMeshManager() : nullptr;
+        if (!mm) {
+            return nullptr;
+        }
+        PagePool* pool = mm->GetCLodPagePool();
+        if (!pool) {
+            return nullptr;
+        }
+
+        auto slabGroup = pool->GetSlabResourceGroup();
+        if (auto pt = pool->GetPageTableBuffer()) {
+            slabGroup->AddResource(pt);
+        }
+        return std::make_unique<ResourceGroupResolver>(slabGroup);
+    };
+
+    auto streamingUploadInsertPoint =
+        RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
+    streamingUploadInsertPoint.keepExtensionOrder = false;
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Copy(
+            "CLod::StreamingUpload",
+            std::make_shared<CLodStructuralStreamingUploadPass>(
+                prepareFrameWork,
+                []() {
+                    return rg::runtime::ConsumeStreamingUploadsDispatch();
+                },
+                makePoolResolver))
+            .At(std::move(streamingUploadInsertPoint))
+            .PreferQueue(QueueKind::Copy));
+
+    auto asyncUploadInsertPoint =
+        RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
+    asyncUploadInsertPoint.keepExtensionOrder = false;
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Copy(
+            "CLod::AsyncUpload",
+            std::make_shared<CLodStructuralAsyncUploadPass>(
+                prepareFrameWork,
+                [this]() -> UploadInstance* {
+                    return m_uploadInstance.get();
+                },
+                makePoolResolver))
+            .At(std::move(asyncUploadInsertPoint))
+            .PreferQueue(QueueKind::Copy)
+            .PinToQueue(m_uploadQueueSlot));
 
 	auto streamingBeginPass = std::make_shared<CLodStreamingBeginFramePass>(
 		[this]() -> UploadInstance* { return m_uploadInstance.get(); },
@@ -726,13 +1109,17 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
         streamingBeginPass);
     // Keep the CLod front-end behind the visibility/depth clear so the graph
     // cannot legally sink ClearVisibilityBufferPass after CLod rasterization.
-    streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("ClearVisibilityBufferPass"));
+    auto streamingBeginInsertPoint =
+        RenderGraph::ExternalInsertPoint::After("ClearVisibilityBufferPass");
+    streamingBeginInsertPoint.keepExtensionOrder = false;
+    streamingBeginPassDesc.At(std::move(streamingBeginInsertPoint));
     outPasses.push_back(std::move(streamingBeginPassDesc));
 }
 
 void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
     (void)rg;
-    if (EnsureParallelSortResources()) {
+    const bool hasStreamingFeedbackSort = EnsureParallelSortResources();
+    if (hasStreamingFeedbackSort) {
         auto feedbackSortPass = std::make_shared<CLodStreamingFeedbackSortPass>(
             m_streamingLoadRequestKeys,
             m_streamingLoadRequests,
@@ -752,25 +1139,97 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
                 .At(RenderGraph::ExternalInsertPoint::After("PresentPass"))
                 .PreferQueue(QueueKind::Graphics));
     }
+
+    auto readbackPass = std::make_shared<CLodStructuralStreamingReadbackCopyPass>(
+        [this]() {
+            PrepareStreamingFrameWork();
+        },
+        [this](CLodStreamingReadbackSnapshot& snapshot) -> bool {
+            if (!m_streamingReadbackFenceHandle.IsValid() || m_readbackStagingSlots.empty()) {
+                return false;
+            }
+
+            uint32_t selectedSlot = UINT32_MAX;
+            {
+                std::lock_guard lock(m_streamingWorkerMutex);
+                for (uint32_t i = 0; i < static_cast<uint32_t>(m_readbackStagingSlots.size()); ++i) {
+                    const uint32_t idx =
+                        (m_readbackStagingCursor + i) % static_cast<uint32_t>(m_readbackStagingSlots.size());
+                    if (!m_readbackStagingSlots[idx].inFlight) {
+                        selectedSlot = idx;
+                        break;
+                    }
+                }
+
+                if (selectedSlot == UINT32_MAX) {
+                    return false;
+                }
+
+                m_readbackStagingCursor =
+                    (selectedSlot + 1u) % static_cast<uint32_t>(m_readbackStagingSlots.size());
+                auto& slot = m_readbackStagingSlots[selectedSlot];
+                slot.fenceValue = 0;
+                slot.inFlight = true;
+            }
+
+            auto& slot = m_readbackStagingSlots[selectedSlot];
+            snapshot.inputs.counterSource = m_streamingLoadCounter;
+            snapshot.inputs.requestsSource = m_streamingLoadRequests;
+            snapshot.inputs.usedGroupsCounterSource = m_usedGroupsCounter;
+            snapshot.inputs.usedGroupsBufferSource = m_usedGroupsBuffer;
+            snapshot.inputs.sourceGroupMismatchCounterSource = m_sourceGroupMismatchCounter;
+            snapshot.inputs.sourceGroupMismatchDetailsSource = m_sourceGroupMismatchDetails;
+            snapshot.counterStaging = slot.counterStaging;
+            snapshot.requestsStaging = slot.requestsStaging;
+            snapshot.usedGroupsCounterStaging = slot.usedGroupsCounterStaging;
+            snapshot.usedGroupsBufferStaging = slot.usedGroupsBufferStaging;
+            snapshot.sourceGroupMismatchCounterStaging = slot.sourceGroupMismatchCounterStaging;
+            snapshot.sourceGroupMismatchDetailsStaging = slot.sourceGroupMismatchDetailsStaging;
+            snapshot.selectedSlot = selectedSlot;
+            return true;
+        },
+        [this](uint32_t selectedSlot) -> PassReturn {
+            if (!m_streamingReadbackFenceHandle.IsValid()) {
+                return {};
+            }
+
+            const uint64_t fenceValue =
+                m_streamingReadbackFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+            {
+                std::lock_guard lock(m_streamingWorkerMutex);
+                if (selectedSlot >= m_readbackStagingSlots.size()) {
+                    return {};
+                }
+
+                auto& armedSlot = m_readbackStagingSlots[selectedSlot];
+                if (!armedSlot.inFlight) {
+                    return {};
+                }
+
+                armedSlot.fenceValue = fenceValue;
+            }
+
+            m_streamingWorkerCV.notify_one();
+            return { m_streamingReadbackFenceHandle, fenceValue };
+        });
+
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Copy(
+            "CLod::StreamingReadbackCopy",
+            readbackPass)
+            .At(RenderGraph::ExternalInsertPoint::After(
+                hasStreamingFeedbackSort ? "CLod::StreamingFeedbackSort" : "PresentPass"))
+            .PreferQueue(QueueKind::Copy));
 }
 
 void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
+    (void)rg;
+    PrepareStreamingFrameWork();
+
     MeshManager* meshManager = nullptr;
     if (m_getMeshManager) {
         meshManager = m_getMeshManager();
     }
-
-    if (meshManager != nullptr && meshManager->ConsumeCLodStreamingStructureDirty()) {
-        m_streamingDomainDirty = true;
-    }
-
-    RefreshStreamingActiveGroupDomain();
-
-    if (meshManager != nullptr) {
-        PollCompletedReadbackSlots();
-        ProcessStreamingRequestsBudgeted();
-    }
-    QueuePendingNonResidentBitsUpload();
 
     if (meshManager != nullptr && meshManager->HasPendingCLodDirectStorageUploads()) {
         std::vector<ExternalTimelinePoint> waits;
@@ -792,59 +1251,6 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                     .At(RenderGraph::ExternalInsertPoint::Before("CLod::StreamingBeginFramePass"))
                     .PreferQueue(QueueKind::Graphics));
         }
-    }
-
-    auto streamingUploads = rg::runtime::ConsumeStreamingUploadsDispatch();
-    if (!streamingUploads.empty()) {
-        StreamingUploadInputs inputs;
-        inputs.uploads = std::move(streamingUploads);
-
-        // Use the persistent slab ResourceGroup from PagePool so the
-        // render graph can schedule transitions. The group auto-tracks
-        // new slabs via version bumps.
-        MeshManager* mm = m_getMeshManager ? m_getMeshManager() : nullptr;
-        if (mm) {
-            if (PagePool* pool = mm->GetCLodPagePool()) {
-                auto slabGroup = pool->GetSlabResourceGroup();
-                // Also include the page table buffer in the group if not present.
-                if (auto pt = pool->GetPageTableBuffer()) {
-                    slabGroup->AddResource(pt); // no-op if already present
-                }
-                inputs.poolResolver = std::make_unique<ResourceGroupResolver>(slabGroup);
-            }
-        }
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Copy(
-                "CLod::StreamingUpload",
-                std::make_shared<StreamingUploadPass>(std::move(inputs)))
-                .At(RenderGraph::ExternalInsertPoint::Before("CLod::StreamingBeginFramePass"))
-                .PreferQueue(QueueKind::Copy));
-    }
-
-    // Drain our dedicated UploadInstance on the async copy queue.
-    if (m_uploadInstance && m_uploadInstance->HasPendingWork()) {
-        CLodAsyncUploadInputs asyncInputs;
-        asyncInputs.uploadInstance = m_uploadInstance.get();
-
-        MeshManager* mm = m_getMeshManager ? m_getMeshManager() : nullptr;
-        if (mm) {
-            if (PagePool* pool = mm->GetCLodPagePool()) {
-                auto slabGroup = pool->GetSlabResourceGroup();
-                if (auto pt = pool->GetPageTableBuffer()) {
-                    slabGroup->AddResource(pt);
-                }
-                asyncInputs.poolResolver = std::make_unique<ResourceGroupResolver>(slabGroup);
-            }
-        }
-
-        outPasses.push_back(
-            RenderGraph::ExternalPassDesc::Copy(
-                "CLod::AsyncUpload",
-                std::make_shared<CLodAsyncUploadPass>(std::move(asyncInputs)))
-                .At(RenderGraph::ExternalInsertPoint::Before("CLod::StreamingBeginFramePass"))
-                .PreferQueue(QueueKind::Copy)
-                .PinToQueue(m_uploadQueueSlot));
     }
 
     if (meshManager != nullptr
@@ -882,81 +1288,7 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
                 .PreferQueue(QueueKind::Graphics));
     }
 
-    // Keep the readback at the frame tail. The copy reads CLod streaming
-    // counters from earlier culling passes, but placing the immediate copy in
-    // the middle of the visibility graph destabilizes replay segment boundaries.
-    if (m_streamingReadbackFenceHandle.IsValid() && !m_readbackStagingSlots.empty()) {
-        const bool hasStreamingFeedbackSort = m_parallelSortAvailable && m_parallelSortState != nullptr;
-        uint32_t selectedSlot = UINT32_MAX;
-        {
-            std::lock_guard lock(m_streamingWorkerMutex);
-            // Find a slot that the worker has already processed (inFlight == false).
-            for (uint32_t i = 0; i < static_cast<uint32_t>(m_readbackStagingSlots.size()); ++i) {
-                const uint32_t idx = (m_readbackStagingCursor + i) % static_cast<uint32_t>(m_readbackStagingSlots.size());
-                if (!m_readbackStagingSlots[idx].inFlight) {
-                    selectedSlot = idx;
-                    break;
-                }
-            }
-
-            if (selectedSlot != UINT32_MAX) {
-                m_readbackStagingCursor = (selectedSlot + 1u) % static_cast<uint32_t>(m_readbackStagingSlots.size());
-                auto& slot = m_readbackStagingSlots[selectedSlot];
-                slot.fenceValue = 0;
-                slot.inFlight = true;
-            }
-        }
-
-        if (selectedSlot != UINT32_MAX) {
-            auto& slot = m_readbackStagingSlots[selectedSlot];
-
-            CLodStreamingReadbackCopyInputs readbackInputs{};
-            readbackInputs.counterSource = m_streamingLoadCounter;
-            readbackInputs.requestsSource = m_streamingLoadRequests;
-            readbackInputs.usedGroupsCounterSource = m_usedGroupsCounter;
-            readbackInputs.usedGroupsBufferSource = m_usedGroupsBuffer;
-            readbackInputs.sourceGroupMismatchCounterSource = m_sourceGroupMismatchCounter;
-            readbackInputs.sourceGroupMismatchDetailsSource = m_sourceGroupMismatchDetails;
-
-            outPasses.push_back(
-                RenderGraph::ExternalPassDesc::Copy(
-                    "CLod::StreamingReadbackCopy",
-                    std::make_shared<CLodStreamingReadbackCopyPass>(
-                        std::move(readbackInputs),
-                        slot.counterStaging,
-                        slot.requestsStaging,
-                        slot.usedGroupsCounterStaging,
-                        slot.usedGroupsBufferStaging,
-                        slot.sourceGroupMismatchCounterStaging,
-                        slot.sourceGroupMismatchDetailsStaging,
-                        [this, selectedSlot]() -> PassReturn {
-                            if (!m_streamingReadbackFenceHandle.IsValid()) {
-                                return {};
-                            }
-
-                            const uint64_t fenceValue = m_streamingReadbackFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1;
-                            {
-                                std::lock_guard lock(m_streamingWorkerMutex);
-                                if (selectedSlot >= m_readbackStagingSlots.size()) {
-                                    return {};
-                                }
-
-                                auto& armedSlot = m_readbackStagingSlots[selectedSlot];
-                                if (!armedSlot.inFlight) {
-                                    return {};
-                                }
-
-                                armedSlot.fenceValue = fenceValue;
-                            }
-
-                            m_streamingWorkerCV.notify_one();
-                            return { m_streamingReadbackFenceHandle, fenceValue };
-                        }))
-                    .At(RenderGraph::ExternalInsertPoint::After(
-                        hasStreamingFeedbackSort ? "CLod::StreamingFeedbackSort" : "PresentPass"))
-                    .PreferQueue(QueueKind::Copy));
-        }
-    }
+    m_streamingFrameWorkPrepared = false;
 }
 
 uint32_t CLodStreamingSystem::BitWordAddress(uint32_t key) {
@@ -2196,93 +2528,62 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
 }
 
 std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshManager* meshManager, PagePopFailureStats* outStats) {
+    ZoneScopedN("CLodStreamingSystem::PopFreePages");
+    ZoneValue(count);
+
     std::vector<uint32_t> pages;
     pages.reserve(count);
 
-    uint32_t attemptsRemaining = m_pageLru.Size();
-    while (pages.size() < count && attemptsRemaining-- > 0u) {
-        uint32_t page = m_pageLru.PopOldest();
-        if (page == ~0u) break;
+    const auto recordDirtyMetadata = [&]() {
         if (outStats != nullptr) {
-            ++outStats->scanned;
+            ++outStats->rejectedDirtyMetadata;
         }
+    };
+    const auto recordPendingWrite = [&]() {
+        if (outStats != nullptr) {
+            ++outStats->rejectedPendingWrite;
+        }
+    };
+    const auto recordProtected = [&]() {
+        if (outStats != nullptr) {
+            ++outStats->rejectedProtected;
+        }
+    };
 
-        if (page < m_pageProtectedThisUpdate.size() && m_pageProtectedThisUpdate[page] != 0u) {
-            if (outStats != nullptr) {
-                ++outStats->rejectedProtected;
-            }
-            break;
-        }
+    const auto tryAcquireCleanFreePage = [&](uint32_t page) -> bool {
         if (page >= m_pageState.size()) {
-            if (outStats != nullptr) {
-                ++outStats->rejectedDirtyMetadata;
-            }
-            continue;
+            recordDirtyMetadata();
+            return false;
         }
         if (m_pageState[page] == CLodPhysicalPageState::PreAllocatedCpuUpload ||
             m_pageState[page] == CLodPhysicalPageState::PendingDirectStorageWrite ||
             m_pageState[page] == CLodPhysicalPageState::Retiring) {
-            if (outStats != nullptr) {
-                ++outStats->rejectedPendingWrite;
-            }
-            continue;
+            recordPendingWrite();
+            return false;
         }
-        if (page < m_pageResidentGroups.size() && !m_pageResidentGroups[page].empty()) {
-            ScrubStaleResidentGroups(page);
+        if (m_pageState[page] != CLodPhysicalPageState::Free || page >= m_pageOwnerGroup.size()) {
+            return false;
         }
 
-        if (page < m_pageResidentGroups.size() && !m_pageResidentGroups[page].empty()) {
-            if (!EvictPhysicalPage(page, meshManager)) {
-                if (outStats != nullptr) {
-                    ++outStats->rejectedEvictFailed;
-                }
-                continue;
-            }
-            if (outStats != nullptr) {
-                ++outStats->evicted;
-            }
-            continue;
-        } else if (m_pageState[page] == CLodPhysicalPageState::Resident &&
-            page < m_pageOwnerGroup.size() &&
-            m_pageOwnerGroup[page] >= 0) {
-            if (!EvictPhysicalPage(page, meshManager)) {
-                if (outStats != nullptr) {
-                    ++outStats->rejectedEvictFailed;
-                }
-                continue;
-            }
-            if (outStats != nullptr) {
-                ++outStats->evicted;
-            }
-            continue;
-        } else if (m_pageState[page] == CLodPhysicalPageState::Free && page < m_pageOwnerGroup.size()) {
-            m_pageOwnerGroup[page] = -1;
-            m_pageOwnerSegment[page] = 0u;
-            if (page < m_pageOwnerMeshPageKey.size()) {
-                m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
-            }
-            m_pendingPageOwnerGroup[page] = ~0u;
-            m_pendingPageOwnerSegment[page] = 0u;
-            if (outStats != nullptr) {
-                ++outStats->freeClean;
-            }
-        } else {
-            if (outStats != nullptr) {
-                ++outStats->rejectedDirtyMetadata;
-            }
-            continue;
+        m_pageOwnerGroup[page] = -1;
+        m_pageOwnerSegment[page] = 0u;
+        if (page < m_pageOwnerMeshPageKey.size()) {
+            m_pageOwnerMeshPageKey[page] = kInvalidCLodMeshPageKey;
+        }
+        m_pendingPageOwnerGroup[page] = ~0u;
+        m_pendingPageOwnerSegment[page] = 0u;
+        if (outStats != nullptr) {
+            ++outStats->freeClean;
         }
 
         m_pageLru.Remove(page);
         if (!IsPhysicalPageCleanForFreshAllocation(page)) {
-            if (outStats != nullptr) {
-                ++outStats->rejectedDirtyMetadata;
-            }
+            recordDirtyMetadata();
             const uint64_t ownerKey = page < m_pageOwnerMeshPageKey.size()
                 ? m_pageOwnerMeshPageKey[page]
                 : kInvalidCLodMeshPageKey;
             spdlog::warn(
-                "CLod streaming: refusing to allocate physical page {} because stale ownership remained after eviction/free (state={}, ownerGroup={}, ownerKey={}, residentGroups={}, pendingOwner={}, writeToken={})",
+                "CLod streaming: refusing to allocate physical page {} because stale ownership remained after free cleanup (state={}, ownerGroup={}, ownerKey={}, residentGroups={}, pendingOwner={}, writeToken={})",
                 page,
                 page < m_pageState.size() ? static_cast<uint32_t>(m_pageState[page]) : UINT32_MAX,
                 page < m_pageOwnerGroup.size() ? m_pageOwnerGroup[page] : -1,
@@ -2290,9 +2591,118 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
                 page < m_pageResidentGroups.size() ? static_cast<uint32_t>(m_pageResidentGroups[page].size()) : 0u,
                 page < m_pendingPageOwnerGroup.size() ? m_pendingPageOwnerGroup[page] : UINT32_MAX,
                 0u);
-            continue;
+            return false;
         }
+
         pages.push_back(page);
+        return true;
+    };
+
+    const uint32_t lruSize = m_pageLru.Size();
+    const uint32_t scanLimit = std::min<uint32_t>(
+        lruSize,
+        std::max<uint32_t>(64u, count > UINT32_MAX / 8u ? UINT32_MAX : count * 8u));
+
+    {
+        ZoneScopedN("CLodStreamingSystem::PopFreePages::ScanFreePages");
+        uint32_t attemptsRemaining = scanLimit;
+        while (pages.size() < count && attemptsRemaining-- > 0u) {
+            uint32_t page = m_pageLru.PopOldest();
+            if (page == ~0u) {
+                break;
+            }
+            if (outStats != nullptr) {
+                ++outStats->scanned;
+            }
+
+            if (page < m_pageProtectedThisUpdate.size() && m_pageProtectedThisUpdate[page] != 0u) {
+                recordProtected();
+                break;
+            }
+
+            if (tryAcquireCleanFreePage(page)) {
+                continue;
+            }
+        }
+    }
+
+    if (pages.size() >= count) {
+        return pages;
+    }
+
+    {
+        ZoneScopedN("CLodStreamingSystem::PopFreePages::EvictResidentPages");
+        uint32_t attemptsRemaining = scanLimit;
+        while (pages.size() < count && attemptsRemaining-- > 0u) {
+            uint32_t page = m_pageLru.PopOldest();
+            if (page == ~0u) break;
+            if (outStats != nullptr) {
+                ++outStats->scanned;
+            }
+
+            if (page < m_pageProtectedThisUpdate.size() && m_pageProtectedThisUpdate[page] != 0u) {
+                recordProtected();
+                break;
+            }
+            if (page >= m_pageState.size()) {
+                recordDirtyMetadata();
+                continue;
+            }
+            if (m_pageState[page] == CLodPhysicalPageState::PreAllocatedCpuUpload ||
+                m_pageState[page] == CLodPhysicalPageState::PendingDirectStorageWrite ||
+                m_pageState[page] == CLodPhysicalPageState::Retiring) {
+                recordPendingWrite();
+                continue;
+            }
+            if (page < m_pageResidentGroups.size() && !m_pageResidentGroups[page].empty()) {
+                ScrubStaleResidentGroups(page);
+            }
+
+            if (page < m_pageResidentGroups.size() && !m_pageResidentGroups[page].empty()) {
+                if (m_pagePopEvictionsThisUpdate >= m_pagePopEvictionBudgetThisUpdate) {
+                    if (outStats != nullptr) {
+                        ++outStats->rejectedEvictionBudget;
+                    }
+                    break;
+                }
+                if (!EvictPhysicalPage(page, meshManager)) {
+                    if (outStats != nullptr) {
+                        ++outStats->rejectedEvictFailed;
+                    }
+                    continue;
+                }
+                if (outStats != nullptr) {
+                    ++outStats->evicted;
+                }
+                ++m_pagePopEvictionsThisUpdate;
+                continue;
+            } else if (m_pageState[page] == CLodPhysicalPageState::Resident &&
+                page < m_pageOwnerGroup.size() &&
+                m_pageOwnerGroup[page] >= 0) {
+                if (m_pagePopEvictionsThisUpdate >= m_pagePopEvictionBudgetThisUpdate) {
+                    if (outStats != nullptr) {
+                        ++outStats->rejectedEvictionBudget;
+                    }
+                    break;
+                }
+                if (!EvictPhysicalPage(page, meshManager)) {
+                    if (outStats != nullptr) {
+                        ++outStats->rejectedEvictFailed;
+                    }
+                    continue;
+                }
+                if (outStats != nullptr) {
+                    ++outStats->evicted;
+                }
+                ++m_pagePopEvictionsThisUpdate;
+                continue;
+            } else if (tryAcquireCleanFreePage(page)) {
+                continue;
+            } else {
+                recordDirtyMetadata();
+                continue;
+            }
+        }
     }
 
     return pages;
@@ -2300,80 +2710,98 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
 
 CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForGroup(
     uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, MeshManager* meshManager) {
-    const uint32_t segmentCount = info.valid ? info.pageCount : 1u;
-    PreAllocatedPages result;
-    result.segmentCount = segmentCount;
-    result.pagesBySegment.assign(segmentCount, ~0u);
-    result.segmentNeedsFetch.assign(segmentCount, true);
-    result.meshPageKeys.assign(segmentCount, kInvalidCLodMeshPageKey);
-    result.usesPinnedStorage = IsGroupPinned(groupIndex);
+    ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup");
 
-    EnsurePageTrackingCapacity(meshManager);
+    const uint32_t segmentCount = info.valid ? info.pageCount : 1u;
+    ZoneValue(segmentCount);
+    PreAllocatedPages result;
+    {
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::InitializeResult");
+        result.segmentCount = segmentCount;
+        result.pagesBySegment.assign(segmentCount, ~0u);
+        result.segmentNeedsFetch.assign(segmentCount, true);
+        result.meshPageKeys.assign(segmentCount, kInvalidCLodMeshPageKey);
+        result.usesPinnedStorage = IsGroupPinned(groupIndex);
+    }
+
+    {
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::EnsurePageTrackingCapacity");
+        EnsurePageTrackingCapacity(meshManager);
+    }
 
     if (info.valid && info.meshPageIndices.size() == segmentCount) {
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::BuildMeshPageKeys");
         for (uint32_t seg = 0; seg < segmentCount; ++seg) {
             result.meshPageKeys[seg] = MakeCLodMeshPageKey(info.groupsBase, info.meshPageIndices[seg]);
         }
     }
 
     uint32_t missingCount = 0;
-    for (uint32_t seg = 0; seg < segmentCount; ++seg) {
-        const uint64_t meshPageKey = result.meshPageKeys[seg];
-        if (meshPageKey == kInvalidCLodMeshPageKey) {
+    {
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::LookupExistingPages");
+        for (uint32_t seg = 0; seg < segmentCount; ++seg) {
+            const uint64_t meshPageKey = result.meshPageKeys[seg];
+            if (meshPageKey == kInvalidCLodMeshPageKey) {
+                ++missingCount;
+                continue;
+            }
+
+            auto residentIt = m_residentMeshPageToPhysicalPage.find(meshPageKey);
+            if (residentIt != m_residentMeshPageToPhysicalPage.end() &&
+                IsPhysicalPageResidentForKey(residentIt->second, meshPageKey)) {
+                const uint32_t existingPage = residentIt->second;
+                result.pagesBySegment[seg] = existingPage;
+                result.segmentNeedsFetch[seg] = false;
+                if (existingPage < m_pageProtectedThisUpdate.size()) {
+                    m_pageProtectedThisUpdate[existingPage] = 1u;
+                }
+                if (!IsPhysicalPagePinnedStorage(existingPage)) {
+                    m_pageLru.Touch(existingPage);
+                }
+                continue;
+            }
+
+            auto pendingIt = m_pendingMeshPageToPhysicalPage.find(meshPageKey);
+            if (pendingIt != m_pendingMeshPageToPhysicalPage.end() &&
+                IsPhysicalPagePendingForKey(pendingIt->second, meshPageKey)) {
+                const uint32_t existingPage = pendingIt->second;
+                result.pagesBySegment[seg] = existingPage;
+                result.segmentNeedsFetch[seg] = false;
+                if (existingPage < m_pageProtectedThisUpdate.size()) {
+                    m_pageProtectedThisUpdate[existingPage] = 1u;
+                }
+                if (!IsPhysicalPagePinnedStorage(existingPage)) {
+                    m_pageLru.Touch(existingPage);
+                }
+                spdlog::debug(
+                    "CLod streaming: group {} reusing pending physical page {} for mesh-page key {} seg {}",
+                    groupIndex,
+                    existingPage,
+                    meshPageKey,
+                    seg);
+                continue;
+            }
+
             ++missingCount;
-            continue;
         }
-
-        auto residentIt = m_residentMeshPageToPhysicalPage.find(meshPageKey);
-        if (residentIt != m_residentMeshPageToPhysicalPage.end() &&
-            IsPhysicalPageResidentForKey(residentIt->second, meshPageKey)) {
-            const uint32_t existingPage = residentIt->second;
-            result.pagesBySegment[seg] = existingPage;
-            result.segmentNeedsFetch[seg] = false;
-            if (existingPage < m_pageProtectedThisUpdate.size()) {
-                m_pageProtectedThisUpdate[existingPage] = 1u;
-            }
-            if (!IsPhysicalPagePinnedStorage(existingPage)) {
-                m_pageLru.Touch(existingPage);
-            }
-            continue;
-        }
-
-        auto pendingIt = m_pendingMeshPageToPhysicalPage.find(meshPageKey);
-        if (pendingIt != m_pendingMeshPageToPhysicalPage.end() &&
-            IsPhysicalPagePendingForKey(pendingIt->second, meshPageKey)) {
-            const uint32_t existingPage = pendingIt->second;
-            result.pagesBySegment[seg] = existingPage;
-            result.segmentNeedsFetch[seg] = false;
-            if (existingPage < m_pageProtectedThisUpdate.size()) {
-                m_pageProtectedThisUpdate[existingPage] = 1u;
-            }
-            if (!IsPhysicalPagePinnedStorage(existingPage)) {
-                m_pageLru.Touch(existingPage);
-            }
-            spdlog::debug(
-                "CLod streaming: group {} reusing pending physical page {} for mesh-page key {} seg {}",
-                groupIndex,
-                existingPage,
-                meshPageKey,
-                seg);
-            continue;
-        }
-
-        ++missingCount;
     }
 
     std::vector<uint32_t> freshPages;
     if (missingCount == 0u) {
         freshPages.clear();
     } else if (result.usesPinnedStorage) {
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::AllocatePinnedPages");
+        ZoneValue(missingCount);
         auto* pool = meshManager ? meshManager->GetCLodPagePool() : nullptr;
         if (pool == nullptr) {
             return PreAllocatedPages{};
         }
 
         freshPages = pool->AllocatePinnedPages(missingCount);
-        EnsurePageTrackingCapacity(meshManager);
+        {
+            ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::AllocatePinnedPages::EnsurePageTrackingCapacity");
+            EnsurePageTrackingCapacity(meshManager);
+        }
         if (freshPages.size() < missingCount) {
             pool->FreePinnedPages(freshPages);
             return PreAllocatedPages{};
@@ -2385,43 +2813,52 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
         }
     } else {
         // Pop fresh pages for missing segments.
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::PopFreePages");
+        ZoneValue(missingCount);
         PagePopFailureStats popStats{};
         freshPages = PopFreePages(missingCount, meshManager, &popStats);
         if (freshPages.size() < missingCount) {
-            static uint64_t s_lastPreallocationFailureLogTick = 0;
-            if (m_streamingDiagnosticTick >= s_lastPreallocationFailureLogTick + 120u) {
-                s_lastPreallocationFailureLogTick = m_streamingDiagnosticTick;
-                uint32_t livePreallocatedFreshPages = 0u;
-                for (const auto& [_, pages] : m_preAllocatedPagesByGroup) {
-                    for (uint32_t seg = 0; seg < pages.segmentCount; ++seg) {
-                        if (seg < pages.segmentNeedsFetch.size() && pages.segmentNeedsFetch[seg]) {
-                            ++livePreallocatedFreshPages;
+            {
+                ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::PopFreePages::FailureDiagnostics");
+                static uint64_t s_lastPreallocationFailureLogTick = 0;
+                if (m_streamingDiagnosticTick >= s_lastPreallocationFailureLogTick + 120u) {
+                    s_lastPreallocationFailureLogTick = m_streamingDiagnosticTick;
+                    uint32_t livePreallocatedFreshPages = 0u;
+                    for (const auto& [_, pages] : m_preAllocatedPagesByGroup) {
+                        for (uint32_t seg = 0; seg < pages.segmentCount; ++seg) {
+                            if (seg < pages.segmentNeedsFetch.size() && pages.segmentNeedsFetch[seg]) {
+                                ++livePreallocatedFreshPages;
+                            }
                         }
                     }
+                    spdlog::warn(
+                        "CLod streaming diag[tick={}]: preallocation failed for group {} missingPages={} acquired={} lruSize={} scanned={} reject(protected={}, pendingWrite={}, evictFailed={}, evictionBudget={}, dirtyMetadata={}) evicted={} freeClean={} pendingCpu={} inProgress={} residentGroups={} preallocGroups={} preallocFreshPages={}",
+                        m_streamingDiagnosticTick,
+                        groupIndex,
+                        missingCount,
+                        static_cast<uint32_t>(freshPages.size()),
+                        m_pageLru.Size(),
+                        popStats.scanned,
+                        popStats.rejectedProtected,
+                        popStats.rejectedPendingWrite,
+                        popStats.rejectedEvictFailed,
+                        popStats.rejectedEvictionBudget,
+                        popStats.rejectedDirtyMetadata,
+                        popStats.evicted,
+                        popStats.freeClean,
+                        m_pendingStreamingRequestCount,
+                        m_streamingRequestsInProgressCount,
+                        m_streamingResidentGroupsCount,
+                        static_cast<uint32_t>(m_preAllocatedPagesByGroup.size()),
+                        livePreallocatedFreshPages);
                 }
-                spdlog::warn(
-                    "CLod streaming diag[tick={}]: preallocation failed for group {} missingPages={} acquired={} lruSize={} scanned={} reject(protected={}, pendingWrite={}, evictFailed={}, dirtyMetadata={}) evicted={} freeClean={} pendingCpu={} inProgress={} residentGroups={} preallocGroups={} preallocFreshPages={}",
-                    m_streamingDiagnosticTick,
-                    groupIndex,
-                    missingCount,
-                    static_cast<uint32_t>(freshPages.size()),
-                    m_pageLru.Size(),
-                    popStats.scanned,
-                    popStats.rejectedProtected,
-                    popStats.rejectedPendingWrite,
-                    popStats.rejectedEvictFailed,
-                    popStats.rejectedDirtyMetadata,
-                    popStats.evicted,
-                    popStats.freeClean,
-                    m_pendingStreamingRequestCount,
-                    m_streamingRequestsInProgressCount,
-                    m_streamingResidentGroupsCount,
-                    static_cast<uint32_t>(m_preAllocatedPagesByGroup.size()),
-                    livePreallocatedFreshPages);
             }
-            for (uint32_t page : freshPages) {
-                if (IsPhysicalPageCleanForFreshAllocation(page)) {
-                    m_pageLru.Insert(page);
+            {
+                ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::PopFreePages::RestorePartialPages");
+                for (uint32_t page : freshPages) {
+                    if (IsPhysicalPageCleanForFreshAllocation(page)) {
+                        m_pageLru.Insert(page);
+                    }
                 }
             }
             ReleasePreAllocatedPages(result, meshManager);
@@ -2435,32 +2872,38 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
     }
 
     // Assign fresh pages to missing segments.
-    uint32_t freshIdx = 0;
-    for (uint32_t seg = 0; seg < segmentCount; ++seg) {
-        if (result.pagesBySegment[seg] == ~0u) {
-            result.pagesBySegment[seg] = freshPages[freshIdx++];
-            result.segmentNeedsFetch[seg] = true;
+    {
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::AssignFreshPages");
+        uint32_t freshIdx = 0;
+        for (uint32_t seg = 0; seg < segmentCount; ++seg) {
+            if (result.pagesBySegment[seg] == ~0u) {
+                result.pagesBySegment[seg] = freshPages[freshIdx++];
+                result.segmentNeedsFetch[seg] = true;
+            }
         }
     }
 
-    for (uint32_t seg = 0; seg < segmentCount; ++seg) {
-        const uint32_t page = result.pagesBySegment[seg];
-        if (page == ~0u || page >= m_pageState.size()) {
-            continue;
-        }
-        if (result.segmentNeedsFetch[seg]) {
-            // Keep in-flight upload targets out of the LRU so another request
-            // cannot reuse the physical page before this IO completes/cancels.
-            m_pageOwnerGroup[page] = static_cast<int32_t>(groupIndex);
-            m_pageOwnerSegment[page] = seg;
-            m_pageState[page] = CLodPhysicalPageState::PreAllocatedCpuUpload;
-            m_pendingPageOwnerGroup[page] = groupIndex;
-            m_pendingPageOwnerSegment[page] = seg;
-            if (page < m_pageOwnerMeshPageKey.size()) {
-                m_pageOwnerMeshPageKey[page] = result.meshPageKeys[seg];
+    {
+        ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup::MarkPreAllocatedPages");
+        for (uint32_t seg = 0; seg < segmentCount; ++seg) {
+            const uint32_t page = result.pagesBySegment[seg];
+            if (page == ~0u || page >= m_pageState.size()) {
+                continue;
             }
-            if (result.meshPageKeys[seg] != kInvalidCLodMeshPageKey) {
-                m_pendingMeshPageToPhysicalPage[result.meshPageKeys[seg]] = page;
+            if (result.segmentNeedsFetch[seg]) {
+                // Keep in-flight upload targets out of the LRU so another request
+                // cannot reuse the physical page before this IO completes/cancels.
+                m_pageOwnerGroup[page] = static_cast<int32_t>(groupIndex);
+                m_pageOwnerSegment[page] = seg;
+                m_pageState[page] = CLodPhysicalPageState::PreAllocatedCpuUpload;
+                m_pendingPageOwnerGroup[page] = groupIndex;
+                m_pendingPageOwnerSegment[page] = seg;
+                if (page < m_pageOwnerMeshPageKey.size()) {
+                    m_pageOwnerMeshPageKey[page] = result.meshPageKeys[seg];
+                }
+                if (result.meshPageKeys[seg] != kInvalidCLodMeshPageKey) {
+                    m_pendingMeshPageToPhysicalPage[result.meshPageKeys[seg]] = page;
+                }
             }
         }
     }
@@ -4062,6 +4505,10 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
     }
     m_streamingCpuUploadBudgetRequests = std::max(m_streamingCpuUploadBudgetRequests, 1u);
     const uint32_t budget = m_streamingCpuUploadBudgetRequests;
+    m_pagePopEvictionsThisUpdate = 0u;
+    m_pagePopEvictionBudgetThisUpdate = std::max<uint32_t>(
+        4u,
+        std::min<uint32_t>(16u, std::max<uint32_t>(budget / 4u, 1u)));
     CLodStreamingOperationStats frameStats{};
 
     MeshManager* meshManager = nullptr;
