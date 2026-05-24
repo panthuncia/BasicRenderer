@@ -47,7 +47,9 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
     std::shared_ptr<PixelBuffer> AVBOITOccupancySliceMaskTexture,
     std::shared_ptr<PixelBuffer> AVBOITEarlyDepthTexture,
-    std::shared_ptr<Buffer> telemetryBuffer)
+    std::shared_ptr<Buffer> telemetryBuffer,
+    std::shared_ptr<Buffer> sourceGroupMismatchCounterBuffer,
+    std::shared_ptr<Buffer> sourceGroupMismatchDetailsBuffer)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
@@ -71,6 +73,8 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
     , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
+    , m_sourceGroupMismatchCounterBuffer(std::move(sourceGroupMismatchCounterBuffer))
+    , m_sourceGroupMismatchDetailsBuffer(std::move(sourceGroupMismatchDetailsBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_wireframe = inputs.wireframe;
     m_clearGbuffer = inputs.clearGbuffer;
@@ -116,6 +120,8 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             Builtin::CLod::Offsets,
             Builtin::CLod::GroupChunks,
             Builtin::CLod::Groups,
+			Builtin::CLod::GroupPageMap,
+			Builtin::CLod::Segments,
             Builtin::CLod::MeshMetadata,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsHistogramBuffer,
@@ -127,6 +133,12 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
 
     if (m_telemetryBuffer) {
         builder->WithUnorderedAccess(m_telemetryBuffer);
+    }
+    if (m_sourceGroupMismatchCounterBuffer) {
+        builder->WithUnorderedAccess(m_sourceGroupMismatchCounterBuffer);
+    }
+    if (m_sourceGroupMismatchDetailsBuffer) {
+        builder->WithUnorderedAccess(m_sourceGroupMismatchDetailsBuffer);
     }
 
     if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
@@ -446,8 +458,16 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     if (m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled()) {
         misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    }
+    if (m_sourceGroupMismatchCounterBuffer && m_sourceGroupMismatchDetailsBuffer) {
+        misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX] =
+            m_sourceGroupMismatchCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX] =
+            m_sourceGroupMismatchDetailsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     }
     if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
         const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();

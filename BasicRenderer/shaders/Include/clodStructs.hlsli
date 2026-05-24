@@ -82,7 +82,7 @@ struct CLodMeshletDescriptor
     uint bitsAndVertexCount;          // [7] reserved:24 | vertexCount:8
     uint triangleCountAndRefinedGroup; // [8] triangleCount:16 | (refinedGroupId+1):16
     uint boneCount;                   // [9]
-    uint reserved2;                   // [10]
+    uint sourceGroupLocalIndex;       // [10] temporary diagnostic source group tag
     uint reserved3;                   // [11]
 
     float4 bounds;                    // [12-15] bounding sphere {cx, cy, cz, radius}

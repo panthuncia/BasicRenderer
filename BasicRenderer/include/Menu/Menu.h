@@ -3513,6 +3513,16 @@ inline void Menu::DrawCLodTelemetryWindow() {
             };
 
             ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(captureState.captureCount));
+            const uint32_t sourceGroupMismatchCount = counter(CLodWorkGraphCounterIndex::RasterMeshShaderSourceGroupMismatch);
+            if (sourceGroupMismatchCount != 0u) {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.15f, 0.10f, 1.0f),
+                    "Source group mismatches: %u",
+                    sourceGroupMismatchCount);
+            }
+            else {
+                ImGui::Text("Source group mismatches: %u", sourceGroupMismatchCount);
+            }
             const uint32_t zeroPageSlabCount = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedZeroPageSlab);
             if (zeroPageSlabCount != 0u) {
                 ImGui::TextColored(
@@ -3660,6 +3670,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t rasterInitZeroPage = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedZeroPageSlab);
                 const uint32_t rasterInitMeshletOob = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedMeshletOutOfBounds);
                 const uint32_t rasterInitInvalidOutput = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedInvalidOutputCounts);
+                const uint32_t rasterSourceGroupMismatch = counter(CLodWorkGraphCounterIndex::RasterMeshShaderSourceGroupMismatch);
                 const uint32_t pixelInvocations = counter(CLodWorkGraphCounterIndex::RasterPixelShaderInvocations);
                 const uint32_t pixelScissorRejected = counter(CLodWorkGraphCounterIndex::RasterPixelScissorRejected);
                 const uint32_t pixelBoundsRejected = counter(CLodWorkGraphCounterIndex::RasterPixelTargetBoundsRejected);
@@ -3687,6 +3698,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     rasterInitZeroPage,
                     rasterInitMeshletOob,
                     rasterInitInvalidOutput);
+                ImGui::Text("Raster MS diagnostics: sourceGroupMismatch=%u", rasterSourceGroupMismatch);
                 ImGui::Text("Raster PS: invocations=%u scissorRejected=%u boundsRejected=%u visibilityWrites=%u",
                     pixelInvocations,
                     pixelScissorRejected,

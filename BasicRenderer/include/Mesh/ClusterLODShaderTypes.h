@@ -64,7 +64,7 @@ struct CLodMeshletDescriptor
 	// Packed: triangleCount:16 | refinedGroupId+1:16 (0 = terminal, >0 = groupId+1)
 	uint32_t triangleCountAndRefinedGroup = 0; // [8]
 	uint32_t boneCount = 0;               // [9]
-	uint32_t reserved2 = 0;               // [10]
+	uint32_t sourceGroupLocalIndex = 0xFFFFFFFFu; // [10] temporary diagnostic source group tag
 	uint32_t reserved3 = 0;               // [11]
 
 	// Bounding sphere (object space)

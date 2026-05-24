@@ -59,7 +59,7 @@ CLodMeshletDescriptor LoadMeshletDescriptor(uint slabDescriptorIndex, uint pageB
     desc.bitsAndVertexCount          = d1.w;
     desc.triangleCountAndRefinedGroup = d2.x;
     desc.boneCount                   = d2.y;
-    desc.reserved2                   = d2.z;
+    desc.sourceGroupLocalIndex       = d2.z;
     desc.reserved3                   = d2.w;
     desc.bounds                      = asfloat(d3);
 

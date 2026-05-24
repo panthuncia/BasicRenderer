@@ -16,6 +16,7 @@ public:
         std::shared_ptr<Buffer> loadCounter,
         std::shared_ptr<Buffer> loadRequestKeys,
         std::shared_ptr<Buffer> usedGroupsCounter,
+        std::shared_ptr<Buffer> sourceGroupMismatchCounter,
         std::shared_ptr<Buffer> nonResidentBits,
         std::shared_ptr<Buffer> activeGroupsBits,
         std::shared_ptr<Buffer> runtimeState,
@@ -34,6 +35,7 @@ private:
     std::shared_ptr<Buffer> m_loadCounter;
     std::shared_ptr<Buffer> m_loadRequestKeys;
     std::shared_ptr<Buffer> m_usedGroupsCounter;
+    std::shared_ptr<Buffer> m_sourceGroupMismatchCounter;
     std::shared_ptr<Buffer> m_nonResidentBits;
     std::shared_ptr<Buffer> m_activeGroupsBits;
     std::shared_ptr<Buffer> m_runtimeState;

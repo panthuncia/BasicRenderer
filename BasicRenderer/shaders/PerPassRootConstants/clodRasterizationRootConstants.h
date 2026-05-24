@@ -26,6 +26,8 @@
 #define CLOD_RASTER_PAGE_JOB_INDIRECT_ARGS_DESCRIPTOR_INDEX UintRootConstant18
 #define CLOD_RASTER_PAGE_JOB_RECORD_CAPACITY UintRootConstant19
 #define CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX UintRootConstant20
+#define CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX UintRootConstant18
+#define CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX UintRootConstant19
 
 // The shadow-only Reyes hardware mesh path is mutually exclusive with the page-job path,
 // so it reuses those slots rather than expanding the misc root-constant range.

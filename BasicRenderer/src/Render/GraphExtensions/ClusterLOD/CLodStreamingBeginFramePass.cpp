@@ -20,6 +20,7 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     std::shared_ptr<Buffer> loadCounter,
     std::shared_ptr<Buffer> loadRequestKeys,
     std::shared_ptr<Buffer> usedGroupsCounter,
+    std::shared_ptr<Buffer> sourceGroupMismatchCounter,
     std::shared_ptr<Buffer> nonResidentBits,
     std::shared_ptr<Buffer> activeGroupsBits,
     std::shared_ptr<Buffer> runtimeState,
@@ -30,6 +31,7 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     : m_loadCounter(std::move(loadCounter))
     , m_loadRequestKeys(std::move(loadRequestKeys))
     , m_usedGroupsCounter(std::move(usedGroupsCounter))
+    , m_sourceGroupMismatchCounter(std::move(sourceGroupMismatchCounter))
     , m_nonResidentBits(std::move(nonResidentBits))
     , m_activeGroupsBits(std::move(activeGroupsBits))
     , m_runtimeState(std::move(runtimeState))
@@ -48,7 +50,7 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
 }
 
 void CLodStreamingBeginFramePass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithUnorderedAccess(m_loadCounter, m_loadRequestKeys, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
+    builder->WithUnorderedAccess(m_loadCounter, m_loadRequestKeys, m_usedGroupsCounter, m_sourceGroupMismatchCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
 }
 
 void CLodStreamingBeginFramePass::Setup() {}
@@ -112,6 +114,9 @@ void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& execution
         ZoneScopedN("CLodStreamingBeginFramePass::UploadCounters");
         BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_loadCounter), 0);
         BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_usedGroupsCounter), 0);
+        if (m_sourceGroupMismatchCounter) {
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_sourceGroupMismatchCounter), 0);
+        }
     }
 
     uint32_t activeGroupScanCount = 0u;

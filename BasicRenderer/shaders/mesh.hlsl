@@ -26,11 +26,39 @@ static const uint WG_COUNTER_RASTER_MESH_SHADER_ZERO_TRIANGLE_OUTPUTS = 121u;
 static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB = 122u;
 static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_MESHLET_OOB = 123u;
 static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_INVALID_OUTPUT_COUNTS = 124u;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_SOURCE_GROUP_MISMATCH = 132u;
+static const uint CLOD_SOURCE_GROUP_MISMATCH_DETAIL_CAPACITY = 1024u;
 
 static const uint CLOD_RASTER_INIT_FAILURE_NONE = 0u;
 static const uint CLOD_RASTER_INIT_FAILURE_ZERO_PAGE_SLAB = 1u;
 static const uint CLOD_RASTER_INIT_FAILURE_MESHLET_OOB = 2u;
 static const uint CLOD_RASTER_INIT_FAILURE_INVALID_OUTPUT_COUNTS = 3u;
+
+struct CLodSourceGroupMismatchDetail
+{
+    uint expectedGroupLocalIndex;
+    uint foundGroupLocalIndex;
+    uint expectedGroupGlobalIndex;
+    uint foundGroupGlobalIndex;
+    uint clodMeshMetadataIndex;
+    uint groupsBase;
+    uint expectedSegmentGlobalIndex;
+    uint expectedSegmentPageIndex;
+    uint expectedSegmentFirstMeshlet;
+    uint expectedSegmentMeshletCount;
+    uint expectedSegmentPageSlabDescriptorIndex;
+    uint expectedSegmentPageSlabByteOffset;
+    uint pageLocalMeshletIndex;
+    uint pageSlabDescriptorIndex;
+    uint pageSlabByteOffset;
+    uint visibleClusterIndex;
+    uint unsortedClusterIndex;
+    uint instanceId;
+    uint viewId;
+    uint bucketMeshletIndex;
+    uint bucketCount;
+    uint pad0;
+};
 
 void CLodRasterTelemetryAdd(uint counterIndex, uint value)
 {
@@ -41,6 +69,106 @@ void CLodRasterTelemetryAdd(uint counterIndex, uint value)
 
     RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
     InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
+void CLodRecordSourceGroupMismatch(
+    uint expectedGroupLocalIndex,
+    uint foundGroupLocalIndex,
+    uint pageLocalMeshletIndex,
+    uint pageSlabDescriptorIndex,
+    uint pageSlabByteOffset,
+    uint visibleClusterIndex,
+    uint unsortedClusterIndex,
+    uint instanceId,
+    uint viewId,
+    uint bucketMeshletIndex,
+    uint bucketCount)
+{
+    if (CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX == CLOD_TELEMETRY_DISABLED_DESCRIPTOR ||
+        CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX == CLOD_TELEMETRY_DISABLED_DESCRIPTOR)
+    {
+        return;
+    }
+
+    StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
+    StructuredBuffer<ClusterLODGroup> clodGroups =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    StructuredBuffer<ClusterLODGroupSegment> clodSegments =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+    const MeshInstanceClodOffsets offsets = meshInstanceClodOffsets[instanceId];
+    const CLodMeshMetadata metadata = clodMeshMetadataBuffer[offsets.clodMeshMetadataIndex];
+    const ClusterLODGroup expectedGroup = clodGroups[metadata.groupsBase + expectedGroupLocalIndex];
+
+    uint expectedSegmentGlobalIndex = 0xFFFFFFFFu;
+    uint expectedSegmentPageIndex = 0xFFFFFFFFu;
+    uint expectedSegmentFirstMeshlet = 0u;
+    uint expectedSegmentMeshletCount = 0u;
+    uint expectedSegmentPageSlabDescriptorIndex = 0u;
+    uint expectedSegmentPageSlabByteOffset = 0u;
+    const uint expectedSegmentEnd = expectedGroup.firstSegment + expectedGroup.segmentCount;
+    for (uint segmentIndex = expectedGroup.firstSegment; segmentIndex < expectedSegmentEnd; ++segmentIndex)
+    {
+        const ClusterLODGroupSegment segment = clodSegments[metadata.segmentsBase + segmentIndex];
+        if (pageLocalMeshletIndex < segment.firstMeshletInPage ||
+            pageLocalMeshletIndex >= segment.firstMeshletInPage + segment.meshletCount)
+        {
+            continue;
+        }
+
+        const GroupPageMapEntry segmentPageEntry = LoadGroupPageMapEntry(metadata.pageMapBase, segment.pageIndex);
+        if (segmentPageEntry.slabDescriptorIndex != pageSlabDescriptorIndex ||
+            segmentPageEntry.slabByteOffset != pageSlabByteOffset)
+        {
+            continue;
+        }
+
+        expectedSegmentGlobalIndex = metadata.segmentsBase + segmentIndex;
+        expectedSegmentPageIndex = segment.pageIndex;
+        expectedSegmentFirstMeshlet = segment.firstMeshletInPage;
+        expectedSegmentMeshletCount = segment.meshletCount;
+        expectedSegmentPageSlabDescriptorIndex = segmentPageEntry.slabDescriptorIndex;
+        expectedSegmentPageSlabByteOffset = segmentPageEntry.slabByteOffset;
+        break;
+    }
+
+    RWStructuredBuffer<uint> counter = ResourceDescriptorHeap[CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX];
+    uint detailIndex = 0u;
+    InterlockedAdd(counter[0], 1u, detailIndex);
+    if (detailIndex >= CLOD_SOURCE_GROUP_MISMATCH_DETAIL_CAPACITY)
+    {
+        return;
+    }
+
+    CLodSourceGroupMismatchDetail detail;
+    detail.expectedGroupLocalIndex = expectedGroupLocalIndex;
+    detail.foundGroupLocalIndex = foundGroupLocalIndex;
+    detail.expectedGroupGlobalIndex = metadata.groupsBase + expectedGroupLocalIndex;
+    detail.foundGroupGlobalIndex = foundGroupLocalIndex != 0xFFFFFFFFu ? metadata.groupsBase + foundGroupLocalIndex : 0xFFFFFFFFu;
+    detail.clodMeshMetadataIndex = offsets.clodMeshMetadataIndex;
+    detail.groupsBase = metadata.groupsBase;
+    detail.expectedSegmentGlobalIndex = expectedSegmentGlobalIndex;
+    detail.expectedSegmentPageIndex = expectedSegmentPageIndex;
+    detail.expectedSegmentFirstMeshlet = expectedSegmentFirstMeshlet;
+    detail.expectedSegmentMeshletCount = expectedSegmentMeshletCount;
+    detail.expectedSegmentPageSlabDescriptorIndex = expectedSegmentPageSlabDescriptorIndex;
+    detail.expectedSegmentPageSlabByteOffset = expectedSegmentPageSlabByteOffset;
+    detail.pageLocalMeshletIndex = pageLocalMeshletIndex;
+    detail.pageSlabDescriptorIndex = pageSlabDescriptorIndex;
+    detail.pageSlabByteOffset = pageSlabByteOffset;
+    detail.visibleClusterIndex = visibleClusterIndex;
+    detail.unsortedClusterIndex = unsortedClusterIndex;
+    detail.instanceId = instanceId;
+    detail.viewId = viewId;
+    detail.bucketMeshletIndex = bucketMeshletIndex;
+    detail.bucketCount = bucketCount;
+    detail.pad0 = 0u;
+
+    RWStructuredBuffer<CLodSourceGroupMismatchDetail> details =
+        ResourceDescriptorHeap[CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX];
+    details[detailIndex] = detail;
 }
 
 #ifndef CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
@@ -946,10 +1074,12 @@ void VisibilityBufferMSMain(
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }
 
-bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup setup, out uint failureReason, in uint bucketMeshletIndex, in uint bucketCount)
+bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup setup, out uint failureReason, out bool sourceGroupMismatch, out uint foundSourceGroupLocalIndex, in uint bucketMeshletIndex, in uint bucketCount)
 {
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     failureReason = CLOD_RASTER_INIT_FAILURE_NONE;
+    sourceGroupMismatch = false;
+    foundSourceGroupLocalIndex = 0xFFFFFFFFu;
 
     setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
     setup.meshInstanceBuffer = meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
@@ -984,6 +1114,11 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     // Load per-meshlet descriptor
     CLodMeshletDescriptor desc = LoadMeshletDescriptor(
         pageSlabDesc, pageSlabOff, hdr.descriptorOffset, setup.meshletIndex);
+    const uint expectedGroupLocalIndex = CLodVisibleClusterGroupID(packedCluster);
+    foundSourceGroupLocalIndex = desc.sourceGroupLocalIndex;
+    sourceGroupMismatch =
+        desc.sourceGroupLocalIndex != 0xFFFFFFFFu &&
+        desc.sourceGroupLocalIndex != expectedGroupLocalIndex;
 
     setup.meshlet = (Meshlet)0;
     setup.vertCount = CLodDescVertexCount(desc);
@@ -1063,12 +1198,14 @@ void ClusterLODBucketMSMain(
     uint outputTriCount = 0;
     ClodViewRasterInfo viewRasterInfo = (ClodViewRasterInfo)0;
     uint initFailureReason = CLOD_RASTER_INIT_FAILURE_NONE;
+    bool sourceGroupMismatch = false;
+    uint foundSourceGroupLocalIndex = 0xFFFFFFFFu;
 
     if (draw) {
         ByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         packedCluster = CLodLoadVisibleClusterPacked(compactedClusters, visibleClusterIndex);
         unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
-        draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, initFailureReason, linearizedID, count);
+        draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, initFailureReason, sourceGroupMismatch, foundSourceGroupLocalIndex, linearizedID, count);
         if (!draw)
         {
             setup = (MeshletSetup)0;
@@ -1096,6 +1233,22 @@ void ClusterLODBucketMSMain(
                 {
                     CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_INVALID_OUTPUT_COUNTS, 1u);
                 }
+            }
+            if (sourceGroupMismatch)
+            {
+                CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_SOURCE_GROUP_MISMATCH, 1u);
+                CLodRecordSourceGroupMismatch(
+                    CLodVisibleClusterGroupID(packedCluster),
+                    foundSourceGroupLocalIndex,
+                    CLodVisibleClusterLocalMeshletIndex(packedCluster),
+                    CLodVisibleClusterPageSlabDescriptorIndex(packedCluster),
+                    CLodVisibleClusterPageSlabByteOffset(packedCluster),
+                    visibleClusterIndex,
+                    unsortedClusterIndex,
+                    CLodVisibleClusterInstanceID(packedCluster),
+                    CLodVisibleClusterViewID(packedCluster),
+                    linearizedID,
+                    count);
             }
         }
     }
@@ -1312,7 +1465,9 @@ void ClusterLODReyesVirtualShadowMSMain(
                 const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, gs_reyesShadowDiceEntry.visibleClusterIndex);
 
                 uint initFailureReason = CLOD_RASTER_INIT_FAILURE_NONE;
-                if (InitializeMeshletFromCompactedCluster(packedCluster, gs_reyesShadowSetup, initFailureReason, compactedWorkIndex, gs_reyesShadowPackedWorkGroup.rasterWorkEntryCount))
+                bool sourceGroupMismatch = false;
+                uint foundSourceGroupLocalIndex = 0xFFFFFFFFu;
+                if (InitializeMeshletFromCompactedCluster(packedCluster, gs_reyesShadowSetup, initFailureReason, sourceGroupMismatch, foundSourceGroupLocalIndex, compactedWorkIndex, gs_reyesShadowPackedWorkGroup.rasterWorkEntryCount))
                 {
                     const uint shadowClipmapIndex = CLodVisibleClusterShadowClipmapIndex(packedCluster);
                     if (shadowClipmapIndex < kCLodVirtualShadowClipmapCount)

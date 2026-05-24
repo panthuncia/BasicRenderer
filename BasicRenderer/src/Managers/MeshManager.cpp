@@ -101,7 +101,7 @@ MeshManager::MeshManager() {
 		PagePool::Config ppConfig;
 		ppConfig.pageSize     = 256 * 1024;         // 256 KB
 		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.numStreamingSlabs = 16;
+		ppConfig.numStreamingSlabs = 1;
 		ppConfig.debugName    = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}
@@ -1059,8 +1059,7 @@ bool MeshManager::EvictCLodGroupResidency(uint32_t groupGlobalIndex, bool clearP
 	}
 
 	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
-	const bool evicted = ApplyCLodGroupEviction(*sharedState, localIndex);
-	(void)clearPageMapEntries;
+	const bool evicted = ApplyCLodGroupEviction(*sharedState, localIndex, clearPageMapEntries);
 	return evicted;
 }
 
@@ -1144,7 +1143,22 @@ bool MeshManager::CommitCLodGroupResidency(
 		for (size_t i = 0; i < meshPageIndices.size(); ++i) {
 			const uint32_t meshPageIndex = meshPageIndices[i];
 			if (meshPageIndex < sharedState->pageMapEntriesCPU.size()) {
+				const GroupPageMapEntry previousEntry = sharedState->pageMapEntriesCPU[meshPageIndex];
 				sharedState->pageMapEntriesCPU[meshPageIndex] = pageMapEntries[i];
+				if (m_clodPageMapWriteCallback) {
+					CLodPageMapWriteEvent event{};
+					event.reason = CLodPageMapWriteReason::Commit;
+					event.groupGlobalIndex = groupGlobalIndex;
+					event.groupLocalIndex = localIndex;
+					event.groupsBase = sharedState->groupsBase;
+					event.meshPageIndex = meshPageIndex;
+					event.physicalPage = pageAllocations[i].firstPageID;
+					event.slabDescriptorIndex = pageMapEntries[i].slabDescriptorIndex;
+					event.slabByteOffset = pageMapEntries[i].slabByteOffset;
+					event.previousSlabDescriptorIndex = previousEntry.slabDescriptorIndex;
+					event.previousSlabByteOffset = previousEntry.slabByteOffset;
+					m_clodPageMapWriteCallback(event);
+				}
 			}
 		}
 		for (size_t i = 0; i < meshPageIndices.size(); ++i) {
@@ -1171,6 +1185,10 @@ bool MeshManager::CommitCLodGroupResidency(
 	}
 	UploadCLodGroupChunk(*sharedState, localIndex);
 	return true;
+}
+
+void MeshManager::SetCLodPageMapWriteCallback(std::function<void(const CLodPageMapWriteEvent&)> fn) {
+	m_clodPageMapWriteCallback = std::move(fn);
 }
 
 bool MeshManager::IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const {
@@ -1501,9 +1519,44 @@ MeshManager::CLodGroupStreamingInfo MeshManager::GetCLodGroupStreamingInfo(uint3
 	info.groupsBase = sharedState->groupsBase;
 	if (localIndex < sharedState->groups.size()) {
 		const ClusterLODGroup& group = sharedState->groups[localIndex];
+		info.group = group;
 		info.pageMapBase = group.pageMapBase;
 		info.meshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
 		info.pageCount = static_cast<uint32_t>(info.meshPageIndices.size());
+		const uint32_t segmentEnd = std::min<uint32_t>(
+			group.firstSegment + group.segmentCount,
+			static_cast<uint32_t>(sharedState->segments.size()));
+		if (group.firstSegment < segmentEnd) {
+			info.segments.assign(
+				sharedState->segments.begin() + group.firstSegment,
+				sharedState->segments.begin() + segmentEnd);
+		}
+
+		for (uint32_t sourceGroupIndex = 0u;
+			sourceGroupIndex < static_cast<uint32_t>(sharedState->groups.size());
+			++sourceGroupIndex) {
+			const ClusterLODGroup& sourceGroup = sharedState->groups[sourceGroupIndex];
+			const uint32_t sourceSegmentEnd = std::min<uint32_t>(
+				sourceGroup.firstSegment + sourceGroup.segmentCount,
+				static_cast<uint32_t>(sharedState->segments.size()));
+			for (uint32_t segmentIndex = sourceGroup.firstSegment;
+				segmentIndex < sourceSegmentEnd;
+				++segmentIndex) {
+				const ClusterLODGroupSegment& segment = sharedState->segments[segmentIndex];
+				if (segment.meshletCount == 0u ||
+					std::find(info.meshPageIndices.begin(), info.meshPageIndices.end(), segment.pageIndex) == info.meshPageIndices.end()) {
+					continue;
+				}
+
+				CLodGroupStreamingInfo::ReferencedPageSegment referencedSegment{};
+				referencedSegment.meshPageIndex = segment.pageIndex;
+				referencedSegment.sourceGroupLocalIndex = sourceGroupIndex;
+				referencedSegment.sourceGroupGlobalIndex = sharedState->groupsBase + sourceGroupIndex;
+				referencedSegment.segmentGlobalIndex = segmentIndex;
+				referencedSegment.segment = segment;
+				info.referencedPageSegments.push_back(referencedSegment);
+			}
+		}
 	}
 	info.vertexByteSize = sharedState->mesh->GetPerMeshCBData().vertexByteSize;
 	info.valid = true;
@@ -1663,7 +1716,7 @@ void MeshManager::UploadCLodGroupPageMapRange(
 	}
 }
 
-bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex) {
+bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool clearPageMapEntries) {
 	if (state.groupChunksView == nullptr || groupLocalIndex >= state.groupCount || groupLocalIndex >= state.baselineGroupChunks.size()) {
 		return false;
 	}
@@ -1672,7 +1725,60 @@ bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32
 		return false;
 	}
 
+	std::vector<uint32_t> meshPageIndices;
+	if (clearPageMapEntries) {
+		meshPageIndices = GetCLodGroupMeshPageIndices(state, groupLocalIndex);
+	}
+
+	auto clearUnreferencedPageMapEntries = [&]() {
+		if (!clearPageMapEntries || state.ownedPageMapView == nullptr) {
+			return;
+		}
+
+		const GroupPageMapEntry zeroEntry{};
+		for (uint32_t meshPageIndex : meshPageIndices) {
+			if (meshPageIndex >= state.pageMapEntriesCPU.size()) {
+				continue;
+			}
+			const GroupPageMapEntry previousEntry = state.pageMapEntriesCPU[meshPageIndex];
+			if (IsCLodMeshPageReferencedByResidentGroup(state, meshPageIndex)) {
+				if (previousEntry.slabDescriptorIndex != 0u && m_clodPageMapWriteCallback) {
+					CLodPageMapWriteEvent event{};
+					event.reason = CLodPageMapWriteReason::EvictClearSkippedResidentReference;
+					event.groupGlobalIndex = state.groupsBase + groupLocalIndex;
+					event.groupLocalIndex = groupLocalIndex;
+					event.groupsBase = state.groupsBase;
+					event.meshPageIndex = meshPageIndex;
+					event.slabDescriptorIndex = previousEntry.slabDescriptorIndex;
+					event.slabByteOffset = previousEntry.slabByteOffset;
+					event.previousSlabDescriptorIndex = previousEntry.slabDescriptorIndex;
+					event.previousSlabByteOffset = previousEntry.slabByteOffset;
+					event.referencedResidentGroupCount = 1u;
+					m_clodPageMapWriteCallback(event);
+				}
+				continue;
+			}
+			state.pageMapEntriesCPU[meshPageIndex] = zeroEntry;
+			if (previousEntry.slabDescriptorIndex != 0u && m_clodPageMapWriteCallback) {
+				CLodPageMapWriteEvent event{};
+				event.reason = CLodPageMapWriteReason::EvictClear;
+				event.groupGlobalIndex = state.groupsBase + groupLocalIndex;
+				event.groupLocalIndex = groupLocalIndex;
+				event.groupsBase = state.groupsBase;
+				event.meshPageIndex = meshPageIndex;
+				event.slabDescriptorIndex = zeroEntry.slabDescriptorIndex;
+				event.slabByteOffset = zeroEntry.slabByteOffset;
+				event.previousSlabDescriptorIndex = previousEntry.slabDescriptorIndex;
+				event.previousSlabByteOffset = previousEntry.slabByteOffset;
+				m_clodPageMapWriteCallback(event);
+			}
+			UploadCLodGroupPageMapRange(state, meshPageIndex, std::span<const GroupPageMapEntry>(&zeroEntry, 1));
+		}
+	};
+
 	if (!IsCLodGroupResident(state, groupLocalIndex)) {
+		UploadCLodGroupChunk(state, groupLocalIndex);
+		clearUnreferencedPageMapEntries();
 		return true; // Already non-resident.
 	}
 
@@ -1691,6 +1797,8 @@ bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32
 		}
 	}
 	DeallocateCLodGroupChunkAllocations(state, groupLocalIndex);
+	UploadCLodGroupChunk(state, groupLocalIndex);
+	clearUnreferencedPageMapEntries();
 	return true;
 }
 

@@ -34,6 +34,8 @@ public:
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
     void GatherStructuralTailPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
+    std::shared_ptr<Buffer> GetSourceGroupMismatchCounterBuffer() const { return m_sourceGroupMismatchCounter; }
+    std::shared_ptr<Buffer> GetSourceGroupMismatchDetailsBuffer() const { return m_sourceGroupMismatchDetails; }
 
 private:
     enum class CLodPhysicalPageState : uint8_t {
@@ -94,7 +96,7 @@ private:
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
     void CommitPendingResidencyPromotions();
     void ReconcileStaleDiskIoRequests(MeshManager* meshManager);
-    void PromoteGroupPagesAfterUploadDrain(uint32_t groupIndex);
+    bool PromoteGroupPagesAfterUploadDrain(uint32_t groupIndex);
     void QueuePendingNonResidentBitsUpload();
     std::vector<uint64_t> BuildExpectedGroupPageKeys(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info) const;
     bool IsPhysicalPageResidentForKey(uint32_t page, uint64_t key) const;
@@ -104,6 +106,8 @@ private:
     void ReleasePendingMeshPageReference(uint32_t page, uint64_t key);
     bool ValidateGroupResidencyPages(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys) const;
     bool ValidateGroupCommittedPageMap(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys, MeshManager* meshManager) const;
+    void RecordPageMapWrite(const MeshManager::CLodPageMapWriteEvent& event);
+    void LogPageMapProvenanceForMismatch(const CLodSourceGroupMismatchDetail& detail) const;
     bool SetGroupResidentBit(uint32_t groupIndex, bool resident);
     void ForceGroupNonResident(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries);
     void TouchGroupPages(uint32_t groupIndex);
@@ -140,6 +144,7 @@ private:
     void RetirePhysicalPage(uint32_t page, MeshManager* meshManager, bool pinned);
     void DrainRetiredPhysicalPages(MeshManager* meshManager);
     bool IsPhysicalPageRetired(uint32_t page) const;
+    bool IsPhysicalPagePinnedStorage(uint32_t page) const;
     uint64_t StreamingUploadVisibilityDelayTicks() const;
     void RecordNonResidentBitsUploadQueued();
     void LogPageOverwriteInvariant(
@@ -178,6 +183,21 @@ private:
         uint64_t commitTick = 0u;
     };
 
+    struct PageMapWriteProvenance {
+        MeshManager::CLodPageMapWriteReason reason = MeshManager::CLodPageMapWriteReason::Commit;
+        uint32_t groupGlobalIndex = 0u;
+        uint32_t groupLocalIndex = 0u;
+        uint32_t groupsBase = 0u;
+        uint32_t meshPageIndex = 0u;
+        uint32_t physicalPage = ~0u;
+        uint32_t slabDescriptorIndex = 0u;
+        uint32_t slabByteOffset = 0u;
+        uint32_t previousSlabDescriptorIndex = 0u;
+        uint32_t previousSlabByteOffset = 0u;
+        uint32_t referencedResidentGroupCount = 0u;
+        uint64_t tick = 0u;
+    };
+
     PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, MeshManager* meshManager);
     bool AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages, MeshManager* meshManager);
     void ReleasePreAllocatedPages(const PreAllocatedPages& pages, MeshManager* meshManager);
@@ -185,6 +205,7 @@ private:
         uint32_t groupIndex,
         const PreAllocatedPages& pages,
         const MeshManager::CLodDiskStreamingCompletion& completion,
+        const MeshManager::CLodGroupStreamingInfo& info,
         uint32_t expectedPageCount) const;
 
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
@@ -195,6 +216,8 @@ private:
     std::shared_ptr<Buffer> m_streamingRuntimeState;
     std::shared_ptr<Buffer> m_usedGroupsCounter;
     std::shared_ptr<Buffer> m_usedGroupsBuffer;
+    std::shared_ptr<Buffer> m_sourceGroupMismatchCounter;
+    std::shared_ptr<Buffer> m_sourceGroupMismatchDetails;
 
     std::vector<uint32_t> m_streamingNonResidentBitsCpu;
     std::vector<uint32_t> m_streamingActiveGroupsBitsCpu;
@@ -214,6 +237,7 @@ private:
     std::vector<CLodPhysicalPageState> m_pageState;
     std::vector<uint64_t> m_pageRetireAfterTick;
     std::vector<uint8_t> m_pageRetirePinned;
+    std::vector<uint8_t> m_pagePinnedStorage;
     std::vector<uint64_t> m_pageReuseRequiresNonResidentEpoch;
     std::vector<uint64_t> m_pageReuseNonResidentQueuedTick;
     std::vector<uint32_t> m_pendingPageOwnerGroup;
@@ -224,6 +248,7 @@ private:
     std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
     std::unordered_map<uint32_t, std::vector<uint64_t>> m_groupOwnedMeshPageKeys; // group to mesh-page keys by page slot
     std::unordered_map<uint32_t, CommittedGroupPageMap> m_groupCommittedPageMaps;
+    std::unordered_map<uint64_t, PageMapWriteProvenance> m_pageMapWriteProvenance;
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageToPhysicalPage;
     std::unordered_map<uint64_t, uint32_t> m_residentMeshPageRefCounts;
     std::unordered_map<uint64_t, uint32_t> m_pendingMeshPageToPhysicalPage;
@@ -276,6 +301,8 @@ private:
         std::shared_ptr<Buffer> requestsStaging;
         std::shared_ptr<Buffer> usedGroupsCounterStaging;
         std::shared_ptr<Buffer> usedGroupsBufferStaging;
+        std::shared_ptr<Buffer> sourceGroupMismatchCounterStaging;
+        std::shared_ptr<Buffer> sourceGroupMismatchDetailsStaging;
         uint64_t fenceValue = 0;
         bool inFlight = false;
     };

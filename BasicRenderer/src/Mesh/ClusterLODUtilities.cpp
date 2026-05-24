@@ -855,6 +855,7 @@ namespace
 
 	ClusterLODGroupBuildOutput BuildClusterLODGroupOutput(
 		const CapturedClusterLODGroup& capturedGroup,
+		uint32_t sourceGroupLocalIndex,
 		const std::vector<std::byte>& vertices,
 		const std::vector<MeshUvSetData>& uvSets,
 		unsigned int vertexFlags,
@@ -1606,6 +1607,7 @@ namespace
 						(meshlet.triangle_count & 0xFFFFu)
 						| (refinedGroupEncoded << 16u);
 					desc.boneCount = static_cast<uint32_t>(comp.boneList.size());
+					desc.sourceGroupLocalIndex = sourceGroupLocalIndex;
 
 					const BoundingSphere& bounds = output.meshletBounds[mi];
 					desc.bounds = bounds.sphere;
@@ -2174,6 +2176,7 @@ namespace
 				destDesc.vertexAttributeOffset = vertexAttributeCursor;
 				destDesc.triangleByteOffset = triangleByteCursor;
 				destDesc.boneListOffset = boneIndexCursor;
+				destDesc.sourceGroupLocalIndex = segment.groupIndex;
 
 				auto copyBytes = [&](uint32_t destOffset, uint32_t sourceOffset, uint32_t byteCount)
 				{
@@ -5520,6 +5523,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 				ClusterLODGroupBuildOutput output = BuildClusterLODGroupOutput(
 					capturedGroup,
+					groupId,
 					*context->vertices,
 					*context->uvSets,
 					context->vertexFlags,

@@ -134,6 +134,28 @@ public:
 	// non-resident, and uploads the chunk table.  Returns true on success.
 	bool FreeCLodGroupEviction(uint32_t groupGlobalIndex);
 	bool EvictCLodGroupResidency(uint32_t groupGlobalIndex, bool clearPageMapEntries);
+
+	enum class CLodPageMapWriteReason : uint8_t {
+		Commit,
+		EvictClear,
+		EvictClearSkippedResidentReference,
+	};
+
+	struct CLodPageMapWriteEvent {
+		CLodPageMapWriteReason reason = CLodPageMapWriteReason::Commit;
+		uint32_t groupGlobalIndex = 0u;
+		uint32_t groupLocalIndex = 0u;
+		uint32_t groupsBase = 0u;
+		uint32_t meshPageIndex = 0u;
+		uint32_t physicalPage = ~0u;
+		uint32_t slabDescriptorIndex = 0u;
+		uint32_t slabByteOffset = 0u;
+		uint32_t previousSlabDescriptorIndex = 0u;
+		uint32_t previousSlabByteOffset = 0u;
+		uint32_t referencedResidentGroupCount = 0u;
+	};
+
+	void SetCLodPageMapWriteCallback(std::function<void(const CLodPageMapWriteEvent&)> fn);
 	bool CommitCLodGroupResidency(
 		uint32_t groupGlobalIndex,
 		const ClusterLODGroupChunk& chunk,
@@ -170,10 +192,21 @@ public:
 	void InvalidateCLodDiskStreamingPipeline();
 
 	struct CLodGroupStreamingInfo {
+		struct ReferencedPageSegment {
+			uint32_t meshPageIndex = 0;
+			uint32_t sourceGroupLocalIndex = 0;
+			uint32_t sourceGroupGlobalIndex = 0;
+			uint32_t segmentGlobalIndex = 0;
+			ClusterLODGroupSegment segment{};
+		};
+
 		ClusterLODRuntimeSummary::GroupChunkHint hint{};
 		uint32_t groupsBase = 0;
 		uint32_t pageMapBase = 0;
 		uint32_t pageCount = 0;
+		ClusterLODGroup group{};
+		std::vector<ClusterLODGroupSegment> segments;
+		std::vector<ReferencedPageSegment> referencedPageSegments;
 		std::vector<uint32_t> meshPageIndices;
 		uint32_t vertexByteSize = 0;
 		bool valid = false;
@@ -288,6 +321,7 @@ private:
 	std::atomic<uint32_t> m_debugResidentGroups{0};
 	std::atomic<uint32_t> m_debugResidentAllocations{0};
 	std::atomic<uint64_t> m_debugTotalStreamedBytes{0};
+	std::function<void(const CLodPageMapWriteEvent&)> m_clodPageMapWriteCallback;
 	std::atomic<uint32_t> m_clodActiveMaxTraversalDepth{0};
 
 	struct CLodDiskStreamingRequest {
@@ -415,7 +449,7 @@ private:
 	void DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
 	void ReleaseAllCLodGroupChunkAllocations(CLodSharedStreamingState& state);
  	static void ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk);
-	bool ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
+	bool ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool clearPageMapEntries);
 
 	void RebuildCLodSharedStreamingRangeIndex();
 	void RecomputeCLodActiveMaxTraversalDepth();
