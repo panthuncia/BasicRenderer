@@ -122,8 +122,7 @@ public:
 
 	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
 	void GetCLodRayTracingResidencySnapshot(CLodRayTracingResidencySnapshot& outSnapshot) const;
-	void ProcessCLodDiskStreamingIO(
-		uint32_t maxCompletedRequests = 64u);
+	void ProcessCLodDiskStreamingIO();
 
 	// Drains groups that completed disk streaming since the last call.
 	// The extension uses this to learn which groups became resident (or failed)

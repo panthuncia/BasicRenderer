@@ -98,14 +98,11 @@ private:
     void ReconcileStaleDiskIoRequests(MeshManager* meshManager);
     bool PromoteGroupPagesAfterUploadDrain(uint32_t groupIndex);
     void QueuePendingNonResidentBitsUpload();
-    std::vector<uint64_t> BuildExpectedGroupPageKeys(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info) const;
     bool IsPhysicalPageResidentForKey(uint32_t page, uint64_t key) const;
     bool IsPhysicalPagePendingForKey(uint32_t page, uint64_t key) const;
     uint32_t GetPendingMeshPageRefCount(uint32_t page, uint64_t key) const;
     void AddPendingMeshPageReference(uint32_t page, uint64_t key);
     void ReleasePendingMeshPageReference(uint32_t page, uint64_t key);
-    bool ValidateGroupResidencyPages(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys) const;
-    bool ValidateGroupCommittedPageMap(uint32_t groupIndex, const std::vector<uint64_t>& expectedKeys, MeshManager* meshManager) const;
     void RecordPageMapWrite(const MeshManager::CLodPageMapWriteEvent& event);
     void LogPageMapProvenanceForMismatch(const CLodSourceGroupMismatchDetail& detail) const;
     bool SetGroupResidentBit(uint32_t groupIndex, bool resident);
@@ -205,7 +202,6 @@ private:
         uint32_t groupIndex,
         const PreAllocatedPages& pages,
         const MeshManager::CLodDiskStreamingCompletion& completion,
-        const MeshManager::CLodGroupStreamingInfo& info,
         uint32_t expectedPageCount) const;
 
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
@@ -276,6 +272,7 @@ private:
     uint64_t m_streamingNonResidentBitsQueuedEpoch = 0u;
     uint64_t m_streamingNonResidentBitsQueuedTick = 0u;
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
+    std::function<uint32_t()> m_getStreamingCpuUploadBudgetRequests;
 
     std::vector<PendingStreamingRequest> m_pendingStreamingRequests;
     std::vector<uint32_t> m_pendingStreamingRequestHeapIndexByGroup;

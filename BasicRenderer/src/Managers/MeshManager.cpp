@@ -638,8 +638,7 @@ void MeshManager::RecomputeCLodActiveMaxTraversalDepth()
 	m_clodActiveMaxTraversalDepth.store(maxTraversalDepth, std::memory_order_release);
 }
 
-void MeshManager::ProcessCLodDiskStreamingIO(
-	uint32_t maxCompletedRequests) {
+void MeshManager::ProcessCLodDiskStreamingIO() {
 	ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO");
 
 	// Dispatch pending IO requests across the task scheduler's IO workers.
@@ -653,15 +652,9 @@ void MeshManager::ProcessCLodDiskStreamingIO(
 	{
 		ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::DrainResults");
 		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-		const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests,
-			static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
-		if (toDrain > 0u) {
-			localResults.reserve(toDrain);
-			for (uint32_t i = 0; i < toDrain; ++i) {
-				localResults.push_back(std::move(m_clodDiskStreamingResults[i]));
-			}
-			m_clodDiskStreamingResults.erase(m_clodDiskStreamingResults.begin(),
-				m_clodDiskStreamingResults.begin() + toDrain);
+		if (!m_clodDiskStreamingResults.empty()) {
+			localResults = std::move(m_clodDiskStreamingResults);
+			m_clodDiskStreamingResults.clear();
 		}
 	}
 
