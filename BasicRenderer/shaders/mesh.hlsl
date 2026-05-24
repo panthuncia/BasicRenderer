@@ -18,6 +18,7 @@
 #define CLOD_COMPRESSED_NORMALS 4u
 
 static const uint CLOD_TELEMETRY_DISABLED_DESCRIPTOR = 0xFFFFFFFFu;
+#define CLOD_ENABLE_SOURCE_GROUP_VALIDATION 0
 static const uint WG_COUNTER_RASTER_MESH_SHADER_GROUPS = 117u;
 static const uint WG_COUNTER_RASTER_MESH_SHADER_IN_RANGE = 118u;
 static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED = 119u;
@@ -34,6 +35,18 @@ static const uint CLOD_RASTER_INIT_FAILURE_ZERO_PAGE_SLAB = 1u;
 static const uint CLOD_RASTER_INIT_FAILURE_MESHLET_OOB = 2u;
 static const uint CLOD_RASTER_INIT_FAILURE_INVALID_OUTPUT_COUNTS = 3u;
 
+void CLodRasterTelemetryAdd(uint counterIndex, uint value)
+{
+    if (CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX == CLOD_TELEMETRY_DISABLED_DESCRIPTOR || value == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
+    InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
+#if CLOD_ENABLE_SOURCE_GROUP_VALIDATION
 struct CLodSourceGroupMismatchDetail
 {
     uint expectedGroupLocalIndex;
@@ -59,17 +72,6 @@ struct CLodSourceGroupMismatchDetail
     uint bucketCount;
     uint pad0;
 };
-
-void CLodRasterTelemetryAdd(uint counterIndex, uint value)
-{
-    if (CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX == CLOD_TELEMETRY_DISABLED_DESCRIPTOR || value == 0u)
-    {
-        return;
-    }
-
-    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
-    InterlockedAdd(telemetryCounters[counterIndex], value);
-}
 
 void CLodRecordSourceGroupMismatch(
     uint expectedGroupLocalIndex,
@@ -170,6 +172,7 @@ void CLodRecordSourceGroupMismatch(
         ResourceDescriptorHeap[CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX];
     details[detailIndex] = detail;
 }
+#endif
 
 #ifndef CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW
 #define CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW 0
@@ -1114,11 +1117,14 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     // Load per-meshlet descriptor
     CLodMeshletDescriptor desc = LoadMeshletDescriptor(
         pageSlabDesc, pageSlabOff, hdr.descriptorOffset, setup.meshletIndex);
+#if CLOD_ENABLE_SOURCE_GROUP_VALIDATION
     const uint expectedGroupLocalIndex = CLodVisibleClusterGroupID(packedCluster);
     foundSourceGroupLocalIndex = desc.sourceGroupLocalIndex;
     sourceGroupMismatch =
         desc.sourceGroupLocalIndex != 0xFFFFFFFFu &&
         desc.sourceGroupLocalIndex != expectedGroupLocalIndex;
+#else
+#endif
 
     setup.meshlet = (Meshlet)0;
     setup.vertCount = CLodDescVertexCount(desc);
@@ -1234,6 +1240,7 @@ void ClusterLODBucketMSMain(
                     CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_INVALID_OUTPUT_COUNTS, 1u);
                 }
             }
+#if CLOD_ENABLE_SOURCE_GROUP_VALIDATION
             if (sourceGroupMismatch)
             {
                 CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_SOURCE_GROUP_MISMATCH, 1u);
@@ -1250,6 +1257,7 @@ void ClusterLODBucketMSMain(
                     linearizedID,
                     count);
             }
+#endif
         }
     }
 

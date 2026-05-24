@@ -50,14 +50,18 @@ public:
         builder->WithCopySource(inputs.requestsSource);
         builder->WithCopySource(inputs.usedGroupsCounterSource);
         builder->WithCopySource(inputs.usedGroupsBufferSource);
-        builder->WithCopySource(inputs.sourceGroupMismatchCounterSource);
-        builder->WithCopySource(inputs.sourceGroupMismatchDetailsSource);
         builder->WithCopyDest(m_counterStaging);
         builder->WithCopyDest(m_requestsStaging);
         builder->WithCopyDest(m_usedGroupsCounterStaging);
         builder->WithCopyDest(m_usedGroupsBufferStaging);
-        builder->WithCopyDest(m_sourceGroupMismatchCounterStaging);
-        builder->WithCopyDest(m_sourceGroupMismatchDetailsStaging);
+        if (inputs.sourceGroupMismatchCounterSource && m_sourceGroupMismatchCounterStaging) {
+            builder->WithCopySource(inputs.sourceGroupMismatchCounterSource);
+            builder->WithCopyDest(m_sourceGroupMismatchCounterStaging);
+        }
+        if (inputs.sourceGroupMismatchDetailsSource && m_sourceGroupMismatchDetailsStaging) {
+            builder->WithCopySource(inputs.sourceGroupMismatchDetailsSource);
+            builder->WithCopyDest(m_sourceGroupMismatchDetailsStaging);
+        }
         builder->PreferQueue(QueueKind::Copy);
     }
 

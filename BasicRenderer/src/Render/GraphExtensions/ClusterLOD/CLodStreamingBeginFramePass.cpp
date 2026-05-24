@@ -50,7 +50,10 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
 }
 
 void CLodStreamingBeginFramePass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithUnorderedAccess(m_loadCounter, m_loadRequestKeys, m_usedGroupsCounter, m_sourceGroupMismatchCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
+    builder->WithUnorderedAccess(m_loadCounter, m_loadRequestKeys, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
+    if (m_sourceGroupMismatchCounter) {
+        builder->WithUnorderedAccess(m_sourceGroupMismatchCounter);
+    }
 }
 
 void CLodStreamingBeginFramePass::Setup() {}

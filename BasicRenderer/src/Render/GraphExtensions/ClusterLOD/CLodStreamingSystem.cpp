@@ -461,6 +461,7 @@ CLodStreamingSystem::CLodStreamingSystem() {
     m_usedGroupsBuffer->SetName("CLod Used Groups Buffer");
     tagBufferUsage(m_usedGroupsBuffer, "Cluster LOD streaming");
 
+#if 0
     m_sourceGroupMismatchCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_sourceGroupMismatchCounter->SetName("CLod Source Group Mismatch Counter");
     tagBufferUsage(m_sourceGroupMismatchCounter, "Cluster LOD diagnostics");
@@ -474,6 +475,7 @@ CLodStreamingSystem::CLodStreamingSystem() {
         false);
     m_sourceGroupMismatchDetails->SetName("CLod Source Group Mismatch Details");
     tagBufferUsage(m_sourceGroupMismatchDetails, "Cluster LOD diagnostics");
+#endif
 
     // Self-managed readback pipeline
     {
@@ -492,9 +494,6 @@ CLodStreamingSystem::CLodStreamingSystem() {
     const uint64_t requestsStagingBytes = static_cast<uint64_t>(CLodStreamingRequestCapacity) * sizeof(CLodStreamingRequest);
     const uint64_t usedGroupsCounterStagingBytes = sizeof(uint32_t);
     const uint64_t usedGroupsBufferStagingBytes = static_cast<uint64_t>(CLodUsedGroupsCapacity) * sizeof(uint32_t);
-    const uint64_t sourceGroupMismatchCounterStagingBytes = sizeof(uint32_t);
-    const uint64_t sourceGroupMismatchDetailsStagingBytes =
-        static_cast<uint64_t>(CLodSourceGroupMismatchDetailCapacity) * sizeof(CLodSourceGroupMismatchDetail);
     m_readbackStagingSlots.resize(m_streamingReadbackRingSize);
     for (uint32_t i = 0; i < m_streamingReadbackRingSize; ++i) {
         auto& slot = m_readbackStagingSlots[i];
@@ -510,12 +509,17 @@ CLodStreamingSystem::CLodStreamingSystem() {
         slot.usedGroupsBufferStaging = Buffer::CreateShared(rhi::HeapType::Readback, usedGroupsBufferStagingBytes);
         slot.usedGroupsBufferStaging->SetName(("CLodReadbackUsedGroupsBuffer_" + std::to_string(i)).c_str());
         tagBufferUsage(slot.usedGroupsBufferStaging, "Cluster LOD streaming readback");
+#if 0
+        const uint64_t sourceGroupMismatchCounterStagingBytes = sizeof(uint32_t);
+        const uint64_t sourceGroupMismatchDetailsStagingBytes =
+            static_cast<uint64_t>(CLodSourceGroupMismatchDetailCapacity) * sizeof(CLodSourceGroupMismatchDetail);
         slot.sourceGroupMismatchCounterStaging = Buffer::CreateShared(rhi::HeapType::Readback, sourceGroupMismatchCounterStagingBytes);
         slot.sourceGroupMismatchCounterStaging->SetName(("CLodReadbackSourceGroupMismatchCounter_" + std::to_string(i)).c_str());
         tagBufferUsage(slot.sourceGroupMismatchCounterStaging, "Cluster LOD diagnostics readback");
         slot.sourceGroupMismatchDetailsStaging = Buffer::CreateShared(rhi::HeapType::Readback, sourceGroupMismatchDetailsStagingBytes);
         slot.sourceGroupMismatchDetailsStaging->SetName(("CLodReadbackSourceGroupMismatchDetails_" + std::to_string(i)).c_str());
         tagBufferUsage(slot.sourceGroupMismatchDetailsStaging, "Cluster LOD diagnostics readback");
+#endif
     }
 
     // Start the background streaming worker thread.
@@ -1355,10 +1359,12 @@ void CLodStreamingSystem::InitializePageLru(MeshManager* meshManager) {
         pool->SetUploadFunction(uploadFn);
         meshManager->SetCLodStreamingUploadFunction(std::move(uploadFn));
     }
+#if 0
     meshManager->SetCLodPageMapWriteCallback(
         [this](const MeshManager::CLodPageMapWriteEvent& event) {
             RecordPageMapWrite(event);
         });
+#endif
 
     spdlog::info("CLodPageLRU initialized with {} general pages", generalPages);
 }
@@ -1479,7 +1485,7 @@ void CLodStreamingSystem::LogPageOverwriteInvariant(
         return;
     }
 
-    spdlog::warn(
+    spdlog::debug(
         "CLod streaming invariant violation? overwriting page before old users are provably hidden: reason={} newGroup={} seg={} page={} key={} state={} ownerGroup={} residentGroups={} pendingOwner={} requiredNonResidentEpoch={} queuedNonResidentEpoch={} retireQueuedTick={} currentTick={} visibilityDelay={}",
         reason != nullptr ? reason : "unknown",
         newGroupIndex,
@@ -2291,7 +2297,7 @@ bool CLodStreamingSystem::EvictPhysicalPage(uint32_t page, MeshManager* meshMana
 
     for (uint32_t groupIndex : groupsToEvict) {
         SetGroupResidentBit(groupIndex, false);
-        ReleaseGroupResidency(groupIndex, meshManager, true);
+        ReleaseGroupResidency(groupIndex, meshManager, false);
     }
 
     if (page < m_pageState.size() && m_pageState[page] != CLodPhysicalPageState::Retiring) {
@@ -2419,10 +2425,12 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
 
     EnsurePageTrackingCapacity(meshManager);
 
-    const auto expectedKeys = BuildExpectedGroupPageKeys(groupIndex, info);
-    if (expectedKeys.size() == segmentCount) {
-        result.meshPageKeys = expectedKeys;
+    if (info.valid && info.meshPageIndices.size() == segmentCount) {
+        for (uint32_t seg = 0; seg < segmentCount; ++seg) {
+            result.meshPageKeys[seg] = MakeCLodMeshPageKey(info.groupsBase, info.meshPageIndices[seg]);
+        }
     }
+    (void)groupIndex;
 
     uint32_t missingCount = 0;
     for (uint32_t seg = 0; seg < segmentCount; ++seg) {
@@ -2808,6 +2816,8 @@ bool CLodStreamingSystem::ValidateRenderableCompletion(
             return false;
         }
 
+#if 0
+        // Temporary CPU payload source-group validation disabled after page-lifecycle fix.
         const bool needsFetch = completion.segmentNeedsFetch.empty() ||
             seg >= static_cast<uint32_t>(completion.segmentNeedsFetch.size()) ||
             completion.segmentNeedsFetch[seg];
@@ -2853,6 +2863,7 @@ bool CLodStreamingSystem::ValidateRenderableCompletion(
                 page,
                 completion.pageMapEntries[seg]);
         }
+#endif
     }
 
     return true;
@@ -4213,69 +4224,9 @@ void CLodStreamingSystem::StreamingWorkerMain() {
                     }
                 }
 
-                uint32_t sourceGroupMismatchCount = 0;
-                if (slot.sourceGroupMismatchCounterStaging) {
-                    auto apiResource = slot.sourceGroupMismatchCounterStaging->GetAPIResource();
-                    void* mapped = nullptr;
-                    apiResource.Map(&mapped);
-                    if (mapped) {
-                        std::memcpy(&sourceGroupMismatchCount, mapped, sizeof(uint32_t));
-                        apiResource.Unmap(0, 0);
-                    }
-                }
-
-                if (sourceGroupMismatchCount > 0 && slot.sourceGroupMismatchDetailsStaging) {
-                    const uint32_t detailCount =
-                        std::min<uint32_t>(sourceGroupMismatchCount, CLodSourceGroupMismatchDetailCapacity);
-                    auto apiResource = slot.sourceGroupMismatchDetailsStaging->GetAPIResource();
-                    void* mapped = nullptr;
-                    apiResource.Map(&mapped);
-                    if (mapped) {
-                        const auto* details = static_cast<const CLodSourceGroupMismatchDetail*>(mapped);
-                        const uint32_t logCount = std::min<uint32_t>(detailCount, 64u);
-                        for (uint32_t i = 0; i < logCount; ++i) {
-                            const CLodSourceGroupMismatchDetail& d = details[i];
-                            spdlog::error(
-                                "CLod source group mismatch: expectedLocalGroup={} foundLocalGroup={} expectedGlobalGroup={} foundGlobalGroup={} metadata={} groupsBase={} expectedSegment={} expectedMeshPage={} expectedSegmentMeshlets=[{}, {}) expectedSegmentPageMap={}:{} pageLocalMeshlet={} slabDesc={} slabByteOffset={} visibleCluster={} unsortedCluster={} instance={} view={} bucketMeshlet={} bucketCount={}",
-                                d.expectedGroupLocalIndex,
-                                d.foundGroupLocalIndex,
-                                d.expectedGroupGlobalIndex,
-                                d.foundGroupGlobalIndex,
-                                d.clodMeshMetadataIndex,
-                                d.groupsBase,
-                                d.expectedSegmentGlobalIndex,
-                                d.expectedSegmentPageIndex,
-                                d.expectedSegmentFirstMeshlet,
-                                d.expectedSegmentFirstMeshlet + d.expectedSegmentMeshletCount,
-                                d.expectedSegmentPageSlabDescriptorIndex,
-                                d.expectedSegmentPageSlabByteOffset,
-                                d.pageLocalMeshletIndex,
-                                d.pageSlabDescriptorIndex,
-                                d.pageSlabByteOffset,
-                                d.visibleClusterIndex,
-                                d.unsortedClusterIndex,
-                                d.instanceId,
-                                d.viewId,
-                                d.bucketMeshletIndex,
-                                d.bucketCount);
-                            LogPageMapProvenanceForMismatch(d);
-                        }
-                        apiResource.Unmap(0, 0);
-                    }
-
-                    if (sourceGroupMismatchCount > detailCount) {
-                        spdlog::error(
-                            "CLod source group mismatch detail buffer overflow: {} mismatches, {} detail records captured",
-                            sourceGroupMismatchCount,
-                            detailCount);
-                    }
-                    if (detailCount > 64u) {
-                        spdlog::error(
-                            "CLod source group mismatch log truncated: {} detail records captured, {} logged",
-                            detailCount,
-                            64u);
-                    }
-                }
+#if 0
+                // Source-group mismatch readback was temporary CLod streaming diagnostics.
+#endif
 
                 slot.inFlight = false;
             }

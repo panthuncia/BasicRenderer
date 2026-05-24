@@ -101,7 +101,7 @@ MeshManager::MeshManager() {
 		PagePool::Config ppConfig;
 		ppConfig.pageSize     = 256 * 1024;         // 256 KB
 		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.numStreamingSlabs = 1;
+		ppConfig.numStreamingSlabs = 12;
 		ppConfig.debugName    = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}
@@ -1523,40 +1523,6 @@ MeshManager::CLodGroupStreamingInfo MeshManager::GetCLodGroupStreamingInfo(uint3
 		info.pageMapBase = group.pageMapBase;
 		info.meshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
 		info.pageCount = static_cast<uint32_t>(info.meshPageIndices.size());
-		const uint32_t segmentEnd = std::min<uint32_t>(
-			group.firstSegment + group.segmentCount,
-			static_cast<uint32_t>(sharedState->segments.size()));
-		if (group.firstSegment < segmentEnd) {
-			info.segments.assign(
-				sharedState->segments.begin() + group.firstSegment,
-				sharedState->segments.begin() + segmentEnd);
-		}
-
-		for (uint32_t sourceGroupIndex = 0u;
-			sourceGroupIndex < static_cast<uint32_t>(sharedState->groups.size());
-			++sourceGroupIndex) {
-			const ClusterLODGroup& sourceGroup = sharedState->groups[sourceGroupIndex];
-			const uint32_t sourceSegmentEnd = std::min<uint32_t>(
-				sourceGroup.firstSegment + sourceGroup.segmentCount,
-				static_cast<uint32_t>(sharedState->segments.size()));
-			for (uint32_t segmentIndex = sourceGroup.firstSegment;
-				segmentIndex < sourceSegmentEnd;
-				++segmentIndex) {
-				const ClusterLODGroupSegment& segment = sharedState->segments[segmentIndex];
-				if (segment.meshletCount == 0u ||
-					std::find(info.meshPageIndices.begin(), info.meshPageIndices.end(), segment.pageIndex) == info.meshPageIndices.end()) {
-					continue;
-				}
-
-				CLodGroupStreamingInfo::ReferencedPageSegment referencedSegment{};
-				referencedSegment.meshPageIndex = segment.pageIndex;
-				referencedSegment.sourceGroupLocalIndex = sourceGroupIndex;
-				referencedSegment.sourceGroupGlobalIndex = sharedState->groupsBase + sourceGroupIndex;
-				referencedSegment.segmentGlobalIndex = segmentIndex;
-				referencedSegment.segment = segment;
-				info.referencedPageSegments.push_back(referencedSegment);
-			}
-		}
 	}
 	info.vertexByteSize = sharedState->mesh->GetPerMeshCBData().vertexByteSize;
 	info.valid = true;

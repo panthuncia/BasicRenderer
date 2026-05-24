@@ -869,12 +869,23 @@ else()
   )
 endif()
 
-# Link‐only: /DEBUG on RelWithDebInfo
-target_link_options(${PROJECT_NAME} PRIVATE
+# Link-only: /DEBUG on Debug/RelWithDebInfo.
+# Use larger PDB pages for native MSVC to avoid "limit exceeded for program database"
+# when debug symbols grow large.
+set(BASICRENDERER_MSVC_PDB_LINK_OPTIONS
     $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CROSSCOMPILING)
+    list(APPEND BASICRENDERER_MSVC_PDB_LINK_OPTIONS
+        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/PDBPAGESIZE:16384>
+    )
+endif()
+
+target_link_options(${PROJECT_NAME} PRIVATE
+    ${BASICRENDERER_MSVC_PDB_LINK_OPTIONS}
+)
 target_link_options(ShaderPreprocessTests PRIVATE
-    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
+    ${BASICRENDERER_MSVC_PDB_LINK_OPTIONS}
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
