@@ -283,7 +283,8 @@ namespace
 			return false;
 		}
 
-		if (prebuilt.groupDiskLocators.size() != prebuilt.groups.size()) {
+		const uint32_t expectedPageCount = prebuilt.voxelPageBase + prebuilt.voxelPageCount;
+		if (expectedPageCount == 0u || prebuilt.pageDiskLocators.size() != expectedPageCount) {
 			outReason = "missing disk-backed ClusterLOD locators";
 			return false;
 		}
@@ -311,7 +312,7 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 			m_vertexSize,
 			m_indices.size(),
 			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->groups.size() : 0ull,
-			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->groupDiskLocators.size() : 0ull);
+			prebuiltClusterLOD.has_value() ? prebuiltClusterLOD->pageDiskLocators.size() : 0ull);
 		return nullptr;
 	}
 
@@ -378,6 +379,7 @@ void Mesh::ClearCLodCacheBuildChunkData(bool shrinkToFit)
 	};
 
 	clearChunkStorage(m_clodCacheBuildChunkData.groupPageBlobs);
+	clearChunkStorage(m_clodCacheBuildChunkData.meshPageBlobs);
 }
 
 void Mesh::ReleaseCLodChunkUploadData()
@@ -401,7 +403,7 @@ void Mesh::ReleaseCLodGroupChunkMetadataCpuData()
 
 void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 {
-	const bool hasDiskBackedStreamingSource = !data.groupDiskLocators.empty() && !data.cacheSource.containerFileName.empty();
+	const bool hasDiskBackedStreamingSource = !data.pageDiskLocators.empty() && !data.cacheSource.containerFileName.empty();
 
 	m_clodGroups = data.groups;
 	m_clodSegments = data.segments;
@@ -416,13 +418,34 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodSegments, m_clodGroupChunks);
 	ClearCLodCacheBuildChunkData(false);
 	m_clodGroupDiskLocators = data.groupDiskLocators;
+	m_clodPageDiskLocators = data.pageDiskLocators;
+	m_clodGroupPageReferences = data.groupPageReferences;
+	m_clodGroupPageReferenceOffsets = data.groupPageReferenceOffsets;
+	m_clodTrianglePageCount = data.trianglePageCount;
+	m_clodVoxelPageBase = data.voxelPageBase;
+	m_clodVoxelPageCount = data.voxelPageCount;
 	m_clodCacheSource = data.cacheSource;
 	m_clodNodes = data.nodes;
 	m_clodLodNodeRanges = data.lodNodeRanges;
 	m_clodLodLevelRoots = data.lodLevelRoots;
 	m_clodTopRootNode = 0;
 	m_perMeshBufferData.boundingSphere = data.objectBoundingSphere;
-	m_voxelGroupMapping = data.voxelGroupMapping;
+	{
+		uint32_t voxelGroupCount = 0;
+		for (const ClusterLODGroup& group : m_clodGroups) {
+			if ((group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u) {
+				voxelGroupCount++;
+			}
+		}
+		if (voxelGroupCount != 0u) {
+			spdlog::info(
+				"ClusterLOD runtime adoption: groups={} voxel_groups={} nodes={} cache_hash=0x{:016X}",
+				m_clodGroups.size(),
+				voxelGroupCount,
+				m_clodNodes.size(),
+				data.cacheSource.buildConfigHash);
+		}
+	}
 
 	m_clodMaxDepth = data.maxDepth;
 	m_clodMaxTraversalDepth = data.maxTraversalDepth;
@@ -453,11 +476,17 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 
 void Mesh::AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data)
 {
-	if (data.groupDiskLocators.empty() || data.cacheSource.containerFileName.empty()) {
+	if (data.pageDiskLocators.empty() || data.cacheSource.containerFileName.empty()) {
 		return;
 	}
 
 	m_clodGroupDiskLocators = data.groupDiskLocators;
+	m_clodPageDiskLocators = data.pageDiskLocators;
+	m_clodGroupPageReferences = data.groupPageReferences;
+	m_clodGroupPageReferenceOffsets = data.groupPageReferenceOffsets;
+	m_clodTrianglePageCount = data.trianglePageCount;
+	m_clodVoxelPageBase = data.voxelPageBase;
+	m_clodVoxelPageCount = data.voxelPageCount;
 	m_clodCacheSource = data.cacheSource;
 
 	if (m_clodGroupChunks.size() != m_clodGroups.size()) {
@@ -481,13 +510,18 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.objectBoundingSphere = m_perMeshBufferData.boundingSphere;
 	out.groupChunks = m_clodGroupChunks;
 	out.groupDiskLocators = m_clodGroupDiskLocators;
+	out.pageDiskLocators = m_clodPageDiskLocators;
+	out.groupPageReferences = m_clodGroupPageReferences;
+	out.groupPageReferenceOffsets = m_clodGroupPageReferenceOffsets;
+	out.trianglePageCount = m_clodTrianglePageCount;
+	out.voxelPageBase = m_clodVoxelPageBase;
+	out.voxelPageCount = m_clodVoxelPageCount;
 	out.cacheSource = m_clodCacheSource;
 	out.nodes = m_clodNodes;
 	out.lodNodeRanges = m_clodLodNodeRanges;
 	out.lodLevelRoots = m_clodLodLevelRoots;
 	out.maxDepth = m_clodMaxDepth;
 	out.maxTraversalDepth = m_clodMaxTraversalDepth;
-	out.voxelGroupMapping = m_voxelGroupMapping;
 	return out;
 }
 
@@ -495,6 +529,7 @@ ClusterLODCacheBuildPayload Mesh::GetClusterLODCacheBuildPayload() const
 {
 	ClusterLODCacheBuildPayload payload{};
 	payload.groupPageBlobs = &m_clodCacheBuildChunkData.groupPageBlobs;
+	payload.meshPageBlobs = &m_clodCacheBuildChunkData.meshPageBlobs;
 	return payload;
 }
 
@@ -502,6 +537,7 @@ ClusterLODCacheBuildOwnedData Mesh::GetClusterLODCacheBuildOwnedData() const
 {
 	ClusterLODCacheBuildOwnedData owned{};
 	owned.groupPageBlobs = m_clodCacheBuildChunkData.groupPageBlobs;
+	owned.meshPageBlobs = m_clodCacheBuildChunkData.meshPageBlobs;
 	return owned;
 }
 
@@ -520,36 +556,6 @@ int Mesh::GetNextGlobalIndex() {
 
 uint64_t Mesh::GetGlobalID() const {
 	return m_globalMeshID;
-}
-
-void Mesh::SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
-	m_preSkinningVertexBufferView = std::move(view);
-	if (m_preSkinningVertexBufferView != nullptr) {
-		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_preSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
-	}
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-
-void Mesh::SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
-	m_postSkinningVertexBufferView = std::move(view);
-	if (m_postSkinningVertexBufferView != nullptr) {
-		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_postSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
-	}
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-
-BufferView* Mesh::GetPreSkinningVertexBufferView() {
-	return m_preSkinningVertexBufferView.get();
-}
-
-BufferView* Mesh::GetPostSkinningVertexBufferView() {
-	return m_postSkinningVertexBufferView.get();
 }
 
 void Mesh::SetCLodBufferViews(
@@ -594,9 +600,6 @@ void Mesh::SetCLodBufferViews(
 		return 0u;
 	};
 
-	m_perMeshBufferData.clodMeshletBufferOffset = firstChunkOffsetDiv(m_clodMeshletChunkViews, sizeof(meshopt_Meshlet));
-	m_perMeshBufferData.clodMeshletVerticesBufferOffset = firstChunkOffsetDiv(m_clodMeshletVertexChunkViews, sizeof(uint32_t));
-	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = firstChunkOffsetBytes(m_clodMeshletTriangleChunkViews); // Intentionally in bytes to index byteaddressbuffer
 	uint32_t totalMeshletCount = 0;
 	for (const auto& group : m_clodGroups) {
 		totalMeshletCount += group.meshletCount;

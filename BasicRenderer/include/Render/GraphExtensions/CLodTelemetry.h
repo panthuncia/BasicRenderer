@@ -127,6 +127,38 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     ClusterCullBucketRecordsDispatched,
     ClusterCullDenseExpansionBuckets,
     ClusterCullDenseClustersDispatched,
+    TraverseNodesVoxelLeafRecords,
+    TraverseNodesVoxelRejectedByErrorRecords,
+    TraverseNodesVoxelDescriptorHits,
+    TraverseNodesVoxelDescriptorMisses,
+    TraverseNodesVoxelRasterWorkRecords,
+    TraverseNodesVoxelRasterWorkDropped,
+
+    RasterSortHistogramInputs,
+    RasterSortHistogramVoxelSkipped,
+    RasterSortHistogramReyesSkipped,
+    RasterSortHistogramTriangleContributors,
+    RasterSortCompactionInputs,
+    RasterSortCompactionVoxelSkipped,
+    RasterSortCompactionReyesSkipped,
+    RasterSortCompactionTriangleEmitted,
+
+    RasterMeshShaderGroups,
+    RasterMeshShaderInRange,
+    RasterMeshShaderInitFailed,
+    RasterMeshShaderOutputTriangles,
+    RasterMeshShaderZeroTriangleOutputs,
+    RasterMeshShaderInitFailedZeroPageSlab,
+    RasterMeshShaderInitFailedMeshletOutOfBounds,
+    RasterMeshShaderInitFailedInvalidOutputCounts,
+    RasterPixelShaderInvocations,
+    RasterPixelScissorRejected,
+    RasterPixelTargetBoundsRejected,
+    RasterPixelVisibilityWrites,
+    RasterPixelVirtualShadowClipmapRejected,
+    RasterPixelVirtualShadowPageRejected,
+    RasterPixelVirtualShadowWrites,
+    RasterMeshShaderSourceGroupMismatch,
 
     Count
 };
@@ -137,6 +169,35 @@ inline constexpr uint32_t CLodWorkGraphCounterCount =
 struct CLodWorkGraphTelemetryCounters {
     std::array<uint32_t, CLodWorkGraphCounterCount> counters{};
 };
+
+inline constexpr uint32_t CLodSourceGroupMismatchDetailCapacity = 1024u;
+
+struct CLodSourceGroupMismatchDetail {
+    uint32_t expectedGroupLocalIndex = 0xFFFFFFFFu;
+    uint32_t foundGroupLocalIndex = 0xFFFFFFFFu;
+    uint32_t expectedGroupGlobalIndex = 0xFFFFFFFFu;
+    uint32_t foundGroupGlobalIndex = 0xFFFFFFFFu;
+    uint32_t clodMeshMetadataIndex = 0xFFFFFFFFu;
+    uint32_t groupsBase = 0u;
+    uint32_t expectedSegmentGlobalIndex = 0xFFFFFFFFu;
+    uint32_t expectedSegmentPageIndex = 0xFFFFFFFFu;
+    uint32_t expectedSegmentFirstMeshlet = 0u;
+    uint32_t expectedSegmentMeshletCount = 0u;
+    uint32_t expectedSegmentPageSlabDescriptorIndex = 0u;
+    uint32_t expectedSegmentPageSlabByteOffset = 0u;
+    uint32_t pageLocalMeshletIndex = 0xFFFFFFFFu;
+    uint32_t pageSlabDescriptorIndex = 0u;
+    uint32_t pageSlabByteOffset = 0u;
+    uint32_t visibleClusterIndex = 0xFFFFFFFFu;
+    uint32_t unsortedClusterIndex = 0xFFFFFFFFu;
+    uint32_t instanceId = 0xFFFFFFFFu;
+    uint32_t viewId = 0xFFFFFFFFu;
+    uint32_t bucketMeshletIndex = 0u;
+    uint32_t bucketCount = 0u;
+    uint32_t pad0 = 0u;
+};
+
+static_assert(sizeof(CLodSourceGroupMismatchDetail) == 88u, "CLodSourceGroupMismatchDetail size must match HLSL");
 
 inline constexpr uint32_t CLodDirectionalShadowDebugMaxClipmaps = 16u;
 

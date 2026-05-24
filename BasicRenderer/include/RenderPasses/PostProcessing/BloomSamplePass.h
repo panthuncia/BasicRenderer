@@ -181,7 +181,7 @@ private:
 
         sib.pixelShader = { L"shaders/PostProcessing/bloomUpsample.hlsl", L"upsample", L"ps_6_6" };
         auto compiledUp = PSOManager::GetInstance().CompileShaders(sib);
-        rhi::SubobjShader soPS_up{ rhi::ShaderStage::Pixel, rhi::DXIL(compiledUp.pixelShader.Get()) };
+        rhi::SubobjShader soPS_up{ rhi::ShaderStage::Pixel, rhi::DXIL(compiledUp.pixelShader.Get()), "upsample" };
 
         rhi::BlendState bsUp{};
         bsUp.alphaToCoverage = false;

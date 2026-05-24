@@ -16,6 +16,10 @@ class EnvironmentManager;
 class MaterialManager;
 class PixelBuffer;
 
+namespace br::render {
+class CLodRayTracingSystem;
+}
+
 struct RenderContext {
 	Components::DrawStats drawStats;
 	ObjectManager* objectManager;
@@ -25,6 +29,7 @@ struct RenderContext {
     LightManager* lightManager;
 	EnvironmentManager* environmentManager;
 	MaterialManager* materialManager;
+	br::render::CLodRayTracingSystem* clodRayTracingSystem = nullptr;
 
     Scene* currentScene;
 	Components::Camera primaryCamera;
@@ -42,6 +47,8 @@ struct RenderContext {
     DirectX::XMUINT2 renderResolution;
 	DirectX::XMUINT2 outputResolution;
     unsigned int globalPSOFlags;
+	bool rayTracedReflectionsEnabled = false;
+	bool clodRayTracingSupported = false;
 	float deltaTime;
 	br::render::SceneOverlapStatus sceneOverlapStatus;
 };

@@ -18,6 +18,8 @@ float SkinningMaxAxisScale_RowVector(float4x4 M)
     return max(sx, max(sy, sz));
 }
 
+float4x4 IdentitySkinMatrix();
+
 float4x4 LoadBoneSkinMatrix(uint skinningInstanceSlot, uint jointIndex)
 {
     if (!IsValidSkinningInstanceSlot(skinningInstanceSlot))
@@ -40,6 +42,22 @@ float4x4 LoadBoneSkinMatrix(uint skinningInstanceSlot, uint jointIndex)
     matrix bone = boneTransformsBuffer[skinningInfo.transformOffsetMatrices + jointIndex];
     matrix bind = inverseBindMatricesBuffer[skinningInfo.invBindOffsetMatrices + jointIndex];
     return transpose(mul(bone, bind));
+}
+
+float4x4 LoadBoneInverseSkinMatrix(uint skinningInstanceSlot, uint jointIndex)
+{
+    if (!IsValidSkinningInstanceSlot(skinningInstanceSlot))
+    {
+        return IdentitySkinMatrix();
+    }
+
+    StructuredBuffer<SkinningInstanceGPUInfo> skinningInstanceBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::SkinningInstanceInfo)];
+    StructuredBuffer<float4x4> inverseSkinMatricesBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::InverseSkinMatrices)];
+
+    SkinningInstanceGPUInfo skinningInfo = skinningInstanceBuffer[skinningInstanceSlot];
+    return transpose(inverseSkinMatricesBuffer[skinningInfo.inverseSkinOffsetMatrices + jointIndex]);
 }
 
 float4x4 IdentitySkinMatrix()

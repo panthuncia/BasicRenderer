@@ -5,6 +5,7 @@
 // Supported formats (auto-detected by extension):
 //   .usd / .usda / .usdc / .usdz    -> USD
 //   .gltf / .glb                     -> glTF
+//   .nif                             -> BRNifly -> USD
 //   anything else (fbx, obj, ...)    -> Assimp
 //
 // Caches are written to the same location the renderer would use,
@@ -26,6 +27,10 @@
 #include "Import/GlTFGeometryExtractor.h"
 #include "Import/AssimpGeometryExtractor.h"
 #include "Import/USDGeometryExtractor.h"
+#include "Import/BRNiflyClient.h"
+
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/usd/stage.h>
 
 namespace fs = std::filesystem;
 
@@ -37,7 +42,7 @@ static std::string ToLower(std::string s) {
     return s;
 }
 
-enum class AssetFormat { USD, GlTF, Assimp };
+enum class AssetFormat { USD, GlTF, Nif, Assimp };
 
 static AssetFormat DetectFormat(const fs::path& path) {
     auto ext = ToLower(path.extension().string());
@@ -45,6 +50,8 @@ static AssetFormat DetectFormat(const fs::path& path) {
         return AssetFormat::USD;
     if (ext == ".gltf" || ext == ".glb")
         return AssetFormat::GlTF;
+    if (ext == ".nif")
+        return AssetFormat::Nif;
     return AssetFormat::Assimp;   // fbx, obj, dae, ...
 }
 
@@ -52,9 +59,51 @@ static const char* FormatName(AssetFormat f) {
     switch (f) {
         case AssetFormat::USD:   return "USD";
         case AssetFormat::GlTF:  return "glTF";
+        case AssetFormat::Nif: return "NIF";
         case AssetFormat::Assimp: return "Assimp";
     }
     return "?";
+}
+
+static void SetProcessEnvironment(const char* name, const std::string& value) {
+#if defined(_WIN32)
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
+static bool TryConsumeOption(const std::string& arg) {
+    constexpr const char* modePrefix = "--clod-voxel-mode=";
+    constexpr const char* gridPrefix = "--clod-voxel-grid=";
+    constexpr const char* minResPrefix = "--clod-voxel-min-res=";
+    constexpr const char* raysPrefix = "--clod-voxel-rays=";
+    constexpr const char* scalePrefix = "--clod-voxel-scale=";
+    constexpr const char* retriesPrefix = "--clod-voxel-retries=";
+    constexpr const char* growthPrefix = "--clod-voxel-growth=";
+    constexpr const char* biasPrefix = "--clod-voxel-acceptance-bias=";
+    constexpr const char* opacityPrefix = "--clod-voxel-opacity-threshold=";
+    constexpr const char* pruningPrefix = "--clod-voxel-pruning=";
+
+    auto consumeValue = [&arg](const char* prefix, const char* envName) -> bool {
+        const std::string prefixString(prefix);
+        if (arg.rfind(prefixString, 0) != 0) {
+            return false;
+        }
+        SetProcessEnvironment(envName, arg.substr(prefixString.size()));
+        return true;
+    };
+
+    return consumeValue(modePrefix, "BASICRENDERER_CLOD_VOXEL_MODE") ||
+        consumeValue(gridPrefix, "BASICRENDERER_CLOD_VOXEL_GRID") ||
+        consumeValue(minResPrefix, "BASICRENDERER_CLOD_VOXEL_MIN_RES") ||
+        consumeValue(raysPrefix, "BASICRENDERER_CLOD_VOXEL_RAYS") ||
+        consumeValue(scalePrefix, "BASICRENDERER_CLOD_VOXEL_SCALE") ||
+        consumeValue(retriesPrefix, "BASICRENDERER_CLOD_VOXEL_RETRIES") ||
+        consumeValue(growthPrefix, "BASICRENDERER_CLOD_VOXEL_GROWTH") ||
+        consumeValue(biasPrefix, "BASICRENDERER_CLOD_VOXEL_ACCEPTANCE_BIAS") ||
+        consumeValue(opacityPrefix, "BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD") ||
+        consumeValue(pruningPrefix, "BASICRENDERER_CLOD_VOXEL_PRUNING");
 }
 
 // Processing
@@ -90,6 +139,44 @@ static bool ProcessFile(const fs::path& path) {
                          result.primitives.size());
             if (result.primitives.empty())
                 spdlog::warn("  No primitives found in glTF file!");
+            break;
+        }
+        case AssetFormat::Nif: {
+            spdlog::info("  Converting NIF through BRNifly...");
+            std::string errorMessage;
+            auto package = BRNiflyClient::ConvertNifToUsd(pathStr, {}, &errorMessage);
+            if (!package) {
+                spdlog::error("  BRNifly conversion failed: {}", errorMessage);
+                return false;
+            }
+
+            for (const auto& diagnostic : package->diagnostics) {
+                if (diagnostic.level == "warning")
+                    spdlog::warn("  BRNifly: {}", diagnostic.message);
+                else if (diagnostic.level == "error")
+                    spdlog::error("  BRNifly: {}", diagnostic.message);
+                else
+                    spdlog::info("  BRNifly: {}", diagnostic.message);
+            }
+
+            auto layer = pxr::SdfLayer::CreateAnonymous("brnifly_clod.usda");
+            if (!layer || !layer->ImportFromString(package->rootLayerText)) {
+                spdlog::error("  Failed to import BRNifly USDA payload.");
+                return false;
+            }
+            auto stage = pxr::UsdStage::Open(layer);
+            if (!stage) {
+                spdlog::error("  Failed to open BRNifly USDA stage.");
+                return false;
+            }
+
+            auto result = USDGeometryExtractor::ExtractAllFromStage(stage, package->sourceIdentifier);
+            spdlog::info("  NIF/USD result: meshes={}, submeshes={}, caches_built={}",
+                         result.meshesProcessed,
+                         result.submeshesProcessed,
+                         result.cachesBuilt);
+            if (result.meshesProcessed == 0)
+                spdlog::warn("  No UsdGeomMesh prims found in converted NIF stage!");
             break;
         }
         case AssetFormat::Assimp: {
@@ -137,7 +224,7 @@ int main(int argc, char* argv[]) {
 
     if (argc < 2) {
         spdlog::error("No arguments provided.");
-        std::cerr << "Usage: CLodCacheTool <file1|dir1> [file2|dir2 ...]\n";
+            std::cerr << "Usage: CLodCacheTool [--clod-voxel-mode=mesh|auto|voxel] <file1|dir1> [file2|dir2 ...]\n";
         return 1;
     }
 
@@ -153,6 +240,12 @@ int main(int argc, char* argv[]) {
     // Gather files
     std::vector<fs::path> files;
     for (int i = 1; i < argc; ++i) {
+        const std::string arg(argv[i]);
+        if (TryConsumeOption(arg)) {
+            spdlog::info("Consumed option: {}", arg);
+            continue;
+        }
+
         fs::path p(argv[i]);
         if (!fs::exists(p)) {
             spdlog::warn("Skipping non-existent path: {}", argv[i]);

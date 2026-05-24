@@ -51,18 +51,21 @@ enum class SceneFiletype {
 	OTHER,
 	GLTF,
 	USD,
+	NIF,
 };
 
 enum class SceneLoader {
 	UNKNOWN,
 	GlTF,
 	Assimp,
-	OpenUSD
+	OpenUSD,
+	Nif
 };
 
 static std::unordered_map<SceneFiletype, SceneLoader> sceneFiletypeToLoader = {
 	{SceneFiletype::GLTF, SceneLoader::GlTF},
 	{SceneFiletype::USD, SceneLoader::OpenUSD},
+	{SceneFiletype::NIF, SceneLoader::Nif},
 	{SceneFiletype::OTHER, SceneLoader::Assimp} // default loader
 };
 
@@ -76,6 +79,11 @@ static std::unordered_set<std::string> usdFileExtensions = {
 	"usd", "usda", "usdc", "usdz"
 };
 
+static std::unordered_set<std::string> nifFileExtensions = {
+	".nif",
+	"nif"
+};
+
 inline bool isUsdExt(const std::string& ext) {
 	return usdFileExtensions.contains(ext);
 }
@@ -84,12 +92,19 @@ inline bool isGltfExt(const std::string& ext) {
 	return gltfFileExtensions.contains(ext);
 }
 
+inline bool isNifExt(const std::string& ext) {
+	return nifFileExtensions.contains(ext);
+}
+
 inline SceneFiletype GetSceneFiletype(const std::string& ext) {
 	if (isGltfExt(ext)) {
 		return SceneFiletype::GLTF;
 	}
 	if (isUsdExt(ext)) {
 		return SceneFiletype::USD;
+	}
+	if (isNifExt(ext)) {
+		return SceneFiletype::NIF;
 	}
 	return SceneFiletype::OTHER;
 }

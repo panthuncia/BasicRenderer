@@ -257,6 +257,19 @@ public:
     bool HasUsableImage() const { return m_image && m_image->HasValidBackingResource(); }
     uint64_t GetBindingRevision() const { return m_streamingState.bindingRevision; }
     uint64_t GetStreamingStateRevision() const { return m_streamingState.stateRevision; }
+    bool HasPendingUploadWork() const {
+        const bool needsStreamingReload =
+            m_hasUploadedFinalImage &&
+            m_streamingState.enabled &&
+            HasStreamingSourceData() &&
+            m_streamingState.pendingTopMip != m_streamingState.residency.residentTopMip;
+        return !HasUsableImage() ||
+            needsStreamingReload ||
+            m_hasUploadedPlaceholder ||
+            m_processingHandle != nullptr ||
+            m_reloadHandle != nullptr ||
+            m_directStorageReloadHandle != nullptr;
+    }
     uint32_t GetFullMip0Width() const { return m_sourceFullWidth != 0u ? m_sourceFullWidth : GetWidth(); }
     uint32_t GetFullMip0Height() const { return m_sourceFullHeight != 0u ? m_sourceFullHeight : GetHeight(); }
     void ApplyStreamingSystemRequest(uint32_t topMip, uint64_t frameIndex = 0);

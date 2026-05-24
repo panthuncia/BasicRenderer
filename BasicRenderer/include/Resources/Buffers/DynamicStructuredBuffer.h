@@ -72,6 +72,11 @@ public:
     }
 
     void UpdateAt(UINT index, const T& element) {
+        EnsureCapacityForIndex(index);
+        if (static_cast<size_t>(index) >= m_data.size()) {
+            m_data.resize(static_cast<size_t>(index) + 1u);
+        }
+        m_data[index] = element;
         StageOrUpload(&element, sizeof(T), index * sizeof(T));
     }
 
@@ -97,6 +102,18 @@ private:
         m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
     }
 
+    bool HasPendingUploadPolicyWork() const override {
+        return m_uploadPolicyState.HasPendingWork();
+    }
+
+    uint64_t GetUploadPolicyLastFlushWrites() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedWrites;
+    }
+
+    uint64_t GetUploadPolicyLastFlushBytes() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedBytes;
+    }
+
     void OnSetName() override {
         SetBackingName(m_name, name);
     }
@@ -110,6 +127,19 @@ private:
     bool m_UAV = false;
 
     std::vector<EntityComponentBundle> m_metadataBundles;
+
+    void EnsureCapacityForIndex(size_t index) {
+        if (index < m_capacity) {
+            return;
+        }
+
+        uint32_t newCapacity = m_capacity > 0u ? m_capacity : 1u;
+        while (index >= static_cast<size_t>(newCapacity)) {
+            newCapacity *= 2u;
+        }
+
+        Resize(newCapacity);
+    }
 
     void SyncUploadPolicyState() {
         const auto tag = GetUploadPolicyTag();
@@ -138,6 +168,7 @@ private:
         const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
         if (staged) {
+            MarkUploadPolicyDirty();
             return;
         }
 

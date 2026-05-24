@@ -4,8 +4,12 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/propertySpec.h>
+#include <pxr/usd/usd/attribute.h>
 #include <spdlog/spdlog.h>
 
 #include "Utilities/CachePathUtilities.h"
@@ -15,12 +19,43 @@ namespace CLodCacheLoader {
 namespace {
 	constexpr const char* kFullMeshSubsetSentinel = "__clod_full_mesh__";
 
+	const char* ToVoxelFallbackModeString(ClusterLODVoxelFallbackMode mode)
+	{
+		switch (mode)
+		{
+		case ClusterLODVoxelFallbackMode::Auto:
+			return "auto";
+		case ClusterLODVoxelFallbackMode::MeshOnly:
+			return "mesh-only";
+		case ClusterLODVoxelFallbackMode::VoxelOnly:
+			return "voxel-only";
+		default:
+			return "unknown";
+		}
+	}
+
+	const char* ToVoxelPruningModeString(ClusterLODVoxelPruningMode mode)
+	{
+		switch (mode)
+		{
+		case ClusterLODVoxelPruningMode::None:
+			return "none";
+		case ClusterLODVoxelPruningMode::Coverage:
+			return "coverage";
+		case ClusterLODVoxelPruningMode::Spatial:
+			return "spatial";
+		default:
+			return "unknown";
+		}
+	}
+
 		std::mutex& GetCacheSaveMutexForIdentity(const MeshCacheIdentity& identity)
 		{
 			static std::mutex cacheMutexTableGuard;
 			static std::unordered_map<std::string, std::unique_ptr<std::mutex>> cacheMutexTable;
 
-			const std::string key = identity.sourceIdentifier + "|" + identity.primPath + "|" + identity.subsetName;
+			const std::string key = identity.sourceIdentifier + "|" + identity.primPath + "|" + identity.subsetName +
+				(identity.doubleSidedVoxelSourceNormals ? "|double-sided-voxel-normals" : "");
 
 			std::lock_guard<std::mutex> lock(cacheMutexTableGuard);
 			auto& mutexPtr = cacheMutexTable[key];
@@ -41,14 +76,114 @@ namespace {
 		key.sourceIdentifier = identity.sourceIdentifier;
 		key.primPath = identity.primPath;
 		key.subsetName = NormalizeSubsetName(identity.subsetName);
+		if (identity.doubleSidedVoxelSourceNormals) {
+			key.subsetName += "|double-sided-voxel-normals";
+		}
 		return key;
+	}
+
+	struct LayerPrimIdentity {
+		std::string sourceIdentifier;
+		std::string primPath;
+	};
+
+	std::string GetLayerCacheSourceIdentifier(const pxr::SdfLayerHandle& layer)
+	{
+		if (!layer) {
+			return {};
+		}
+
+		const std::string& realPath = layer->GetRealPath();
+		return NormalizeCacheSourcePath(realPath.empty() ? layer->GetIdentifier() : realPath);
+	}
+
+	std::optional<LayerPrimIdentity> GetStrongestAuthoredValueIdentity(
+		const pxr::UsdAttribute& attr,
+		pxr::UsdTimeCode geomTimeCode)
+	{
+		if (!attr) {
+			return std::nullopt;
+		}
+
+		for (const auto& spec : attr.GetPropertyStack(geomTimeCode)) {
+			if (!spec || !spec->GetLayer()) {
+				continue;
+			}
+
+			const bool hasTimeSamples =
+				!spec->GetLayer()->ListTimeSamplesForPath(spec->GetPath()).empty();
+			if (!spec->HasDefaultValue() && !hasTimeSamples) {
+				continue;
+			}
+
+			LayerPrimIdentity identity{};
+			identity.sourceIdentifier = GetLayerCacheSourceIdentifier(spec->GetLayer());
+			identity.primPath = spec->GetPath().GetPrimPath().GetString();
+			if (!identity.sourceIdentifier.empty() && !identity.primPath.empty()) {
+				return identity;
+			}
+		}
+
+		return std::nullopt;
+	}
+
+	std::optional<LayerPrimIdentity> GetReferencedGeometryIdentity(
+		const pxr::UsdGeomMesh& mesh,
+		pxr::UsdTimeCode geomTimeCode)
+	{
+		const std::optional<LayerPrimIdentity> pointsIdentity =
+			GetStrongestAuthoredValueIdentity(mesh.GetPointsAttr(), geomTimeCode);
+		const std::optional<LayerPrimIdentity> countsIdentity =
+			GetStrongestAuthoredValueIdentity(mesh.GetFaceVertexCountsAttr(), geomTimeCode);
+		const std::optional<LayerPrimIdentity> indicesIdentity =
+			GetStrongestAuthoredValueIdentity(mesh.GetFaceVertexIndicesAttr(), geomTimeCode);
+
+		if (!pointsIdentity || !countsIdentity || !indicesIdentity) {
+			return std::nullopt;
+		}
+
+		const auto matchesPoints = [&pointsIdentity](const LayerPrimIdentity& other) {
+			return other.sourceIdentifier == pointsIdentity->sourceIdentifier &&
+				other.primPath == pointsIdentity->primPath;
+		};
+
+		if (!matchesPoints(*countsIdentity) || !matchesPoints(*indicesIdentity)) {
+			return std::nullopt;
+		}
+
+		return pointsIdentity;
+	}
+
+	void LogBuildConfigOnce(uint64_t buildHash)
+	{
+		static std::once_flag logOnce;
+		std::call_once(logOnce, [buildHash]() {
+			const ClusterLODBuilderSettings effectiveSettings = ApplyClusterLODBuilderEnvironmentOverrides({});
+			spdlog::info(
+				"CLod cache build config: hash=0x{:016X} voxel_enabled={} voxel_mode='{}' voxel_grid={} voxel_rays={} voxel_scale={} voxel_opacity_threshold={} voxel_pruning='{}' env_mode='{}' env_grid='{}' env_rays='{}' env_scale='{}' env_opacity_threshold='{}' env_pruning='{}'",
+				buildHash,
+				effectiveSettings.enableVoxelFallback,
+				ToVoxelFallbackModeString(effectiveSettings.voxelFallbackMode),
+				effectiveSettings.voxelGridBaseResolution,
+				effectiveSettings.voxelRaysPerCell,
+				effectiveSettings.voxelFallbackScalingFactor,
+				effectiveSettings.voxelFallbackOpacityThreshold,
+				ToVoxelPruningModeString(effectiveSettings.voxelFallbackPruningMode),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_MODE"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_GRID"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_RAYS"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_SCALE"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_OPACITY_THRESHOLD"),
+				GetClusterLODEnvironmentVariable("BASICRENDERER_CLOD_VOXEL_PRUNING"));
+		});
 	}
 }
 
 MeshCacheIdentity BuildIdentity(
 	const pxr::UsdGeomMesh& mesh,
 	const pxr::UsdStageRefPtr& stage,
-	const std::string& subsetName)
+	const std::string& subsetName,
+	pxr::UsdTimeCode geomTimeCode)
 {
 	MeshCacheIdentity identity{};
 	if (stage && stage->GetRootLayer()) {
@@ -57,6 +192,26 @@ MeshCacheIdentity BuildIdentity(
 	}
 	identity.primPath = mesh.GetPrim().GetPath().GetString();
 	identity.subsetName = subsetName;
+
+	if (auto referencedGeometryIdentity = GetReferencedGeometryIdentity(mesh, geomTimeCode)) {
+		identity.sourceIdentifier = std::move(referencedGeometryIdentity->sourceIdentifier);
+		identity.primPath = std::move(referencedGeometryIdentity->primPath);
+	}
+
+	return identity;
+}
+
+MeshCacheIdentity BuildIdentity(
+	const pxr::UsdGeomMesh& mesh,
+	const pxr::UsdStageRefPtr& stage,
+	const std::string& subsetName,
+	pxr::UsdTimeCode geomTimeCode,
+	const std::string& sourceIdentifierOverride)
+{
+	MeshCacheIdentity identity = BuildIdentity(mesh, stage, subsetName, geomTimeCode);
+	if (!sourceIdentifierOverride.empty()) {
+		identity.sourceIdentifier = NormalizeCacheSourcePath(sourceIdentifierOverride);
+	}
 	return identity;
 }
 
@@ -64,6 +219,7 @@ std::optional<ClusterLODPrebuiltData> TryLoadPrebuilt(const MeshCacheIdentity& i
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	LogBuildConfigOnce(buildHash);
 	spdlog::debug("CLodCacheLoader::TryLoadPrebuilt  src='{}' prim='{}' subset='{}' hash=0x{:X}",
 		identity.sourceIdentifier, identity.primPath, identity.subsetName, buildHash);
 	auto cached = CLodCache::TryLoad(cacheKey, buildHash);
@@ -80,6 +236,7 @@ bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltDat
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	LogBuildConfigOnce(buildHash);
 	return CLodCache::Save(cacheKey, buildHash, prebuiltData, payload);
 }
 
@@ -87,6 +244,7 @@ bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltDat
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	LogBuildConfigOnce(buildHash);
 	return CLodCache::Save(cacheKey, buildHash, prebuiltData, payload, outSavedPrebuiltData);
 }
 

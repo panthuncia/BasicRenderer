@@ -75,15 +75,11 @@ void MeshInstance::SetBufferViews(std::unique_ptr<BufferView> perMeshInstanceBuf
 void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView) {
 	m_perMeshInstanceBufferView = std::move(perMeshInstanceBufferView);
     InitializeBoundsFromMesh_();
-	//Skinning
-	auto postSkinningView = m_mesh->GetPostSkinningVertexBufferView();
+
 	if (m_perMeshInstanceBufferView == nullptr) {
 		return; // no need to update
 	}
 
-	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = (postSkinningView != nullptr)
-		? static_cast<uint32_t>(postSkinningView->GetOffset())
-		: 0u;
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}

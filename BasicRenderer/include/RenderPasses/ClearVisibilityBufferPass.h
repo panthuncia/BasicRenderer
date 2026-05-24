@@ -9,7 +9,7 @@ public:
 	ClearVisibilityBufferPass() {}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithUnorderedAccess(Builtin::PrimaryCamera::VisibilityTexture,
+		builder->WithUnorderedAccessClear(Builtin::PrimaryCamera::VisibilityTexture,
 			Builtin::GBuffer::Albedo,
 			Builtin::GBuffer::Coat,
 			Builtin::GBuffer::Emissive,
@@ -17,9 +17,9 @@ public:
 			Builtin::GBuffer::MetallicRoughness,
 			Builtin::GBuffer::Normals,
 			Builtin::GBuffer::MotionVectors,
-			Builtin::Color::HDRColorTarget);
-		builder->WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture);
-		builder->WithUnorderedAccess(Builtin::DebugVisualization);
+			Builtin::Color::HDRColorTarget,
+			Builtin::DebugVisualization);
+		builder->WithDepthStencilClear(Builtin::PrimaryCamera::DepthTexture);
 	}
 
 	void Setup() override {

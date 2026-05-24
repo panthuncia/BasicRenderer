@@ -56,7 +56,7 @@ void ResourceManager::Initialize() {
 
 	void* pMappedCounterReset = nullptr;
 	
-    m_uavCounterReset->Map(&pMappedCounterReset, 0, 0);
+    m_uavCounterReset->Map(&pMappedCounterReset, 0, sizeof(UINT));
 	ZeroMemory(pMappedCounterReset, sizeof(UINT));
 	m_uavCounterReset->Unmap(0, 0);
 }

@@ -27,7 +27,9 @@ MeshPreprocessResult ExtractSubMesh(
 	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<pxr::UsdSkelSkinningQuery>& skinQ,
 	const pxr::VtTokenArray& skelJointOrderRaw,
-	const pxr::VtTokenArray& skelJointOrderMapped);
+	const pxr::VtTokenArray& skelJointOrderMapped,
+	bool doubleSidedVoxelSourceNormals = false,
+	const std::string& sourceIdentifierOverride = {});
 
 // Build a UsdSkelSkinningQuery for a mesh if it has skinning data.
 std::optional<pxr::UsdSkelSkinningQuery> GetSkinningQuery(
@@ -43,5 +45,8 @@ struct StageExtractionResult {
 
 // Open a USD stage and extract geometry + build CLod caches for every mesh.
 StageExtractionResult ExtractAll(const std::string& filePath);
+StageExtractionResult ExtractAllFromStage(
+	const pxr::UsdStageRefPtr& stage,
+	const std::string& sourceIdentifier = {});
 
 } // namespace USDGeometryExtractor

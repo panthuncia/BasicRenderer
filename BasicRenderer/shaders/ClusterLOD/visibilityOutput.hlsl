@@ -4,9 +4,28 @@
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 #include "include/visibilityPacking.hlsli"
 
+static const uint CLOD_TELEMETRY_DISABLED_DESCRIPTOR = 0xFFFFFFFFu;
+static const uint WG_COUNTER_RASTER_PIXEL_SHADER_INVOCATIONS = 125u;
+static const uint WG_COUNTER_RASTER_PIXEL_SCISSOR_REJECTED = 126u;
+static const uint WG_COUNTER_RASTER_PIXEL_TARGET_BOUNDS_REJECTED = 127u;
+static const uint WG_COUNTER_RASTER_PIXEL_VISIBILITY_WRITES = 128u;
+
+void CLodRasterPixelTelemetryAdd(uint counterIndex, uint value)
+{
+    if (CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX == CLOD_TELEMETRY_DISABLED_DESCRIPTOR || value == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
+    InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
 [shader("pixel")]
 void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET
 {
+    CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_SHADER_INVOCATIONS, 1u);
+
     // Fetch view-specific output buffer + manual scissor rect
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[input.viewID];
@@ -18,6 +37,7 @@ void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFron
         pixel.x >= viewRasterInfo.scissorMaxX ||
         pixel.y >= viewRasterInfo.scissorMaxY)
     {
+        CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_SCISSOR_REJECTED, 1u);
         return;
     }
 
@@ -29,6 +49,7 @@ void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFron
     if (pixel.x >= dims.x || pixel.y >= dims.y)
     {
         // Pixel outside of bounds
+        CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_TARGET_BOUNDS_REJECTED, 1u);
         return;
     }
 
@@ -41,4 +62,5 @@ void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFron
     uint64_t output = PackVisKey(input.linearDepth, input.visibleClusterIndex, primID);
 
     InterlockedMin(visBuffer[pixel], output);
+    CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_VISIBILITY_WRITES, 1u);
 }

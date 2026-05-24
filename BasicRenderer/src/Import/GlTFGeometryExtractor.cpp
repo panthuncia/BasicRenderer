@@ -28,6 +28,7 @@
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
+#include "Mesh/DefaultCLodSettings.h"
 #include "Utilities/CachePathUtilities.h"
 
 using nlohmann::json;
@@ -1012,10 +1013,20 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	cacheIdentity.sourceIdentifier = NormalizeCacheSourcePath(sourceFilePath);
 	cacheIdentity.primPath = "/glTF/Mesh/" + std::to_string(meshIndex) + "/Primitive/" + std::to_string(primitiveIndex);
 	cacheIdentity.subsetName = "";
+	bool doubleSidedVoxelSourceNormals = false;
+	if (primitive.contains("material")) {
+		const size_t materialIndex = primitive["material"].get<size_t>();
+		if (doc.gltf.contains("materials") && materialIndex < doc.gltf["materials"].size()) {
+			doubleSidedVoxelSourceNormals = doc.gltf["materials"][materialIndex].value("doubleSided", false);
+		}
+	}
+	cacheIdentity.doubleSidedVoxelSourceNormals = doubleSidedVoxelSourceNormals;
 
 	auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
-	MeshIngestBuilder ingest(vertexSize, skinningVertexSize, meshFlags);
+	ClusterLODBuilderSettings builderSettings = GetDefaultBuilderSettings();
+	builderSettings.doubleSidedVoxelSourceNormals = doubleSidedVoxelSourceNormals;
+	MeshIngestBuilder ingest(vertexSize, skinningVertexSize, meshFlags, builderSettings);
     std::vector<MeshUvSetData> uvSets;
     if (hasAnyTexcoordSet) {
         uvSets.resize(static_cast<size_t>(maxTexcoordSetIndex) + 1u);

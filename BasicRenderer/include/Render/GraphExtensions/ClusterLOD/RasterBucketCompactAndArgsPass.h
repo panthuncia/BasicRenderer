@@ -14,6 +14,7 @@ public:
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,
         std::shared_ptr<Buffer> compactedBaseCounterBuffer,
+        std::shared_ptr<Buffer> readBaseCounterBuffer,
         std::shared_ptr<Buffer> indirectCommand,
         std::shared_ptr<Buffer> histogramBuffer,
         std::shared_ptr<Buffer> offsetsBuffer,
@@ -22,6 +23,7 @@ public:
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
         std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer,
+        std::shared_ptr<Buffer> telemetryBuffer,
         uint64_t maxVisibleClusters,
         bool appendToExisting,
         bool readReverse = false,
@@ -42,6 +44,7 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_compactedBaseCounterBuffer;
+    std::shared_ptr<Buffer> m_readBaseCounterBuffer;
     std::shared_ptr<Buffer> m_indirectCommand;
     std::shared_ptr<Buffer> m_histogramBuffer;
     std::shared_ptr<Buffer> m_offsetsBuffer;
@@ -50,6 +53,7 @@ private:
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_reyesOwnershipBitsetBuffer;
+    std::shared_ptr<Buffer> m_telemetryBuffer;
 
     uint64_t m_maxVisibleClusters = 0;
     bool m_appendToExisting = false;

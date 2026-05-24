@@ -18,16 +18,21 @@ SkeletonManager::SkeletonManager() {
     m_lifetimeToken = std::make_shared<std::atomic_bool>(true);
     m_inverseBindMatrices = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "InverseBindMatricesPacked");
     m_boneTransforms = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "BoneTransformsPacked");
+    // TODO: This only exists to project skinned voxel samples back to object-space for voxel sample reconstruction.
+    // Maybe we could avoid this if we changed the normal skinning path as well?
+    m_inverseSkinMatrices = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "InverseSkinMatricesPacked");
 
     m_instanceInfo = DynamicStructuredBuffer<SkinningInstanceGPUInfo>::CreateShared(64, "SkinningInstanceInfo");
 
     rg::memory::SetResourceUsageHint(*m_inverseBindMatrices, "Skinning data");
     rg::memory::SetResourceUsageHint(*m_boneTransforms, "Skinning data");
+    rg::memory::SetResourceUsageHint(*m_inverseSkinMatrices, "Skinning data");
     rg::memory::SetResourceUsageHint(*m_instanceInfo, "Skinning data");
 
     // Expose via resource provider keys
     m_resources[Builtin::SkeletonResources::InverseBindMatrices] = m_inverseBindMatrices;
     m_resources[Builtin::SkeletonResources::BoneTransforms] = m_boneTransforms;
+    m_resources[Builtin::SkeletonResources::InverseSkinMatrices] = m_inverseSkinMatrices;
     m_resources[Builtin::SkeletonResources::SkinningInstanceInfo] = m_instanceInfo;
 }
 
@@ -109,6 +114,8 @@ uint32_t SkeletonManager::AcquireSkinningInstance(const std::shared_ptr<Skeleton
     const size_t bytes = rec.boneCount * sizeof(DirectX::XMMATRIX);
     rec.transformsView = m_boneTransforms->Allocate(bytes, sizeof(DirectX::XMMATRIX));
     rec.transformOffsetMatrices = BytesToMatrixIndex(rec.transformsView->GetOffset());
+    rec.inverseSkinView = m_inverseSkinMatrices->Allocate(bytes, sizeof(DirectX::XMMATRIX));
+    rec.inverseSkinOffsetMatrices = BytesToMatrixIndex(rec.inverseSkinView->GetOffset());
     rec.invBindOffsetMatrices = baseRec.invBindOffsetMatrices;
 
     // Allocate instance slot and write GPU info
@@ -116,6 +123,7 @@ uint32_t SkeletonManager::AcquireSkinningInstance(const std::shared_ptr<Skeleton
     SkinningInstanceGPUInfo info;
     info.transformOffsetMatrices = rec.transformOffsetMatrices;
     info.invBindOffsetMatrices = rec.invBindOffsetMatrices;
+    info.inverseSkinOffsetMatrices = rec.inverseSkinOffsetMatrices;
     info.boneCount = rec.boneCount;
 
     m_instanceInfo->UpdateAt(rec.instanceSlot, info);
@@ -139,6 +147,8 @@ void SkeletonManager::ReleaseSkinningInstance(Skeleton* skinningInstance) {
 
     if (rec.transformsView)
         m_boneTransforms->Deallocate(rec.transformsView.get());
+    if (rec.inverseSkinView)
+        m_inverseSkinMatrices->Deallocate(rec.inverseSkinView.get());
 
     FreeInstanceSlot(rec.instanceSlot);
 
@@ -165,6 +175,18 @@ void SkeletonManager::UpdateInstanceTransforms(Skeleton& inst) {
     BUFFER_UPLOAD(inst.GetBoneMatrices().data(), bytes,
         rg::runtime::UploadTarget::FromShared(m_boneTransforms),
         rec.transformsView->GetOffset());
+
+    std::vector<DirectX::XMMATRIX> inverseSkinMatrices(rec.boneCount);
+    const auto boneMatrices = inst.GetBoneMatrices();
+    const auto inverseBindMatrices = rec.base->GetInverseBindMatrices();
+    for (uint32_t boneIndex = 0; boneIndex < rec.boneCount; ++boneIndex) {
+        inverseSkinMatrices[boneIndex] = DirectX::XMMatrixInverse(
+            nullptr,
+            DirectX::XMMatrixMultiply(boneMatrices[boneIndex], inverseBindMatrices[boneIndex]));
+    }
+    BUFFER_UPLOAD(inverseSkinMatrices.data(), bytes,
+        rg::runtime::UploadTarget::FromShared(m_inverseSkinMatrices),
+        rec.inverseSkinView->GetOffset());
 
     //rec.dirty = false;
 }

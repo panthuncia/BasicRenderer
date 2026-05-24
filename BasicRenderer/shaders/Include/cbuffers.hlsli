@@ -9,26 +9,6 @@ SamplerState g_pointClamp : register(s0);
 // linear-clamp at s1
 SamplerState g_linearClamp : register(s1);
 
-cbuffer PerObject : register(b0) {
-    uint perObjectBufferIndex;
-};
-
-cbuffer PerMesh : register(b1) {
-    uint perMeshBufferIndex;
-    uint perMeshInstanceBufferIndex;
-};
-
-cbuffer ShadowInfo : register(b2) {
-    int currentLightID; // Used for shadow mapping, global light index
-    int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
-};
-
-cbuffer Settings : register(b3) {
-    bool enableShadows;
-    bool enablePunctualLights;
-    bool enableGTAO;
-}
-
 cbuffer MiscUintRootConstants : register(b4) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
     uint UintRootConstant1;
@@ -57,6 +37,7 @@ cbuffer MiscUintRootConstants : register(b4) { // Used for pass-specific one-off
     uint UintRootConstant24;
     uint UintRootConstant25;
     uint UintRootConstant26;
+    uint UintRootConstant27;
 }
 
 cbuffer ResourceDescriptorIndices : register(b5) {
@@ -134,5 +115,37 @@ cbuffer IndirectCommandSignatureRootConstants : register(b6)
     uint IndirectCommandSignatureRootConstant3;
 };
 
+uint GetRootPerObjectBufferIndex()
+{
+#if defined(USE_MISC_DRAW_ROOT_CONSTANTS)
+    return UintRootConstant19;
+#else
+    return IndirectCommandSignatureRootConstant0;
+#endif
+}
+
+uint GetRootPerMeshBufferIndex()
+{
+#if defined(USE_MISC_DRAW_ROOT_CONSTANTS)
+    return UintRootConstant20;
+#else
+    return IndirectCommandSignatureRootConstant1;
+#endif
+}
+
+uint GetRootPerMeshInstanceBufferIndex()
+{
+#if defined(USE_MISC_DRAW_ROOT_CONSTANTS)
+    return UintRootConstant21;
+#else
+    return IndirectCommandSignatureRootConstant2;
+#endif
+}
+
+int GetRootCurrentLightID() { return (int)UintRootConstant22; }
+int GetRootLightViewIndex() { return (int)UintRootConstant23; }
+bool GetRootEnableShadows() { return UintRootConstant24 != 0u; }
+bool GetRootEnablePunctualLights() { return UintRootConstant25 != 0u; }
+bool GetRootEnableGTAO() { return UintRootConstant26 != 0u; }
 
 #endif // __CBUFFERS_HLSL__

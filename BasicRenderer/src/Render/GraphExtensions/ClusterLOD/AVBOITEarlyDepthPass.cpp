@@ -79,7 +79,7 @@ AVBOITEarlyDepthPass::AVBOITEarlyDepthPass(
     m_pso = PipelineState(std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots);
 
     rhi::IndirectArg args[] = {
-        {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 1, 3 } } },
+        {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 3 } } },
         {.kind = rhi::IndirectArgKind::Draw }
     };
     result = dev.CreateCommandSignature(

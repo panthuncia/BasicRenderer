@@ -37,6 +37,8 @@ public:
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 		commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
 
+        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+
         uint32_t rootConstants[NumMiscUintRootConstants] = {};
         rootConstants[0] = m_linearDepthMapDescriptorIndex;
         rootConstants[1] = m_cameraBufferDescriptorIndex;

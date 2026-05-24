@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <rhi.h>
 
@@ -17,6 +19,9 @@ public:
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,
         std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
+        std::shared_ptr<Buffer> voxelRasterWorkBuffer,
+        std::shared_ptr<Buffer> voxelRasterWorkCounterBuffer,
+        uint32_t voxelRasterWorkCapacity,
         std::shared_ptr<Buffer> pageJobVisibleClustersBuffer,
         std::shared_ptr<Buffer> pageJobVisibleClustersCounterBuffer,
         std::shared_ptr<Buffer> histogramIndirectCommand,
@@ -72,13 +77,17 @@ private:
     PipelineState m_pureComputeReplayNodesPipelineState;
     PipelineState m_pureComputeReplayClustersPipelineState;
     PipelineState m_pureComputeTraversePipelineState;
-    PipelineState m_pureComputeExpandClustersPipelineState;
     PipelineState m_pureComputeClusterPipelineState;
     PipelineState m_pureComputeDenseClusterPipelineState;
     rhi::CommandSignaturePtr m_pureComputeDispatchCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_voxelRasterWorkBuffer;
+    std::shared_ptr<Buffer> m_voxelRasterWorkCounterBuffer;
+    std::shared_ptr<Buffer> m_voxelRasterQueueDescriptorsBuffer;
+    std::string m_voxelRasterQueueDescriptorResourceId;
+    uint32_t m_voxelRasterWorkCapacity = 0u;
     std::shared_ptr<Buffer> m_pageJobVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_pageJobVisibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_workGraphComputePageJobDescriptorsBuffer;
@@ -104,12 +113,23 @@ private:
     std::shared_ptr<Buffer> m_pureComputeCurrentNodeCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeNextNodeCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterCounterBuffer;
-    std::shared_ptr<Buffer> m_pureComputeDenseClusterWorkBuffer;
-    std::shared_ptr<Buffer> m_pureComputeDenseClusterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_pureComputeNodeDispatchArgsBuffer;
     std::shared_ptr<Buffer> m_pureComputeClusterDispatchArgsBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::vector<uint64_t> m_declaredDrawSetResourceIds;
+    std::vector<CLodViewRasterInfo> m_cachedViewRasterInfo;
+    std::vector<CLodViewDepthSRVIndex> m_cachedViewDepthSrvIndices;
+    std::vector<uint32_t> m_zeroTelemetryScratch;
+    std::array<CLodNodeGpuInput, 3> m_cachedNodeGpuInputs{};
+    CLodVoxelRasterQueueDescriptors m_cachedVoxelQueueDescriptors{};
+    CLodWorkGraphComputePageJobDescriptors m_cachedPageJobDescriptors{};
+    uint64_t m_lastDrawSetDeclarationRevision = 0u;
+    uint64_t m_lastViewResourceLayoutRevision = 0u;
+    uint32_t m_sizedPureComputeFrontierCapacity = 0u;
+    bool m_hasCachedNodeGpuInputs = false;
+    bool m_hasCachedVoxelQueueDescriptors = false;
+    bool m_hasCachedPageJobDescriptors = false;
+    bool m_hasUploadedViewDepthSrvIndices = false;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;

@@ -63,6 +63,8 @@ struct ClodGBufferColorSample
 struct ClodGBufferDebugSample
 {
     uint meshletIndex;
+    uint geometryGroupIndex;
+    bool isVoxelPath;
     float3 normalOS;
     float2 motionVector;
     MaterialInputs materialInputs;
@@ -71,6 +73,8 @@ struct ClodGBufferDebugSample
 struct ClodResolvedGBufferSample
 {
     uint meshletIndex;
+    uint geometryGroupIndex;
+    bool isVoxelPath;
     float3 normalOS;
     float2 motionVector;
     MaterialInputs materialInputs;
@@ -82,6 +86,8 @@ struct ClodResolvedCommonSample
     uint clusterIndex;
     uint meshletTriangleIndex;
     uint meshletIndex;
+    uint geometryGroupIndex;
+    bool isVoxelPath;
     float3 positionWS;
     float3 positionVS;
     float3 normalWSBase;
@@ -135,6 +141,14 @@ BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNd
 
     return ret;
 }
+
+#if defined(VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE)
+bool ClodBarycentricDerivativesAreBackFacing(BarycentricDeriv bary)
+{
+    const float detBarycentricDxDy = bary.m_ddx.y * bary.m_ddy.z - bary.m_ddy.y * bary.m_ddx.z;
+    return detBarycentricDxDy > 0.0f;
+}
+#endif
 
 float3 InterpolateWithDeriv(BarycentricDeriv deriv, float v0, float v1, float v2)
 {
@@ -606,19 +620,8 @@ void BuildClodMaterialUvData(
 
 float3 DecodeCompressedPosition(uint meshletLocalVertex, MeshletResolveData d)
 {
-    uint bitsPerVertex = d.bitsX + d.bitsY + d.bitsZ;
-    uint bitCursor = d.positionBitstreamBase * 8u + d.positionBitOffset + meshletLocalVertex * bitsPerVertex;
-
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint px = ReadPackedBits32_BA(slab, bitCursor, d.bitsX);
-    bitCursor += d.bitsX;
-    uint py = ReadPackedBits32_BA(slab, bitCursor, d.bitsY);
-    bitCursor += d.bitsY;
-    uint pz = ReadPackedBits32_BA(slab, bitCursor, d.bitsZ);
-
-    int3 q = int3(px, py, pz) + d.minQ;
-    float invScale = 1.0f / float(1u << d.compressedPositionQuantExp);
-    return float3(q) * invScale;
+    return CLodLoadPagePosition(slab, d.compressedPositionQuantExp, d.positionBitstreamBase, d.positionBitOffset, meshletLocalVertex);
 }
 
 float2 UnpackSnorm16x2(uint packed)
@@ -805,6 +808,542 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     return d;
 }
 
+uint3 CLodDecodeVoxelCubeCoord(uint packedCoord)
+{
+    return uint3(packedCoord & 0x3FFu, (packedCoord >> 10u) & 0x3FFu, (packedCoord >> 20u) & 0x3FFu);
+}
+
+bool ResolveVoxelMaskTest(uint2 mask, uint bitIndex)
+{
+    return bitIndex < 32u ? ((mask.x & (1u << bitIndex)) != 0u) : ((mask.y & (1u << (bitIndex - 32u))) != 0u);
+}
+
+bool ResolveRayBoxIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxMax, out float tEnter, out float tExit)
+{
+    tEnter = 0.0f;
+    tExit = 3.402823e+38f;
+
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
+    {
+        const float origin = rayOrigin[axis];
+        const float dir = rayDir[axis];
+        const float bMin = boxMin[axis];
+        const float bMax = boxMax[axis];
+
+        if (abs(dir) <= 1.0e-8f)
+        {
+            if (origin < bMin || origin > bMax)
+            {
+                return false;
+            }
+            continue;
+        }
+
+        const float invDir = 1.0f / dir;
+        float t0 = (bMin - origin) * invDir;
+        float t1 = (bMax - origin) * invDir;
+        if (t0 > t1)
+        {
+            const float tmp = t0;
+            t0 = t1;
+            t1 = tmp;
+        }
+
+        tEnter = max(tEnter, t0);
+        tExit = min(tExit, t1);
+        if (tExit < tEnter)
+        {
+            return false;
+        }
+    }
+
+    return tExit >= 0.0f;
+}
+
+bool ResolveRaycastVoxelCubeDDA(float3 rayOrigin, float3 rayDir, uint2 occupancyMask, out float tHit)
+{
+    tHit = 0.0f;
+
+    float tEnter = 0.0f;
+    float tExit = 0.0f;
+    if (!ResolveRayBoxIntersect(rayOrigin, rayDir, float3(0.0f, 0.0f, 0.0f), float3(4.0f, 4.0f, 4.0f), tEnter, tExit))
+    {
+        return false;
+    }
+
+    float currentT = max(tEnter, 0.0f) + 1.0e-4f;
+    const float3 p = clamp(rayOrigin + rayDir * currentT, float3(0.0f, 0.0f, 0.0f), float3(3.9999f, 3.9999f, 3.9999f));
+    int3 cell = int3(floor(p));
+    const int3 stepDir = int3(rayDir.x >= 0.0f ? 1 : -1, rayDir.y >= 0.0f ? 1 : -1, rayDir.z >= 0.0f ? 1 : -1);
+
+    const float largeT = 3.402823e+38f;
+    float3 nextBoundary = float3(
+        stepDir.x > 0 ? float(cell.x + 1) : float(cell.x),
+        stepDir.y > 0 ? float(cell.y + 1) : float(cell.y),
+        stepDir.z > 0 ? float(cell.z + 1) : float(cell.z));
+    float3 tMax = float3(
+        abs(rayDir.x) > 1.0e-8f ? (nextBoundary.x - rayOrigin.x) / rayDir.x : largeT,
+        abs(rayDir.y) > 1.0e-8f ? (nextBoundary.y - rayOrigin.y) / rayDir.y : largeT,
+        abs(rayDir.z) > 1.0e-8f ? (nextBoundary.z - rayOrigin.z) / rayDir.z : largeT);
+    float3 tDelta = float3(
+        abs(rayDir.x) > 1.0e-8f ? abs(1.0f / rayDir.x) : largeT,
+        abs(rayDir.y) > 1.0e-8f ? abs(1.0f / rayDir.y) : largeT,
+        abs(rayDir.z) > 1.0e-8f ? abs(1.0f / rayDir.z) : largeT);
+
+    [loop]
+    for (uint iter = 0u; iter < 16u; ++iter)
+    {
+        if (any(cell < 0) || any(cell >= 4))
+        {
+            break;
+        }
+
+        const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
+        if (ResolveVoxelMaskTest(occupancyMask, cellIndex))
+        {
+            tHit = currentT;
+            return true;
+        }
+
+        if (tMax.x <= tMax.y && tMax.x <= tMax.z)
+        {
+            if (tMax.x > tExit)
+            {
+                break;
+            }
+            currentT = tMax.x + 1.0e-4f;
+            cell.x += stepDir.x;
+            tMax.x += tDelta.x;
+        }
+        else if (tMax.y <= tMax.z)
+        {
+            if (tMax.y > tExit)
+            {
+                break;
+            }
+            currentT = tMax.y + 1.0e-4f;
+            cell.y += stepDir.y;
+            tMax.y += tDelta.y;
+        }
+        else
+        {
+            if (tMax.z > tExit)
+            {
+                break;
+            }
+            currentT = tMax.z + 1.0e-4f;
+            cell.z += stepDir.z;
+            tMax.z += tDelta.z;
+        }
+    }
+
+    return false;
+}
+
+MaterialInputs BuildVoxelMaterialInputs(
+    MaterialInfo materialInfo,
+    uint materialFlags,
+    float3 normalWS,
+    float3 posWS,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    float opacity)
+{
+    MaterialUvCache uvCache = BuildSingleUvCache(uv, dUVdx, dUVdy);
+    const uint voxelMaterialFlags = materialFlags & ~(MATERIAL_NORMAL_MAP | MATERIAL_PARALLAX | MATERIAL_GEOMETRIC_DISPLACEMENT);
+    MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, voxelMaterialFlags, uvCache);
+
+    MaterialInputs inputs;
+    SampleMaterialFromUvCacheRuntime(
+        uvCache,
+        uvBindings,
+        normalWS,
+        posWS,
+        float3(1.0f, 1.0f, 1.0f),
+        materialInfo,
+        voxelMaterialFlags,
+        float3(0.0f, 0.0f, 0.0f),
+        float3(0.0f, 0.0f, 0.0f),
+        inputs);
+    inputs.opacity *= opacity;
+    return inputs;
+}
+
+uint CLodVoxelLocalCellIndex(int3 cell)
+{
+    return (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
+}
+
+void CLodVoxelAccumulateNeighborUvDelta(
+    GroupPageMapEntry pageEntry,
+    CLodVoxelPageHeader pageHeader,
+    CLodVoxelCubeRecord cube,
+    int3 neighborCell,
+    float2 uv,
+    inout float maxUvDelta)
+{
+    if (any(neighborCell < int3(0, 0, 0)) || any(neighborCell > int3(3, 3, 3)))
+    {
+        return;
+    }
+
+    const uint neighborIndex = CLodVoxelLocalCellIndex(neighborCell);
+    if (!ResolveVoxelMaskTest(cube.occupancyMask, neighborIndex))
+    {
+        return;
+    }
+
+    const CLodVoxelAttributeSample neighborSample =
+        CLodLoadVoxelAttributeSampleFromPage(pageEntry, pageHeader, cube, neighborIndex);
+    maxUvDelta = max(maxUvDelta, length(neighborSample.uv - uv));
+}
+
+float CLodVoxelEstimateUvFootprint(
+    GroupPageMapEntry pageEntry,
+    CLodVoxelPageHeader pageHeader,
+    CLodVoxelCubeRecord cube,
+    int3 cell,
+    float2 uv,
+    uint groupResolution)
+{
+    float maxUvDelta = 0.0f;
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(-1, 0, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(1, 0, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, -1, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, 1, 0), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, 0, -1), uv, maxUvDelta);
+    CLodVoxelAccumulateNeighborUvDelta(pageEntry, pageHeader, cube, cell + int3(0, 0, 1), uv, maxUvDelta);
+
+    const float fallbackUvDelta = rcp((float)max(groupResolution, 1u));
+    return max(maxUvDelta, fallbackUvDelta);
+}
+
+float2 CLodProjectWorldToPixel(float3 worldPosition, float4x4 viewProj, float2 winSize)
+{
+    float4 clip = mul(float4(worldPosition, 1.0f), viewProj);
+    const float invW = rcp(max(abs(clip.w), 1.0e-6f));
+    const float2 ndc = clip.xy * invW;
+    return float2(
+        (ndc.x * 0.5f + 0.5f) * winSize.x,
+        (0.5f - ndc.y * 0.5f) * winSize.y);
+}
+
+float CLodVoxelEstimatePixelFootprint(
+    float3 objectPosition,
+    float voxelWidth,
+    float4x4 localToWorld,
+    float4x4 viewProj,
+    float2 winSize)
+{
+    const float3 centerWorld = mul(float4(objectPosition, 1.0f), localToWorld).xyz;
+    const float2 centerPixel = CLodProjectWorldToPixel(centerWorld, viewProj, winSize);
+    const float3 xWorld = mul(float4(objectPosition + float3(voxelWidth, 0.0f, 0.0f), 1.0f), localToWorld).xyz;
+    const float3 yWorld = mul(float4(objectPosition + float3(0.0f, voxelWidth, 0.0f), 1.0f), localToWorld).xyz;
+    const float3 zWorld = mul(float4(objectPosition + float3(0.0f, 0.0f, voxelWidth), 1.0f), localToWorld).xyz;
+    float maxPixelDelta = max(
+        length(CLodProjectWorldToPixel(xWorld, viewProj, winSize) - centerPixel),
+        length(CLodProjectWorldToPixel(yWorld, viewProj, winSize) - centerPixel));
+    maxPixelDelta = max(maxPixelDelta, length(CLodProjectWorldToPixel(zWorld, viewProj, winSize) - centerPixel));
+
+    return max(maxPixelDelta, 0.25f);
+}
+
+float2 ComputeClodMotionVector(float3 posOS, float3 worldPosition, float4x4 prevModel, float4x4 unjitteredViewProj, float4x4 prevUnjitteredViewProj);
+
+uint CLodVoxelHash(uint v)
+{
+    v ^= v >> 16u;
+    v *= 0x7FEB352Du;
+    v ^= v >> 15u;
+    v *= 0x846CA68Bu;
+    v ^= v >> 16u;
+    return v;
+}
+
+float CLodVoxelHashToUnitFloat(uint v)
+{
+    return (float)(CLodVoxelHash(v) & 0x00FFFFFFu) / 16777216.0f;
+}
+
+void CLodVoxelBuildOrthonormalBasis(float3 direction, out float3 tangent, out float3 bitangent)
+{
+    const float3 helper = abs(direction.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
+    tangent = normalize(cross(helper, direction));
+    bitangent = cross(direction, tangent);
+}
+
+float3 CLodVoxelMulSGGX(float3 sDiag, float3 sOff, float3 v)
+{
+    return float3(
+        sDiag.x * v.x + sOff.x * v.y + sOff.y * v.z,
+        sOff.x * v.x + sDiag.y * v.y + sOff.z * v.z,
+        sOff.y * v.x + sOff.z * v.y + sDiag.z * v.z);
+}
+
+float3 CLodVoxelDecodeOctAxis(float2 encoded)
+{
+    float3 axis = float3(encoded.xy, 1.0f - abs(encoded.x) - abs(encoded.y));
+    if (axis.z < 0.0f)
+    {
+        const float2 axisSign = float2(axis.x >= 0.0f ? 1.0f : -1.0f, axis.y >= 0.0f ? 1.0f : -1.0f);
+        const float2 folded = (1.0f - abs(axis.yx)) * axisSign;
+        axis.xy = folded;
+    }
+    return normalize(dot(axis, axis) > 1.0e-12f ? axis : float3(0.0f, 0.0f, 1.0f));
+}
+
+float3 CLodVoxelMulAxialSGGX(float4 sggxAxisAndSigmas, float3 v)
+{
+    const float3 axis = CLodVoxelDecodeOctAxis(sggxAxisAndSigmas.xy);
+    const float sigmaPerp = max(sggxAxisAndSigmas.z, 1.0e-4f);
+    const float sigmaParallel = max(sggxAxisAndSigmas.w, 1.0e-4f);
+    const float sp2 = sigmaPerp * sigmaPerp;
+    const float sa2 = sigmaParallel * sigmaParallel;
+    return sp2 * v + (sa2 - sp2) * axis * dot(axis, v);
+}
+
+float CLodVoxelDetSGGX(float3 sDiag, float3 sOff)
+{
+    const float sxx = sDiag.x;
+    const float syy = sDiag.y;
+    const float szz = sDiag.z;
+    const float sxy = sOff.x;
+    const float sxz = sOff.y;
+    const float syz = sOff.z;
+    return sxx * (syy * szz - syz * syz) - sxy * (sxy * szz - sxz * syz) + sxz * (sxy * syz - sxz * syy);
+}
+
+float3 CLodVoxelDominantSGGXNormal(float3 sDiag, float3 sOff)
+{
+    float3 axis = float3(0.0f, 0.0f, 1.0f);
+    [unroll]
+    for (uint i = 0u; i < 8u; ++i)
+    {
+        axis = normalize(CLodVoxelMulSGGX(sDiag, sOff, axis));
+    }
+    return axis;
+}
+
+float3 CLodVoxelDominantAxialSGGXNormal(float4 sggxAxisAndSigmas)
+{
+    return CLodVoxelDecodeOctAxis(sggxAxisAndSigmas.xy);
+}
+
+float3 CLodVoxelSampleSGGXVNDF(float4 sggxAxisAndSigmas, float3 wi, float u1, float u2)
+{
+    wi = normalize(wi);
+    float3 k, j;
+    CLodVoxelBuildOrthonormalBasis(wi, k, j);
+
+    const float3 Sk = CLodVoxelMulAxialSGGX(sggxAxisAndSigmas, k);
+    const float3 Sj = CLodVoxelMulAxialSGGX(sggxAxisAndSigmas, j);
+    const float3 Si = CLodVoxelMulAxialSGGX(sggxAxisAndSigmas, wi);
+    const float Skj = dot(k, Sj);
+    const float Ski = dot(k, Si);
+    const float Sjj = dot(j, Sj);
+    const float Sji = dot(j, Si);
+    float Sii = dot(wi, Si);
+
+    const float eps = 1.0e-8f;
+    const float sigmaPerp = max(sggxAxisAndSigmas.z, 1.0e-4f);
+    const float sigmaParallel = max(sggxAxisAndSigmas.w, 1.0e-4f);
+    const float sp2 = sigmaPerp * sigmaPerp;
+    const float sa2 = sigmaParallel * sigmaParallel;
+    const float detS = max(sp2 * sp2 * sa2, eps);
+    Sii = max(Sii, eps);
+    const float tmp = max(Sjj * Sii - Sji * Sji, eps);
+    const float sqrtSii = sqrt(Sii);
+    const float sqrtTmp = sqrt(tmp);
+
+    const float3 Mk = float3(sqrt(detS / tmp), 0.0f, 0.0f);
+    const float3 Mj = float3(
+        -(Skj * Sii - Ski * Sji) / (sqrtSii * sqrtTmp),
+        sqrtTmp / sqrtSii,
+        0.0f);
+    const float3 Mi = float3(Ski / sqrtSii, Sji / sqrtSii, sqrtSii);
+
+    const float r = sqrt(saturate(u1));
+    const float phi = 2.0f * PI * u2;
+    const float diskU = r * cos(phi);
+    const float diskV = r * sin(phi);
+    const float diskW = sqrt(max(0.0f, 1.0f - diskU * diskU - diskV * diskV));
+    const float3 wmLocal = normalize(diskU * Mk + diskV * Mj + diskW * Mi);
+    return normalize(wmLocal.x * k + wmLocal.y * j + wmLocal.z * wi);
+}
+
+bool ResolveClodVoxelCommonSampleFromPackedCluster(
+    uint4 packedCluster,
+    uint visibleClusterIndex,
+    uint primID,
+    float linearDepth,
+    uint2 pixel,
+    Camera cam,
+    out ClodResolvedCommonSample sample)
+{
+    sample = (ClodResolvedCommonSample)0;
+
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    StructuredBuffer<CLodMeshMetadata> metadataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
+
+    const uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
+    const uint localGroupId = CLodVisibleClusterGroupID(packedCluster);
+    const uint localVoxelClusterIndex = CLodVisibleClusterVoxelClusterIndex(packedCluster);
+
+    const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[instanceIndex];
+    const PerObjectBuffer obj = perObjectBuffer[instanceData.perObjectBufferIndex];
+    const PerMeshBuffer mesh = perMeshBuffer[instanceData.perMeshBufferIndex];
+    const MeshInstanceClodOffsets offsets = meshInstanceClodOffsets[instanceIndex];
+    const CLodMeshMetadata metadata = metadataBuffer[offsets.clodMeshMetadataIndex];
+
+    CLodVoxelGroupDescriptor descriptor;
+    if (!CLodTryLoadVoxelDescriptorByClusterIndex(metadata, localGroupId, localVoxelClusterIndex, descriptor))
+    {
+        return false;
+    }
+
+    GroupPageMapEntry pageEntry;
+    CLodVoxelPageHeader pageHeader;
+    const CLodVoxelClusterRecord voxelCluster = CLodLoadVoxelCluster(metadata, descriptor, localGroupId, localVoxelClusterIndex, pageEntry, pageHeader);
+    const uint cubeLocalIndex = primID;
+    if (cubeLocalIndex >= voxelCluster.cubeCount)
+    {
+        return false;
+    }
+    const CLodVoxelCubeRecord cube = CLodLoadVoxelCubeFromPage(
+        pageEntry.slabDescriptorIndex,
+        pageEntry.slabByteOffset,
+        pageHeader.cubeRecordsOffset,
+        voxelCluster.firstCube + cubeLocalIndex);
+    const uint3 cubeCoord = CLodDecodeVoxelCubeCoord(cube.cubeCoord);
+    const float voxelWidth = descriptor.aabbMinAndVoxelWidth.w;
+    if (voxelWidth <= 0.0f)
+    {
+        return false;
+    }
+    const float3 cubeMinObject = descriptor.aabbMinAndVoxelWidth.xyz + float3(cubeCoord) * (voxelWidth * 4.0f);
+
+    float4x4 skinMatrix = IdentitySkinMatrix();
+    float4x4 inverseSkinMatrix = IdentitySkinMatrix();
+    if (cube.dominantBoneIndex != CLOD_VOXEL_STATIC_BONE_INDEX)
+    {
+        skinMatrix = LoadBoneSkinMatrix(instanceData.skinningInstanceSlot, cube.dominantBoneIndex);
+        inverseSkinMatrix = LoadBoneInverseSkinMatrix(instanceData.skinningInstanceSlot, cube.dominantBoneIndex);
+    }
+    const row_major matrix localToWorld = mul(skinMatrix, obj.model);
+    const row_major matrix worldToLocal = mul(obj.modelInverse, inverseSkinMatrix);
+
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    const float2 winSize = float2(perFrame.screenResX, perFrame.screenResY);
+    const float2 pixelUv = (float2(pixel) + 0.5f) / winSize;
+    const float2 ndc = float2(pixelUv.x * 2.0f - 1.0f, 1.0f - pixelUv.y * 2.0f);
+    float4 viewNear = mul(float4(ndc, 0.0f, 1.0f), cam.projectionInverse);
+    viewNear.xyz /= max(viewNear.w, 1e-6f);
+    float4 worldNear = mul(float4(viewNear.xyz, 1.0f), cam.viewInverse);
+    const float3 worldPoint = worldNear.xyz / max(worldNear.w, 1e-6f);
+    const float3 rayOriginWS = cam.positionWorldSpace.xyz;
+    const float3 rayOriginObject = mul(float4(rayOriginWS, 1.0f), worldToLocal).xyz;
+    const float3 localPoint = mul(float4(worldPoint, 1.0f), worldToLocal).xyz;
+    const float3 rayDirObject = normalize(localPoint - rayOriginObject);
+    const float3 rayOriginCube = (rayOriginObject - cubeMinObject) / voxelWidth;
+    const float3 rayDirCube = rayDirObject / voxelWidth;
+
+    float tHitCube = 0.0f;
+    if (!ResolveRaycastVoxelCubeDDA(rayOriginCube, rayDirCube, cube.occupancyMask, tHitCube))
+    {
+        return false;
+    }
+
+    const float3 objectPosition = rayOriginObject + rayDirObject * tHitCube;
+    const float3 skinnedObjectPosition = mul(float4(objectPosition, 1.0f), skinMatrix).xyz;
+    const float3 worldPosition = mul(float4(objectPosition, 1.0f), localToWorld).xyz;
+
+    const int3 cell = clamp(int3(floor((objectPosition - cubeMinObject) / voxelWidth)), int3(0, 0, 0), int3(3, 3, 3));
+    const uint cellIndex = (uint)cell.x | ((uint)cell.y << 2u) | ((uint)cell.z << 4u);
+
+    CLodVoxelAttributeSample attributeSample = CLodLoadVoxelAttributeSampleFromPage(pageEntry, pageHeader, cube, cellIndex);
+    const float4 sggxAxisAndSigmas = float4(
+        attributeSample.sggxAxisAndSigmas.xy,
+        max(attributeSample.sggxAxisAndSigmas.zw, float2(1.0e-4f, 1.0e-4f)));
+    const uint sampleSeed = CLodVoxelHash(
+        pixel.x * 0x1F123BB5u ^
+        pixel.y * 0x05491333u ^
+        visibleClusterIndex * 0x9E3779B9u ^
+        primID * 0x68BC21EBu ^
+        cellIndex * 0xB5297A4Du);
+    float3 normalOS = CLodVoxelSampleSGGXVNDF(
+        sggxAxisAndSigmas,
+        rayDirObject,
+        CLodVoxelHashToUnitFloat(sampleSeed),
+        CLodVoxelHashToUnitFloat(sampleSeed ^ 0xD1B54A35u));
+    normalOS = dot(normalOS, -rayDirObject) >= 0.0f ? normalOS : -normalOS;
+    normalOS = normalize(mul(normalOS, (float3x3)skinMatrix));
+    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    const float3 normalWS = normalize(mul(normalOS, (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex]));
+
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[mesh.materialDataIndex];
+    const uint materialFlags = materialInfo.materialFlags;
+    const float4x4 viewProj = mul(cam.view, cam.projection);
+    const float uvFootprint = CLodVoxelEstimateUvFootprint(
+        pageEntry,
+        pageHeader,
+        cube,
+        cell,
+        attributeSample.uv,
+        descriptor.resolution);
+    const float pixelFootprint = CLodVoxelEstimatePixelFootprint(
+        objectPosition,
+        voxelWidth,
+        localToWorld,
+        viewProj,
+        winSize);
+    const float uvPerPixel = uvFootprint / pixelFootprint;
+    const float2 voxelDUdx = float2(uvPerPixel, 0.0f);
+    const float2 voxelDUdy = float2(0.0f, uvPerPixel);
+
+    sample.linearDepth = linearDepth;
+    sample.clusterIndex = visibleClusterIndex;
+    sample.meshletTriangleIndex = cubeLocalIndex;
+    sample.meshletIndex = localVoxelClusterIndex;
+    sample.geometryGroupIndex = localGroupId;
+    sample.isVoxelPath = true;
+    sample.positionWS = worldPosition;
+    sample.positionVS = mul(float4(worldPosition, 1.0f), cam.view).xyz;
+    sample.normalWSBase = normalWS;
+    sample.normalOS = normalOS;
+    sample.vertexColor = 1.0f.xxx;
+    sample.dpdxWS = 0.0f.xxx;
+    sample.dpdyWS = 0.0f.xxx;
+    sample.motionVector = ComputeClodMotionVector(
+        skinnedObjectPosition,
+        worldPosition,
+        obj.prevModel,
+        mul(cam.view, cam.unjitteredProjection),
+        mul(cam.prevView, cam.prevUnjitteredProjection));
+#if defined(VISUTIL_USE_COMPACT_MATERIAL_EVAL)
+    sample.materialInfo = (MaterialInfo)0;
+#else
+    sample.materialInfo = materialInfo;
+#endif
+    sample.materialFlags = materialFlags;
+    sample.materialInputs = BuildVoxelMaterialInputs(
+        materialInfo,
+        materialFlags,
+        normalWS,
+        worldPosition,
+        attributeSample.uv,
+        voxelDUdx,
+        voxelDUdy,
+        saturate(attributeSample.opacity));
+    return true;
+}
+
 uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d)
 {
     uint triOffset = d.triangleStreamBase + d.triangleByteOffset + triLocalIndex * 3u;
@@ -936,6 +1475,20 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
         isReyesPatch = true;
     }
 
+    ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    const uint4 packedVisibleCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
+    if (CLodVisibleClusterIsVoxel(packedVisibleCluster))
+    {
+        return ResolveClodVoxelCommonSampleFromPackedCluster(
+            packedVisibleCluster,
+            clusterIndex,
+            meshletTriangleIndex,
+            depth,
+            pixel,
+            cam,
+            sample);
+    }
+
     MeshletResolveData md = LoadMeshletResolveData_Wave(clusterIndex);
     if (meshletTriangleIndex >= md.triangleCount)
     {
@@ -1046,6 +1599,10 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
         bary = ReyesComposeSourceBarycentrics(bary, sourcePatchBary0, sourcePatchBary1, sourcePatchBary2);
     }
 
+#if defined(VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE)
+    const bool clodGBufferResolveBackface = ClodBarycentricDerivativesAreBackFacing(bary);
+#endif
+
     float3 interpPosX = InterpolateWithDeriv(bary, evalPos0.x, evalPos1.x, evalPos2.x);
     float3 interpPosY = InterpolateWithDeriv(bary, evalPos0.y, evalPos1.y, evalPos2.y);
     float3 interpPosZ = InterpolateWithDeriv(bary, evalPos0.z, evalPos1.z, evalPos2.z);
@@ -1131,6 +1688,7 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
     sample.clusterIndex = clusterIndex;
     sample.meshletTriangleIndex = meshletTriangleIndex;
     sample.meshletIndex = md.drawcallAndMeshlet.y;
+    sample.geometryGroupIndex = CLodVisibleClusterGroupID(packedVisibleCluster);
     sample.positionWS = worldPosition;
     sample.positionVS = positionVS;
     sample.normalWSBase = worldNormal;
@@ -1151,6 +1709,14 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
 #endif
     sample.materialFlags = materialFlags;
     sample.materialInputs = materialInputs;
+#if defined(VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE)
+    if (clodGBufferResolveBackface)
+    {
+        sample.normalWSBase = -sample.normalWSBase;
+        sample.normalOS = -sample.normalOS;
+        sample.materialInputs.normalWS = -sample.materialInputs.normalWS;
+    }
+#endif
     return true;
 }
 
@@ -1194,6 +1760,8 @@ bool ResolveClodGBufferSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool 
     }
 
     sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.geometryGroupIndex = resolvedSample.geometryGroupIndex;
+    sample.isVoxelPath = resolvedSample.isVoxelPath;
     sample.normalOS = resolvedSample.normalOS;
     sample.motionVector = resolvedSample.motionVector;
     sample.materialInputs = resolvedSample.materialInputs;
@@ -1251,6 +1819,8 @@ bool ResolveClodGBufferDebugSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, 
     }
 
     sample.meshletIndex = resolvedSample.meshletIndex;
+    sample.geometryGroupIndex = resolvedSample.geometryGroupIndex;
+    sample.isVoxelPath = resolvedSample.isVoxelPath;
     sample.normalOS = resolvedSample.normalOS;
     sample.motionVector = resolvedSample.motionVector;
     sample.materialInputs = resolvedSample.materialInputs;

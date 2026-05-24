@@ -38,6 +38,27 @@ struct RasterBucketsHistogramIndirectCommand
     uint dispatchX, dispatchY, dispatchZ;
 };
 
+static const uint CLOD_TELEMETRY_DISABLED_DESCRIPTOR = 0xFFFFFFFFu;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_INPUTS = 109u;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_VOXEL_SKIPPED = 110u;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_REYES_SKIPPED = 111u;
+static const uint WG_COUNTER_RASTER_SORT_HISTOGRAM_TRIANGLE_CONTRIBUTORS = 112u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_INPUTS = 113u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_VOXEL_SKIPPED = 114u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_REYES_SKIPPED = 115u;
+static const uint WG_COUNTER_RASTER_SORT_COMPACTION_TRIANGLE_EMITTED = 116u;
+
+void CLodSortTelemetryAdd(uint descriptorIndex, uint counterIndex, uint value)
+{
+    if (descriptorIndex == CLOD_TELEMETRY_DISABLED_DESCRIPTOR || value == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[descriptorIndex];
+    InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
 struct CLodVirtualShadowInvalidationInput
 {
     uint perMeshInstanceBufferIndex;
@@ -2581,22 +2602,26 @@ void CreateRasterBucketsHistogramCommandCSMain()
     outCommand[0].dispatchY = dispatchY;
     outCommand[0].dispatchZ = 1;
 
-    StructuredBuffer<CLodReplayBufferState> replayStateBuffer = ResourceDescriptorHeap[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<CLodNodeGpuInput> nodeInputs = ResourceDescriptorHeap[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX];
+    if (CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX != 0xFFFFFFFFu &&
+        CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        StructuredBuffer<CLodReplayBufferState> replayStateBuffer = ResourceDescriptorHeap[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<CLodNodeGpuInput> nodeInputs = ResourceDescriptorHeap[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX];
 
-    const CLodReplayBufferState replayState = replayStateBuffer[0];
+        const CLodReplayBufferState replayState = replayStateBuffer[0];
 
-    const uint nodeReplayCount = min(replayState.nodeWriteCount, CLOD_NODE_REPLAY_CAPACITY);
-    const uint meshletReplayCount = min(replayState.meshletWriteCount, CLOD_MESHLET_REPLAY_CAPACITY);
+        const uint nodeReplayCount = min(replayState.nodeWriteCount, CLOD_NODE_REPLAY_CAPACITY);
+        const uint meshletReplayCount = min(replayState.meshletWriteCount, CLOD_MESHLET_REPLAY_CAPACITY);
 
-    // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
-    // Entry point 1 = TraverseNodes (node replay region, 12-byte stride).
-    // Entry point 2 = ClusterCull1  (meshlet replay region, 24-byte stride).
-    // recordsAddress for meshlet region is patched by C++ to include CLOD_REPLAY_MESHLET_REGION_OFFSET.
-    nodeInputs[1].numRecords = nodeReplayCount;
-    nodeInputs[1].recordStride = CLOD_NODE_REPLAY_STRIDE_BYTES;
-    nodeInputs[2].numRecords = meshletReplayCount;
-    nodeInputs[2].recordStride = CLOD_MESHLET_REPLAY_STRIDE_BYTES;
+        // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
+        // Entry point 1 = TraverseNodes (node replay region, 12-byte stride).
+        // Entry point 2 = ClusterCull1  (meshlet replay region, 24-byte stride).
+        // recordsAddress for meshlet region is patched by C++ to include CLOD_REPLAY_MESHLET_REGION_OFFSET.
+        nodeInputs[1].numRecords = nodeReplayCount;
+        nodeInputs[1].recordStride = CLOD_NODE_REPLAY_STRIDE_BYTES;
+        nodeInputs[2].numRecords = meshletReplayCount;
+        nodeInputs[2].recordStride = CLOD_MESHLET_REPLAY_STRIDE_BYTES;
+    }
 }
 
 // IndirectCommandSignatureRootConstant0 = cluster count
@@ -2617,19 +2642,31 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     }
 
     const uint visibleClusterReadIndex = CLodGetHistogramVisibleClusterReadIndex(linearizedID);
+    CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_INPUTS, 1u);
     if ((CLOD_HISTOGRAM_READ_MODE_FLAGS & CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
         CLodIsVisibleClusterOwnedByReyes(visibleClusterReadIndex, CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX)) {
+        CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_REYES_SKIPPED, 1u);
         return;
     }
 
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, visibleClusterReadIndex);
+    if (CLodVisibleClusterIsVoxel(packedCluster))
+    {
+        CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_VOXEL_SKIPPED, 1u);
+        return;
+    }
 
     // TODO: Remove load chain
-    uint instanceIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusters, visibleClusterReadIndex));
+    uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint rasterBucketIndex = perMeshBuffer[perMeshIndex].rasterBucketIndex;
+    if (rasterBucketIndex >= CLOD_HISTOGRAM_NUM_RASTER_BUCKETS)
+    {
+        return;
+    }
 
     // Group threads in the wave by matId
     uint4 mask = WaveMatch(rasterBucketIndex);
@@ -2639,6 +2676,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
         uint groupSize = CountBits128(mask);
         RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
         InterlockedAdd(histogramBuffer[rasterBucketIndex], groupSize);
+        CLodSortTelemetryAdd(CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_HISTOGRAM_TRIANGLE_CONTRIBUTORS, groupSize);
     }
 }
 
@@ -2847,10 +2885,13 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     if (linearizedID < clusterCount)
     {
         const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
+        CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_INPUTS, 1u);
+        bool shouldCompactCluster = true;
         if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
             CLodIsVisibleClusterOwnedByReyes(sourceClusterIndex, CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX))
         {
-            return;
+            CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_REYES_SKIPPED, 1u);
+            shouldCompactCluster = false;
         }
 
         ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
@@ -2859,14 +2900,26 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
         const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
-        uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
+        if (shouldCompactCluster && CLodVisibleClusterIsVoxel(packedCluster))
+        {
+            CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_VOXEL_SKIPPED, 1u);
+            shouldCompactCluster = false;
+        }
+        if (shouldCompactCluster)
+        {
+            uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
+            shouldCompactCluster = bucketIndex < numBuckets;
+            if (shouldCompactCluster)
+            {
+                uint localOffset = 0;
+                InterlockedAdd(writeCursor[bucketIndex], 1, localOffset);
 
-        uint localOffset = 0;
-        InterlockedAdd(writeCursor[bucketIndex], 1, localOffset);
-
-        uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
-        CLodStoreVisibleClusterPackedWordsRW(compactedClusters, dst, packedCluster);
-        sortedToUnsortedMapping[dst] = sourceClusterIndex;
+                uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
+                CLodStoreVisibleClusterPackedWordsRW(compactedClusters, dst, packedCluster);
+                sortedToUnsortedMapping[dst] = sourceClusterIndex;
+                CLodSortTelemetryAdd(CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX, WG_COUNTER_RASTER_SORT_COMPACTION_TRIANGLE_EMITTED, 1u);
+            }
+        }
     }
 
     if (linearizedID < numBuckets)

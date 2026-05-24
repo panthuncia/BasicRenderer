@@ -1,7 +1,7 @@
 
 # BasicRenderer
 
-![Zorah AO example](images/zorah_ao.png)
+![Zorah shadow example](images/zorah_shadows.png)
 
 An advanced DX12 research renderer, written to experiment with real-time rendering, built entirely around virtualized geometry
 
@@ -10,6 +10,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 ## Graphical Features
 
 - Nanite-style virtualized geometry using a novel work-graph approach, capable of real-time rendering of scenes with tens of billions of triangles
+- Virtual shadow mapping (directional-only for now) with multiple experimental raster modes
+- Voxel LOD fallback for virtualized geometry
 - Image-based lighting
 - Normal mapping & contact-refinement parallax heightmaps
 - Support for arbitrary numbers of point, spot, and directional lights using clustered lighting
@@ -27,7 +29,6 @@ Feature development is driven purely by what I'm interested in at the moment.
 - Shader-instrumentation debugging, using [GPU Reshape](https://github.com/GPUOpen-Tools/GPU-Reshape)'s backend
 - GPU-driven rendering with compute culling & ExecuteIndirect
 - Visibility buffer (UE5-style), Deferred, and forward+ rendering
-- Virtual shadow mapping (directional-only for now) with multiple raster modes
 - DirectStorage integration for low-latency, high-throughput data streaming
 - GPU BC7 compressor for rapid asset optimization
 - Clustered lighting with a paged linked-list
@@ -39,6 +40,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ## Gallery
 ![Zorah cluster example](images/zorah_clusters.png)
+
+<img src="images/needles_0.png" width="34.1%"><img src="images/needles_1.png" width="33.1%"><img src="images/needles_2.png" width="32.6%">
 
 ![San-Miguel example](images/SanMiguel.png)
 

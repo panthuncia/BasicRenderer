@@ -179,12 +179,19 @@ struct Camera {
 struct CullingCameraInfo
 {
     float4 positionWorldSpace;
+    float projX;
     float projY;
     float zNear;
     float errorOverDistanceThreshold; // Threshold for (error * scale) / distance metric
-    float pad;
+    uint isOrtho;
+    float3 pad;
+    float4 viewRightWorld;
+    float4 viewUpWorld;
+    float4 viewForwardWorld;
     row_major matrix viewProjection;
     float4 viewZ;
+    row_major matrix viewInverse;
+    row_major matrix projectionInverse;
 };
 
 struct PerFrameBuffer {
@@ -490,6 +497,7 @@ struct SingleMatrix {
 struct PerObjectBuffer {
     row_major matrix model;
     row_major matrix prevModel;
+    row_major matrix modelInverse;
     uint normalMatrixBufferIndex;
     uint objectFlags;
     uint pad[2];
@@ -518,7 +526,6 @@ struct PerMeshInstanceBuffer {
     uint perMeshBufferIndex;
     uint perObjectBufferIndex;
     uint skinningInstanceSlot;
-    uint postSkinningVertexBufferOffset;
     float skinnedBoundsScale;
     BoundingSphere boundingSphere;
 };
@@ -665,8 +672,8 @@ struct SkinningInstanceGPUInfo
 {
     uint transformOffsetMatrices;
     uint invBindOffsetMatrices;
+    uint inverseSkinOffsetMatrices;
     uint boneCount;
-    uint pad[1];
 };
 
 // TODO: packing?

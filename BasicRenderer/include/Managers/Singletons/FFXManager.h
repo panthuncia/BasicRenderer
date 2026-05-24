@@ -41,12 +41,13 @@ public:
 
 private:
     FFXManager() = default;
-    uint8_t m_numFramesInFlight;
+    uint8_t m_numFramesInFlight = 0;
     std::function<DirectX::XMUINT2()> m_getRenderRes;
     std::function<DirectX::XMUINT2()> m_getOutputRes;
-    FfxInterface m_backendInterface;
-	FfxSssrContext m_sssrContext;
+    FfxInterface m_backendInterface{};
+	FfxSssrContext m_sssrContext{};
 	void* m_pScratchMemory = nullptr;
+	bool m_sssrContextCreated = false;
 };
 
 inline FFXManager& FFXManager::GetInstance() {

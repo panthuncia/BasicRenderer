@@ -18,5 +18,8 @@ models/
 textures/
 /ThirdParty/
 cmake-build-*
-openpbr-bsdf
 docs/
+PyNifly/
+Streamline/
+vk_streamline/
+vk_lod_clusters/

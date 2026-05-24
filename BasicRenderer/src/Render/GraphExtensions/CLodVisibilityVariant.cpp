@@ -130,10 +130,9 @@ std::string CLodVisibilityVariant::AppendFineRasterPassForPhase(
         throw std::runtime_error("Unsupported CLod visibility fine raster phase.");
     }
 
-    outPasses.push_back(
-        RenderGraph::ExternalPassDesc::Compute(
-            passName,
-            std::make_shared<ReyesPatchRasterizationPass>(
+    auto rasterPassDesc = RenderGraph::ExternalPassDesc::Compute(
+        passName,
+        std::make_shared<ReyesPatchRasterizationPass>(
                 extension.m_visibleClustersBuffer,
                 extension.m_reyesDiceQueueBuffer,
                 extension.m_reyesDiceQueueCounterBuffer,
@@ -146,9 +145,11 @@ std::string CLodVisibilityVariant::AppendFineRasterPassForPhase(
                 rasterWorkIndirectArgsBuffer,
                 telemetryBuffer,
                 slabGroup,
-                extension.m_maxVisibleClusters,
+                extension.m_visibleClusterCapacity,
                 phaseIndex,
-                CLodReyesPatchVisibilityIndexBase(extension.m_maxVisibleClusters))));
+                CLodReyesPatchVisibilityIndexBase(extension.m_visibleClusterCapacity)));
+    rasterPassDesc.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
+    outPasses.push_back(std::move(rasterPassDesc));
 
     return passName;
 }

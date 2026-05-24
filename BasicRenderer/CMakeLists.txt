@@ -83,6 +83,9 @@ endif()
 find_package(spdlog CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+if(TARGET imgui::imgui)
+    set_property(TARGET imgui::imgui PROPERTY INTERFACE_LINK_LIBRARIES "")
+endif()
 #find_package(meshoptimizer REQUIRED)
 find_package(DirectX-Headers CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
@@ -209,6 +212,81 @@ target_link_libraries(resource_codegen
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 add_executable(ShaderPreprocessTests "tests/ShaderPreprocessTests.cpp")
+
+set(BASICRENDERER_IMGUI_SOURCE_VERSION "1.91.9" CACHE STRING "ImGui source release used when vcpkg's transient build tree is unavailable.")
+set(_basicrenderer_imgui_vulkan_backend_candidates)
+if(DEFINED VCPKG_INSTALLED_DIR)
+    file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
+        "${VCPKG_INSTALLED_DIR}/vcpkg/blds/imgui/src/*/backends/imgui_impl_vulkan.cpp")
+endif()
+if(NOT _basicrenderer_imgui_vulkan_backend_candidates)
+    file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/vcpkg/blds/imgui/src/*/backends/imgui_impl_vulkan.cpp")
+endif()
+if(NOT _basicrenderer_imgui_vulkan_backend_candidates)
+    file(GLOB _basicrenderer_imgui_vulkan_backend_candidates CONFIGURE_DEPENDS
+        "${BASICRENDERER_REPO_ROOT}/out/build/*/vcpkg_installed/vcpkg/blds/imgui/src/*/backends/imgui_impl_vulkan.cpp")
+endif()
+if(NOT _basicrenderer_imgui_vulkan_backend_candidates)
+    set(_basicrenderer_imgui_archive "${CMAKE_BINARY_DIR}/_deps/ocornut-imgui-v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz")
+    set(_basicrenderer_imgui_source_dir "${CMAKE_BINARY_DIR}/_deps/imgui-${BASICRENDERER_IMGUI_SOURCE_VERSION}")
+
+    set(_basicrenderer_imgui_cached_archives)
+    if(DEFINED ENV{VCPKG_DOWNLOADS})
+        list(APPEND _basicrenderer_imgui_cached_archives "$ENV{VCPKG_DOWNLOADS}/ocornut-imgui-v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz")
+    endif()
+    if(DEFINED ENV{LOCALAPPDATA})
+        list(APPEND _basicrenderer_imgui_cached_archives "$ENV{LOCALAPPDATA}/vcpkg/downloads/ocornut-imgui-v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz")
+    endif()
+
+    foreach(_basicrenderer_imgui_cached_archive IN LISTS _basicrenderer_imgui_cached_archives)
+        if(EXISTS "${_basicrenderer_imgui_cached_archive}")
+            set(_basicrenderer_imgui_archive "${_basicrenderer_imgui_cached_archive}")
+            break()
+        endif()
+    endforeach()
+
+    if(NOT EXISTS "${_basicrenderer_imgui_archive}")
+        file(DOWNLOAD
+            "https://github.com/ocornut/imgui/archive/refs/tags/v${BASICRENDERER_IMGUI_SOURCE_VERSION}.tar.gz"
+            "${_basicrenderer_imgui_archive}"
+            EXPECTED_HASH SHA512=c9393bd9f6b49b036ad6ab3ba4d972876c6f60ce7f5c13a7a56ff11b3559ea3211b0caa03eed10b4f4fbe9c371e14f7f24866bd476652f543f3ed3aa878ea930
+            TLS_VERIFY ON
+            STATUS _basicrenderer_imgui_download_status)
+        list(GET _basicrenderer_imgui_download_status 0 _basicrenderer_imgui_download_result)
+        if(NOT _basicrenderer_imgui_download_result EQUAL 0)
+            list(GET _basicrenderer_imgui_download_status 1 _basicrenderer_imgui_download_message)
+            message(FATAL_ERROR "BasicRenderer: failed to download ImGui ${BASICRENDERER_IMGUI_SOURCE_VERSION} source archive: ${_basicrenderer_imgui_download_message}")
+        endif()
+    endif()
+
+    if(NOT EXISTS "${_basicrenderer_imgui_source_dir}/backends/imgui_impl_vulkan.cpp")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E tar xzf "${_basicrenderer_imgui_archive}"
+            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/_deps"
+            RESULT_VARIABLE _basicrenderer_imgui_extract_result)
+        if(NOT _basicrenderer_imgui_extract_result EQUAL 0)
+            message(FATAL_ERROR "BasicRenderer: failed to extract ImGui source archive '${_basicrenderer_imgui_archive}'.")
+        endif()
+    endif()
+
+    if(EXISTS "${_basicrenderer_imgui_source_dir}/backends/imgui_impl_vulkan.cpp")
+        list(APPEND _basicrenderer_imgui_vulkan_backend_candidates
+            "${_basicrenderer_imgui_source_dir}/backends/imgui_impl_vulkan.cpp")
+    endif()
+endif()
+if(_basicrenderer_imgui_vulkan_backend_candidates)
+    list(SORT _basicrenderer_imgui_vulkan_backend_candidates)
+    list(GET _basicrenderer_imgui_vulkan_backend_candidates 0 _basicrenderer_imgui_vulkan_backend)
+    target_sources(${PROJECT_NAME} PRIVATE "${_basicrenderer_imgui_vulkan_backend}")
+    set_source_files_properties("${_basicrenderer_imgui_vulkan_backend}" PROPERTIES
+        SKIP_PRECOMPILE_HEADERS ON
+        COMPILE_DEFINITIONS "IMGUI_IMPL_VULKAN_NO_PROTOTYPES;VK_USE_PLATFORM_WIN32_KHR"
+        COMPILE_OPTIONS "/w")
+else()
+    message(FATAL_ERROR "BasicRenderer: imgui_impl_vulkan.cpp source was not found. Vulkan ImGui must compile the backend locally with IMGUI_IMPL_VULKAN_NO_PROTOTYPES instead of using the prebuilt imgui library backend.")
+endif()
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/pch.h")
 
@@ -486,6 +564,16 @@ add_symlink_or_copy_per_config(
     "FFX_backend_dx12"
 )
 
+set(FFX_BACKEND_VK_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_backend_vk_x64drel.dll")
+set(FFX_BACKEND_VK_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_backend_vk_x64drel.dll")
+
+add_symlink_or_copy_per_config(
+    "${FFX_BACKEND_VK_DIR}"
+    "${FFX_BACKEND_VK_FILE}"
+    FALSE  # IS_DIRECTORY
+    "FFX_backend_vk"
+)
+
 set(FFX_SSSR_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_sssr_x64drel.dll")
 set(FFX_SSSR_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_sssr_x64drel.dll")
 
@@ -690,12 +778,13 @@ if (MSVC)
   target_compile_options(${PROJECT_NAME} PRIVATE /external:anglebrackets /external:W0) # Disable warnings in external headers
   # Clang (via clang-cl) warns about MSVC-specific flags it ignores; suppress those warnings-as-errors
   target_compile_options(${PROJECT_NAME} PRIVATE $<$<CXX_COMPILER_ID:Clang>:
+      -Werror
       -Wno-unused-command-line-argument
+      -Wno-unused-function
       -Wno-error=switch
       -Wno-error=reorder-ctor
       -Wno-error=unused-variable
       -Wno-error=unused-but-set-variable
-      -Wno-error=unused-function
       -Wno-error=unused-private-field
       -Wno-error=misleading-indentation
       -Wno-error=nonportable-include-path
@@ -733,12 +822,13 @@ if (MSVC)
   )
   target_compile_options(ShaderPreprocessTests PRIVATE /external:anglebrackets /external:W0)
   target_compile_options(ShaderPreprocessTests PRIVATE $<$<CXX_COMPILER_ID:Clang>:
+      -Werror
       -Wno-unused-command-line-argument
+      -Wno-unused-function
       -Wno-error=switch
       -Wno-error=reorder-ctor
       -Wno-error=unused-variable
       -Wno-error=unused-but-set-variable
-      -Wno-error=unused-function
       -Wno-error=unused-private-field
       -Wno-error=misleading-indentation
       -Wno-error=nonportable-include-path
@@ -755,8 +845,12 @@ endif()
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
+if(BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR)
+    target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR}")
+endif()
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/")
 target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/ThirdParty")
+target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/volk")
 target_include_directories(ShaderPreprocessTests BEFORE PRIVATE "${BASICRENDERER_SOURCE_ROOT}" "${BASICRENDERER_SOURCE_ROOT}/src" include/)
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
@@ -765,24 +859,23 @@ target_compile_definitions(ShaderPreprocessTests PRIVATE NOMINMAX)
 # Disable warnings for signed/unsigned mismatch
 add_compile_options("/wd4267")
 
-# Compile‐only: debug info on RelWithDebInfo
-# Native MSVC uses /Zi (PDB); clang-cl cross-compile uses /Z7 (embedded CodeView)
-if(CMAKE_CROSSCOMPILING)
-  target_compile_options(${PROJECT_NAME} PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Z7>
-  )
-else()
-  target_compile_options(${PROJECT_NAME} PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Zi>
-  )
-endif()
-
-# Link‐only: /DEBUG on RelWithDebInfo
-target_link_options(${PROJECT_NAME} PRIVATE
+# Link-only: /DEBUG on Debug/RelWithDebInfo.
+set(BASICRENDERER_MSVC_PDB_LINK_OPTIONS
     $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CROSSCOMPILING)
+    # Use larger PDB pages for native MSVC to avoid "limit exceeded for program
+    # database" when debug symbols grow large.
+    list(APPEND BASICRENDERER_MSVC_PDB_LINK_OPTIONS
+        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/PDBPAGESIZE:16384>
+    )
+endif()
+
+target_link_options(${PROJECT_NAME} PRIVATE
+    ${BASICRENDERER_MSVC_PDB_LINK_OPTIONS}
+)
 target_link_options(ShaderPreprocessTests PRIVATE
-    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
+    ${BASICRENDERER_MSVC_PDB_LINK_OPTIONS}
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -838,9 +931,6 @@ PRIVATE
     slang::slang
     "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib" 
     "${BASICRENDERER_SOURCE_ROOT}/sl.interposer.lib" 
-    "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_dx12.lib" 
-    "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_vk.lib"
-    "${BASICRENDERER_SOURCE_ROOT}/ffx_backend_dx12_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/ffx_sssr_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )
@@ -869,7 +959,7 @@ if(BASICRENDERER_DIRECTSTORAGE_CORE_DLL)
     )
 endif()
 
-if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
+if(BASICRHI_ENABLE_RESHAPE AND (TARGET GRS.Backends.DX12.Layer OR TARGET GRS.Backends.Vulkan.Layer))
     target_link_directories(${PROJECT_NAME} PRIVATE
         "${CMAKE_BINARY_DIR}/External/lib"
     )
@@ -921,17 +1011,14 @@ if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
     endif()
     br_add_reshape_plugin(GRS.Features.ExportIndices.Backend "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Features/ExportIndices/ExportIndices.xml")
 
-    add_dependencies(${PROJECT_NAME}
-        GRS.Backends.DX12.Layer
-        ${_basicrenderer_reshape_plugins}
-    )
-
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
+    set(_basicrenderer_reshape_backend_targets ${_basicrenderer_reshape_plugins})
+    set(_basicrenderer_reshape_backend_copy_commands)
+    if(TARGET GRS.Backends.DX12.Layer)
+        list(APPEND _basicrenderer_reshape_backend_targets GRS.Backends.DX12.Layer)
+        list(APPEND _basicrenderer_reshape_backend_copy_commands
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxil.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxil.dll"
@@ -941,6 +1028,28 @@ if(BASICRHI_ENABLE_RESHAPE AND TARGET GRS.Backends.DX12.Layer)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxilconv.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxilconv.dll"
+        )
+    endif()
+    if(TARGET GRS.Backends.Vulkan.Layer)
+        list(APPEND _basicrenderer_reshape_backend_targets GRS.Backends.Vulkan.Layer)
+        list(APPEND _basicrenderer_reshape_backend_copy_commands
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:GRS.Backends.Vulkan.Layer>"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.Vulkan.Layer>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Backends/Vulkan/Layer/Resources/VK_LAYER_GPUOPEN_GRS.json"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/VK_LAYER_GPUOPEN_GRS.json"
+        )
+    endif()
+
+    add_dependencies(${PROJECT_NAME}
+        ${_basicrenderer_reshape_backend_targets}
+    )
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC"
+        ${_basicrenderer_reshape_backend_copy_commands}
         ${_basicrenderer_reshape_plugin_copy_commands}
             COMMAND ${CMAKE_COMMAND} -E rm -f
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Debug.Backend.dll"

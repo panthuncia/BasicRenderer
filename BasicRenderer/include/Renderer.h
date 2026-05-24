@@ -39,6 +39,7 @@
 #include "Render/RenderContext.h"
 #include "Render/OpenPBRLookupResources.h"
 #include "Render/SceneRenderBridge.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodRayTracingSystem.h"
 
 class DynamicResource;
 class ExternalTextureResource;
@@ -150,6 +151,7 @@ private:
 	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
     std::unique_ptr<br::ReadbackManager> m_pReadbackManager = nullptr;
     std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
+    std::unique_ptr<br::render::CLodRayTracingSystem> m_clodRayTracingSystem = nullptr;
 
 	ManagerInterface m_managerInterface;
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
@@ -217,9 +219,11 @@ private:
 	bool m_visibilityRendering = true;
 	bool m_occlusionCulling = true;
 	bool m_meshletCulling = true;
-    bool m_bloom = true;
+    bool m_bloom = false;
     bool m_jitter = true;
-	bool m_screenSpaceReflections = true;
+	bool m_screenSpaceReflections = false;
+    bool m_rayTracedReflections = false;
+    bool m_warnedRayTracedReflectionsUnsupported = false;
 	bool m_useMeshShaders = true;
 
     std::function<uint16_t()> getShadowResolution;
@@ -253,9 +257,9 @@ private:
     flecs::query<Components::Matrix, Components::Light> m_renderSyncLightQuery;
     flecs::query<> m_renderTransformUpdatedCleanupQuery;
     bool m_renderSyncQueriesBuilt = false;
-    std::shared_ptr<br::render::SceneFrameSnapshot> m_committedSceneSnapshot;
     std::shared_ptr<br::render::SceneFrameSnapshot> m_completedSceneSnapshot;
     mutable std::mutex m_sceneSnapshotMutex;
+    bool m_hasCommittedSceneSnapshot = false;
     std::atomic<bool> m_sceneTaskInFlight = false;
     std::atomic<bool> m_sceneTaskCompleted = false;
     std::atomic<uint64_t> m_sceneOverlapEpoch = 1;

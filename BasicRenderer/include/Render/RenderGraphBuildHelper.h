@@ -24,6 +24,7 @@
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
+#include "RenderPasses/RayTracing/RayTracedReflectionsPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/FidelityFX/LinearDepthHistoryCopyPass.h"
 #include "Resources/Buffers/Buffer.h"
@@ -39,7 +40,7 @@ void CreateGBufferResources(RenderGraph* graph) {
 
     TextureDescription normalsWorldSpaceDesc;
     normalsWorldSpaceDesc.channels = 3;
-    normalsWorldSpaceDesc.format = rhi::Format::R32G32B32A32_Typeless;
+    normalsWorldSpaceDesc.format = rhi::Format::R32G32B32A32_Float;
     normalsWorldSpaceDesc.hasRTV = true;
 	normalsWorldSpaceDesc.rtvFormat = rhi::Format::R32G32B32A32_Float;
     normalsWorldSpaceDesc.hasSRV = true;
@@ -174,6 +175,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     brdfDesc.imageDimensions.push_back(dims);
     auto brdfIntegrationTexture = PixelBuffer::CreateSharedUnmaterialized(brdfDesc);
     brdfIntegrationTexture->SetName("BRDF Integration Texture");
+    rg::memory::SetResourceUsageHint(*brdfIntegrationTexture, "Environment lighting");
     brdfIntegrationTexture->EnableIdleDematerialization(120);
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
 	graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
@@ -229,10 +231,11 @@ void BuildGBufferPipeline(RenderGraph* graph) {
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     bool clearRTVs = false;
-    if (!occlusionCulling || !indirect) {
+    const bool needsVisibilityMaterialEvaluation = visibilityRendering;
+    if (!needsVisibilityMaterialEvaluation && (!occlusionCulling || !indirect)) {
         clearRTVs = true; // We will not run an earlier pass
     }
-    else {
+    if (needsVisibilityMaterialEvaluation) {
 
         // Reset material counters
         graph->BuildComputePass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");
@@ -554,4 +557,34 @@ void BuildSSRPasses(RenderGraph* graph) {
 
     graph->BuildRenderPass<SpecularIBLPass>("Specular IBL & SSR Composite Pass");
     TagPassTechnique(graph, "Specular IBL & SSR Composite Pass", "Post Process::Screen-Space Reflections");
+}
+
+void BuildRayTracedReflectionPasses(RenderGraph* graph) {
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+
+    TextureDescription rtReflectionDesc;
+    rtReflectionDesc.arraySize = 1;
+    rtReflectionDesc.channels = 4;
+    rtReflectionDesc.isCubemap = false;
+    rtReflectionDesc.hasRTV = true;
+    rtReflectionDesc.format = rhi::Format::R16G16B16A16_Float;
+    rtReflectionDesc.generateMipMaps = false;
+    rtReflectionDesc.hasSRV = true;
+    rtReflectionDesc.srvFormat = rhi::Format::R16G16B16A16_Float;
+    rtReflectionDesc.hasUAV = true;
+    rtReflectionDesc.uavFormat = rhi::Format::R16G16B16A16_Float;
+    rtReflectionDesc.hasNonShaderVisibleUAV = true;
+    rtReflectionDesc.imageDimensions.push_back({ resolution.x, resolution.y, 0, 0 });
+    rtReflectionDesc.allowAlias = true;
+
+    auto rtReflectionTexture = PixelBuffer::CreateSharedUnmaterialized(rtReflectionDesc);
+    rtReflectionTexture->SetName("Ray Traced Reflections Texture");
+    rg::memory::SetResourceUsageHint(*rtReflectionTexture, "Post-Processing resources");
+    graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, rtReflectionTexture);
+
+    graph->BuildComputePass<RayTracedReflectionsPass>("Ray Traced Reflections Pass");
+    TagPassTechnique(graph, "Ray Traced Reflections Pass", "Ray Tracing::Reflections");
+
+    graph->BuildRenderPass<SpecularIBLPass>("Specular IBL & RT Reflections Composite Pass");
+    TagPassTechnique(graph, "Specular IBL & RT Reflections Composite Pass", "Ray Tracing::Reflections");
 }

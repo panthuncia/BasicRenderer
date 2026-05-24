@@ -393,6 +393,131 @@ namespace {
         return levels;
     }
 
+    uint32_t GetTextureMipLevelCount(const TextureDescription& desc) noexcept
+    {
+        if (desc.imageDimensions.empty()) {
+            return 1u;
+        }
+
+        const uint32_t faces = desc.isCubemap ? 6u : 1u;
+        const uint32_t slices = faces * (std::max)(1u, desc.arraySize);
+        if (slices > 0u && desc.imageDimensions.size() > slices && (desc.imageDimensions.size() % slices) == 0u) {
+            return static_cast<uint32_t>(desc.imageDimensions.size() / slices);
+        }
+
+        return 1u;
+    }
+
+    void ExpandDescriptionToFullMipChain(TextureDescription& desc)
+    {
+        if (desc.imageDimensions.empty()) {
+            return;
+        }
+
+        const uint32_t baseW = desc.imageDimensions[0].width;
+        const uint32_t baseH = desc.imageDimensions[0].height;
+        const uint32_t faces = desc.isCubemap ? 6u : 1u;
+        const uint32_t slices = faces * (std::max)(1u, desc.arraySize);
+        const uint32_t mipLevels = CalcMipCount(baseW, baseH);
+        desc.imageDimensions.resize(static_cast<size_t>(slices) * mipLevels);
+        const bool blockCompressed = rhi::helpers::IsBlockCompressed(desc.format);
+
+        for (uint32_t s = 0; s < slices; ++s) {
+            for (uint32_t m = 0; m < mipLevels; ++m) {
+                const uint32_t w = (std::max)(1u, baseW >> m);
+                const uint32_t h = (std::max)(1u, baseH >> m);
+                const uint32_t idx = m + s * mipLevels;
+
+                desc.imageDimensions[idx].width = w;
+                desc.imageDimensions[idx].height = h;
+                if (blockCompressed) {
+                    const uint32_t blocksWide = (w + 3u) / 4u;
+                    const uint32_t blocksHigh = (h + 3u) / 4u;
+                    desc.imageDimensions[idx].rowPitch = static_cast<uint64_t>(blocksWide) * 16u;
+                    desc.imageDimensions[idx].slicePitch = desc.imageDimensions[idx].rowPitch * blocksHigh;
+                }
+                else {
+                    desc.imageDimensions[idx].rowPitch = uint64_t(w) * desc.channels;
+                    desc.imageDimensions[idx].slicePitch = desc.imageDimensions[idx].rowPitch * h;
+                }
+            }
+        }
+    }
+
+    uint32_t CalcAlphaCoverageExportMipCount(uint32_t baseW, uint32_t baseH) noexcept
+    {
+        constexpr uint32_t kMinRepresentableAlphaMaskTexels = 16u;
+
+        uint32_t levels = 1u;
+        uint32_t w = baseW;
+        uint32_t h = baseH;
+        while (w > 1u || h > 1u) {
+            const uint32_t nextW = (std::max)(1u, w >> 1u);
+            const uint32_t nextH = (std::max)(1u, h >> 1u);
+            if (nextW * nextH < kMinRepresentableAlphaMaskTexels) {
+                break;
+            }
+
+            w = nextW;
+            h = nextH;
+            ++levels;
+        }
+
+        return levels;
+    }
+
+    void ResizeDescriptionMipChain(TextureDescription& desc, uint32_t mipLevels)
+    {
+        if (desc.imageDimensions.empty() || mipLevels == 0u) {
+            return;
+        }
+
+        const uint32_t baseW = desc.imageDimensions[0].width;
+        const uint32_t baseH = desc.imageDimensions[0].height;
+        const uint32_t faces = desc.isCubemap ? 6u : 1u;
+        const uint32_t slices = faces * (std::max)(1u, desc.arraySize);
+        desc.imageDimensions.resize(static_cast<size_t>(slices) * mipLevels);
+        const bool blockCompressed = rhi::helpers::IsBlockCompressed(desc.format);
+
+        for (uint32_t s = 0; s < slices; ++s) {
+            for (uint32_t m = 0; m < mipLevels; ++m) {
+                const uint32_t w = (std::max)(1u, baseW >> m);
+                const uint32_t h = (std::max)(1u, baseH >> m);
+                const uint32_t idx = m + s * mipLevels;
+
+                desc.imageDimensions[idx].width = w;
+                desc.imageDimensions[idx].height = h;
+                if (blockCompressed) {
+                    const uint32_t blocksWide = (w + 3u) / 4u;
+                    const uint32_t blocksHigh = (h + 3u) / 4u;
+                    desc.imageDimensions[idx].rowPitch = static_cast<uint64_t>(blocksWide) * 16u;
+                    desc.imageDimensions[idx].slicePitch = desc.imageDimensions[idx].rowPitch * blocksHigh;
+                }
+                else {
+                    desc.imageDimensions[idx].rowPitch = uint64_t(w) * desc.channels;
+                    desc.imageDimensions[idx].slicePitch = desc.imageDimensions[idx].rowPitch * h;
+                }
+            }
+        }
+    }
+
+    bool ShouldPreserveAlphaCoverage(const TextureFileMeta& meta, const TextureDescription& desc)
+    {
+        if (!meta.processing.isParticipatingMaterialTexture || meta.alphaIsAllOpaque) {
+            return false;
+        }
+        if (desc.isArray || desc.isCubemap || desc.channels != 4 || desc.imageDimensions.empty()) {
+            return false;
+        }
+
+        switch (rhi::helpers::stripSrgb(desc.format)) {
+        case rhi::Format::R8G8B8A8_UNorm:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     std::shared_ptr<Buffer> CreateRawByteAddressBuffer(uint64_t bufferSize, bool unorderedAccess, std::string_view debugName)
     {
         auto buffer = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, bufferSize, unorderedAccess);
@@ -544,7 +669,9 @@ namespace {
 std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
     TextureDescription desc,
     TextureInitialData initialData,
-    std::string_view debugName)
+    std::string_view debugName,
+    bool preserveAlphaCoverage,
+    bool forceSrgbMipEncoding)
     const {
     if (initialData.Empty()) {
         throw std::runtime_error("CreateAlwaysResidentPixelBuffer: initialData is empty. Use PixelBuffer::CreateShared for data-less textures.");
@@ -560,6 +687,12 @@ std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
     const uint32_t baseH = desc.imageDimensions[0].height;
 
     const bool doMipmapping = desc.generateMipMaps && !rhi::helpers::IsBlockCompressed(desc.format); // TODO: BC mip gen
+    preserveAlphaCoverage = preserveAlphaCoverage
+        && doMipmapping
+        && !desc.isArray
+        && !desc.isCubemap
+        && desc.channels == 4
+        && rhi::helpers::stripSrgb(desc.format) == rhi::Format::R8G8B8A8_UNorm;
 
     // if caller asked for mipmaps but only provided mip0 for a single-slice 2D texture, generate full chain on CPU.
     if (doMipmapping) {
@@ -615,8 +748,8 @@ std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
 
     // Enqueue GPU mipgen (only if mipLevels > 1)
     if (doMipmapping && pb->GetMipLevels() > 1) {
-        const bool isSrgb = rhi::helpers::IsSRGB(desc.format);
-        std::static_pointer_cast<MipmappingPass>(m_mipmappingPass)->EnqueueJob(pb, isSrgb);
+        const bool isSrgb = rhi::helpers::IsSRGB(desc.format) || forceSrgbMipEncoding;
+        std::static_pointer_cast<MipmappingPass>(m_mipmappingPass)->EnqueueJob(pb, isSrgb, preserveAlphaCoverage);
     }
 
     return pb;
@@ -663,40 +796,67 @@ bool TextureFactory::SubmitBC7CompressionJob(
         return false;
     }
 
+    const bool preserveAlphaCoverage = ShouldPreserveAlphaCoverage(requestMeta, preparedSourceData->desc);
+    const uint32_t preparedMipLevels = GetTextureMipLevelCount(preparedSourceData->desc);
+
     TextureDescription workingDesc = preparedSourceData->desc;
     workingDesc.format = rhi::helpers::stripSrgb(workingDesc.format);
-    workingDesc.generateMipMaps = false;
+    workingDesc.generateMipMaps = preserveAlphaCoverage && preparedMipLevels == 1u && requestMeta.processing.requestMipChain;
     workingDesc.hasUAV = false;
     workingDesc.uavFormat = rhi::Format::Unknown;
 
     auto workingTexture = CreateAlwaysResidentPixelBuffer(
         workingDesc,
         TextureInitialData::FromBytes(preparedSourceData->subresources),
-        jobName.empty() ? std::string_view("Texture[BC7Working]") : std::string_view(jobName));
+        jobName.empty() ? std::string_view("Texture[BC7Working]") : std::string_view(jobName),
+        preserveAlphaCoverage,
+        requestMeta.preferSRGB);
 
-    const uint32_t expectedMipLevels = static_cast<uint32_t>(preparedSourceData->desc.imageDimensions.size());
-    if (workingTexture->GetMipLevels() != expectedMipLevels) {
+    const uint32_t generatedMipLevels = workingDesc.generateMipMaps
+        ? CalcMipCount(preparedSourceData->desc.imageDimensions[0].width, preparedSourceData->desc.imageDimensions[0].height)
+        : preparedMipLevels;
+    if (workingTexture->GetMipLevels() != generatedMipLevels) {
         spdlog::error(
             "TextureFactory: BC7 working texture mip mismatch for '{}': expected {} mips but resource created {}",
             jobName,
-            expectedMipLevels,
+            generatedMipLevels,
             workingTexture->GetMipLevels());
         return false;
     }
 
-    TextureDescription compressedDesc = BuildBc7CompressedDescription(*preparedSourceData, requestMeta);
+    const uint32_t compressedMipLevels = preserveAlphaCoverage && requestMeta.processing.requestMipChain
+        ? CalcAlphaCoverageExportMipCount(
+            preparedSourceData->desc.imageDimensions[0].width,
+            preparedSourceData->desc.imageDimensions[0].height)
+        : generatedMipLevels;
+
+    TextureSourceData compressionLayoutSource = *preparedSourceData;
+    if (compressionLayoutSource.desc.imageDimensions.size() != compressedMipLevels) {
+        ExpandDescriptionToFullMipChain(compressionLayoutSource.desc);
+        ResizeDescriptionMipChain(compressionLayoutSource.desc, compressedMipLevels);
+    }
+
+    TextureDescription compressedDesc = BuildBc7CompressedDescription(compressionLayoutSource, requestMeta);
     auto compressedTexture = PixelBuffer::CreateShared(compressedDesc);
     if (!jobName.empty()) {
         compressedTexture->SetName(jobName + "[BC7]");
     }
 
-    if (compressedTexture->GetMipLevels() != expectedMipLevels) {
+    if (compressedTexture->GetMipLevels() != compressedMipLevels) {
         spdlog::error(
             "TextureFactory: BC7 compressed texture mip mismatch for '{}': expected {} mips but resource created {}",
             jobName,
-            expectedMipLevels,
+            compressedMipLevels,
             compressedTexture->GetMipLevels());
         return false;
+    }
+
+    if (preserveAlphaCoverage && compressedMipLevels < generatedMipLevels) {
+        spdlog::info(
+            "TextureFactory: alpha coverage BC7 export for '{}' trimmed mip chain from {} to {} levels",
+            jobName,
+            generatedMipLevels,
+            compressedMipLevels);
     }
 
     uint64_t outputByteSize = 0;
@@ -712,6 +872,9 @@ bool TextureFactory::SubmitBC7CompressionJob(
     job->workingTexture = std::move(workingTexture);
     job->compressedTexture = std::move(compressedTexture);
     job->blockBuffer = std::move(blockBuffer);
+    job->outputHasFullMipChain = compressedMipLevels == CalcMipCount(
+        preparedSourceData->desc.imageDimensions[0].width,
+        preparedSourceData->desc.imageDimensions[0].height);
     job->subresources.reserve(footprints.size());
     for (uint32_t mip = 0; mip < static_cast<uint32_t>(footprints.size()); ++mip) {
         BC7CompressionSubresource subresource{};
@@ -806,6 +969,25 @@ PipelineState TextureFactory::MipmappingPass::CreatePipeline(MipmapValueType val
         debugName);
 }
 
+PipelineState& TextureFactory::MipmappingPass::GetOrCreateAlphaPipeline(
+    const wchar_t* entryPoint,
+    PipelineState& pso,
+    bool& hasPso,
+    const char* debugName)
+{
+    if (!hasPso) {
+        auto& psoManager = PSOManager::GetInstance();
+        pso = psoManager.MakeComputePipeline(
+            psoManager.GetComputeRootSignature().GetHandle(),
+            L"shaders/Utilities/alphaCoverageMipmapping.hlsl",
+            entryPoint,
+            {},
+            debugName);
+        hasPso = true;
+    }
+    return pso;
+}
+
 PipelineState& TextureFactory::MipmappingPass::GetOrCreatePipeline(MipmapValueType valueType, bool isArray)
 {
     switch (valueType) {
@@ -855,7 +1037,7 @@ PipelineState& TextureFactory::MipmappingPass::GetOrCreatePipeline(MipmapValueTy
     throw std::runtime_error("MipmappingPass: unsupported pipeline variant");
 }
 
-void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb) {
+void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb, bool preserveAlphaCoverage) {
     if (!tex) return;
 
     if (tex->IsBlockCompressed()) {
@@ -869,8 +1051,8 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
     const uint32_t w = tex->GetInternalWidth();
     const uint32_t h = tex->GetInternalHeight();
 
-    // SPD limit
-    if (w > 4096 || h > 4096) {
+    // SPD limit. The alpha-coverage path generates mips sequentially and is not bound by SPD's 4K setup.
+    if (!preserveAlphaCoverage && (w > 4096 || h > 4096)) {
         spdlog::warn("MipmappingPass: skipping >4K texture ({}x{}) for now", w, h);
         return;
     }
@@ -878,6 +1060,7 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
     Job j{};
     j.texture = tex;
     j.isSrgb = isSrgb;
+    j.preserveAlphaCoverage = preserveAlphaCoverage;
 
     const uint32_t faces = tex->IsCubemap() ? 6u : 1u;
     const uint32_t slices = faces * tex->GetArraySize();
@@ -893,6 +1076,11 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
         return;
     }
 
+    if (j.preserveAlphaCoverage && (j.isArray || j.valueType != MipmapValueType::Float4)) {
+        spdlog::warn("MipmappingPass: alpha coverage mip generation is only supported for non-array float4 textures; falling back to SPD");
+        j.preserveAlphaCoverage = false;
+    }
+
     // SPD setup
     unsigned int workGroupOffset[2]{};
     unsigned int numWorkGroupsAndMips[2]{};
@@ -902,13 +1090,15 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
     SpdSetup(tg, workGroupOffset, numWorkGroupsAndMips, rectInfo);
 
     const uint32_t maxGen = 12u;
-    j.mipsToGenerate = (std::min)(mipLevels - 1u, maxGen);
+    j.mipsToGenerate = j.preserveAlphaCoverage
+        ? (mipLevels - 1u)
+        : (std::min)(mipLevels - 1u, maxGen);
 
     // Build constants (store CPU copy; upload happens in Update())
     MipmapSpdConstants c{};
     c.srcSize[0] = w;
     c.srcSize[1] = h;
-    c.mips = j.mipsToGenerate;
+    c.mips = (std::min)(j.mipsToGenerate, 12u);
     c.numWorkGroups = numWorkGroupsAndMips[0];
     c.workGroupOffset[0] = workGroupOffset[0];
     c.workGroupOffset[1] = workGroupOffset[1];
@@ -922,7 +1112,7 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
     }
 
     // Fill mip1..mipN UAV indices
-    for (uint32_t i = 0; i < j.mipsToGenerate; ++i) {
+    for (uint32_t i = 0; i < c.mips; ++i) {
         c.mipUavDescriptorIndices[i] = tex->GetUAVShaderVisibleInfo(i + 1).slot.index;
     }
 
@@ -942,6 +1132,18 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
         /*stride=*/ sizeof(uint32_t),
         /*uav=*/ true);
 
+    if (j.preserveAlphaCoverage) {
+        constexpr uint32_t kStatsWordsPerMip = 260u;
+        j.alphaStats = CreateIndexedStructuredBuffer(
+            static_cast<size_t>(mipLevels) * kStatsWordsPerMip,
+            sizeof(uint32_t),
+            true);
+        j.alphaScales = CreateIndexedStructuredBuffer(
+            mipLevels,
+            sizeof(float),
+            true);
+    }
+
     m_declaredResourcesChanged = true;
     m_pending.push_back(std::move(j));
 }
@@ -957,14 +1159,25 @@ void TextureFactory::MipmappingPass::DeclareResourceUsages(ComputePassBuilder* b
         auto tex = j.texture;
         if (!tex) continue;
 
-        // Read mip0, write mip1..N
-        builder->WithShaderResource(Subresources(tex, Mip{ 0, 1 }));
+        // SPD reads only mip0. Alpha coverage mode reads each previous mip in sequence.
+        if (j.preserveAlphaCoverage) {
+            builder->WithShaderResource(Subresources(tex, Mip{ 0, j.mipsToGenerate }));
+        }
+        else {
+            builder->WithShaderResource(Subresources(tex, Mip{ 0, 1 }));
+        }
         if (j.mipsToGenerate > 0) {
             builder->WithUnorderedAccess(Subresources(tex, FromMip{ 1 }));
         }
 
         // Counter is UAV for the dispatch
-        builder->WithUnorderedAccess(j.counter);
+        if (j.preserveAlphaCoverage) {
+            builder->WithUnorderedAccess(j.alphaStats);
+            builder->WithUnorderedAccess(j.alphaScales);
+        }
+        else {
+            builder->WithUnorderedAccess(j.counter);
+        }
     }
 }
 
@@ -987,34 +1200,100 @@ PassReturn TextureFactory::MipmappingPass::Execute(PassExecutionContext& executi
     for (auto& j : m_pending) {
         if (!j.texture) continue;
 
-        // Pick SRV (2D vs array)
-        const uint32_t srcSrvIndex =
-            j.isArray
-            ? j.texture->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index
-            : j.texture->GetSRVInfo(0).slot.index;
+        if (j.preserveAlphaCoverage) {
+            PipelineState& resetPso = GetOrCreateAlphaPipeline(L"AlphaMipResetStatsCS", m_psoAlphaReset, m_hasPsoAlphaReset, "AlphaMip[ResetStats]");
+            PipelineState& downsamplePso = GetOrCreateAlphaPipeline(L"AlphaMipDownsampleCS", m_psoAlphaDownsample, m_hasPsoAlphaDownsample, "AlphaMip[Downsample]");
+            PipelineState& resolvePso = GetOrCreateAlphaPipeline(L"AlphaMipResolveScaleCS", m_psoAlphaResolveScale, m_hasPsoAlphaResolveScale, "AlphaMip[ResolveScale]");
+            PipelineState& applyPso = GetOrCreateAlphaPipeline(L"AlphaMipApplyScaleCS", m_psoAlphaApplyScale, m_hasPsoAlphaApplyScale, "AlphaMip[ApplyScale]");
 
-        PipelineState& pso = GetOrCreatePipeline(j.valueType, j.isArray);
+            constexpr uint32_t kStatsWordsPerMip = 260u;
+            const uint32_t statsUav = j.alphaStats->GetUAVShaderVisibleInfo(0).slot.index;
+            const uint32_t scalesUav = j.alphaScales->GetUAVShaderVisibleInfo(0).slot.index;
+            const uint32_t flags = j.isSrgb ? 1u : 0u;
 
-        commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+            auto uavBarrier = [&commandList]() {
+                rhi::GlobalBarrier barrier{};
+                barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+                barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+                barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+                barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+                rhi::BarrierBatch batch{};
+                batch.globals = rhi::Span<rhi::GlobalBarrier>(&barrier, 1);
+                commandList.Barriers(batch);
+            };
 
-        unsigned int root[NumMiscUintRootConstants]{};
-        root[UintRootConstant0] = j.counter->GetUAVShaderVisibleInfo(0).slot.index;
-        root[UintRootConstant1] = srcSrvIndex;
-        root[UintRootConstant2] = constantsSrvIndex;
-        root[UintRootConstant3] = j.constantsIndex;
+            for (uint32_t mip = 1; mip <= j.mipsToGenerate; ++mip) {
+                const uint32_t srcMip = mip - 1u;
+                const uint32_t srcW = (std::max)(1u, j.texture->GetInternalWidth() >> srcMip);
+                const uint32_t srcH = (std::max)(1u, j.texture->GetInternalHeight() >> srcMip);
+                const uint32_t dstW = (std::max)(1u, j.texture->GetInternalWidth() >> mip);
+                const uint32_t dstH = (std::max)(1u, j.texture->GetInternalHeight() >> mip);
+                const uint32_t statsBase = mip * kStatsWordsPerMip;
 
-        commandList.PushConstants(
-            rhi::ShaderStage::Compute,
-            0,
-            MiscUintRootSignatureIndex,
-            0,
-            NumMiscUintRootConstants,
-            root);
+                unsigned int root[NumMiscUintRootConstants]{};
+                root[UintRootConstant2] = statsUav;
+                root[UintRootConstant3] = scalesUav;
+                root[UintRootConstant4] = srcW;
+                root[UintRootConstant5] = srcH;
+                root[UintRootConstant6] = dstW;
+                root[UintRootConstant7] = dstH;
+                root[UintRootConstant8] = statsBase;
+                root[UintRootConstant9] = mip;
+                root[UintRootConstant10] = flags;
 
-        commandList.Dispatch(
-            j.dispatchThreadGroupCountXY[0],
-            j.dispatchThreadGroupCountXY[1],
-            j.sliceCount);
+                commandList.BindPipeline(resetPso.GetAPIPipelineState().GetHandle());
+                commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, root);
+                commandList.Dispatch((kStatsWordsPerMip + 255u) / 256u, 1, 1);
+                uavBarrier();
+
+                root[UintRootConstant0] = j.texture->GetSRVInfo(srcMip).slot.index;
+                root[UintRootConstant1] = j.texture->GetUAVShaderVisibleInfo(mip).slot.index;
+                commandList.BindPipeline(downsamplePso.GetAPIPipelineState().GetHandle());
+                commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, root);
+                commandList.Dispatch((dstW + 7u) / 8u, (dstH + 7u) / 8u, 1);
+                uavBarrier();
+
+                commandList.BindPipeline(resolvePso.GetAPIPipelineState().GetHandle());
+                commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, root);
+                commandList.Dispatch(1, 1, 1);
+                uavBarrier();
+
+                commandList.BindPipeline(applyPso.GetAPIPipelineState().GetHandle());
+                commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, root);
+                commandList.Dispatch((dstW + 7u) / 8u, (dstH + 7u) / 8u, 1);
+                uavBarrier();
+            }
+        }
+        else {
+            // Pick SRV (2D vs array)
+            const uint32_t srcSrvIndex =
+                j.isArray
+                ? j.texture->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index
+                : j.texture->GetSRVInfo(0).slot.index;
+
+            PipelineState& pso = GetOrCreatePipeline(j.valueType, j.isArray);
+
+            commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+
+            unsigned int root[NumMiscUintRootConstants]{};
+            root[UintRootConstant0] = j.counter->GetUAVShaderVisibleInfo(0).slot.index;
+            root[UintRootConstant1] = srcSrvIndex;
+            root[UintRootConstant2] = constantsSrvIndex;
+            root[UintRootConstant3] = j.constantsIndex;
+
+            commandList.PushConstants(
+                rhi::ShaderStage::Compute,
+                0,
+                MiscUintRootSignatureIndex,
+                0,
+                NumMiscUintRootConstants,
+                root);
+
+            commandList.Dispatch(
+                j.dispatchThreadGroupCountXY[0],
+                j.dispatchThreadGroupCountXY[1],
+                j.sliceCount);
+        }
     }
 
     // Clear jobs
@@ -1311,7 +1590,7 @@ void TextureFactory::BC7CompressionReadbackPass::RecordImmediateCommands(Immedia
             try {
                 auto result = BuildCompressedSourceDataFromReadback(
                     job->compressedTexture->GetDescription(),
-                    true,
+                    job->outputHasFullMipChain,
                     readback);
                 TextureProcessingManager::GetInstance().CompleteGpuProcessing(
                     job->handle,

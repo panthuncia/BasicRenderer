@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <bit>
+
 #include <ThirdParty/FFX/host/ffx_types.h>
 
 /// @defgroup Utils Utilities

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <flecs.h>
 
@@ -41,12 +42,22 @@ private:
 
     // Cached export queries (mutable because ExportSnapshot is const)
     mutable flecs::query<Components::StableSceneID, Components::Matrix, Components::MeshInstances> m_exportRenderableQuery;
+    mutable flecs::query<Components::StableSceneID, Components::Matrix, Components::MeshInstances> m_exportDirtyRenderableQuery;
+    mutable flecs::query<Components::StableSceneID, Components::Matrix, Components::MeshInstances> m_exportTransformUpdatedRenderableQuery;
     mutable flecs::query<Components::StableSceneID, Components::Matrix, Components::Camera> m_exportCameraQuery;
     mutable flecs::query<Components::StableSceneID, Components::Matrix, Components::Light> m_exportLightQuery;
     mutable uint64_t m_cachedExportSceneID = 0;
 
     // Export-side generation cache for detecting mesh changes without scene-side flags
     mutable std::unordered_map<uint64_t, uint64_t> m_lastExportedMeshGeneration;
+    mutable std::unordered_set<uint64_t> m_lastExportedAliveRenderableIDs;
+    mutable std::unordered_set<uint64_t> m_lastExportedAliveCameraIDs;
+    mutable std::unordered_set<uint64_t> m_lastExportedAliveLightIDs;
+    mutable uint64_t m_lastExportedMeshLibraryGeneration = 0;
+    mutable Components::DrawStats m_lastExportedDrawStats;
+    mutable bool m_hasLastExportedDrawStats = false;
+    mutable bool m_hasLastExportedMeshLibrary = false;
+    mutable bool m_needsFullRenderableExport = true;
 
     // Hints for vector pre-reservation
     mutable size_t m_lastRenderableCount = 0;

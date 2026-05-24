@@ -34,6 +34,12 @@ inline TransparencyPick PickTransparency(const MaterialDescription& d) {
     return t;
 }
 
+inline bool PickDescriptionDoubleSided(const MaterialDescription& d) {
+    return d.forceDoubleSided ||
+        (d.baseColor.texture && !d.baseColor.texture->Meta().alphaIsAllOpaque) ||
+        d.opacity.factor.Get() < 1.0f;
+}
+
 inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO: The alpha-test/double-sided logic is wrong here
     TechniqueDescriptor tech{};
     const auto transparency = PickTransparency(d);
@@ -52,7 +58,7 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 		}
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }
-	if (d.forceDoubleSided) {
+    if (PickDescriptionDoubleSided(d)) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
 		tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsDoubleSided;
 	}

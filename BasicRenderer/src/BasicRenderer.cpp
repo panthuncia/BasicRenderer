@@ -300,11 +300,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         spdlog::warn("could not load the PIX library");
     }
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
-    //HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
-    //if (!pixLoaded) {
-    //    // Print the error code for debugging purposes
-    //    spdlog::warn("Could not load PIX! Error: {}", GetLastError());
-    //}
+    HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
+    if (!pixLoaded) {
+        // Print the error code for debugging purposes
+        spdlog::warn("Could not load PIX! Error: {}", GetLastError());
+    }
 #endif
 
     SetDllDirectoryA(".\\D3D\\");
@@ -346,7 +346,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto usdScene = LoadModel("models/sponza.usdz");
     
     //auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
-    auto bistro = LoadModel("models/bistroExterior.glb");
+    //auto bistro = LoadModel("models/bistroExterior.glb");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -360,15 +360,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	
 	//auto cubes = LoadModel("models/cubes/suspicious_cubes.usda");
 
-    //auto barbershop = LoadModel("models/barbershop.glb");
+    //auto cherry = LoadModel("models/Trees/CherryTree.usd");
 
-	//auto subway = LoadModel("models/subway.glb");
+    auto pine = LoadModel("models/Trees/branch.usdz");
+	//pine->GetRoot().set<Components::Position>({ 0.0, 2.0, 0.0 });
+
+    //auto needles = LoadModel("models/Trees/PineTree.usd");
 
     renderer.SetCurrentScene(baseScene);
 
-	//renderer.GetCurrentScene()->AppendScene(subway->Clone());
+    //renderer.GetCurrentScene()->AppendScene(needles->Clone());
 
-	//renderer.GetCurrentScene()->AppendScene(barbershop->Clone());
+	renderer.GetCurrentScene()->AppendScene(pine->Clone());
+
+    //renderer.GetCurrentScene()->AppendScene(cherry->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(cubes->Clone());
     
@@ -393,7 +398,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
 
 	//sphereScene->GetRoot().set<Components::Position>({ 0.0, 2.0, 0.0 });
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());

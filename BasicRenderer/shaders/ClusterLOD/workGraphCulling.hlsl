@@ -20,6 +20,14 @@
 #define CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID "CLod::WorkGraphComputePageJobDescriptors"
 #endif
 
+#ifndef CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID
+#define CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID "CLod::VoxelRasterQueueDescriptors"
+#endif
+
+#ifndef CLOD_HIERARCHY_LEVEL_INFOS_BUFFER_ID
+#define CLOD_HIERARCHY_LEVEL_INFOS_BUFFER_ID "Builtin::CLod::LevelInfos"
+#endif
+
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION
 #define CLOD_WG_ENABLE_SW_CLASSIFICATION 1
 #endif
@@ -55,10 +63,10 @@ struct Meshlet
 
 struct ClusterLODNodeRange
 {
-    uint isLeaf; // 0=internal node, 1=leaf node
-    uint indexOrOffset; // segment-leaf: mesh-local segment index
+    uint isLeaf; // 0=internal node, 1=voxel group leaf, 2=segment leaf
+    uint indexOrOffset; // voxel leaf: group-local section index; segment-leaf: mesh-local segment index
                          // internal: childOffset (relative to lodNodesBase)
-    uint countMinusOne; // internal: childCountMinusOne; leaf: unused
+    uint countMinusOne; // internal: childCountMinusOne; voxel leaf: refinedGroup+1, or 0 for terminal
     uint ownerGroupId;  // segment-leaf: mesh-local group index (for page resolution + streaming)
 };
 
@@ -99,6 +107,13 @@ static const uint WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES = 17;
 static const uint WG_COUNTER_CLUSTER_CULL_BUCKET_RECORDS_DISPATCHED = 100;
 static const uint WG_COUNTER_CLUSTER_CULL_DENSE_EXPANSION_BUCKETS = 101;
 static const uint WG_COUNTER_CLUSTER_CULL_DENSE_CLUSTERS_DISPATCHED = 102;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS = 103;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS = 104;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS = 105;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES = 106;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS = 107;
+static const uint WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED = 108;
+static const uint WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB = 122u;
 
 static const uint WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES = 18;
 static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS = 19;
@@ -205,6 +220,26 @@ static const uint CLOD_VIRTUAL_SHADOW_PREDICTIVE_CANDIDATE_CAPACITY = (1u << 16)
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
 static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
 
+bool CLodForcedTraversalDepthRootEnabled(CLodMeshMetadata clodMeshMetadata)
+{
+    const uint forcedDepth = CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT;
+    return
+        forcedDepth != CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT_DISABLED &&
+        forcedDepth < clodMeshMetadata.lodLevelCount;
+}
+
+uint CLodResolveTraversalRootNode(CLodMeshMetadata clodMeshMetadata)
+{
+    if (!CLodForcedTraversalDepthRootEnabled(clodMeshMetadata))
+    {
+        return clodMeshMetadata.rootNode;
+    }
+
+    StructuredBuffer<CLodHierarchyLevelInfo> levelInfos =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_HIERARCHY_LEVEL_INFOS_BUFFER_ID)];
+    return levelInfos[clodMeshMetadata.lodLevelInfoBase + CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT].rootNode;
+}
+
 bool CLodWorkGraphTelemetryEnabled()
 {
     return (CLOD_WG_FLAGS & CLOD_WG_FLAG_TELEMETRY_ENABLED) != 0u;
@@ -227,6 +262,27 @@ bool CLodWorkGraphSWRasterEnabled()
 bool CLodWorkGraphIsPhase2()
 {
     return (CLOD_WG_FLAGS & CLOD_WG_FLAG_PHASE2) != 0u;
+}
+
+uint CLodWorkGraphSharedVisibleClusterWriteCapacity(
+    uint visibleClusterCapacity,
+    uint phase1HWBase,
+    uint phase1SWBase)
+{
+    if (!CLodWorkGraphIsPhase2())
+    {
+        return visibleClusterCapacity;
+    }
+
+    if (phase1HWBase >= visibleClusterCapacity)
+    {
+        return 0u;
+    }
+
+    const uint capacityAfterHW = visibleClusterCapacity - phase1HWBase;
+    return (phase1SWBase < capacityAfterHW)
+        ? (capacityAfterHW - phase1SWBase)
+        : 0u;
 }
 
 bool CLodWorkGraphUseComputeSWRaster()
@@ -972,6 +1028,168 @@ void WGTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
+float ProjectedGeometricError(
+    float3 worldCenter,
+    float worldRadius,
+    float errorMeshSpace,
+    float errorScale,
+    float3 cameraPos,
+    float zNear,
+    bool isOrtho);
+
+bool SphereOutsideFrustumViewSpace(float3 viewSpaceCenter, float radius, Camera camera);
+
+void CLodAppendVoxelRasterClusterWork(
+    CLodMeshMetadata clodMeshMetadata,
+    uint instanceIndex,
+    uint viewId,
+    uint localGroupId,
+    ClusterLODGroup voxelGroup,
+    ClusterLODGroupSegment voxelSegment,
+    CLodVoxelGroupDescriptor voxelDescriptor,
+    float4x4 objectModelMatrix,
+    float lodUniformScale,
+    Camera cullCamera,
+    CullingCameraInfo lodCam,
+    bool lodCameraIsOrtho,
+    bool clusterDirtyPageCullingEnabled,
+    uint meshBufferIndex,
+    float ownGroupErrorOverDistance)
+{
+    (void)lodCam;
+    (void)lodCameraIsOrtho;
+    (void)meshBufferIndex;
+    (void)ownGroupErrorOverDistance;
+
+    if (voxelDescriptor.clusterCount == 0u)
+    {
+        return;
+    }
+
+    GroupPageMapEntry voxelPageEntry = CLodLoadVoxelPageMapEntry(clodMeshMetadata, voxelGroup, voxelSegment.pageIndex);
+    CLodVoxelPageHeader voxelPageHeader = CLodLoadVoxelPageHeader(voxelPageEntry.slabDescriptorIndex, voxelPageEntry.slabByteOffset);
+    if (voxelPageHeader.magic != CLOD_VOXEL_PAGE_MAGIC ||
+        voxelPageHeader.version != CLOD_VOXEL_PAGE_VERSION ||
+        voxelSegment.firstMeshletInPage + voxelDescriptor.clusterCount > voxelPageHeader.clusterCount)
+    {
+        return;
+    }
+
+    StructuredBuffer<CLodVoxelRasterQueueDescriptors> queueDescriptorBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_VOXEL_RASTER_QUEUE_DESCRIPTOR_BUFFER_ID)];
+    const CLodVoxelRasterQueueDescriptors queueDescriptors = queueDescriptorBuffer[0];
+    if (queueDescriptors.workRecordsUAVDescriptorIndex == 0xFFFFFFFFu ||
+        queueDescriptors.workRecordCounterUAVDescriptorIndex == 0xFFFFFFFFu ||
+        queueDescriptors.workRecordCapacity == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<CLodVoxelRasterWorkRecord> workRecords =
+        ResourceDescriptorHeap[queueDescriptors.workRecordsUAVDescriptorIndex];
+    RWStructuredBuffer<uint> workRecordCounter =
+        ResourceDescriptorHeap[queueDescriptors.workRecordCounterUAVDescriptorIndex];
+    globallycoherent RWByteAddressBuffer visibleClusters =
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> visibleClusterCounter =
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState =
+        ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
+    StructuredBuffer<uint> phase1SWBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint phase1SWBase = CLodWorkGraphIsPhase2() ? phase1SWBaseCounter.Load(0) : 0u;
+
+    uint appendedCount = 0u;
+    uint droppedCount = 0u;
+    const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
+    const uint visibleClusterWriteCapacity = CLodWorkGraphSharedVisibleClusterWriteCapacity(
+        visibleClusterCapacity,
+        phase1HWBase,
+        phase1SWBase);
+
+    for (uint clusterIndex = 0u; clusterIndex < voxelDescriptor.clusterCount; ++clusterIndex)
+    {
+        const uint localVoxelClusterIndex = voxelDescriptor.firstCluster + clusterIndex;
+        const uint pageLocalClusterIndex = voxelSegment.firstMeshletInPage + clusterIndex;
+        const CLodVoxelClusterRecord voxelCluster = CLodLoadVoxelClusterFromPage(
+            voxelPageEntry.slabDescriptorIndex,
+            voxelPageEntry.slabByteOffset,
+            voxelPageHeader.clusterRecordsOffset,
+            pageLocalClusterIndex);
+        if (voxelCluster.cubeCount == 0u || voxelCluster.cubeCount > CLOD_VOXEL_MAX_CUBES_PER_CLUSTER)
+        {
+            continue;
+        }
+
+        const float3 clusterWorldCenter = mul(float4(voxelCluster.bounds.xyz, 1.0f), objectModelMatrix).xyz;
+        const float clusterWorldRadius = voxelCluster.bounds.w * lodUniformScale;
+        const float3 clusterViewCenter = mul(float4(clusterWorldCenter, 1.0f), cullCamera.view).xyz;
+        if (SphereOutsideFrustumViewSpace(clusterViewCenter, clusterWorldRadius, cullCamera))
+        {
+            continue;
+        }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (clusterDirtyPageCullingEnabled && !CLodVirtualShadowBoundsTouchDirtyPages(clusterWorldCenter, clusterWorldRadius, viewId))
+        {
+            continue;
+        }
+#else
+        (void)clusterDirtyPageCullingEnabled;
+#endif
+
+        uint combinedSlot = 0u;
+        InterlockedAdd(replayState[0].visibleClusterCombinedCount, 1u, combinedSlot);
+        if (combinedSlot >= visibleClusterWriteCapacity)
+        {
+            InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterWriteCapacity);
+            ++droppedCount;
+            continue;
+        }
+
+        uint baseSlot = 0u;
+        InterlockedAdd(workRecordCounter[0], 1u, baseSlot);
+        if (baseSlot >= queueDescriptors.workRecordCapacity)
+        {
+            InterlockedMin(workRecordCounter[0], queueDescriptors.workRecordCapacity);
+            ++droppedCount;
+            continue;
+        }
+
+        uint visibleBase = 0u;
+        InterlockedAdd(visibleClusterCounter[0], 1u, visibleBase);
+        const uint visibleClusterIndex = phase1HWBase + visibleBase;
+        CLodStoreVisibleClusterWithVsmPayloadGloballyCoherent(
+            visibleClusters,
+            visibleClusterIndex,
+            viewId,
+            instanceIndex,
+            localVoxelClusterIndex & 0x3FFFu,
+            localGroupId,
+            localVoxelClusterIndex >> 14u,
+            0u,
+            CLodVisibleClusterMarkVoxelPayload(CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX)));
+
+        CLodVoxelRasterWorkRecord record;
+        record.visibleClusterIndex = visibleClusterIndex;
+        record.pad0 = 0u;
+        record.pad1 = 0u;
+        record.pad2 = 0u;
+        workRecords[baseSlot] = record;
+        ++appendedCount;
+    }
+
+    if (appendedCount != 0u)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_RECORDS, appendedCount);
+    }
+    if (droppedCount != 0u)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_RASTER_WORK_DROPPED, droppedCount);
+    }
+}
+
 void ReplayReserveNodeSlotsWave(
     RWStructuredBuffer<CLodReplayBufferState> replayState,
     uint capacity,
@@ -1313,6 +1531,245 @@ float ProjectedGeometricError(
     return worldSpaceError / denom;
 }
 
+bool CLodGroupIsResident(uint groupGlobalIndex)
+{
+    StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+    const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+    if (groupGlobalIndex >= activeGroupScanCount)
+    {
+        return false;
+    }
+
+    ByteAddressBuffer nonResidentBits =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+    return !CLodReadBit(nonResidentBits, groupGlobalIndex);
+}
+
+void CLodMarkGroupTouched(uint groupGlobalIndex)
+{
+    RWStructuredBuffer<uint> usedGroupsCounter =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
+    RWStructuredBuffer<uint> usedGroupsBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
+    uint usedSlot = 0u;
+    InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
+    if (usedSlot < CLOD_USED_GROUPS_CAPACITY)
+    {
+        usedGroupsBuffer[usedSlot] = groupGlobalIndex;
+    }
+}
+
+void CLodRequestGroupLoad(
+    uint groupGlobalIndex,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    float requestPriorityErrorOverDistance)
+{
+    StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+    const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+    if (groupGlobalIndex >= activeGroupScanCount)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<CLodStreamingRequest> loadRequests =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+    RWStructuredBuffer<uint> loadRequestKeys =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestKeys)];
+    RWStructuredBuffer<uint> loadRequestCounter =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+    uint requestIndex = 0u;
+    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY)
+    {
+        CLodStreamingRequest req = (CLodStreamingRequest)0;
+        req.groupGlobalIndex = groupGlobalIndex;
+        req.meshInstanceIndex = instanceIndex;
+        req.meshBufferIndex = meshBufferIndex;
+        req.viewId = CLodPackViewPriority(viewId, requestPriorityErrorOverDistance);
+        loadRequests[requestIndex] = req;
+
+        const uint priority16 = (req.viewId >> 16u) & 0xffffu;
+        loadRequestKeys[requestIndex] = 0xffffu - priority16;
+    }
+}
+
+bool CLodTouchAndRequestGroupResident(
+    uint groupGlobalIndex,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    float requestPriorityErrorOverDistance)
+{
+    CLodMarkGroupTouched(groupGlobalIndex);
+    if (CLodGroupIsResident(groupGlobalIndex))
+    {
+        return true;
+    }
+
+    CLodRequestGroupLoad(
+        groupGlobalIndex,
+        instanceIndex,
+        meshBufferIndex,
+        viewId,
+        requestPriorityErrorOverDistance);
+    return false;
+}
+
+bool CLodRefinedChildSuppressesParent(
+    uint groupsBase,
+    uint childGroupLocalIndex,
+    bool hasRefinedChild,
+    float4x4 objectModelMatrix,
+    float lodUniformScale,
+    CullingCameraInfo lodCam,
+    bool lodCameraIsOrtho,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    float requestPriorityErrorOverDistance,
+    float3 predictiveCenterWorld,
+    float predictiveRadiusWorld,
+    bool emitNonResidentTelemetry)
+{
+    if (!hasRefinedChild)
+    {
+        return false;
+    }
+
+    StructuredBuffer<ClusterLODGroup> groups =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+
+    const uint childGroupGlobalIndex = groupsBase + childGroupLocalIndex;
+    const ClusterLODGroup childGroup = groups[childGroupGlobalIndex];
+    const float3 childWorldCenter = mul(float4(childGroup.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+    const float childWorldRadius = childGroup.bounds.centerAndRadius.w * lodUniformScale;
+    const float childBoundaryEOD = ProjectedGeometricError(
+        childWorldCenter,
+        childWorldRadius,
+        childGroup.maxParentError,
+        lodUniformScale,
+        lodCam.positionWorldSpace.xyz,
+        lodCam.zNear,
+        lodCameraIsOrtho);
+
+    if (childBoundaryEOD < lodCam.errorOverDistanceThreshold)
+    {
+        return false;
+    }
+
+    if (CLodTouchAndRequestGroupResident(
+        childGroupGlobalIndex,
+        instanceIndex,
+        meshBufferIndex,
+        viewId,
+        requestPriorityErrorOverDistance))
+    {
+        return true;
+    }
+
+    if (emitNonResidentTelemetry)
+    {
+        WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
+    }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    const bool useChildPredictiveBounds = predictiveRadiusWorld < 0.0f;
+    CLodAppendVirtualShadowPredictiveInvalidationCandidate(
+        useChildPredictiveBounds ? childWorldCenter : predictiveCenterWorld,
+        useChildPredictiveBounds ? childWorldRadius : predictiveRadiusWorld,
+        viewId,
+        childGroupGlobalIndex);
+#endif
+
+    return false;
+}
+
+struct CLodRenderableLeaf
+{
+    bool valid;
+    bool isVoxel;
+    bool canRender;
+    uint groupGlobalIndex;
+    ClusterLODGroup group;
+    float errorOverDistance;
+};
+
+bool CLodPrepareRenderableLeaf(
+    CLodMeshMetadata clodMeshMetadata,
+    ClusterLODNode node,
+    bool parentAllowsRefine,
+    float4x4 objectModelMatrix,
+    float lodUniformScale,
+    CullingCameraInfo lodCam,
+    bool lodCameraIsOrtho,
+    bool nodeTouchesDirtyPages,
+    bool forceLodDecision,
+    uint instanceIndex,
+    uint meshBufferIndex,
+    uint viewId,
+    out CLodRenderableLeaf leaf)
+{
+    leaf = (CLodRenderableLeaf)0;
+    leaf.groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
+    StructuredBuffer<ClusterLODGroup> groups =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    leaf.group = groups[leaf.groupGlobalIndex];
+    leaf.isVoxel = (leaf.group.flags & CLOD_GROUP_FLAG_IS_VOXEL) != 0u;
+
+    if (leaf.isVoxel)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_LEAF_RECORDS, 1);
+    }
+
+    const float3 groupWorldCenter = mul(float4(leaf.group.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+    const float groupWorldRadius = leaf.group.bounds.centerAndRadius.w * lodUniformScale;
+    leaf.errorOverDistance = ProjectedGeometricError(
+        groupWorldCenter,
+        groupWorldRadius,
+        node.metric.maxQuadricError,
+        lodUniformScale,
+        lodCam.positionWorldSpace.xyz,
+        lodCam.zNear,
+        lodCameraIsOrtho);
+    const bool wantsRender = forceLodDecision || (parentAllowsRefine && (leaf.errorOverDistance >= lodCam.errorOverDistanceThreshold));
+    if (!wantsRender)
+    {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
+        if (leaf.isVoxel)
+        {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS, 1);
+        }
+        return false;
+    }
+
+    if (!nodeTouchesDirtyPages)
+    {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+        return false;
+    }
+
+    leaf.canRender = CLodTouchAndRequestGroupResident(
+        leaf.groupGlobalIndex,
+        instanceIndex,
+        meshBufferIndex,
+        viewId,
+        leaf.errorOverDistance);
+    if (!leaf.canRender)
+    {
+        if (leaf.isVoxel)
+        {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+        }
+    }
+
+    leaf.valid = true;
+    return true;
+}
+
 // Node: ObjectCull (entry)
 #ifndef CLOD_COMPUTE_INCLUDE_ONLY
 [Shader("node")]
@@ -1398,7 +1855,7 @@ void WG_ObjectCull(
 
             outRecord.viewId = hdr.viewDataIndex;
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
-            outRecord.nodeIdPacked = PackTraverseNodeId(clodMeshMetadata.rootNode, CLOD_RECORD_SOURCE_PASS1, 1u);
+            outRecord.nodeIdPacked = PackTraverseNodeId(CLodResolveTraversalRootNode(clodMeshMetadata), CLOD_RECORD_SOURCE_PASS1, 1u);
             outCount = 1;
 
             WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS, 1);
@@ -1471,6 +1928,7 @@ void WG_TraverseNodes(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
         const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
+        const bool forceLodDecision = CLodForcedTraversalDepthRootEnabled(clodMeshMetadata);
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[rec.instanceIndex];
@@ -1491,14 +1949,12 @@ void WG_TraverseNodes(
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         const CullingCameraInfo lodCam = cameraInfos[lodViewId];
-        StructuredBuffer<ClusterLODGroup> groups =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
         StructuredBuffer<ClusterLODNode> lodNodes =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
         const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + UnpackNodeId(rec.nodeIdPacked)];
 
-        if (node.range.isLeaf == 0) {
+        if (node.range.isLeaf == CLOD_NODE_INTERNAL) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
         }
         else {
@@ -1531,83 +1987,126 @@ void WG_TraverseNodes(
             // For internal nodes, the BVH node sphere and propagated max
             // error provide a conservative bound.
 
-            if (node.range.isLeaf != 0) {
-                // Segment-leaf: LOD check + inlined SegmentEvaluate.
-                const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
-                const ClusterLODGroup grp = groups[groupGlobalIndex];
-
-                const float3 grpWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                const float grpWorldRadius = grp.bounds.centerAndRadius.w * lodUniformScale;
-                const float grpEOD = ProjectedGeometricError(
-                    grpWorldCenter, grpWorldRadius,
-                    grp.bounds.error, lodUniformScale,
-                    lodCam.positionWorldSpace.xyz, lodCam.zNear,
-                    lodCamera.isOrtho);
-                const bool nodeWantsTraversal = parentAllowsRefine && (grpEOD >= lodCam.errorOverDistanceThreshold);
-
-                if (!nodeWantsTraversal) {
-                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
-                }
-                else {
-                    bool nodeTouchesDirtyPages = true;
+            if (node.range.isLeaf != CLOD_NODE_INTERNAL) {
+                bool nodeTouchesDirtyPages = true;
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-                    if (dirtyPageCullingEnabled)
-                    {
-                        const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
-                        nodeTouchesDirtyPages = CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId);
-                    }
+                if (dirtyPageCullingEnabled)
+                {
+                    const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+                    nodeTouchesDirtyPages = CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId);
+                }
 #endif
 
-                    if (!nodeTouchesDirtyPages)
+                CLodRenderableLeaf leaf;
+                if (CLodPrepareRenderableLeaf(
+                    clodMeshMetadata,
+                    node,
+                    parentAllowsRefine,
+                    objectModelMatrix,
+                    lodUniformScale,
+                    lodCam,
+                    lodCamera.isOrtho,
+                    nodeTouchesDirtyPages,
+                    forceLodDecision,
+                    rec.instanceIndex,
+                    instanceData.perMeshBufferIndex,
+                    rec.viewId,
+                    leaf))
+                {
+                    if (!forceLodDecision && CLodRefinedChildSuppressesParent(
+                        clodMeshMetadata.groupsBase,
+                        node.range.countMinusOne - 1u,
+                        node.range.countMinusOne != 0u,
+                        objectModelMatrix,
+                        lodUniformScale,
+                        lodCam,
+                        lodCamera.isOrtho,
+                        rec.instanceIndex,
+                        instanceData.perMeshBufferIndex,
+                        rec.viewId,
+                        leaf.errorOverDistance,
+                        0.0f.xxx,
+                        -1.0f,
+                        false))
                     {
-                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
+                    }
+                    else if (!leaf.canRender)
+                    {
+                        // The group was requested above; keep traversal/request side effects
+                        // but do not emit render work until the page data is resident.
+                    }
+                    else if (leaf.isVoxel)
+                    {
+                        const float voxelRepresentationError = leaf.group.representationError > 0.0f ? leaf.group.representationError : leaf.group.bounds.error;
+                        const float voxelRepresentationErrorOverDistance = ProjectedGeometricError(
+                            mul(float4(leaf.group.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz,
+                            leaf.group.bounds.centerAndRadius.w * lodUniformScale,
+                            voxelRepresentationError,
+                            lodUniformScale,
+                            lodCam.positionWorldSpace.xyz,
+                            lodCam.zNear,
+                            lodCamera.isOrtho);
+                        const bool voxelRepresentationAcceptable = forceLodDecision || voxelRepresentationErrorOverDistance <= lodCam.errorOverDistanceThreshold;
+
+                        StructuredBuffer<ClusterLODGroupSegment> segments =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+                        const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
+                        const ClusterLODGroupSegment seg = segments[segGlobalIndex];
+                        CLodVoxelGroupDescriptor voxelDescriptor;
+                        if (!voxelRepresentationAcceptable)
+                        {
+                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_REJECTED_BY_ERROR_RECORDS, 1);
+                        }
+                        else if (CLodTryLoadVoxelDescriptorForSegment(clodMeshMetadata, leaf.group, seg, voxelDescriptor))
+                        {
+                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_HITS, 1);
+                            CLodAppendVoxelRasterClusterWork(
+                                clodMeshMetadata,
+                                rec.instanceIndex,
+                                rec.viewId,
+                                node.range.ownerGroupId,
+                                leaf.group,
+                                seg,
+                                voxelDescriptor,
+                                objectModelMatrix,
+                                lodUniformScale,
+                                cullCamera,
+                                lodCam,
+                                lodCamera.isOrtho,
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                                dirtyPageCullingEnabled,
+#else
+                                false,
+#endif
+                                instanceData.perMeshBufferIndex,
+                                leaf.errorOverDistance);
+                        }
+                        else
+                        {
+                            WGTelemetryAdd(WG_COUNTER_TRAVERSE_VOXEL_DESCRIPTOR_MISSES, 1);
+                        }
                     }
                     else
                     {
-
-                        // Inlined SegmentEvaluate
+                        // Final emit for triangle meshlet payloads.
                         StructuredBuffer<ClusterLODGroupSegment> segments =
                             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
                         const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
                         const ClusterLODGroupSegment seg = segments[segGlobalIndex];
 
-                        // Used-groups tracking: mark the owning group as touched for streaming protection
-                        {
-                            RWStructuredBuffer<uint> usedGroupsCounter =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
-                            RWStructuredBuffer<uint> usedGroupsBuffer =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
-                            uint usedSlot = 0;
-                            InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
-                            if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
-                                usedGroupsBuffer[usedSlot] = groupGlobalIndex;
-                            }
-                        }
-
-                        // LOD condition 1 already confirmed by nodeWantsTraversal.
-                        bool shouldEmit = (seg.meshletCount != 0);
-
-                        // Suppress emission when own group's pages are non-resident.
-                        {
-                            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-                            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-                            ByteAddressBuffer nonResidentBits =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-                            if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
-                                if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
-                                    shouldEmit = false;
-                                }
-                            }
-                        }
-
-                        emitBucket = shouldEmit;
+                        emitBucket = (seg.meshletCount != 0);
 
                         if (emitBucket) {
                             WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
                             emittedSegmentMeshletCount = seg.meshletCount;
 
-                            const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + grp.pageMapBase, seg.pageIndex);
+                            const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase, seg.pageIndex);
+                            if (pageEntry.slabDescriptorIndex == 0u)
+                            {
+                                WGTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_INIT_FAILED_ZERO_PAGE_SLAB, 1);
+                                return;
+                            }
 
                             bucketRecord.instanceIndex = rec.instanceIndex;
                             bucketRecord.viewId = rec.viewId;
@@ -1653,7 +2152,9 @@ void WG_TraverseNodes(
                     lodCam.positionWorldSpace.xyz,
                     lodCam.zNear,
                     lodCamera.isOrtho);
-                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= lodCam.errorOverDistanceThreshold);
+                const bool nodeWantsTraversal =
+                    forceLodDecision ||
+                    (parentAllowsRefine && (nodeErrorOverDistance >= lodCam.errorOverDistanceThreshold));
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -1740,7 +2241,7 @@ void WG_TraverseNodes(
                                 // LOD pre-filter for internal children only.
                                 // Leaf children use the group sphere for LOD (different from node sphere),
                                 // so we skip the LOD check here and let the leaf thread handle it.
-                                if (child.range.isLeaf == 0) {
+                                if (!forceLodDecision && child.range.isLeaf == CLOD_NODE_INTERNAL) {
                                     const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                                     const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
                                     const float childEOD = ProjectedGeometricError(
@@ -1947,6 +2448,7 @@ void ClusterCullBody(
     bool isSkinned = false;
     bool reyesDisplacementCandidate = false;
     bool isAlphaTestedMaterial = false;
+    bool forceLodDecision = false;
     uint skinningInstanceSlot = 0xFFFFFFFFu;
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
     bool objectInvalidatedThisFrame = false;
@@ -2029,7 +2531,9 @@ void ClusterCullBody(
         StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         const MeshInstanceClodOffsets clodOff = clodOffsets[b.instanceIndex];
-        groupsBase = clodMeshMetadataBuffer[clodOff.clodMeshMetadataIndex].groupsBase;
+        const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[clodOff.clodMeshMetadataIndex];
+        groupsBase = clodMeshMetadata.groupsBase;
+        forceLodDecision = CLodForcedTraversalDepthRootEnabled(clodMeshMetadata);
 
         // Own group EOD for streaming request priority
         {
@@ -2077,11 +2581,24 @@ void ClusterCullBody(
         ResourceDescriptorHeap[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
+    const uint phase1SWBase = swWriteBase;
     const bool useDedicatedComputePageJobBuffer = CLodWorkGraphUseDedicatedComputePageJobBuffer();
     // Page-job classification setup.
     const bool pageJobEnabled = CLodPageJobEnabled();
     const float pageJobDiameterThreshold = (float)CLodPageJobDiameterThreshold();
     const bool pageJobForceAll = CLodPageJobForceAll();
+#else
+    StructuredBuffer<uint> phase1SWBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint phase1SWBase = CLodWorkGraphIsPhase2() ? phase1SWBaseCounter.Load(0) : 0u;
+#endif
+
+    const uint sharedVisibleClusterWriteCapacity = CLodWorkGraphSharedVisibleClusterWriteCapacity(
+        visibleClusterCapacity,
+        phase1HWBase,
+        phase1SWBase);
+    const uint hwVisibleClusterWriteCapacity = sharedVisibleClusterWriteCapacity;
+#if CLOD_WG_ENABLE_SW_CLASSIFICATION
+    const uint swVisibleClusterWriteCapacity = sharedVisibleClusterWriteCapacity;
 #endif
 
     uint totalSurvivors = 0;
@@ -2140,64 +2657,29 @@ void ClusterCullBody(
                 }
 #endif
 
-                // Per-meshlet LOD condition 2: read refined group ID from descriptor.
-                // Terminal meshlets (refinedGroupId < 0) pass automatically.
-                // Non-terminal meshlets check if the child group is acceptable.
-                if (survives) {
+                // Per-meshlet LOD condition 2: terminal meshlets pass
+                // automatically; non-terminal meshlets are suppressed when
+                // the refined child boundary is still above the threshold and
+                // the refined child is resident.
+                if (survives && !forceLodDecision) {
                     const int refinedGroupId = CLodDescRefinedGroupId(desc);
-                    if (refinedGroupId >= 0) {
-                        StructuredBuffer<ClusterLODGroup> groups =
-                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-                        const uint childGroupGlobalIndex = groupsBase + (uint)refinedGroupId;
-                        const ClusterLODGroup childGrp = groups[childGroupGlobalIndex];
-                        const float3 childWorldCenter = mul(float4(childGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                        const float childWorldRadius = childGrp.bounds.centerAndRadius.w * lodUniformScale;
-                        const float childEOD = ProjectedGeometricError(
-                            childWorldCenter, childWorldRadius,
-                            childGrp.bounds.error, lodUniformScale,
-                            lodCam.positionWorldSpace.xyz, lodCam.zNear,
-                            lodCameraIsOrtho);
-
-                        if (childEOD >= lodCam.errorOverDistanceThreshold) {
-                            // Child exceeds the threshold; check residency.
-                            ByteAddressBuffer nonResidentBits =
-                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-                            bool childResident = true;
-                            if (childGroupGlobalIndex < activeGroupScanCount) {
-                                childResident = !CLodReadBit(nonResidentBits, childGroupGlobalIndex);
-                            }
-
-                            if (childResident) {
-                                survives = false;
-                                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
-                            } else {
-                                WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
-                                if (childGroupGlobalIndex < activeGroupScanCount) {
-                                    RWStructuredBuffer<CLodStreamingRequest> loadRequests =
-                                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
-                                    RWStructuredBuffer<uint> loadRequestCounter =
-                                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-                                    uint requestIndex = 0;
-                                    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                                    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                                        CLodStreamingRequest req = (CLodStreamingRequest)0;
-                                        req.groupGlobalIndex = childGroupGlobalIndex;
-                                        req.meshInstanceIndex = b.instanceIndex;
-                                        req.meshBufferIndex = meshBufferIndex;
-                                        req.viewId = CLodPackViewPriority(b.viewId, ownGroupErrorOverDistance);
-                                        loadRequests[requestIndex] = req;
-#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-                                        const float3 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
-                                        CLodAppendVirtualShadowPredictiveInvalidationCandidate(
-                                            meshletCenterWorld,
-                                            meshletRadiusWorld,
-                                            b.viewId,
-                                            childGroupGlobalIndex);
-#endif
-                                    }
-                                }
-                            }
-                        }
+                    if (CLodRefinedChildSuppressesParent(
+                        groupsBase,
+                        (uint)refinedGroupId,
+                        refinedGroupId >= 0,
+                        objectModelMatrix,
+                        lodUniformScale,
+                        lodCam,
+                        lodCameraIsOrtho,
+                        b.instanceIndex,
+                        meshBufferIndex,
+                        b.viewId,
+                        ownGroupErrorOverDistance,
+                        meshletCenterWorld,
+                        meshletRadiusWorld,
+                        true)) {
+                        survives = false;
+                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
                     }
                 }
 
@@ -2322,8 +2804,8 @@ void ClusterCullBody(
             hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
             const uint hwAvail =
-                (hwCombinedBase < visibleClusterCapacity)
-                    ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
+                (hwCombinedBase < hwVisibleClusterWriteCapacity)
+                    ? min(hwWriteCount, hwVisibleClusterWriteCapacity - hwCombinedBase)
                     : 0u;
 
             if (WaveGetLaneIndex() == hwLeader) {
@@ -2337,11 +2819,11 @@ void ClusterCullBody(
                     ? min(hwLaneWriteCount, hwAvail - hwPrefix)
                     : 0u;
 
-            if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
-                InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+            if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > hwVisibleClusterWriteCapacity)) {
+                InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
             }
 
-            if (isWaveLeader) {
+            if (WaveGetLaneIndex() == hwLeader) {
                 WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
             }
 
@@ -2434,8 +2916,8 @@ void ClusterCullBody(
                 hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
                 const uint hwAvail =
-                    (hwCombinedBase < visibleClusterCapacity)
-                        ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
+                    (hwCombinedBase < hwVisibleClusterWriteCapacity)
+                        ? min(hwWriteCount, hwVisibleClusterWriteCapacity - hwCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == hwLeader) {
@@ -2449,11 +2931,11 @@ void ClusterCullBody(
                         ? min(hwLaneWriteCount, hwAvail - hwPrefix)
                         : 0u;
 
-                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
-                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > hwVisibleClusterWriteCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
                 }
 
-                if (isWaveLeader) {
+                if (WaveGetLaneIndex() == hwLeader) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
                 }
 
@@ -2597,8 +3079,8 @@ void ClusterCullBody(
                 hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
                 const uint hwAvail =
-                    (hwCombinedBase < visibleClusterCapacity)
-                        ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
+                    (hwCombinedBase < hwVisibleClusterWriteCapacity)
+                        ? min(hwWriteCount, hwVisibleClusterWriteCapacity - hwCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == hwLeader) {
@@ -2612,11 +3094,11 @@ void ClusterCullBody(
                         ? min(hwLaneWriteCount, hwAvail - hwPrefix)
                         : 0u;
 
-                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
-                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > hwVisibleClusterWriteCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, hwVisibleClusterWriteCapacity);
                 }
 
-                if (isWaveLeader) {
+                if (WaveGetLaneIndex() == hwLeader) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
                 }
 
@@ -2679,8 +3161,8 @@ void ClusterCullBody(
                 swCombinedBase = WaveReadLaneAt(swCombinedBase, swLeader);
 
                 swAvail =
-                    (swCombinedBase < visibleClusterCapacity)
-                        ? min(swIterCount, visibleClusterCapacity - swCombinedBase)
+                    (swCombinedBase < swVisibleClusterWriteCapacity)
+                        ? min(swIterCount, swVisibleClusterWriteCapacity - swCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == swLeader) {
@@ -2688,8 +3170,8 @@ void ClusterCullBody(
                 }
                 swBase = WaveReadLaneAt(swBase, swLeader);
 
-                if (WaveGetLaneIndex() == swLeader && (swCombinedBase + swIterCount > visibleClusterCapacity)) {
-                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                if (WaveGetLaneIndex() == swLeader && (swCombinedBase + swIterCount > swVisibleClusterWriteCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, swVisibleClusterWriteCapacity);
                 }
 
                 if (outputSW && (swRank < swAvail)) {
@@ -2775,8 +3257,8 @@ void ClusterCullBody(
                     pjCombinedBase = WaveReadLaneAt(pjCombinedBase, pjLeader);
 
                     pjAvail =
-                        (pjCombinedBase < visibleClusterCapacity)
-                            ? min(pjIterCount, visibleClusterCapacity - pjCombinedBase)
+                        (pjCombinedBase < swVisibleClusterWriteCapacity)
+                            ? min(pjIterCount, swVisibleClusterWriteCapacity - pjCombinedBase)
                             : 0u;
 
                     if (WaveGetLaneIndex() == pjLeader) {
@@ -2784,8 +3266,8 @@ void ClusterCullBody(
                     }
                     pjBase = WaveReadLaneAt(pjBase, pjLeader);
 
-                    if (WaveGetLaneIndex() == pjLeader && (pjCombinedBase + pjIterCount > visibleClusterCapacity)) {
-                        InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                    if (WaveGetLaneIndex() == pjLeader && (pjCombinedBase + pjIterCount > swVisibleClusterWriteCapacity)) {
+                        InterlockedMin(replayState[0].visibleClusterCombinedCount, swVisibleClusterWriteCapacity);
                     }
 
                     if (outputPageJob && (pjRank < pjAvail)) {
@@ -2956,7 +3438,6 @@ void WG_ClusterCull4(
 }
 
 [Shader("node")]
-#endif
 [NodeID("ClusterCull8")]
 [NodeLaunch("coalescing")]
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
@@ -3039,6 +3520,8 @@ void WG_ClusterCull64(
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
     CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
+
+#endif
 
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
 #define CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST 1

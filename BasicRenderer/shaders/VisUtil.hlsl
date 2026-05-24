@@ -17,7 +17,13 @@ uint GetMaterialIdFromCluster(uint clusterIndex,
         clusterIndex = diceQueue[clusterIndex - VISBUF_REYES_PATCH_INDEX_BASE].visibleClusterIndex;
     }
 
-    uint perMeshInstanceBufferIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex));
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
+    if (CLodVisibleClusterIsVoxel(packedCluster))
+    {
+        return VISBUF_VOXEL_MATERIAL_BIN_INDEX;
+    }
+
+    uint perMeshInstanceBufferIndex = CLodVisibleClusterInstanceID(packedCluster);
     PerMeshInstanceBuffer instanceData = perMeshInstance[perMeshInstanceBufferIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
 

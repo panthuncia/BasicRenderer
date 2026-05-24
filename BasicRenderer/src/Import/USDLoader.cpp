@@ -2,8 +2,12 @@
 #include <DirectXMath.h>
 #include <array>
 #include <filesystem>
+#include <functional>
+#include <optional>
+#include <stdexcept>
 #include <vector>
 #include <cstring>
+#include <cctype>
 #include <unordered_set>
 #include <cmath>
 
@@ -14,6 +18,7 @@
 #include <pxr/usd/ar/packageUtils.h>
 //#include <pxr/usd/ar/packageResolver.h>
 
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/primFlags.h>
@@ -32,6 +37,7 @@
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdGeom/pointInstancer.h>
+#include <pxr/usd/usdGeom/xformCache.h>
 #include <pxr/usd/usdSkel/skeleton.h>
 #include <pxr/usd/usdSkel/animation.h>
 #include <pxr/usd/usdSkel/bindingAPI.h>
@@ -58,6 +64,7 @@
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Managers/Singletons/TextureProcessingManager.h"
 
 #include "Import/USDLoader.h"
@@ -68,15 +75,107 @@ namespace USDLoader {
 
 	using namespace pxr;
 
+	namespace {
+
+		std::string NormalizeHeuristicName(const std::string& value) {
+			std::string normalized;
+			normalized.reserve(value.size());
+			for (unsigned char ch : value) {
+				if (std::isalnum(ch)) {
+					normalized.push_back(static_cast<char>(std::tolower(ch)));
+				}
+			}
+			return normalized;
+		}
+
+		std::vector<std::string> TokenizeHeuristicName(const std::string& value) {
+			std::vector<std::string> tokens;
+			std::string current;
+			for (unsigned char ch : value) {
+				if (std::isalnum(ch)) {
+					current.push_back(static_cast<char>(std::tolower(ch)));
+				}
+				else if (!current.empty()) {
+					tokens.push_back(std::move(current));
+					current.clear();
+				}
+			}
+			if (!current.empty()) {
+				tokens.push_back(std::move(current));
+			}
+			return tokens;
+		}
+
+		bool NameSuggestsDoubleSided(const std::string& value) {
+			const std::string normalized = NormalizeHeuristicName(value);
+			if (normalized.find("doublesided") != std::string::npos ||
+				normalized.find("doubleside") != std::string::npos ||
+				normalized.find("twosided") != std::string::npos ||
+				normalized.find("twoside") != std::string::npos ||
+				normalized.find("2sided") != std::string::npos ||
+				normalized.find("2side") != std::string::npos) {
+				return true;
+			}
+
+			const std::vector<std::string> tokens = TokenizeHeuristicName(value);
+			for (size_t tokenIndex = 0; tokenIndex + 1 < tokens.size(); ++tokenIndex) {
+				const std::string& first = tokens[tokenIndex];
+				const std::string& second = tokens[tokenIndex + 1];
+				const bool firstMatches = first == "double" || first == "two" || first == "2";
+				const bool secondMatches = second == "side" || second == "sided";
+				if (firstMatches && secondMatches) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		bool ShouldForceDoubleSidedByName(
+			const UsdShadeMaterial& material,
+			const std::optional<UsdGeomSubset>& subset,
+			const ImportSettings& settings) {
+			if (!settings.enableDoubleSidedNameHeuristic) {
+				return false;
+			}
+
+			if (subset && NameSuggestsDoubleSided(subset->GetPrim().GetName().GetString())) {
+				return true;
+			}
+
+			if (material && NameSuggestsDoubleSided(material.GetPrim().GetName().GetString())) {
+				return true;
+			}
+
+			return false;
+		}
+
+	}
+
     struct MaterialTemplateRecord {
         MaterialDescription desc;
         std::vector<std::string> referencedUvSetNames;
     };
 
+	struct PreprocessedMeshSubset {
+		UsdShadeMaterial material;
+		MeshPreprocessResult result;
+		bool inferredDoubleSided = false;
+
+		PreprocessedMeshSubset(UsdShadeMaterial m, MeshPreprocessResult&& r, bool inferred)
+			: material(std::move(m)), result(std::move(r)), inferredDoubleSided(inferred) {}
+	};
+
+	struct PreprocessedMeshRecord {
+		bool authoredDoubleSided = false;
+		std::vector<PreprocessedMeshSubset> subsets;
+	};
+
 	struct LoadingCaches {
 		std::unordered_map<std::string, MaterialTemplateRecord> materialTemplateCache;
         std::unordered_map<std::string, std::shared_ptr<Material>> resolvedMaterialCache;
 		std::unordered_map<std::string, std::vector<std::shared_ptr<Mesh>>> meshCache;
+		std::unordered_map<std::string, PreprocessedMeshRecord> preprocessedMeshCache;
 		std::unordered_map<std::string, std::shared_ptr<TextureAsset>> textureCache;
 		//std::unordered_map<std::string, std::shared_ptr<UsdSkelSkeleton>> unprocessedSkeletons;
 		std::unordered_map<std::string, UsdPrim> primsWithSkeletons;
@@ -89,6 +188,7 @@ namespace USDLoader {
 			materialTemplateCache.clear();
             resolvedMaterialCache.clear();
 			meshCache.clear();
+			preprocessedMeshCache.clear();
 			textureCache.clear();
 			primsWithSkeletons.clear();
 			skeletonMap.clear();
@@ -124,6 +224,113 @@ namespace USDLoader {
 		}
 
 		return UsdTimeCode::Default();
+	}
+
+	struct PointInstancerPrototypeRenderable {
+		std::vector<std::shared_ptr<Mesh>> meshes;
+		GfMatrix4d localTransform = GfMatrix4d(1.0);
+		std::string name;
+	};
+
+	static void SetEntityTransformFromUsdMatrix(
+		flecs::entity entity,
+		const GfMatrix4d& matrix,
+		double metersPerUnit)
+	{
+		const GfTransform transform(matrix);
+		const GfVec3d translation = transform.GetTranslation();
+		const GfQuaternion rotation = transform.GetRotation().GetQuaternion();
+		const GfVec3d scale = transform.GetScale();
+
+		entity.set<Components::Position>({
+			DirectX::XMFLOAT3(
+				static_cast<float>(translation[0] * metersPerUnit),
+				static_cast<float>(translation[1] * metersPerUnit),
+				static_cast<float>(translation[2] * metersPerUnit))
+			});
+		entity.set<Components::Rotation>({
+			DirectX::XMFLOAT4(
+				static_cast<float>(rotation.GetImaginary()[0]),
+				static_cast<float>(rotation.GetImaginary()[1]),
+				static_cast<float>(rotation.GetImaginary()[2]),
+				static_cast<float>(rotation.GetReal()))
+			});
+		entity.set<Components::Scale>({
+			DirectX::XMFLOAT3(
+				static_cast<float>(scale[0]),
+				static_cast<float>(scale[1]),
+				static_cast<float>(scale[2]))
+			});
+	}
+
+	static void ApplyPointInstancerPScaleFallback(
+		const UsdGeomPointInstancer& pointInstancer,
+		const UsdTimeCode& timeCode,
+		const std::vector<bool>& mask,
+		VtArray<GfMatrix4d>* instanceTransforms)
+	{
+		if (instanceTransforms == nullptr || instanceTransforms->empty()) {
+			return;
+		}
+
+		VtVec3fArray nativeScales;
+		if (pointInstancer.GetScalesAttr().Get(&nativeScales, timeCode) && !nativeScales.empty()) {
+			return;
+		}
+
+		UsdGeomPrimvarsAPI primvarsAPI(pointInstancer.GetPrim());
+		UsdGeomPrimvar pscalePrimvar = primvarsAPI.FindPrimvarWithInheritance(TfToken("pscale"));
+		if (!pscalePrimvar) {
+			return;
+		}
+
+		VtFloatArray pscaleValues;
+		if (!pscalePrimvar.ComputeFlattened(&pscaleValues, timeCode) || pscaleValues.empty()) {
+			spdlog::warn(
+				"PointInstancer '{}' authored primvars:pscale but it could not be flattened at geometry sample time {}; ignoring fallback scaling.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				timeCode.IsDefault() ? -1.0 : timeCode.GetValue());
+			return;
+		}
+
+		std::vector<float> resolvedPscale;
+		resolvedPscale.reserve(instanceTransforms->size());
+		if (pscaleValues.size() == 1) {
+			resolvedPscale.assign(instanceTransforms->size(), pscaleValues[0]);
+		}
+		else if (!mask.empty() && pscaleValues.size() == mask.size()) {
+			for (size_t valueIndex = 0; valueIndex < mask.size(); ++valueIndex) {
+				if (mask[valueIndex]) {
+					resolvedPscale.push_back(pscaleValues[valueIndex]);
+				}
+			}
+		}
+		else if (pscaleValues.size() == instanceTransforms->size()) {
+			resolvedPscale.assign(pscaleValues.begin(), pscaleValues.end());
+		}
+		else {
+			spdlog::warn(
+				"PointInstancer '{}' primvars:pscale count {} does not match masked instance count {}; ignoring fallback scaling.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				pscaleValues.size(),
+				instanceTransforms->size());
+			return;
+		}
+
+		if (resolvedPscale.size() != instanceTransforms->size()) {
+			spdlog::warn(
+				"PointInstancer '{}' resolved primvars:pscale count {} does not match instance transform count {}; ignoring fallback scaling.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				resolvedPscale.size(),
+				instanceTransforms->size());
+			return;
+		}
+
+		for (size_t instanceIndex = 0; instanceIndex < instanceTransforms->size(); ++instanceIndex) {
+			GfMatrix4d scaleMatrix(1.0);
+			scaleMatrix.SetScale(GfVec3d(resolvedPscale[instanceIndex]));
+			(*instanceTransforms)[instanceIndex] = scaleMatrix * (*instanceTransforms)[instanceIndex];
+		}
 	}
 
 	static std::vector<uint32_t> SwizzleToIndices(const std::string& swizzle) {
@@ -1099,6 +1306,159 @@ namespace USDLoader {
         return runtimeMaterial;
     }
 
+	void PreprocessAllMeshes(
+		const UsdStageRefPtr& stage,
+		double metersPerUnit,
+		const std::string& directory,
+		bool isUSDZ,
+		const ImportSettings& importSettings)
+	{
+		struct MeshPreprocessWorkItem {
+			std::string meshPath;
+			UsdGeomMesh mesh;
+			std::optional<UsdGeomSubset> subset;
+			UsdShadeMaterial material;
+			std::vector<std::string> requiredUvSetNames;
+			std::optional<UsdSkelSkinningQuery> skinQ;
+			VtTokenArray skelJointOrderRaw;
+			VtTokenArray skelJointOrderMapped;
+			bool authoredDoubleSided = false;
+			bool inferredDoubleSided = false;
+		};
+
+		loadingCache.preprocessedMeshCache.clear();
+
+		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
+		UsdSkelCache preprocessSkelCache;
+		std::vector<MeshPreprocessWorkItem> workItems;
+
+		std::function<void(const UsdPrim&)> gatherMeshJobs = [&](const UsdPrim& prim) {
+			if (prim.IsA<UsdGeomImageable>()) {
+				UsdGeomImageable imageable(prim);
+				if (imageable.ComputeVisibility(geomTimeCode) == UsdGeomTokens->invisible) {
+					return;
+				}
+			}
+
+			UsdGeomMesh mesh(prim);
+			if (mesh) {
+				auto skinQ = USDGeometryExtractor::GetSkinningQuery(mesh, preprocessSkelCache);
+				VtTokenArray skelJointOrderRaw;
+				VtTokenArray skelJointOrderMapped;
+				if (skinQ) {
+					UsdSkelBindingAPI bindAPI(mesh.GetPrim());
+					UsdSkelSkeleton skel = bindAPI.GetInheritedSkeleton();
+					if (skel) {
+						preprocessSkelCache.Populate(UsdSkelRoot(skel.GetPrim()), UsdPrimDefaultPredicate);
+						auto skelQuery = preprocessSkelCache.GetSkelQuery(skel);
+						skelJointOrderRaw = skelQuery.GetJointOrder();
+
+						auto& mapper = skinQ->GetJointMapper();
+						if (mapper && !mapper->IsIdentity()) {
+							mapper->Remap(skelJointOrderRaw, &skelJointOrderMapped);
+						}
+						else {
+							skelJointOrderMapped = skelJointOrderRaw;
+						}
+					}
+				}
+
+				bool authoredDoubleSided = false;
+				UsdGeomGprim gprim(mesh.GetPrim());
+				if (gprim) {
+					gprim.GetDoubleSidedAttr().Get(&authoredDoubleSided, geomTimeCode);
+				}
+
+				const std::string meshPath = mesh.GetPrim().GetPath().GetString();
+				UsdShadeMaterialBindingAPI bindAPI(mesh);
+				auto subsets = bindAPI.GetMaterialBindSubsets();
+
+				const auto getRequiredUvSetNames = [](const UsdShadeMaterial& material) {
+					const auto templateIt = loadingCache.materialTemplateCache.find(material.GetPrim().GetPath().GetString());
+					return templateIt != loadingCache.materialTemplateCache.end()
+						? templateIt->second.referencedUvSetNames
+						: std::vector<std::string>{};
+				};
+
+				if (subsets.empty()) {
+					auto mat = UsdShadeMaterialBindingAPI(mesh).ComputeBoundMaterial();
+					ProcessMaterial(mat, stage, isUSDZ, directory);
+					const bool inferredDoubleSided = ShouldForceDoubleSidedByName(mat, std::nullopt, importSettings);
+					workItems.push_back(MeshPreprocessWorkItem{
+						.meshPath = meshPath,
+						.mesh = mesh,
+						.subset = std::nullopt,
+						.material = mat,
+						.requiredUvSetNames = getRequiredUvSetNames(mat),
+						.skinQ = skinQ,
+						.skelJointOrderRaw = skelJointOrderRaw,
+						.skelJointOrderMapped = skelJointOrderMapped,
+						.authoredDoubleSided = authoredDoubleSided,
+						.inferredDoubleSided = inferredDoubleSided
+						});
+				}
+				else {
+					for (const auto& subset : subsets) {
+						auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
+						ProcessMaterial(mat, stage, isUSDZ, directory);
+						const bool inferredDoubleSided = ShouldForceDoubleSidedByName(mat, subset, importSettings);
+						workItems.push_back(MeshPreprocessWorkItem{
+							.meshPath = meshPath,
+							.mesh = mesh,
+							.subset = subset,
+							.material = mat,
+							.requiredUvSetNames = getRequiredUvSetNames(mat),
+							.skinQ = skinQ,
+							.skelJointOrderRaw = skelJointOrderRaw,
+							.skelJointOrderMapped = skelJointOrderMapped,
+							.authoredDoubleSided = authoredDoubleSided,
+							.inferredDoubleSided = inferredDoubleSided
+							});
+						if (inferredDoubleSided) {
+							spdlog::info("USD double-sided heuristic enabled for mesh '{}' subset '{}' material '{}'",
+								meshPath,
+								subset.GetPrim().GetName().GetString(),
+								mat ? mat.GetPrim().GetName().GetString() : std::string("<unbound>"));
+						}
+					}
+				}
+			}
+
+			for (auto child : prim.GetFilteredChildren(UsdTraverseInstanceProxies())) {
+				gatherMeshJobs(child);
+			}
+		};
+		gatherMeshJobs(stage->GetPseudoRoot());
+
+		spdlog::info("USD mesh preprocessing: gathered {} mesh/subset job(s).", workItems.size());
+		std::vector<std::optional<MeshPreprocessResult>> preprocessed(workItems.size());
+		TaskSchedulerManager::GetInstance().ParallelFor("USDLoader::PreprocessMeshes", workItems.size(), [&](size_t workIndex) {
+			const MeshPreprocessWorkItem& workItem = workItems[workIndex];
+			preprocessed[workIndex] = USDGeometryExtractor::ExtractSubMesh(
+				workItem.mesh,
+				workItem.subset,
+				stage,
+				geomTimeCode,
+				metersPerUnit,
+				workItem.requiredUvSetNames,
+				workItem.skinQ,
+				workItem.skelJointOrderRaw,
+				workItem.skelJointOrderMapped,
+				workItem.authoredDoubleSided || workItem.inferredDoubleSided);
+			});
+
+		for (size_t workIndex = 0; workIndex < workItems.size(); ++workIndex) {
+			if (!preprocessed[workIndex].has_value()) {
+				throw std::runtime_error("Missing preprocessed USD mesh data");
+			}
+
+			const MeshPreprocessWorkItem& workItem = workItems[workIndex];
+			auto& record = loadingCache.preprocessedMeshCache[workItem.meshPath];
+			record.authoredDoubleSided = workItem.authoredDoubleSided;
+			record.subsets.emplace_back(workItem.material, std::move(preprocessed[workIndex].value()), workItem.inferredDoubleSided);
+		}
+	}
+
 	std::vector<std::shared_ptr<Mesh>> ProcessMesh(
 		const UsdGeomMesh& mesh,
 		const pxr::UsdStageRefPtr& stage,
@@ -1110,72 +1470,39 @@ namespace USDLoader {
 		VtTokenArray& skelJointOrderRaw,
 		VtTokenArray& skelJointOrderMapped)
 	{
+		(void)stage;
+		(void)metersPerUnit;
+		(void)upRot;
+		(void)directory;
+		(void)isUSDZ;
+		(void)skelCache;
+		(void)skelJointOrderRaw;
+		(void)skelJointOrderMapped;
+
 		auto& cacheKey = mesh.GetPrim().GetPath().GetString();
 		if (loadingCache.meshCache.contains(cacheKey)) {
 			return loadingCache.meshCache[cacheKey];
 		}
 
-		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
-
-		// Extract skin once
-		auto skinQ = USDGeometryExtractor::GetSkinningQuery(mesh, skelCache);
-
-		// Gather subsets
-		UsdShadeMaterialBindingAPI  bindAPI(mesh);
-		auto                        subsets = bindAPI.GetMaterialBindSubsets();
-        bool authoredDoubleSided = false;
-        UsdGeomGprim gprim(mesh.GetPrim());
-        if (gprim) {
-            gprim.GetDoubleSidedAttr().Get(&authoredDoubleSided, geomTimeCode);
-        }
-
 		std::vector<std::shared_ptr<Mesh>> outMeshes;
+		auto preprocessedIt = loadingCache.preprocessedMeshCache.find(cacheKey);
+		if (preprocessedIt == loadingCache.preprocessedMeshCache.end()) {
+			spdlog::warn("USD mesh '{}' was not present in the preprocessed mesh cache.", cacheKey);
+			loadingCache.meshCache[cacheKey] = outMeshes;
+			return outMeshes;
+		}
 
-		// If no subsets: one full mesh with ComputeBoundMaterial()
-		if (subsets.empty()) {
-			auto matAPI = UsdShadeMaterialBindingAPI(mesh);
-			auto mat = matAPI.ComputeBoundMaterial();
-			ProcessMaterial(mat, stage, isUSDZ, directory);
-            const auto templateIt = loadingCache.materialTemplateCache.find(mat.GetPrim().GetPath().GetString());
-            const std::vector<std::string> requiredUvSetNames =
-                templateIt != loadingCache.materialTemplateCache.end()
-                ? templateIt->second.referencedUvSetNames
-                : std::vector<std::string>{};
-
-			// Phase 1: geometry extraction + CLod cache
-			auto result = USDGeometryExtractor::ExtractSubMesh(
-				mesh, std::nullopt, stage, geomTimeCode, metersPerUnit, requiredUvSetNames,
-				skinQ, skelJointOrderRaw, skelJointOrderMapped);
-
-			// Phase 2: GPU mesh creation
-			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
+		PreprocessedMeshRecord& record = preprocessedIt->second;
+		outMeshes.reserve(record.subsets.size());
+		for (PreprocessedMeshSubset& subset : record.subsets) {
+			auto& result = subset.result;
+			auto material = ResolveMaterialForMesh(
+				subset.material,
+				result.ingest.GetUvSets(),
+				record.authoredDoubleSided || subset.inferredDoubleSided || result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			if (mPtr != nullptr) {
 				outMeshes.push_back(mPtr);
-			}
-		}
-		else {
-			// Otherwise: one mesh per subset
-			for (auto const& subset : subsets) {
-				auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
-				ProcessMaterial(mat, stage, isUSDZ, directory);
-                const auto templateIt = loadingCache.materialTemplateCache.find(mat.GetPrim().GetPath().GetString());
-                const std::vector<std::string> requiredUvSetNames =
-                    templateIt != loadingCache.materialTemplateCache.end()
-                    ? templateIt->second.referencedUvSetNames
-                    : std::vector<std::string>{};
-
-				// Phase 1: geometry extraction + CLod cache
-				auto result = USDGeometryExtractor::ExtractSubMesh(
-					mesh, std::make_optional(subset), stage, geomTimeCode, metersPerUnit, requiredUvSetNames,
-					skinQ, skelJointOrderRaw, skelJointOrderMapped);
-
-				// Phase 2: GPU mesh creation
-				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
-				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-				if (mPtr != nullptr) {
-					outMeshes.push_back(mPtr);
-				}
 			}
 		}
 
@@ -1192,6 +1519,13 @@ namespace USDLoader {
 		const auto& topo = skelQuery.GetTopology();
 		pxr::VtArray<pxr::GfMatrix4d> bindXforms;
 		skel.GetBindTransformsAttr().Get(&bindXforms);
+		if (bindXforms.size() < rawJointOrder.size()) {
+			spdlog::warn(
+				"Skeleton '{}' bind transform count ({}) is smaller than joint count ({}); missing joints will use identity rest transforms.",
+				skel.GetPrim().GetPath().GetString(),
+				bindXforms.size(),
+				rawJointOrder.size());
+		}
 
 		std::vector<XMMATRIX>        invBindMats;
 		std::vector<flecs::entity>   jointNodes;
@@ -1199,11 +1533,16 @@ namespace USDLoader {
 		jointNodes.reserve(rawJointOrder.size());
 
 		for (size_t i = 0; i < rawJointOrder.size(); ++i) {
-			auto& m = bindXforms[i];
+			const GfMatrix4d bindMatrix = i < bindXforms.size() ? bindXforms[i] : GfMatrix4d(1.0);
+			GfMatrix4d localBindMatrix = bindMatrix;
+			auto parentIdx = topo.GetParent(i);
+			if (parentIdx > -1 && static_cast<size_t>(parentIdx) < bindXforms.size()) {
+				localBindMatrix = bindMatrix * bindXforms[parentIdx].GetInverse();
+			}
 			// Convert GfMatrix4d to XMMATRIX
 
 			// Extract translation and scale from the matrix
-			auto transform = GfTransform(m);
+			auto transform = GfTransform(bindMatrix);
 			auto translation = transform.GetTranslation() * metersPerUnit;
 			auto rotation = transform.GetRotation().GetQuaternion();
 			auto& scale = transform.GetScale();
@@ -1229,8 +1568,8 @@ namespace USDLoader {
 				boneNode.add<AnimationController>();
 				boneNode.set<Components::AnimationName>({ jn });
 			}
+			SetEntityTransformFromUsdMatrix(boneNode, localBindMatrix, metersPerUnit);
 			jointNodes.push_back(boneNode);
-			auto parentIdx = topo.GetParent(i);
 			if (parentIdx > -1) {
 				boneNode.child_of(jointNodes[parentIdx]);
 			}
@@ -1411,11 +1750,14 @@ namespace USDLoader {
 			prototypeRootsToSkip.insert(prototypeTarget.GetString());
 		}
 
-		const UsdTimeCode timeCode = UsdTimeCode::Default();
+		const UsdTimeCode timeCode = GetUsdGeometrySampleTime(stage);
 
 		VtIntArray protoIndices;
 		if (!pointInstancer.GetProtoIndicesAttr().Get(&protoIndices, timeCode)) {
-			spdlog::warn("PointInstancer '{}' has no readable protoIndices at default time.", pointInstancer.GetPrim().GetPath().GetString());
+			spdlog::warn(
+				"PointInstancer '{}' has no readable protoIndices at geometry sample time {}.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				timeCode.IsDefault() ? -1.0 : timeCode.GetValue());
 			return;
 		}
 
@@ -1435,6 +1777,8 @@ namespace USDLoader {
 			spdlog::warn("PointInstancer '{}' failed to compute instance transforms.", pointInstancer.GetPrim().GetPath().GetString());
 			return;
 		}
+
+		ApplyPointInstancerPScaleFallback(pointInstancer, timeCode, mask, &instanceTransforms);
 
 		const size_t emittedCount = std::min(instanceTransforms.size(), protoIndices.size());
 		if (instanceTransforms.size() != protoIndices.size()) {
@@ -1456,8 +1800,9 @@ namespace USDLoader {
 			return;
 		}
 
-		std::vector<std::vector<std::shared_ptr<Mesh>>> meshesByPrototype;
-		meshesByPrototype.resize(prototypeTargets.size());
+		UsdGeomXformCache xformCache(timeCode);
+		std::vector<std::vector<PointInstancerPrototypeRenderable>> renderablesByPrototype;
+		renderablesByPrototype.resize(prototypeTargets.size());
 
 		for (size_t prototypeIndex = 0; prototypeIndex < prototypeTargets.size(); ++prototypeIndex) {
 			const auto& prototypeTarget = prototypeTargets[prototypeIndex];
@@ -1469,16 +1814,33 @@ namespace USDLoader {
 				continue;
 			}
 
-			for (const auto& prototypePrim : UsdPrimRange(prototypeRoot)) {
+			const GfMatrix4d prototypeRootWorldInverse = xformCache.GetLocalToWorldTransform(prototypeRoot).GetInverse();
+			std::function<void(const UsdPrim&)> gatherPrototypeRenderables = [&](const UsdPrim& prototypePrim) {
+				if (prototypePrim.IsA<UsdGeomImageable>()) {
+					UsdGeomImageable imageable(prototypePrim);
+					if (imageable.ComputeVisibility(timeCode) == UsdGeomTokens->invisible) {
+						return;
+					}
+				}
+
 				std::vector<std::shared_ptr<Mesh>> prototypePrimMeshes;
 				ProcessMeshAndAnimations(prototypePrim, prototypePrimMeshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
 				if (!prototypePrimMeshes.empty()) {
-					auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
-					prototypeMeshes.insert(prototypeMeshes.end(), prototypePrimMeshes.begin(), prototypePrimMeshes.end());
+					PointInstancerPrototypeRenderable renderable;
+					renderable.meshes = std::move(prototypePrimMeshes);
+					renderable.localTransform = xformCache.GetLocalToWorldTransform(prototypePrim) * prototypeRootWorldInverse;
+					renderable.name = prototypePrim.GetName().GetString();
+					renderablesByPrototype[prototypeIndex].push_back(std::move(renderable));
 				}
-			}
 
-			if (meshesByPrototype[prototypeIndex].empty()) {
+				for (const auto& childPrim : prototypePrim.GetFilteredChildren(UsdTraverseInstanceProxies())) {
+					gatherPrototypeRenderables(childPrim);
+				}
+			};
+
+			gatherPrototypeRenderables(prototypeRoot);
+
+			if (renderablesByPrototype[prototypeIndex].empty()) {
 				spdlog::warn("PointInstancer '{}' prototype '{}' resolved no renderable meshes.",
 					pointInstancer.GetPrim().GetPath().GetString(),
 					prototypeTarget.GetString());
@@ -1489,7 +1851,7 @@ namespace USDLoader {
 
 		for (size_t instanceIndex = 0; instanceIndex < emittedCount; ++instanceIndex) {
 			const int prototypeIndex = protoIndices[instanceIndex];
-			if (prototypeIndex < 0 || static_cast<size_t>(prototypeIndex) >= meshesByPrototype.size()) {
+			if (prototypeIndex < 0 || static_cast<size_t>(prototypeIndex) >= renderablesByPrototype.size()) {
 				spdlog::warn("PointInstancer '{}' has out-of-range proto index {} at instance {}.",
 					pointInstancer.GetPrim().GetPath().GetString(),
 					prototypeIndex,
@@ -1497,40 +1859,22 @@ namespace USDLoader {
 				continue;
 			}
 
-			auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
-			if (prototypeMeshes.empty()) {
+			auto& prototypeRenderables = renderablesByPrototype[prototypeIndex];
+			if (prototypeRenderables.empty()) {
 				continue;
 			}
 
-			const GfTransform instanceTransform(instanceTransforms[instanceIndex]);
-			const GfVec3d translation = instanceTransform.GetTranslation();
-			const GfQuaternion rotation = instanceTransform.GetRotation().GetQuaternion();
-			const GfVec3d scale = instanceTransform.GetScale();
-
-			auto instanceEntity = scene->CreateRenderableEntityECS(
-				prototypeMeshes,
-				s2ws(baseName + "_instance_" + std::to_string(instanceIndex)));
-
-			instanceEntity.set<Components::Position>({
-				DirectX::XMFLOAT3(
-					static_cast<float>(translation[0] * metersPerUnit),
-					static_cast<float>(translation[1] * metersPerUnit),
-					static_cast<float>(translation[2] * metersPerUnit))
-				});
-			instanceEntity.set<Components::Rotation>({
-				DirectX::XMFLOAT4(
-					static_cast<float>(rotation.GetImaginary()[0]),
-					static_cast<float>(rotation.GetImaginary()[1]),
-					static_cast<float>(rotation.GetImaginary()[2]),
-					static_cast<float>(rotation.GetReal()))
-				});
-			instanceEntity.set<Components::Scale>({
-				DirectX::XMFLOAT3(
-					static_cast<float>(scale[0]),
-					static_cast<float>(scale[1]),
-					static_cast<float>(scale[2]))
-				});
+			auto instanceEntity = scene->CreateNodeECS(s2ws(baseName + "_instance_" + std::to_string(instanceIndex)));
+			SetEntityTransformFromUsdMatrix(instanceEntity, instanceTransforms[instanceIndex], metersPerUnit);
 			instanceEntity.child_of(instancerEntity);
+
+			for (const auto& prototypeRenderable : prototypeRenderables) {
+				auto renderableEntity = scene->CreateRenderableEntityECS(
+					prototypeRenderable.meshes,
+					s2ws(prototypeRenderable.name.empty() ? baseName : prototypeRenderable.name));
+				SetEntityTransformFromUsdMatrix(renderableEntity, prototypeRenderable.localTransform, metersPerUnit);
+				renderableEntity.child_of(instanceEntity);
+			}
 		}
 	}
 
@@ -1655,11 +1999,12 @@ namespace USDLoader {
 
 	}
 
-	std::shared_ptr<Scene> LoadModel(std::string filePath) {
-
-		UsdStageRefPtr stage = UsdStage::Open(filePath);
+	std::shared_ptr<Scene> LoadModelFromStage(
+		const UsdStageRefPtr& stage,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
 		if (!stage) {
-			spdlog::error("USD stage open failed for {}", filePath);
+			spdlog::error("USD stage open failed for in-memory source '{}'", options.sourceIdentifier);
 			return nullptr;
 		}
 
@@ -1705,17 +2050,57 @@ namespace USDLoader {
 
 		UsdSkelCache skelCache;
 
-		// Check if this is a USDZ file
-		bool isUSDZ = false;
-		if (std::filesystem::path(filePath).extension() == ".usdz") {
-			isUSDZ = true;
-		}
+		const bool isUSDZ = options.isUsdPackage;
+		const std::string directory = options.sourceDirectory;
 
-		ParseNodeHierarchy(scene, stage, metersPerUnit, upRot, std::filesystem::path(filePath).parent_path().string(), skelCache, isUSDZ);
+		PreprocessAllMeshes(stage, metersPerUnit, directory, isUSDZ, importSettings);
+
+		ParseNodeHierarchy(scene, stage, metersPerUnit, upRot, directory, skelCache, isUSDZ);
 
 		loadingCache.Clear();
 
 		return scene;
+	}
+
+	std::shared_ptr<Scene> LoadModel(std::string filePath, const ImportSettings& importSettings) {
+
+		UsdStageRefPtr stage = UsdStage::Open(filePath);
+		if (!stage) {
+			spdlog::error("USD stage open failed for {}", filePath);
+			return nullptr;
+		}
+
+		InMemoryStageOptions options{};
+		options.sourceIdentifier = filePath;
+		options.sourceDirectory = std::filesystem::path(filePath).parent_path().string();
+		options.layerIdentifierHint = std::filesystem::path(filePath).filename().string();
+		options.isUsdPackage = std::filesystem::path(filePath).extension() == ".usdz";
+
+		return LoadModelFromStage(stage, options, importSettings);
+	}
+
+	std::shared_ptr<Scene> LoadModelFromUsdBytes(
+		const std::string& usdText,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
+		const std::string identifierHint = options.layerIdentifierHint.empty() ? std::string("in_memory.usda") : options.layerIdentifierHint;
+		SdfLayerRefPtr rootLayer = SdfLayer::CreateAnonymous(identifierHint);
+		if (!rootLayer || !rootLayer->ImportFromString(usdText)) {
+			spdlog::error("Failed to import in-memory USD layer '{}'.", identifierHint);
+			return nullptr;
+		}
+
+		UsdStageRefPtr stage = UsdStage::Open(rootLayer);
+		if (!stage) {
+			spdlog::error("Failed to open in-memory USD stage '{}'.", identifierHint);
+			return nullptr;
+		}
+
+		return LoadModelFromStage(stage, options, importSettings);
+	}
+
+	std::shared_ptr<Scene> LoadModel(std::string filePath) {
+		return LoadModel(std::move(filePath), ImportSettings{});
 	}
 
 }

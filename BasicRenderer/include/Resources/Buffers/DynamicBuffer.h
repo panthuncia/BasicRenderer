@@ -36,6 +36,9 @@ public:
 
     void EndBulkWrite(size_t dirtyOffset, size_t dirtySize) {
         m_uploadPolicyState.CommitBulkRegion(dirtyOffset, dirtySize);
+        if (m_uploadPolicyState.HasPendingWork()) {
+            MarkUploadPolicyDirty();
+        }
     }
 
     void OnUploadPolicyBeginFrame() override {
@@ -46,6 +49,18 @@ public:
     void OnUploadPolicyFlush() override {
         SyncUploadPolicyState();
         m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
+    }
+
+    bool HasPendingUploadPolicyWork() const override {
+        return m_uploadPolicyState.HasPendingWork();
+    }
+
+    uint64_t GetUploadPolicyLastFlushWrites() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedWrites;
+    }
+
+    uint64_t GetUploadPolicyLastFlushBytes() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedBytes;
     }
 
     size_t Size() const {

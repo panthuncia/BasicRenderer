@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <fstream>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -11,7 +12,7 @@
 
 namespace CLodCache {
 
-inline constexpr uint32_t kSchemaVersion = 24;
+inline constexpr uint32_t kSchemaVersion = 47;
 
 struct CacheKey {
 	std::string sourceIdentifier;
@@ -30,13 +31,13 @@ struct LoadedGroupPayload {
 	std::vector<std::vector<std::byte>> pageBlobs;
 };
 
-struct GroupPayloadLayoutMetadata {
+struct PagePayloadLayoutMetadata {
 	std::optional<ClusterLODGroupChunk> groupChunkMetadata;
 	std::vector<uint32_t> pageBlobSizes;
 	std::vector<uint64_t> pageBlobOffsets;
 
 	bool IsValid() const {
-		return groupChunkMetadata.has_value() && pageBlobSizes.size() == pageBlobOffsets.size();
+		return pageBlobSizes.size() == pageBlobOffsets.size();
 	}
 
 	void Clear() {
@@ -45,6 +46,8 @@ struct GroupPayloadLayoutMetadata {
 		pageBlobOffsets.clear();
 	}
 };
+
+using GroupPayloadLayoutMetadata = PagePayloadLayoutMetadata;
 
 std::wstring ResolveContainerPath(const ClusterLODCacheSource& cacheSource);
 
@@ -56,41 +59,50 @@ bool Save(const CacheKey& key, const CacheData& data);
 bool Save(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload);
 bool Save(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload, ClusterLODPrebuiltData* outSavedPrebuiltData);
 bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
-bool LoadGroupPayload(const ClusterLODCacheSource& cacheSource, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
 
-// Load a single group payload from an already-opened container stream using a
-// pre-resolved disk locator. Avoids re-opening the file and re-reading the
-// directory for every request, giving a large throughput improvement when many
-// groups are streamed from the same container.
-bool LoadGroupPayloadDirect(std::ifstream& file,
-	const ClusterLODGroupDiskLocator& locator,
+bool LoadMeshPagesSelective(std::ifstream& file,
+	std::span<const ClusterLODGroupDiskLocator> pageLocators,
+	uint32_t firstPage,
+	uint32_t pageCount,
+	const std::vector<bool>& pageNeedsFetch,
 	LoadedGroupPayload& outPayload);
 
-// Selective variant: reads all metadata but only fetches page blobs where
-// segmentNeedsFetch[i] is true.  Skipped segments get an empty blob in
-// outPayload.pageBlobs.  segmentNeedsFetch.size() must equal the on-disk
-// page count or be empty (which falls back to reading everything).
-bool LoadGroupPayloadSelective(std::ifstream& file,
-	const ClusterLODGroupDiskLocator& locator,
-	const std::vector<bool>& segmentNeedsFetch,
+bool LoadMeshPagesSelective(std::ifstream& file,
+	std::span<const ClusterLODGroupDiskLocator> pageLocators,
+	std::span<const uint32_t> meshPageIndices,
+	const std::vector<bool>& pageNeedsFetch,
 	LoadedGroupPayload& outPayload);
 
-bool GetGroupPayloadLayout(std::ifstream& file,
-	const ClusterLODGroupDiskLocator& locator,
-	GroupPayloadLayoutMetadata& outLayout);
+bool GetMeshPagePayloadLayout(std::span<const ClusterLODGroupDiskLocator> pageLocators,
+	uint32_t firstPage,
+	uint32_t pageCount,
+	PagePayloadLayoutMetadata& outLayout);
 
-bool LoadGroupPayloadSelectiveDirectStorage(std::ifstream& file,
+bool GetMeshPagePayloadLayout(std::span<const ClusterLODGroupDiskLocator> pageLocators,
+	std::span<const uint32_t> meshPageIndices,
+	PagePayloadLayoutMetadata& outLayout);
+
+bool LoadMeshPagesSelectiveDirectStorage(
 	const std::wstring& containerPath,
-	const ClusterLODGroupDiskLocator& locator,
-	const std::vector<bool>& segmentNeedsFetch,
+	std::span<const ClusterLODGroupDiskLocator> pageLocators,
+	uint32_t firstPage,
+	uint32_t pageCount,
+	const std::vector<bool>& pageNeedsFetch,
+	LoadedGroupPayload& outPayload,
+	std::string* outMessage = nullptr);
+
+bool LoadMeshPagesSelectiveDirectStorage(
+	const std::wstring& containerPath,
+	std::span<const ClusterLODGroupDiskLocator> pageLocators,
+	std::span<const uint32_t> meshPageIndices,
+	const std::vector<bool>& pageNeedsFetch,
 	LoadedGroupPayload& outPayload,
 	std::string* outMessage = nullptr);
 
 // Open a container file and validate its header.  Returns true on success.
-// The caller keeps the ifstream around for repeated LoadGroupPayloadDirect
-// calls, avoiding per-request open/close overhead.
+// The caller keeps the ifstream around for repeated mesh-page interval loads.
 bool OpenContainerFile(const ClusterLODCacheSource& cacheSource,
 	std::ifstream& outFile,
-	uint32_t& outGroupCount);
+	uint32_t& outPageCount);
 
 }

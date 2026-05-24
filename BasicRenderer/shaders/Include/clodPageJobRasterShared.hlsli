@@ -24,15 +24,8 @@ float3 PJ_DecodeCompressedPosition(
     int3 minQ,
     uint pagePoolSlabDescriptorIndex)
 {
-    uint bitsPerVertex = bitsX + bitsY + bitsZ;
-    uint bitCursor = positionBitstreamBase * 8u + positionBitOffset + meshletLocalVertex * bitsPerVertex;
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint px = PJ_ReadPackedBits32(slab, bitCursor, bitsX); bitCursor += bitsX;
-    uint py = PJ_ReadPackedBits32(slab, bitCursor, bitsY); bitCursor += bitsY;
-    uint pz = PJ_ReadPackedBits32(slab, bitCursor, bitsZ);
-    int3 q = int3(px, py, pz) + minQ;
-    float invScale = 1.0f / float(1u << quantExp);
-    return float3(q) * invScale;
+    return CLodLoadPagePosition(slab, quantExp, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
 }
 
 uint3 PJ_DecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteOffset, uint triLocalIndex)

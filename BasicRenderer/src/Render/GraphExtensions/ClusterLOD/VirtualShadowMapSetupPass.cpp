@@ -57,13 +57,13 @@ uint32_t WrapPageOffset(int64_t pageCoord, uint32_t pageTableResolution)
 
 float ExtractOrthographicWidth(const DirectX::XMMATRIX& projection)
 {
-    const float m11 = projection.r[0].m128_f32[0];
+    const float m11 = DirectX::XMVectorGetX(projection.r[0]);
     return std::abs(m11) > 1.0e-6f ? (2.0f / std::abs(m11)) : 0.0f;
 }
 
 float ExtractOrthographicHeight(const DirectX::XMMATRIX& projection)
 {
-    const float m22 = projection.r[1].m128_f32[1];
+    const float m22 = DirectX::XMVectorGetY(projection.r[1]);
     return std::abs(m22) > 1.0e-6f ? (2.0f / std::abs(m22)) : 0.0f;
 }
 
@@ -303,11 +303,12 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 markData.pageTableResolution = clipmapInfo.pageTableResolution;
                 markData.physicalAtlasPagesWide = clipmapInfo.physicalAtlasPagesWide;
                 markData.physicalAtlasPagesHigh = clipmapInfo.physicalAtlasPagesHigh;
+                const DirectX::XMVECTOR directionalPageViewRow = view->cameraInfo.view.r[3];
                 markData.directionalPageViewRow = DirectX::XMFLOAT4(
-                    view->cameraInfo.view.r[3].m128_f32[0],
-                    view->cameraInfo.view.r[3].m128_f32[1],
-                    view->cameraInfo.view.r[3].m128_f32[2],
-                    view->cameraInfo.view.r[3].m128_f32[3]);
+                    DirectX::XMVectorGetX(directionalPageViewRow),
+                    DirectX::XMVectorGetY(directionalPageViewRow),
+                    DirectX::XMVectorGetZ(directionalPageViewRow),
+                    DirectX::XMVectorGetW(directionalPageViewRow));
                 markData.shadowViewProjection = view->cameraInfo.viewProjection;
 
                 compactShadowCameras[clipmapIndex].view = view->cameraInfo.view;

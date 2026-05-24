@@ -103,7 +103,7 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
     // relies on derivatives, keep lanes coherent:
     // clamp coords for computations, then guard the store.
     uint2 dim;
-    RWTexture2D<float4> hdr = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostProcessing::UpscaledHDR)];
+    RWTexture2D<float4> hdr = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Color::HDRColorTarget)];
     hdr.GetDimensions(dim.x, dim.y);
 
     uint2 pix = dtid.xy;

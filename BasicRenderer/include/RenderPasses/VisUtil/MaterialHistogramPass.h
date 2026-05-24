@@ -4,6 +4,7 @@
 #include "Render/RenderContext.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Materials/TechniqueDescriptor.h"
 #include "../shaders/PerPassRootConstants/visUtilRootConstants.h"
 
 class MaterialHistogramPass : public ComputePass {
@@ -38,8 +39,7 @@ public:
 
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery)); 
     	b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
-        b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
-                              Builtin::PrimaryCamera::VisibilityTexture,
+        b->WithShaderResource(Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
                               Builtin::PerMeshBuffer,
@@ -97,6 +97,7 @@ public:
         miscRootConstants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
         miscRootConstants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
         miscRootConstants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+        miscRootConstants[VISBUF_VOXEL_MATERIAL_BIN_INDEX] = ctx.materialManager->GetCompileFlagsSlot(MaterialCompileFlags::MaterialCompileVoxel);
         cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
         const uint32_t groupSizeX = 8, groupSizeY = 8;

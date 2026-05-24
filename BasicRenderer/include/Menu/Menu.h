@@ -11,7 +11,11 @@
 #include <imgui_impl_dx12.h>
 #if __has_include(<imgui_impl_vulkan.h>) && __has_include(<vulkan/vulkan.h>)
 #define BASICRENDERER_HAS_IMGUI_VULKAN 1
+#ifndef IMGUI_IMPL_VULKAN_NO_PROTOTYPES
+#define IMGUI_IMPL_VULKAN_NO_PROTOTYPES 1
+#endif
 #include <imgui_impl_vulkan.h>
+#include <volk.h>
 #include <rhi_interop_vulkan.h>
 #else
 #define BASICRENDERER_HAS_IMGUI_VULKAN 0
@@ -46,6 +50,7 @@
 #include "ShaderBuffers.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodRayTracingSystem.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Telemetry/FrameTaskGraphTelemetry.h"
 #include "Managers/Singletons/RendererECSManager.h"
@@ -164,12 +169,23 @@ public:
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
+        if (m_imguiBackend == rhi::Backend::Vulkan) {
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+            for (auto& entry : imguiVkTextureIds_) {
+                ImGui_ImplVulkan_RemoveTexture(entry.second);
+            }
+            imguiVkTextureIds_.clear();
+#endif
+        }
         if (m_imguiBackend == rhi::Backend::D3D12) {
             ImGui_ImplDX12_Shutdown();
         }
 #if BASICRENDERER_HAS_IMGUI_VULKAN
         if (m_imguiBackend == rhi::Backend::Vulkan) {
             ImGui_ImplVulkan_Shutdown();
+            if (m_imguiVkPreviewSampler != VK_NULL_HANDLE && m_imguiVkDevice != VK_NULL_HANDLE) {
+                vkDestroySampler(m_imguiVkDevice, m_imguiVkPreviewSampler, nullptr);
+            }
         }
 #endif
         if (m_imguiWin32Initialized) {
@@ -182,6 +198,11 @@ public:
         imguiHeapIncrementSize_ = 0;
         imguiHeapNextSlot_ = 1;
         imguiHeapFreeSlots_ = {};
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        imguiVkTextureIds_.clear();
+        m_imguiVkPreviewSampler = VK_NULL_HANDLE;
+        m_imguiVkDevice = VK_NULL_HANDLE;
+#endif
 		m_settingSubscriptions.clear();
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
@@ -214,14 +235,49 @@ public:
     }
     void FreeImGuiDescriptor(uint32_t index) {
         if (index == 0) return; // never free the font atlas slot
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        if (m_imguiBackend == rhi::Backend::Vulkan) {
+            auto textureIt = imguiVkTextureIds_.find(index);
+            if (textureIt != imguiVkTextureIds_.end()) {
+                ImGui_ImplVulkan_RemoveTexture(textureIt->second);
+                imguiVkTextureIds_.erase(textureIt);
+            }
+        }
+#endif
         std::lock_guard lock(imguiHeapMutex_);
         imguiHeapFreeSlots_.push(index);
     }
-    ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) const {
-		if (m_imguiBackend != rhi::Backend::D3D12) {
-            return static_cast<ImTextureID>(0);
-		}
+    ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) {
+        if (m_imguiBackend == rhi::Backend::D3D12) {
         return static_cast<ImTextureID>(imguiHeapGpuStart_ + static_cast<uint64_t>(index) * imguiHeapIncrementSize_);
+        }
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+        if (m_imguiBackend == rhi::Backend::Vulkan && g_pd3dSrvDescHeap && m_imguiVkPreviewSampler != VK_NULL_HANDLE) {
+            auto textureIt = imguiVkTextureIds_.find(index);
+            if (textureIt != imguiVkTextureIds_.end()) {
+                return (ImTextureID)textureIt->second;
+            }
+
+            auto device = DeviceManager::GetInstance().GetDevice();
+            const rhi::DescriptorSlot slot{ g_pd3dSrvDescHeap->GetHandle(), index };
+            const VkImageView imageView = rhi::vulkan::get_image_view(device, slot);
+            if (imageView == VK_NULL_HANDLE) {
+                return static_cast<ImTextureID>(0);
+            }
+
+            VkDescriptorSet textureSet = ImGui_ImplVulkan_AddTexture(
+                m_imguiVkPreviewSampler,
+                imageView,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            if (textureSet == VK_NULL_HANDLE) {
+                return static_cast<ImTextureID>(0);
+            }
+
+            imguiVkTextureIds_[index] = textureSet;
+            return (ImTextureID)textureSet;
+        }
+#endif
+        return static_cast<ImTextureID>(0);
     }
     rhi::DescriptorHeapHandle GetImGuiHeapHandle() const {
 		if (!g_pd3dSrvDescHeap) {
@@ -237,12 +293,17 @@ private:
     uint32_t imguiHeapIncrementSize_ = 0;
     uint32_t imguiHeapNextSlot_ = 1; // slot 0 = font atlas
     std::queue<uint32_t> imguiHeapFreeSlots_;
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    std::unordered_map<uint32_t, VkDescriptorSet> imguiVkTextureIds_;
+#endif
     std::mutex imguiHeapMutex_;
     rhi::Backend m_imguiBackend = rhi::Backend::Null;
     bool m_imguiWin32Initialized = false;
 #if BASICRENDERER_HAS_IMGUI_VULKAN
     VkFormat m_imguiVkColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
     VkPipelineRenderingCreateInfoKHR m_imguiVkRenderingInfo{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+    VkDevice m_imguiVkDevice = VK_NULL_HANDLE;
+    VkSampler m_imguiVkPreviewSampler = VK_NULL_HANDLE;
 #endif
 
     Menu() { 
@@ -471,6 +532,10 @@ private:
     std::function<CLodCullingBackend()> getCLodCullingBackend;
     std::function<void(CLodCullingBackend)> setCLodCullingBackend;
 
+    uint32_t m_clodPureComputePhase2ExpansionFactor = CLodPureComputePhase2ExpansionFactorDefault;
+    std::function<uint32_t()> getCLodPureComputePhase2ExpansionFactor;
+    std::function<void(uint32_t)> setCLodPureComputePhase2ExpansionFactor;
+
     CLodSoftwareRasterMode m_clodSoftwareRasterMode = CLodSoftwareRasterMode::Disabled;
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
@@ -518,6 +583,10 @@ private:
     bool m_clodPageJobForceAll = false;
     std::function<bool()> getCLodPageJobForceAll;
     std::function<void(bool)> setCLodPageJobForceAll;
+
+    uint32_t m_clodForceTraversalDepthRoot = CLodForceTraversalDepthRootDisabled;
+    std::function<uint32_t()> getCLodForceTraversalDepthRoot;
+    std::function<void(uint32_t)> setCLodForceTraversalDepthRoot;
 
     uint32_t m_clodDirectionalVirtualShadowMaxBackingResolution = CLodVirtualShadowDefaultBackingResolution;
     std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxBackingResolution;
@@ -607,6 +676,10 @@ private:
 	std::function<bool()> getScreenSpaceReflectionsEnabled;
 	std::function<void(bool)> setScreenSpaceReflectionsEnabled;
 
+    bool m_rayTracedReflectionsEnabled = false;
+    std::function<bool()> getRayTracedReflectionsEnabled;
+    std::function<void(bool)> setRayTracedReflectionsEnabled;
+
     bool m_jitterEnabled = true;
     std::function<bool()> getJitterEnabled;
     std::function<void(bool)> setJitterEnabled;
@@ -634,9 +707,17 @@ private:
 	std::function<bool()> getHeavyDebug;
 	std::function<void(bool)> setHeavyDebug;
 
+	bool m_renderGraphDisableCaching = false;
+	std::function<bool()> getRenderGraphDisableCaching;
+	std::function<void(bool)> setRenderGraphDisableCaching;
+
     bool m_renderGraphBatchTraceEnabled = false;
     std::function<bool()> getRenderGraphBatchTraceEnabled;
     std::function<void(bool)> setRenderGraphBatchTraceEnabled;
+
+	bool m_renderGraphLightweightCompileSummaryEnabled = false;
+	std::function<bool()> getRenderGraphLightweightCompileSummaryEnabled;
+	std::function<void(bool)> setRenderGraphLightweightCompileSummaryEnabled;
 
     bool m_reshapeTexelAddressing = true;
     std::function<bool()> getReshapeTexelAddressing;
@@ -662,6 +743,10 @@ private:
     uint32_t m_clodStreamingCpuUploadBudgetRequests = 64;
     std::function<uint32_t()> getCLodStreamingCpuUploadBudgetRequests;
     std::function<void(uint32_t)> setCLodStreamingCpuUploadBudgetRequests;
+
+    bool m_clodStreamingEnableDirectStorage = true;
+    std::function<bool()> getCLodStreamingEnableDirectStorage;
+    std::function<void(bool)> setCLodStreamingEnableDirectStorage;
 
     float m_autoAliasPoolGrowthHeadroom = 1.5f;
     std::function<float()> getAutoAliasPoolGrowthHeadroom;
@@ -711,7 +796,7 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     } else if (DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan) {
 #if BASICRENDERER_HAS_IMGUI_VULKAN
         ImGui_ImplVulkan_InitInfo initInfo{};
-        initInfo.ApiVersion = VK_API_VERSION_1_3;
+        initInfo.ApiVersion = rhi::vulkan::get_device_api_version(device);
         initInfo.Instance = rhi::vulkan::get_instance(device);
         initInfo.PhysicalDevice = rhi::vulkan::get_physical_device(device);
         initInfo.Device = rhi::vulkan::get_device(device);
@@ -736,12 +821,68 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
         if (!initInfo.Instance || !initInfo.PhysicalDevice || !initInfo.Device || !initInfo.Queue) {
             throw std::runtime_error("Menu::Initialize failed to query Vulkan native handles for ImGui");
         }
+        if (!vkGetInstanceProcAddr || !vkGetDeviceProcAddr) {
+            throw std::runtime_error("Menu::Initialize cannot initialize ImGui Vulkan backend because Volk has not loaded Vulkan function pointers");
+        }
+
+        struct ImGuiVulkanLoaderData {
+            VkInstance instance;
+            VkDevice device;
+        } loaderData{ initInfo.Instance, initInfo.Device };
+
+        if (!ImGui_ImplVulkan_LoadFunctions(initInfo.ApiVersion, [](const char* functionName, void* userData) -> PFN_vkVoidFunction {
+            const auto* loaderData = static_cast<const ImGuiVulkanLoaderData*>(userData);
+            if (!loaderData) {
+                return nullptr;
+            }
+            if (std::strcmp(functionName, "vkCmdBeginRendering") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdBeginRendering);
+            }
+            if (std::strcmp(functionName, "vkCmdEndRendering") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdEndRendering);
+            }
+            if (std::strcmp(functionName, "vkCmdBeginRenderingKHR") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdBeginRenderingKHR);
+            }
+            if (std::strcmp(functionName, "vkCmdEndRenderingKHR") == 0) {
+                return reinterpret_cast<PFN_vkVoidFunction>(vkCmdEndRenderingKHR);
+            }
+            if (vkGetInstanceProcAddr) {
+                if (PFN_vkVoidFunction function = vkGetInstanceProcAddr(loaderData->instance, functionName)) {
+                    return function;
+                }
+            }
+            return vkGetDeviceProcAddr ? vkGetDeviceProcAddr(loaderData->device, functionName) : nullptr;
+        }, &loaderData)) {
+            throw std::runtime_error("Menu::Initialize failed to load ImGui Vulkan backend functions through Volk");
+        }
 
         if (!ImGui_ImplVulkan_Init(&initInfo)) {
             throw std::runtime_error("Menu::Initialize failed to initialize ImGui Vulkan backend");
         }
         if (!ImGui_ImplVulkan_CreateFontsTexture()) {
             throw std::runtime_error("Menu::Initialize failed to create ImGui Vulkan font texture");
+        }
+
+        auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
+        if (!rhi::IsOk(result) || !g_pd3dSrvDescHeap) {
+            throw std::runtime_error("Menu::Initialize failed to create ImGui descriptor heap for Vulkan backend");
+        }
+
+        VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+        samplerInfo.maxAnisotropy = 1.0f;
+        m_imguiVkDevice = initInfo.Device;
+        const VkResult samplerResult = vkCreateSampler(m_imguiVkDevice, &samplerInfo, nullptr, &m_imguiVkPreviewSampler);
+        if (samplerResult != VK_SUCCESS) {
+            throw std::runtime_error("Menu::Initialize failed to create Vulkan ImGui preview sampler");
         }
 
         m_imguiBackend = rhi::Backend::Vulkan;
@@ -762,12 +903,6 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.FontGlobalScale = 1.2f;
-
-	DirectX::XMUINT2 renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-	DirectX::XMUINT2 outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-	io.DisplaySize = ImVec2(static_cast<float>(outputResolution.x), static_cast<float>(outputResolution.y));
-    io.DisplayFramebufferScale = ImVec2(
-        2.0, 2.0);
 
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
@@ -838,6 +973,14 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     m_clodCullingBackend = getCLodCullingBackend();
     observerSetting(m_clodCullingBackend, CLodCullingBackendSettingName);
 
+    getCLodPureComputePhase2ExpansionFactor =
+        settingsManager.getSettingGetter<uint32_t>(CLodPureComputePhase2ExpansionFactorSettingName);
+    setCLodPureComputePhase2ExpansionFactor =
+        settingsManager.getSettingSetter<uint32_t>(CLodPureComputePhase2ExpansionFactorSettingName);
+    m_clodPureComputePhase2ExpansionFactor =
+        CLodNormalizePureComputePhase2ExpansionFactor(getCLodPureComputePhase2ExpansionFactor());
+    observerSetting(m_clodPureComputePhase2ExpansionFactor, CLodPureComputePhase2ExpansionFactorSettingName);
+
     getCLodSoftwareRasterMode = settingsManager.getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
@@ -897,6 +1040,11 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     setCLodPageJobForceAll = settingsManager.getSettingSetter<bool>(CLodPageJobForceAllSettingName);
     m_clodPageJobForceAll = getCLodPageJobForceAll();
     observerSetting(m_clodPageJobForceAll, CLodPageJobForceAllSettingName);
+
+    getCLodForceTraversalDepthRoot = settingsManager.getSettingGetter<uint32_t>(CLodForceTraversalDepthRootSettingName);
+    setCLodForceTraversalDepthRoot = settingsManager.getSettingSetter<uint32_t>(CLodForceTraversalDepthRootSettingName);
+    m_clodForceTraversalDepthRoot = getCLodForceTraversalDepthRoot();
+    observerSetting(m_clodForceTraversalDepthRoot, CLodForceTraversalDepthRootSettingName);
 
     getCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
     setCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
@@ -1003,6 +1151,11 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 	m_screenSpaceReflectionsEnabled = getScreenSpaceReflectionsEnabled();
 	observerSetting(m_screenSpaceReflectionsEnabled, "enableScreenSpaceReflections");
 
+    setRayTracedReflectionsEnabled = settingsManager.getSettingSetter<bool>("enableRayTracedReflections");
+    getRayTracedReflectionsEnabled = settingsManager.getSettingGetter<bool>("enableRayTracedReflections");
+    m_rayTracedReflectionsEnabled = getRayTracedReflectionsEnabled();
+    observerSetting(m_rayTracedReflectionsEnabled, "enableRayTracedReflections");
+
     setJitterEnabled = settingsManager.getSettingSetter<bool>("enableJitter");
     getJitterEnabled = settingsManager.getSettingGetter<bool>("enableJitter");
     m_jitterEnabled = getJitterEnabled();
@@ -1037,10 +1190,20 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 	m_heavyDebug = getHeavyDebug();
 	observerSetting(m_heavyDebug, "heavyDebug");
 
+	getRenderGraphDisableCaching = settingsManager.getSettingGetter<bool>("renderGraphDisableCaching");
+	setRenderGraphDisableCaching = settingsManager.getSettingSetter<bool>("renderGraphDisableCaching");
+	m_renderGraphDisableCaching = getRenderGraphDisableCaching();
+	observerSetting(m_renderGraphDisableCaching, "renderGraphDisableCaching");
+
     getRenderGraphBatchTraceEnabled = settingsManager.getSettingGetter<bool>("renderGraphBatchTraceEnabled");
     setRenderGraphBatchTraceEnabled = settingsManager.getSettingSetter<bool>("renderGraphBatchTraceEnabled");
     m_renderGraphBatchTraceEnabled = getRenderGraphBatchTraceEnabled();
     observerSetting(m_renderGraphBatchTraceEnabled, "renderGraphBatchTraceEnabled");
+
+	getRenderGraphLightweightCompileSummaryEnabled = settingsManager.getSettingGetter<bool>("renderGraphLightweightCompileSummaryEnabled");
+	setRenderGraphLightweightCompileSummaryEnabled = settingsManager.getSettingSetter<bool>("renderGraphLightweightCompileSummaryEnabled");
+	m_renderGraphLightweightCompileSummaryEnabled = getRenderGraphLightweightCompileSummaryEnabled();
+	observerSetting(m_renderGraphLightweightCompileSummaryEnabled, "renderGraphLightweightCompileSummaryEnabled");
 
     getReshapeTexelAddressing = settingsManager.getSettingGetter<bool>("reshapeTexelAddressing");
     setReshapeTexelAddressing = settingsManager.getSettingSetter<bool>("reshapeTexelAddressing");
@@ -1069,10 +1232,15 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
     m_autoAliasPoolRetireIdleFrames = getAutoAliasPoolRetireIdleFrames();
     observerSetting(m_autoAliasPoolRetireIdleFrames, "autoAliasPoolRetireIdleFrames");
 
-    getCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingGetter<uint32_t>("clodStreamingCpuUploadBudgetRequests");
-    setCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingSetter<uint32_t>("clodStreamingCpuUploadBudgetRequests");
+    getCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingGetter<uint32_t>(CLodStreamingCpuUploadBudgetSettingName);
+    setCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingSetter<uint32_t>(CLodStreamingCpuUploadBudgetSettingName);
     m_clodStreamingCpuUploadBudgetRequests = getCLodStreamingCpuUploadBudgetRequests();
-    observerSetting(m_clodStreamingCpuUploadBudgetRequests, "clodStreamingCpuUploadBudgetRequests");
+    observerSetting(m_clodStreamingCpuUploadBudgetRequests, CLodStreamingCpuUploadBudgetSettingName);
+
+    getCLodStreamingEnableDirectStorage = settingsManager.getSettingGetter<bool>(CLodStreamingEnableDirectStorageSettingName);
+    setCLodStreamingEnableDirectStorage = settingsManager.getSettingSetter<bool>(CLodStreamingEnableDirectStorageSettingName);
+    m_clodStreamingEnableDirectStorage = getCLodStreamingEnableDirectStorage();
+    observerSetting(m_clodStreamingEnableDirectStorage, CLodStreamingEnableDirectStorageSettingName);
 
     getAutoAliasPoolGrowthHeadroom = settingsManager.getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
     setAutoAliasPoolGrowthHeadroom = settingsManager.getSettingSetter<float>("autoAliasPoolGrowthHeadroom");
@@ -1263,8 +1431,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         attchment.loadOp = rhi::LoadOp::Load;
 		attchment.rtv = { context.rtvHeap.GetHandle() , context.frameIndex }; // Index into the swapchain RTV heap
 		beginInfo.colors = { &attchment };
-		beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
-		beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
+        beginInfo.height = context.outputResolution.y;
+        beginInfo.width = context.outputResolution.x;
 
 		commandList.BeginPass(beginInfo);
 
@@ -1319,6 +1487,33 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodCullingBackend = static_cast<CLodCullingBackend>(clodCullingBackendIndex);
             setCLodCullingBackend(m_clodCullingBackend);
         }
+        if (m_clodCullingBackend == CLodCullingBackend::PureCompute) {
+            static constexpr uint32_t kPureComputePhase2ExpansionFactors[] = { 1u, 2u, 4u, 8u, 16u, 32u, 64u };
+            static constexpr const char* kPureComputePhase2ExpansionFactorLabels[] = { "1", "2", "4", "8", "16", "32", "64" };
+            static constexpr int kPureComputePhase2ExpansionFactorCount =
+                static_cast<int>(sizeof(kPureComputePhase2ExpansionFactors) / sizeof(kPureComputePhase2ExpansionFactors[0]));
+            m_clodPureComputePhase2ExpansionFactor =
+                CLodNormalizePureComputePhase2ExpansionFactor(m_clodPureComputePhase2ExpansionFactor);
+            int phase2ExpansionIndex = 0;
+            for (int i = 0; i < kPureComputePhase2ExpansionFactorCount; ++i) {
+                if (kPureComputePhase2ExpansionFactors[i] == m_clodPureComputePhase2ExpansionFactor) {
+                    phase2ExpansionIndex = i;
+                    break;
+                }
+            }
+            if (ImGui::Combo(
+                    "Pure Compute Phase-2 Bucket Size",
+                    &phase2ExpansionIndex,
+                    kPureComputePhase2ExpansionFactorLabels,
+                    kPureComputePhase2ExpansionFactorCount)) {
+                phase2ExpansionIndex = std::clamp(
+                    phase2ExpansionIndex,
+                    0,
+                    kPureComputePhase2ExpansionFactorCount - 1);
+                m_clodPureComputePhase2ExpansionFactor = kPureComputePhase2ExpansionFactors[phase2ExpansionIndex];
+                setCLodPureComputePhase2ExpansionFactor(m_clodPureComputePhase2ExpansionFactor);
+            }
+        }
         int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
         if (ImGui::Combo("Visibility/Alpha SW Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
@@ -1342,6 +1537,19 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         }
         if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
             setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
+        }
+        bool forceTraversalDepthRoot = m_clodForceTraversalDepthRoot != CLodForceTraversalDepthRootDisabled;
+        if (ImGui::Checkbox("Force CLod Traversal Depth Root", &forceTraversalDepthRoot)) {
+            m_clodForceTraversalDepthRoot = forceTraversalDepthRoot ? 0u : CLodForceTraversalDepthRootDisabled;
+            setCLodForceTraversalDepthRoot(m_clodForceTraversalDepthRoot);
+        }
+        if (forceTraversalDepthRoot) {
+            int forcedDepth = static_cast<int>(std::min<uint32_t>(m_clodForceTraversalDepthRoot, 255u));
+            if (ImGui::InputInt("Forced CLod Depth Root", &forcedDepth)) {
+                forcedDepth = std::max(forcedDepth, 0);
+                m_clodForceTraversalDepthRoot = static_cast<uint32_t>(forcedDepth);
+                setCLodForceTraversalDepthRoot(m_clodForceTraversalDepthRoot);
+            }
         }
         if (ImGui::SliderFloat(
                 "Shadow Reyes Coarse Target Pages/Triangle",
@@ -1549,6 +1757,39 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         if (ImGui::Checkbox("Enable Screen Space Reflections", &m_screenSpaceReflectionsEnabled)) {
             setScreenSpaceReflectionsEnabled(m_screenSpaceReflectionsEnabled);
 		}
+        const bool clodRtSupported = DeviceManager::GetInstance().GetCLodRayTracingSupported();
+        if (!clodRtSupported) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Checkbox("Enable Ray Traced Reflections", &m_rayTracedReflectionsEnabled)) {
+            setRayTracedReflectionsEnabled(m_rayTracedReflectionsEnabled);
+        }
+        if (!clodRtSupported) {
+            ImGui::EndDisabled();
+        }
+        const RayTracingFeatureInfo& rtFeatures = DeviceManager::GetInstance().GetRayTracingFeatures();
+        ImGui::TextDisabled(
+            "RT: pipeline %s, AS %s, GPU RTAS %s, cluster AS %s, max cluster %u verts/%u tris",
+            rtFeatures.pipeline ? "yes" : "no",
+            rtFeatures.accelerationStructure ? "yes" : "no",
+            rtFeatures.gpuRtasOperations ? "yes" : "no",
+            rtFeatures.clusterAccelerationStructure ? "yes" : "no",
+            rtFeatures.maxClusterVertices,
+            rtFeatures.maxClusterTriangles);
+        if (context.clodRayTracingSystem) {
+            const auto& clodRtStats = context.clodRayTracingSystem->GetStats();
+            ImGui::TextDisabled(
+                "CLod RT: groups %u pages %u clusters %u, GPU %s, CLAS %s, BLAS %s, TLAS %s, pipeline %s, trace %s",
+                clodRtStats.residentGroups,
+                clodRtStats.residentPages,
+                clodRtStats.buildableClusters,
+                clodRtStats.gpuResourcesReady ? "yes" : "no",
+                clodRtStats.clasBuildSubmitted ? "yes" : "no",
+                clodRtStats.blasBuildSubmitted ? "yes" : "no",
+                clodRtStats.tlasBuildSubmitted ? "yes" : "no",
+                clodRtStats.rayPipelineReady ? "yes" : "no",
+                clodRtStats.traceRaysSubmitted ? "yes" : "no");
+        }
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);
         }
@@ -1572,9 +1813,15 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Heavy Debug (1 pass/batch + GPU drain)", &m_heavyDebug)) {
 			setHeavyDebug(m_heavyDebug);
 		}
+		if (ImGui::Checkbox("Disable Render Graph Caching", &m_renderGraphDisableCaching)) {
+			setRenderGraphDisableCaching(m_renderGraphDisableCaching);
+		}
         if (ImGui::Checkbox("Render Graph Batch Trace", &m_renderGraphBatchTraceEnabled)) {
             setRenderGraphBatchTraceEnabled(m_renderGraphBatchTraceEnabled);
         }
+		if (ImGui::Checkbox("Render Graph Compile Summary", &m_renderGraphLightweightCompileSummaryEnabled)) {
+			setRenderGraphLightweightCompileSummaryEnabled(m_renderGraphLightweightCompileSummaryEnabled);
+		}
         if (ImGui::Checkbox("ReShape texel addressing (requires recreate)", &m_reshapeTexelAddressing)) {
             setReshapeTexelAddressing(m_reshapeTexelAddressing);
         }
@@ -1582,6 +1829,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {
             m_clodStreamingCpuUploadBudgetRequests = static_cast<uint32_t>(std::max(clodCpuUploadBudget, 1));
             setCLodStreamingCpuUploadBudgetRequests(m_clodStreamingCpuUploadBudgetRequests);
+        }
+        if (ImGui::Checkbox("CLod Streaming DirectStorage", &m_clodStreamingEnableDirectStorage)) {
+            setCLodStreamingEnableDirectStorage(m_clodStreamingEnableDirectStorage);
         }
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
@@ -1711,38 +1961,42 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
-        if (m_imguiBackend == rhi::Backend::D3D12 && g_pd3dSrvDescHeap) {
-            RGInspectorOptions opts;
+		RGInspectorOptions opts;
+        if ((m_imguiBackend == rhi::Backend::D3D12 || m_imguiBackend == rhi::Backend::Vulkan) && g_pd3dSrvDescHeap) {
             opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
             opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
             opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
             opts.imguiHeapHandle = GetImGuiHeapHandle();
-            RGInspector::Show(m_renderGraph->GetBatches(),
-                m_renderGraph->GetQueueRegistry(),
-                PassUsesResourceAdapter,
-                [this](uint64_t resourceId) -> std::string {
-                    if (!m_renderGraph) return {};
-                    auto resource = m_renderGraph->GetResourceByID(resourceId);
-                    if (!resource) return {};
-                    return resource->GetName();
-                },
-                [this](uint64_t resourceId) -> Resource* {
-                    if (!m_renderGraph) return nullptr;
-                    auto resource = m_renderGraph->GetResourceByID(resourceId);
-                    return resource ? resource.get() : nullptr;
-                },
-                [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
-                    if (!m_renderGraph) {
-                        return;
-                    }
-                    if (auto* readbackService = m_renderGraph->GetReadbackService()) {
-                        readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
-                    }
-                },
-                opts);
-        } else {
-            ImGui::TextUnformatted("Texture preview integration currently requires the DX12 ImGui backend.");
         }
+        opts.cacheOverlayProvider = [this]() -> std::vector<RGCacheOverlayRange> {
+            if (!m_renderGraph) {
+                return {};
+            }
+            return m_renderGraph->BuildReplayCacheOverlayRanges();
+        };
+        RGInspector::Show(m_renderGraph->GetBatches(),
+            m_renderGraph->GetQueueRegistry(),
+            PassUsesResourceAdapter,
+            [this](uint64_t resourceId) -> std::string {
+                if (!m_renderGraph) return {};
+                auto resource = m_renderGraph->GetResourceByID(resourceId);
+                if (!resource) return {};
+                return resource->GetName();
+            },
+            [this](uint64_t resourceId) -> Resource* {
+                if (!m_renderGraph) return nullptr;
+                auto resource = m_renderGraph->GetResourceByID(resourceId);
+                return resource ? resource.get() : nullptr;
+            },
+            [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
+                if (!m_renderGraph) {
+                    return;
+                }
+                if (auto* readbackService = m_renderGraph->GetReadbackService()) {
+                    readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
+                }
+            },
+            opts);
         ImGui::End();
 
     }
@@ -1783,8 +2037,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     attchment.loadOp = rhi::LoadOp::Load;
 	attchment.rtv = { context.rtvHeap.GetHandle() , context.frameIndex }; // Index into the swapchain RTV heap
 	beginInfo.colors = { &attchment };
-	beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
-	beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
+    beginInfo.height = context.outputResolution.y;
+    beginInfo.width = context.outputResolution.x;
 
 	commandList.BeginPass(beginInfo);
 
@@ -1916,7 +2170,7 @@ inline void Menu::DrawLoadModelButton() {
     if (ImGui::Button("Load Model"))
     {
         std::wstring selectedFile;
-        std::wstring customFilter = L"glTF Files\0*.glb;*.gltf\0All Files\0*.*\0";
+        std::wstring customFilter = L"Scene Files\0*.glb;*.gltf;*.usd;*.usda;*.usdc;*.usdz;*.nif\0All Files\0*.*\0";
         if (OpenFileDialog(selectedFile, customFilter))
         {
 			//auto exePath = GetExePath();
@@ -2531,7 +2785,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodOpaque::HierarchicalCullingPass2",
+                "CLodOpaque::RasterizeClustersPass2",
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2568,16 +2822,38 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const uint32_t voxelLeaves = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelLeafRecords);
+                const uint32_t voxelRejected = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRejectedByErrorRecords);
+                const uint32_t voxelHits = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorHits);
+                const uint32_t voxelMisses = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses);
+                const uint32_t voxelRasterWork = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkRecords);
+                const uint32_t voxelRasterDropped = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkDropped);
+                const uint32_t sortHistInputs = counter(CLodWorkGraphCounterIndex::RasterSortHistogramInputs);
+                const uint32_t sortHistVoxels = counter(CLodWorkGraphCounterIndex::RasterSortHistogramVoxelSkipped);
+                const uint32_t sortHistTriangles = counter(CLodWorkGraphCounterIndex::RasterSortHistogramTriangleContributors);
+                const uint32_t sortCompactInputs = counter(CLodWorkGraphCounterIndex::RasterSortCompactionInputs);
+                const uint32_t sortCompactVoxels = counter(CLodWorkGraphCounterIndex::RasterSortCompactionVoxelSkipped);
+                const uint32_t sortCompactTriangles = counter(CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+                const uint32_t rasterGroups = counter(CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+                const uint32_t rasterInRange = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInRange);
+                const uint32_t rasterInitFailed = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed);
+                const uint32_t rasterOutputTris = counter(CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
                 const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
                     ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
                     : "bucketed";
 
                 spdlog::info(
-                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}, rasterWork={}, rasterDrop={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={}), sort(hist input={}, hist voxels={}, hist tris={}, compact input={}, compact voxels={}, compact tris={}), raster(groups={}, inRange={}, initFail={}, outTris={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    voxelLeaves,
+                    voxelRejected,
+                    voxelHits,
+                    voxelMisses,
+                    voxelRasterWork,
+                    voxelRasterDropped,
                     clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
@@ -2586,7 +2862,17 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     denseExpansionBuckets,
                     denseClustersDispatched,
                     replayNodeInput,
-                    replayMeshletInput);
+                    replayMeshletInput,
+                    sortHistInputs,
+                    sortHistVoxels,
+                    sortHistTriangles,
+                    sortCompactInputs,
+                    sortCompactVoxels,
+                    sortCompactTriangles,
+                    rasterGroups,
+                    rasterInRange,
+                    rasterInitFailed,
+                    rasterOutputTris);
                 });
 
         }
@@ -2668,7 +2954,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodShadow::HierarchicalCullingPass1",
+                "CLodShadow::RasterizeClustersPass1",
                 shadowClodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2705,16 +2991,38 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
                 const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+                const uint32_t voxelLeaves = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelLeafRecords);
+                const uint32_t voxelRejected = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRejectedByErrorRecords);
+                const uint32_t voxelHits = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorHits);
+                const uint32_t voxelMisses = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses);
+                const uint32_t voxelRasterWork = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkRecords);
+                const uint32_t voxelRasterDropped = counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkDropped);
+                const uint32_t sortHistInputs = counter(CLodWorkGraphCounterIndex::RasterSortHistogramInputs);
+                const uint32_t sortHistVoxels = counter(CLodWorkGraphCounterIndex::RasterSortHistogramVoxelSkipped);
+                const uint32_t sortHistTriangles = counter(CLodWorkGraphCounterIndex::RasterSortHistogramTriangleContributors);
+                const uint32_t sortCompactInputs = counter(CLodWorkGraphCounterIndex::RasterSortCompactionInputs);
+                const uint32_t sortCompactVoxels = counter(CLodWorkGraphCounterIndex::RasterSortCompactionVoxelSkipped);
+                const uint32_t sortCompactTriangles = counter(CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+                const uint32_t rasterGroups = counter(CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+                const uint32_t rasterInRange = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInRange);
+                const uint32_t rasterInitFailed = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed);
+                const uint32_t rasterOutputTris = counter(CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
                 const char* clusterDispatchMode = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u)
                     ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense")
                     : "bucketed";
 
                 spdlog::info(
-                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={})",
+                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, voxel(leaves={}, rejected={}, descHit={}, descMiss={}, rasterWork={}, rasterDrop={}), ClusterCull[{}] {}/{} in-range, visible writes {}, dispatch(bucket={}, denseBuckets={}, denseClusters={}), replay(node={}, meshlet={}), sort(hist input={}, hist voxels={}, hist tris={}, compact input={}, compact voxels={}, compact tris={}), raster(groups={}, inRange={}, initFail={}, outTris={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
+                    voxelLeaves,
+                    voxelRejected,
+                    voxelHits,
+                    voxelMisses,
+                    voxelRasterWork,
+                    voxelRasterDropped,
                     clusterDispatchMode,
                     clusterActive,
                     clusterThreads,
@@ -2723,7 +3031,17 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     denseExpansionBuckets,
                     denseClustersDispatched,
                     replayNodeInput,
-                    replayMeshletInput);
+                    replayMeshletInput,
+                    sortHistInputs,
+                    sortHistVoxels,
+                    sortHistTriangles,
+                    sortCompactInputs,
+                    sortCompactVoxels,
+                    sortCompactTriangles,
+                    rasterGroups,
+                    rasterInRange,
+                    rasterInitFailed,
+                    rasterOutputTris);
                 });
 
         }
@@ -3195,6 +3513,26 @@ inline void Menu::DrawCLodTelemetryWindow() {
             };
 
             ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(captureState.captureCount));
+            const uint32_t sourceGroupMismatchCount = counter(CLodWorkGraphCounterIndex::RasterMeshShaderSourceGroupMismatch);
+            if (sourceGroupMismatchCount != 0u) {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.15f, 0.10f, 1.0f),
+                    "Source group mismatches: %u",
+                    sourceGroupMismatchCount);
+            }
+            else {
+                ImGui::Text("Source group mismatches: %u", sourceGroupMismatchCount);
+            }
+            const uint32_t zeroPageSlabCount = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedZeroPageSlab);
+            if (zeroPageSlabCount != 0u) {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.15f, 0.10f, 1.0f),
+                    "Zero page slab: %u",
+                    zeroPageSlabCount);
+            }
+            else {
+                ImGui::Text("Zero page slab: %u", zeroPageSlabCount);
+            }
             drawUtilizationRow(
                 "ObjectCull active draw threads",
                 counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
@@ -3234,17 +3572,17 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
 
             const uint32_t bucketDispatchRecords = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
-            const uint32_t denseExpansionBuckets = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
+            const uint32_t phase2Records = counter(CLodWorkGraphCounterIndex::ClusterCullDenseExpansionBuckets);
             const uint32_t denseClustersDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullDenseClustersDispatched);
-            const bool denseDispatchActive = (denseExpansionBuckets > 0u || denseClustersDispatched > 0u);
+            const bool denseDispatchActive = (phase2Records > 0u || denseClustersDispatched > 0u);
             const char* clusterDispatchMode = denseDispatchActive
-                ? ((bucketDispatchRecords > 0u) ? "mixed" : "dense per-cluster")
+                ? ((bucketDispatchRecords > 0u) ? "mixed" : "phase2 records")
                 : "bucketed";
             ImGui::Text(
-                "ClusterCull dispatch mode: %s | bucket records=%u | dense expansion buckets=%u | dense clusters=%u",
+                "ClusterCull dispatch mode: %s | bucket records=%u | phase2 records=%u | phase2 clusters=%u",
                 clusterDispatchMode,
                 bucketDispatchRecords,
-                denseExpansionBuckets,
+                phase2Records,
                 denseClustersDispatched);
 
             const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
@@ -3256,6 +3594,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 counter(CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords),
                 counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
                 counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
+
+            ImGui::Text("Voxel leaves: reached=%u rejectedByError=%u descriptorHit=%u descriptorMiss=%u rasterWork=%u rasterDrop=%u",
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelLeafRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRejectedByErrorRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorHits),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelDescriptorMisses),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesVoxelRasterWorkDropped));
 
             const uint32_t traverseCoalescedLaunches = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedLaunches);
             const uint32_t traverseCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputRecords);
@@ -3304,6 +3650,65 @@ inline void Menu::DrawCLodTelemetryWindow() {
             drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
 
             ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Raster bucket sort/compaction");
+            {
+                const uint32_t histInputs = counter(CLodWorkGraphCounterIndex::RasterSortHistogramInputs);
+                const uint32_t histVoxels = counter(CLodWorkGraphCounterIndex::RasterSortHistogramVoxelSkipped);
+                const uint32_t histReyes = counter(CLodWorkGraphCounterIndex::RasterSortHistogramReyesSkipped);
+                const uint32_t histTriangles = counter(CLodWorkGraphCounterIndex::RasterSortHistogramTriangleContributors);
+                const uint32_t compactInputs = counter(CLodWorkGraphCounterIndex::RasterSortCompactionInputs);
+                const uint32_t compactVoxels = counter(CLodWorkGraphCounterIndex::RasterSortCompactionVoxelSkipped);
+                const uint32_t compactReyes = counter(CLodWorkGraphCounterIndex::RasterSortCompactionReyesSkipped);
+                const uint32_t compactTriangles = counter(CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+                const uint32_t rasterGroups = counter(CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+                const uint32_t rasterInRange = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInRange);
+                const uint32_t rasterInitFailed = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed);
+                const uint32_t rasterOutputTriangles = counter(CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
+                const uint32_t rasterZeroTriangleOutputs = counter(CLodWorkGraphCounterIndex::RasterMeshShaderZeroTriangleOutputs);
+                const uint32_t rasterInitZeroPage = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedZeroPageSlab);
+                const uint32_t rasterInitMeshletOob = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedMeshletOutOfBounds);
+                const uint32_t rasterInitInvalidOutput = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailedInvalidOutputCounts);
+                const uint32_t rasterSourceGroupMismatch = counter(CLodWorkGraphCounterIndex::RasterMeshShaderSourceGroupMismatch);
+                const uint32_t pixelInvocations = counter(CLodWorkGraphCounterIndex::RasterPixelShaderInvocations);
+                const uint32_t pixelScissorRejected = counter(CLodWorkGraphCounterIndex::RasterPixelScissorRejected);
+                const uint32_t pixelBoundsRejected = counter(CLodWorkGraphCounterIndex::RasterPixelTargetBoundsRejected);
+                const uint32_t pixelVisibilityWrites = counter(CLodWorkGraphCounterIndex::RasterPixelVisibilityWrites);
+                const uint32_t pixelVsmClipmapRejected = counter(CLodWorkGraphCounterIndex::RasterPixelVirtualShadowClipmapRejected);
+                const uint32_t pixelVsmPageRejected = counter(CLodWorkGraphCounterIndex::RasterPixelVirtualShadowPageRejected);
+                const uint32_t pixelVsmWrites = counter(CLodWorkGraphCounterIndex::RasterPixelVirtualShadowWrites);
+                ImGui::Text("Histogram: input=%u triangles=%u voxelsSkipped=%u reyesSkipped=%u",
+                    histInputs,
+                    histTriangles,
+                    histVoxels,
+                    histReyes);
+                ImGui::Text("Compaction: input=%u emittedTriangles=%u voxelsSkipped=%u reyesSkipped=%u",
+                    compactInputs,
+                    compactTriangles,
+                    compactVoxels,
+                    compactReyes);
+                ImGui::Text("Raster MS: groups=%u inRange=%u initFailed=%u outputTriangles=%u zeroTriOutputs=%u",
+                    rasterGroups,
+                    rasterInRange,
+                    rasterInitFailed,
+                    rasterOutputTriangles,
+                    rasterZeroTriangleOutputs);
+                ImGui::Text("Raster MS init failures: zeroPageSlab=%u meshletOOB=%u invalidOutputCounts=%u",
+                    rasterInitZeroPage,
+                    rasterInitMeshletOob,
+                    rasterInitInvalidOutput);
+                ImGui::Text("Raster MS diagnostics: sourceGroupMismatch=%u", rasterSourceGroupMismatch);
+                ImGui::Text("Raster PS: invocations=%u scissorRejected=%u boundsRejected=%u visibilityWrites=%u",
+                    pixelInvocations,
+                    pixelScissorRejected,
+                    pixelBoundsRejected,
+                    pixelVisibilityWrites);
+                ImGui::Text("Raster PS VSM: clipmapRejected=%u pageRejected=%u writes=%u",
+                    pixelVsmClipmapRejected,
+                    pixelVsmPageRejected,
+                    pixelVsmWrites);
+            }
 
             ImGui::Separator();
             ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");

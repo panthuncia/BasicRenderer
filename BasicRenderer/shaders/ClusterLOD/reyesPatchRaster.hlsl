@@ -53,17 +53,8 @@ float3 DecodeCompressedPosition(
     int3 minQ,
     uint pagePoolSlabDescriptorIndex)
 {
-    uint bitsPerVertex = bitsX + bitsY + bitsZ;
-    uint bitCursor = positionBitstreamBase * 8u + positionBitOffset + meshletLocalVertex * bitsPerVertex;
-
     ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pagePoolSlabDescriptorIndex)];
-    uint px = ReadPackedBits32(slab, bitCursor, bitsX); bitCursor += bitsX;
-    uint py = ReadPackedBits32(slab, bitCursor, bitsY); bitCursor += bitsY;
-    uint pz = ReadPackedBits32(slab, bitCursor, bitsZ);
-
-    int3 q = int3(px, py, pz) + minQ;
-    float invScale = 1.0f / float(1u << quantExp);
-    return float3(q) * invScale;
+    return CLodLoadPagePosition(slab, quantExp, positionBitstreamBase, positionBitOffset, meshletLocalVertex);
 }
 
 uint3 DecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteOffset, uint triLocalIndex)
@@ -250,7 +241,7 @@ float2 DecodeCompressedUV(
     uint bitsU = CLodUvDescBitsU(uvDesc);
     uint bitsV = CLodUvDescBitsV(uvDesc);
     uint bitsPerVertex = bitsU + bitsV;
-    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * bitsPerVertex;
+    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + meshletLocalVertex * bitsPerVertex;
     ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pagePoolSlabDescriptorIndex)];
     uint encodedU = ReadPackedBits32(slab, bitCursor, bitsU);
     bitCursor += bitsU;

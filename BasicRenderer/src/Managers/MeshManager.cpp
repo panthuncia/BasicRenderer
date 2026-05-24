@@ -3,6 +3,8 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Managers/Singletons/DirectStorageManager.h"
+#include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Mesh/Mesh.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Buffers/BufferView.h"
@@ -14,18 +16,43 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include <algorithm>
 #include <bit>
+#include <cstring>
+#include <iterator>
 #include <limits>
+#include <span>
 #include <cassert>
+#include <tracy/Tracy.hpp>
+
 #include "../../generated/BuiltinResources.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_preSkinningVertices = DynamicBuffer::CreateShared(1, 4, "preSkinnedVertices", true);
-	m_postSkinningVertices = DynamicBuffer::CreateShared(1, 4, "PostSkinnedvertices", true, true);
-	m_meshletOffsets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "meshletOffsets");
-	m_meshletVertexIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "meshletVertexIndices");
-	m_meshletTriangles = DynamicBuffer::CreateShared(1, 4, "meshletTriangles", true);
+
+	try {
+		auto& settingsManager = SettingsManager::GetInstance();
+		m_clodStreamingDirectStorageEnabled.store(
+			settingsManager.getSettingGetter<bool>(CLodStreamingEnableDirectStorageSettingName)(),
+			std::memory_order_release);
+		m_clodStreamingDirectStorageSubscription = settingsManager.addObserver<bool>(
+			CLodStreamingEnableDirectStorageSettingName,
+			[this](const bool& enabled) {
+				m_clodStreamingDirectStorageEnabled.store(enabled, std::memory_order_release);
+			});
+	}
+	catch (const std::exception&) {
+		m_clodStreamingDirectStorageEnabled.store(true, std::memory_order_release);
+	}
+
+	{
+		auto result = DeviceManager::GetInstance().GetDevice().CreateTimeline(
+			m_clodDirectStorageCompletionFencePtr,
+			0,
+			"CLodDirectStorageCompletionFence");
+		if (result == rhi::Result::Ok && m_clodDirectStorageCompletionFencePtr) {
+			m_clodDirectStorageCompletionFenceHandle = m_clodDirectStorageCompletionFencePtr.Get();
+		}
+	}
 
 	m_perMeshBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "PerMeshBuffers");
 	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshInstanceCB), 1, "perMeshInstanceBuffers");
@@ -37,25 +64,14 @@ MeshManager::MeshManager() {
 	m_clodHierarchyLevelInfos = DynamicBuffer::CreateShared(sizeof(CLodHierarchyLevelInfo), 10000, "clodHierarchyLevelInfos");
 	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 10000, "clusterLODGroups");
 	m_clusterLODSegments = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupSegment), 10000, "clusterLODSegments");
-	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
+	//m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 10000, "clusterLODNodes");
 	m_clodGroupPageMap = DynamicBuffer::CreateShared(sizeof(GroupPageMapEntry), 10000, "clodGroupPageMap");
 
-	m_postSkinningVertices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_meshletOffsets->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_meshletVertexIndices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_meshletTriangles->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_clusterLODMeshletBounds->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_clodSharedGroupChunks->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
-	m_clodGroupPageMap->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clodSharedGroupChunks->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
+	m_clodGroupPageMap->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
 
 	// Tag resources for memory statistics
-	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_postSkinningVertices, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_meshletOffsets, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_meshletVertexIndices, "Mesh Data");
-	rg::memory::SetResourceUsageHint(*m_meshletTriangles, "Mesh Data");
-
 	rg::memory::SetResourceUsageHint(*m_perMeshBuffers, "PerMesh, PerMeshInstance, PerObject");
 	rg::memory::SetResourceUsageHint(*m_perMeshInstanceBuffers, "PerMesh, PerMeshInstance, PerObject");
 	rg::memory::SetResourceUsageHint(*m_perMeshInstanceClodOffsets, "Cluster LOD data");
@@ -64,18 +80,11 @@ MeshManager::MeshManager() {
 	rg::memory::SetResourceUsageHint(*m_clodHierarchyLevelInfos, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODGroups, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODSegments, "Cluster LOD data");
-	rg::memory::SetResourceUsageHint(*m_clusterLODMeshletBounds, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clusterLODNodes, "Cluster LOD data");
 	rg::memory::SetResourceUsageHint(*m_clodGroupPageMap, "Cluster LOD streaming");
 
-
-	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
-	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
 	m_resources[Builtin::PerMeshBuffer] = m_perMeshBuffers;
 	m_resources[Builtin::PerMeshInstanceBuffer] = m_perMeshInstanceBuffers;
-	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
-	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
-	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
 
 	m_resources[Builtin::CLod::Offsets] = m_perMeshInstanceClodOffsets;
 	m_resources[Builtin::CLod::GroupChunks] = m_clodSharedGroupChunks;
@@ -83,7 +92,7 @@ MeshManager::MeshManager() {
 	m_resources[CLodLevelInfosBufferId] = m_clodHierarchyLevelInfos;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
 	m_resources[Builtin::CLod::Segments] = m_clusterLODSegments;
-	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
+	//m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
 	m_resources[Builtin::CLod::Nodes] = m_clusterLODNodes;
 	m_resources[Builtin::CLod::GroupPageMap] = m_clodGroupPageMap;
 
@@ -107,6 +116,22 @@ MeshManager::~MeshManager() {
 }
 
 void MeshManager::InvalidateCLodDiskStreamingPipeline() {
+	std::vector<DirectStorageAsyncRequestHandle> pendingDirectStorageUploads;
+	pendingDirectStorageUploads.reserve(m_clodPendingDirectStorageUploads.size());
+	for (const auto& pendingUpload : m_clodPendingDirectStorageUploads) {
+		if (pendingUpload.uploadHandle.IsValid()) {
+			pendingDirectStorageUploads.push_back(pendingUpload.uploadHandle);
+		}
+	}
+	if (!pendingDirectStorageUploads.empty()) {
+		std::string waitMessage;
+		if (!DirectStorageManager::GetInstance().WaitForRequests(pendingDirectStorageUploads, &waitMessage) && !waitMessage.empty()) {
+			spdlog::warn("CLod streaming: DirectStorage invalidate wait reported '{}'", waitMessage);
+		}
+		m_clodPendingDirectStorageUploads.clear();
+	}
+	m_clodPendingDirectStorageLaunches.clear();
+
 	// Bump generation so in-flight IO tasks produce stale results that will be rejected.
 	m_clodDiskStreamingGeneration.fetch_add(1, std::memory_order_release);
 
@@ -157,13 +182,14 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			result.groupGlobalIndex = request.groupGlobalIndex;
 			result.cacheSource = request.cacheSource;
 			result.segmentNeedsFetch = request.segmentNeedsFetch;
+			result.meshPageIndices = request.meshPageIndices;
 			result.generation = request.generation;
 
 			struct TLContainerState {
 				std::wstring containerFileName;
 				std::string sourceIdentifier;
 				std::ifstream file;
-				uint32_t groupCount = 0;
+				uint32_t pageCount = 0;
 				bool valid = false;
 			};
 			thread_local TLContainerState tls;
@@ -175,37 +201,16 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 				tls.valid = false;
 				tls.containerFileName = request.cacheSource.containerFileName;
 				tls.sourceIdentifier = request.cacheSource.sourceIdentifier;
-				tls.groupCount = 0;
-				if (CLodCache::OpenContainerFile(request.cacheSource, tls.file, tls.groupCount)) {
+				tls.pageCount = 0;
+				if (CLodCache::OpenContainerFile(request.cacheSource, tls.file, tls.pageCount)) {
 					tls.valid = true;
 				}
 			}
 
-			if (!tls.valid || request.groupLocalIndex >= tls.groupCount) {
+			if (!tls.valid ||
+				request.pageDiskLocators.size() != tls.pageCount ||
+				std::any_of(request.meshPageIndices.begin(), request.meshPageIndices.end(), [&](uint32_t pageIndex) { return pageIndex >= tls.pageCount; })) {
 				result.success = false;
-				std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-				m_clodDiskStreamingResults.push_back(std::move(result));
-				return;
-			}
-
-			const uint64_t directoryEntryOffset =
-				static_cast<uint64_t>(sizeof(uint32_t) * 4)
-				+ static_cast<uint64_t>(request.groupLocalIndex) * static_cast<uint64_t>(sizeof(ClusterLODGroupDiskLocator));
-
-			tls.file.seekg(static_cast<std::streamoff>(directoryEntryOffset), std::ios::beg);
-			if (!tls.file.good()) {
-				result.success = false;
-				tls.valid = false;
-				std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-				m_clodDiskStreamingResults.push_back(std::move(result));
-				return;
-			}
-
-			ClusterLODGroupDiskLocator locator{};
-			tls.file.read(reinterpret_cast<char*>(&locator), sizeof(locator));
-			if (!tls.file.good()) {
-				result.success = false;
-				tls.valid = false;
 				std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
 				m_clodDiskStreamingResults.push_back(std::move(result));
 				return;
@@ -214,7 +219,9 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			CLodCache::LoadedGroupPayload payload{};
 			bool loaded = false;
 			const std::wstring containerPath = CLodCache::ResolveContainerPath(request.cacheSource);
-			if (DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::Gpu) && !containerPath.empty()) {
+			const bool clodDirectStorageEnabled = m_clodStreamingDirectStorageEnabled.load(std::memory_order_acquire);
+			const bool clodGpuDirectStorageEnabled = false;
+			if (clodGpuDirectStorageEnabled && !containerPath.empty()) {
 				if (request.prefetchedLayout.has_value() && request.prefetchedLayout->IsValid()) {
 					result.groupChunkMetadata = request.prefetchedLayout->groupChunkMetadata;
 					result.directStoragePageBlobSizes = request.prefetchedLayout->pageBlobSizes;
@@ -224,9 +231,11 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 
 				if (!loaded) {
 					CLodCache::GroupPayloadLayoutMetadata layout;
-					loaded = CLodCache::GetGroupPayloadLayout(tls.file, locator, layout);
+					loaded = CLodCache::GetMeshPagePayloadLayout(
+						std::span<const ClusterLODGroupDiskLocator>(request.pageDiskLocators.data(), request.pageDiskLocators.size()),
+						std::span<const uint32_t>(request.meshPageIndices.data(), request.meshPageIndices.size()),
+						layout);
 					if (loaded) {
-						result.groupChunkMetadata = std::move(layout.groupChunkMetadata);
 						result.directStoragePageBlobSizes = std::move(layout.pageBlobSizes);
 						result.directStoragePageBlobOffsets = std::move(layout.pageBlobOffsets);
 					}
@@ -243,14 +252,14 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 				}
 			}
 
-			if (!loaded && DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
+			if (!loaded && clodDirectStorageEnabled && DirectStorageManager::GetInstance().CanServiceQueue(DirectStorageQueueKind::SystemMemory)) {
 				const std::wstring containerPath = CLodCache::ResolveContainerPath(request.cacheSource);
 				if (!containerPath.empty()) {
 					std::string directStorageMessage;
-					loaded = CLodCache::LoadGroupPayloadSelectiveDirectStorage(
-						tls.file,
+					loaded = CLodCache::LoadMeshPagesSelectiveDirectStorage(
 						containerPath,
-						locator,
+						std::span<const ClusterLODGroupDiskLocator>(request.pageDiskLocators.data(), request.pageDiskLocators.size()),
+						std::span<const uint32_t>(request.meshPageIndices.data(), request.meshPageIndices.size()),
 						request.segmentNeedsFetch,
 						payload,
 						&directStorageMessage);
@@ -268,7 +277,12 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			}
 
 			if (!loaded) {
-				loaded = CLodCache::LoadGroupPayloadSelective(tls.file, locator, request.segmentNeedsFetch, payload);
+				loaded = CLodCache::LoadMeshPagesSelective(
+					tls.file,
+					std::span<const ClusterLODGroupDiskLocator>(request.pageDiskLocators.data(), request.pageDiskLocators.size()),
+					std::span<const uint32_t>(request.meshPageIndices.data(), request.meshPageIndices.size()),
+					request.segmentNeedsFetch,
+					payload);
 			}
 
 			if (loaded) {
@@ -278,6 +292,9 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 				}
 				result.preAllocatedPages = std::move(request.preAllocatedPages);
 				result.success = true;
+
+				// Child layout prefetch is now handled on the main thread where
+				// group -> mesh-page intervals are available.
 			}
 			else {
 				result.success = false;
@@ -293,47 +310,8 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
 
 	mesh->SetCurrentMeshManager(this);
-	if (mesh->GetPreSkinningVertexBufferView() != nullptr) {
-		m_preSkinningVertices->Deallocate(mesh->GetPreSkinningVertexBufferView());
-		mesh->SetPreSkinningVertexBufferView(nullptr);
-	}
-	if (mesh->GetPostSkinningVertexBufferView() != nullptr) {
-		m_postSkinningVertices->Deallocate(mesh->GetPostSkinningVertexBufferView());
-		mesh->SetPostSkinningVertexBufferView(nullptr);
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPreSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_preSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPostSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_postSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletVertexChunkViews()) {
-		if (chunkView) {
-			m_meshletVertexIndices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletChunkViews()) {
-		if (chunkView) {
-			m_meshletOffsets->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletTriangleChunkViews()) {
-		if (chunkView) {
-			m_meshletTriangles->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletBoundsChunkViews()) {
-		if (chunkView) {
-			m_clusterLODMeshletBounds->Deallocate(chunkView.get());
-		}
-	}
-	mesh->SetCLodGroupChunkViews({}, {}, {}, {}, {}, {}, {}, {}, {});
 
-	const auto& groupDiskLocators = mesh->GetCLodGroupDiskLocators();
+	const auto& pageDiskLocators = mesh->GetCLodPageDiskLocators();
 
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
@@ -348,7 +326,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	std::vector<std::unique_ptr<BufferView>> clodMeshletTriangleChunkViews;
 	std::vector<std::unique_ptr<BufferView>> clodMeshletBoundsChunkViews;
 
-	const bool hasDiskBackedGroupChunks = !groupDiskLocators.empty() && (groupDiskLocators.size() == mesh->GetCLodGroupCount());
+	const bool hasDiskBackedGroupChunks = !pageDiskLocators.empty();
 	const bool hasData = hasDiskBackedGroupChunks && mesh->HasCLodDiskStreamingSource();
 	if (!hasData) {
 		spdlog::warn("Loading mesh with no associated geometry, skipping");
@@ -366,25 +344,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	// Per mesh buffer
 	auto perMeshBufferView = m_perMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
-
-	// Vertex data
-	if (preSkinningView) {
-		mesh->SetPreSkinningVertexBufferView(std::move(preSkinningView));
-	}
-	if (postSkinningView) {
-		mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
-	}
-	mesh->SetCLodGroupChunkViews(
-		std::move(clodPreSkinningChunkViews),
-		std::move(clodPostSkinningChunkViews),
-		std::move(clodMeshletVertexChunkViews),
-		std::move(clodCompressedPositionChunkViews),
-		std::move(clodCompressedNormalChunkViews),
-		std::move(clodCompressedMeshletVertexChunkViews),
-		std::move(clodMeshletChunkViews),
-		std::move(clodMeshletTriangleChunkViews),
-		std::move(clodMeshletBoundsChunkViews));
-	//mesh->SetMeshletBoundsBufferView(std::move(meshletBoundsView));
 
 	// Cluster LOD hierarchy data is shared per mesh; per-instance state stores only indirection/instance IDs.
 	auto clusterLODGroupsView = m_clusterLODGroups->AddData(mesh->GetCLodGroups().data(), mesh->GetCLodGroups().size() * sizeof(ClusterLODGroup), sizeof(ClusterLODGroup));
@@ -408,8 +367,8 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			chunk.meshletCount = hint.meshletCount;
 			chunk.meshletTrianglesByteCount = hint.meshletTrianglesByteCount;
 
-			// Fresh chunks start non-resident, so expose zero counts to the GPU.
-			bool hasRuntimeChunkData = (chunk.meshletCount == 0u);
+			// Fresh chunks with streamable pages start non-resident, so expose zero counts to the GPU.
+			bool hasRuntimeChunkData = (hint.pageCount == 0u);
 			baselineGroupChunks[groupIndex] = chunk;
 
 			if (!hasRuntimeChunkData) {
@@ -437,6 +396,8 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		// Move hierarchy data into the shared state before the mesh releases its CPU copies.
 		sharedState->groups = mesh->GetCLodGroups();
 		sharedState->segments = mesh->GetCLodSegments();
+		sharedState->groupPageReferences = mesh->GetCLodGroupPageReferences();
+		sharedState->groupPageReferenceOffsets = mesh->GetCLodGroupPageReferenceOffsets();
 
 		// Cache parent-child mapping and error values for streaming snapshots.
 		{
@@ -445,10 +406,15 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			sharedState->groupErrorByLocal = summary.groupErrorByLocal;
 		}
 
-		// Compute total page-map entries needed for all groups in this mesh.
+		// Compute total mesh-local page-map entries needed for this mesh.
 		uint32_t totalPageMapEntries = 0;
 		for (const auto& grp : sharedState->groups) {
-			totalPageMapEntries += grp.pageCount;
+			const uint64_t pageEnd = static_cast<uint64_t>(grp.pageMapBase) + static_cast<uint64_t>(grp.pageCount);
+			if (pageEnd > static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())) {
+				spdlog::warn("CLOD mesh page-map allocation exceeds uint32_t range; skipping mesh");
+				return;
+			}
+			totalPageMapEntries = std::max(totalPageMapEntries, static_cast<uint32_t>(pageEnd));
 		}
 
 		std::unique_ptr<BufferView> hierarchyLevelInfoView = nullptr;
@@ -536,49 +502,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 
 void MeshManager::RemoveMesh(Mesh* mesh) {
 
-	// Things to remove:
-	// - Pre-skinning vertices, if any
-	// - Post-skinning vertices
-	// - Meshlet bounds
-
-	auto preSkinningView = mesh->GetPreSkinningVertexBufferView();
-	if (preSkinningView != nullptr) {
-		m_preSkinningVertices->Deallocate(preSkinningView);
-	}
-	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
-	if (postSkinningView != nullptr) {
-		m_postSkinningVertices->Deallocate(postSkinningView);
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPreSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_preSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodPostSkinningVertexChunkViews()) {
-		if (chunkView) {
-			m_postSkinningVertices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletVertexChunkViews()) {
-		if (chunkView) {
-			m_meshletVertexIndices->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletChunkViews()) {
-		if (chunkView) {
-			m_meshletOffsets->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletTriangleChunkViews()) {
-		if (chunkView) {
-			m_meshletTriangles->Deallocate(chunkView.get());
-		}
-	}
-	for (const auto& [_, chunkView] : mesh->GetCLodMeshletBoundsChunkViews()) {
-		if (chunkView) {
-			m_clusterLODMeshletBounds->Deallocate(chunkView.get());
-		}
-	}
 	// Deallocate the per mesh buffer view
 	auto& perMeshBufferView = mesh->GetPerMeshBufferView();
 	if (perMeshBufferView != nullptr) {
@@ -611,7 +534,19 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	}
 
 	if (sharedState) {
+		const bool wasInactive = sharedState->activeInstanceCount == 0u;
 		sharedState->activeInstanceCount++;
+		if (wasInactive && sharedState->mesh != nullptr) {
+			const uint32_t meshTraversalDepth = sharedState->mesh->GetCLodMaxTraversalDepth();
+			uint32_t cachedDepth = m_clodActiveMaxTraversalDepth.load(std::memory_order_acquire);
+			while (meshTraversalDepth > cachedDepth
+				&& !m_clodActiveMaxTraversalDepth.compare_exchange_weak(
+					cachedDepth,
+					meshTraversalDepth,
+					std::memory_order_release,
+					std::memory_order_acquire)) {
+			}
+		}
 	}
 
 	MeshInstanceClodOffsets clodOffsets = {};
@@ -662,6 +597,9 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 			if (sharedMeshState != nullptr && sharedMeshState->activeInstanceCount > 0u) {
 				sharedMeshState->activeInstanceCount--;
 				if (sharedMeshState->activeInstanceCount == 0u) {
+					const uint32_t removedTraversalDepth = sharedMeshState->mesh
+						? sharedMeshState->mesh->GetCLodMaxTraversalDepth()
+						: 0u;
 					ReleaseAllCLodGroupChunkAllocations(*sharedMeshState);
 					if (sharedMeshState->ownedMeshMetadataView != nullptr) {
 						m_clodMeshMetadata->Deallocate(sharedMeshState->ownedMeshMetadataView.get());
@@ -675,6 +613,9 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 					m_clodSharedStreamingStateByMesh.erase(mesh->GetMesh().get());
 					m_clodSharedStreamingRangesDirty = true;
 					m_clodStreamingStructureDirty = true;
+					if (removedTraversalDepth >= m_clodActiveMaxTraversalDepth.load(std::memory_order_acquire)) {
+						RecomputeCLodActiveMaxTraversalDepth();
+					}
 				}
 			}
 		}
@@ -683,45 +624,37 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	}
 }
 
-uint32_t MeshManager::GetCLodMaxTraversalDepth() const
+void MeshManager::RecomputeCLodActiveMaxTraversalDepth()
 {
 	uint32_t maxTraversalDepth = 0u;
-	std::unordered_set<const CLodSharedStreamingState*> visitedSharedStates;
-	visitedSharedStates.reserve(m_clodStreamingStateByInstanceIndex.size());
-
-	for (const auto& [_, state] : m_clodStreamingStateByInstanceIndex) {
-		const auto* sharedState = state.sharedMeshState.get();
-		if (sharedState == nullptr || sharedState->mesh == nullptr) {
-			continue;
-		}
-		if (!visitedSharedStates.insert(sharedState).second) {
+	for (const auto& [_, sharedState] : m_clodSharedStreamingStateByMesh) {
+		if (sharedState == nullptr || sharedState->mesh == nullptr || sharedState->activeInstanceCount == 0u) {
 			continue;
 		}
 
 		maxTraversalDepth = std::max(maxTraversalDepth, sharedState->mesh->GetCLodMaxTraversalDepth());
 	}
 
-	return maxTraversalDepth;
+	m_clodActiveMaxTraversalDepth.store(maxTraversalDepth, std::memory_order_release);
 }
 
-void MeshManager::ProcessCLodDiskStreamingIO(
-	uint32_t maxCompletedRequests) {
+void MeshManager::ProcessCLodDiskStreamingIO() {
+	ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO");
+
 	// Dispatch pending IO requests across the task scheduler's IO workers.
-	DispatchCLodDiskStreamingBatch();
+	{
+		ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::DispatchBatch");
+		DispatchCLodDiskStreamingBatch();
+	}
 
 	// Drain completed results into a local vector under the results lock.
 	std::vector<CLodDiskStreamingResult> localResults;
 	{
+		ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::DrainResults");
 		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-		const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests,
-			static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
-		if (toDrain > 0u) {
-			localResults.reserve(toDrain);
-			for (uint32_t i = 0; i < toDrain; ++i) {
-				localResults.push_back(std::move(m_clodDiskStreamingResults[i]));
-			}
-			m_clodDiskStreamingResults.erase(m_clodDiskStreamingResults.begin(),
-				m_clodDiskStreamingResults.begin() + toDrain);
+		if (!m_clodDiskStreamingResults.empty()) {
+			localResults = std::move(m_clodDiskStreamingResults);
+			m_clodDiskStreamingResults.clear();
 		}
 	}
 
@@ -731,34 +664,46 @@ void MeshManager::ProcessCLodDiskStreamingIO(
 	newCompletions.reserve(localResults.size() + m_clodPendingDirectStorageUploads.size());
 	finishedGroups.reserve(localResults.size() + m_clodPendingDirectStorageUploads.size());
 
-	for (auto& result : localResults) {
-		// Reject stale results from a previous generation (pre-rebuild IO).
-		if (result.generation != currentGeneration) {
-			spdlog::info("CLod streaming: rejecting stale IO result for group {} (gen {} vs current {})",
-				result.groupGlobalIndex, result.generation, currentGeneration);
-			newCompletions.push_back({ result.groupGlobalIndex, false });
+	{
+		ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::ApplyResults");
+		for (auto& result : localResults) {
+			// Reject stale results from a previous generation (pre-rebuild IO).
+			if (result.generation != currentGeneration) {
+				spdlog::info("CLod streaming: rejecting stale IO result for group {} (gen {} vs current {})",
+					result.groupGlobalIndex, result.generation, currentGeneration);
+				newCompletions.push_back({ result.groupGlobalIndex, false });
+				finishedGroups.push_back(result.groupGlobalIndex);
+				continue;
+			}
+
+			DiskStreamingApplyResult applyResult;
+			{
+				ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::ApplyResults::ApplyOne");
+				std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+				CLodDiskStreamingCompletion completion{};
+				applyResult = PrepareCompletedCLodDiskStreamingResult(result, result.preAllocatedPages, completion);
+				if (applyResult == DiskStreamingApplyResult::Prepared) {
+					newCompletions.push_back(std::move(completion));
+				}
+			}
+
+			if (applyResult == DiskStreamingApplyResult::DeferredPendingUpload) {
+				continue;
+			}
+			if (applyResult == DiskStreamingApplyResult::FailedPermanent) {
+				newCompletions.push_back({ result.groupGlobalIndex, false });
+			}
 			finishedGroups.push_back(result.groupGlobalIndex);
-			continue;
 		}
-
-		DiskStreamingApplyResult applyResult;
-		{
-			std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
-			applyResult = ApplyCompletedCLodDiskStreamingResult(result, result.preAllocatedPages);
-		}
-
-		if (applyResult == DiskStreamingApplyResult::DeferredPendingUpload) {
-			continue;
-		}
-
-		newCompletions.push_back({ result.groupGlobalIndex,
-			applyResult == DiskStreamingApplyResult::Applied });
-		finishedGroups.push_back(result.groupGlobalIndex);
 	}
 
-	FinalizePendingCLodDirectStorageUploads(currentGeneration, newCompletions, finishedGroups);
+	{
+		ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::FinalizeDirectStorageUploads");
+		FinalizePendingCLodDirectStorageUploads(currentGeneration, newCompletions, finishedGroups);
+	}
 
 	if (!finishedGroups.empty()) {
+		ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::ClearQueuedGroups");
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
 		for (uint32_t groupGlobalIndex : finishedGroups) {
 			m_clodDiskStreamingQueuedGroups.erase(groupGlobalIndex);
@@ -766,6 +711,7 @@ void MeshManager::ProcessCLodDiskStreamingIO(
 	}
 
 	if (!newCompletions.empty()) {
+		ZoneScopedN("MeshManager::ProcessCLodDiskStreamingIO::PublishCompletions");
 		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
 		for (auto& completion : newCompletions) {
 			m_clodDiskStreamingCompletions.push_back(std::move(completion));
@@ -831,6 +777,30 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 	return it->state;
 }
 
+std::vector<uint32_t> MeshManager::GetCLodGroupMeshPageIndices(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const {
+	std::vector<uint32_t> meshPageIndices;
+	if (groupLocalIndex >= state.groups.size()) {
+		return meshPageIndices;
+	}
+
+	if (groupLocalIndex + 1u < state.groupPageReferenceOffsets.size()) {
+		const uint32_t refBegin = state.groupPageReferenceOffsets[groupLocalIndex];
+		const uint32_t refEnd = state.groupPageReferenceOffsets[groupLocalIndex + 1u];
+		if (refBegin <= refEnd && refEnd <= state.groupPageReferences.size()) {
+			meshPageIndices.assign(state.groupPageReferences.begin() + refBegin, state.groupPageReferences.begin() + refEnd);
+		}
+	}
+
+	const ClusterLODGroup& group = state.groups[groupLocalIndex];
+	if (meshPageIndices.empty() && group.pageCount > 0u) {
+		meshPageIndices.reserve(group.pageCount);
+		for (uint32_t pageIndex = 0; pageIndex < group.pageCount; ++pageIndex) {
+			meshPageIndices.push_back(group.pageMapBase + pageIndex);
+		}
+	}
+	return meshPageIndices;
+}
+
 	bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout) {
 	outQueued = false;
 	if (state.mesh == nullptr) {
@@ -852,10 +822,12 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 	}
 	const auto& sourceChunk = groupChunkHints[groupLocalIndex];
 
-	// The page-pool path considers a group "ready" when the page allocation is valid
-	// (meshlets + bounds are packed into the page-pool blob).
-	const bool hasRequiredAllocations = !residentAllocations.pageAllocations.empty()
-		|| sourceChunk.meshletCount == 0u;
+	// The page-pool path considers a group "ready" when the page allocation is valid.
+	// Zero-meshlet voxel groups can still own streamable pages, so readiness is based
+	// on pageCount rather than meshletCount.
+	const bool hasRequiredAllocations =
+		IsCLodGroupResident(state, groupLocalIndex) &&
+		(!residentAllocations.pageAllocations.empty() || sourceChunk.pageCount == 0u);
 
 	if (hasRequiredAllocations) {
 		return true;
@@ -865,8 +837,21 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 		return false;
 	}
 
-	const auto& groupDiskLocators = mesh->GetCLodGroupDiskLocators();
-	if (groupLocalIndex >= groupDiskLocators.size()) {
+	const auto& pageDiskLocators = mesh->GetCLodPageDiskLocators();
+	if (pageDiskLocators.empty() ||
+		groupLocalIndex >= state.groups.size()) {
+		return false;
+	}
+	const ClusterLODGroup& group = state.groups[groupLocalIndex];
+	std::vector<uint32_t> meshPageIndices = GetCLodGroupMeshPageIndices(state, groupLocalIndex);
+	if (std::any_of(meshPageIndices.begin(), meshPageIndices.end(), [&](uint32_t pageIndex) { return pageIndex >= pageDiskLocators.size(); })) {
+		return false;
+	}
+	if ((!segmentNeedsFetch.empty() && segmentNeedsFetch.size() != meshPageIndices.size()) ||
+		(!preAllocatedPages.empty() && preAllocatedPages.size() != meshPageIndices.size())) {
+		spdlog::warn(
+			"CLod streaming: refusing to queue group {} because request page arrays do not cover all group pages",
+			groupGlobalIndex);
 		return false;
 	}
 
@@ -880,7 +865,12 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 		CLodDiskStreamingRequest request{};
 		request.groupGlobalIndex = groupGlobalIndex;
 		request.groupLocalIndex = groupLocalIndex;
+		request.groupsBase = state.groupsBase;
 		request.cacheSource = mesh->GetCLodCacheSource();
+		request.pageDiskLocators = pageDiskLocators;
+		request.pageMapBase = group.pageMapBase;
+		request.pageCount = static_cast<uint32_t>(meshPageIndices.size());
+		request.meshPageIndices = std::move(meshPageIndices);
 		if (prefetchedLayout != nullptr && prefetchedLayout->IsValid()) {
 			request.prefetchedLayout = *prefetchedLayout;
 		}
@@ -895,7 +885,13 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 	return false;
 }
 
-MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result, const std::vector<uint32_t>& preAllocatedPages) {
+MeshManager::DiskStreamingApplyResult MeshManager::PrepareCompletedCLodDiskStreamingResult(
+	CLodDiskStreamingResult& result,
+	const std::vector<uint32_t>& preAllocatedPages,
+	CLodDiskStreamingCompletion& outCompletion) {
+	outCompletion = {};
+	outCompletion.groupGlobalIndex = result.groupGlobalIndex;
+	outCompletion.generation = result.generation;
 	if (!result.success) {
 		return DiskStreamingApplyResult::FailedPermanent;
 	}
@@ -922,145 +918,35 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 	if (localIndex >= meshGroups.size()) {
 		return DiskStreamingApplyResult::FailedPermanent;
 	}
-	const auto& group = meshGroups[localIndex];
-	const uint32_t sCount = group.pageCount;
-	const bool useDirectStorageGpuUpload = result.directStorageGpuUploadPending;
-
-	const size_t streamedPageCount = useDirectStorageGpuUpload
-		? result.directStoragePageBlobSizes.size()
-		: result.pageBlobs.size();
-	if (streamedPageCount != sCount) {
+	const uint32_t sCount = static_cast<uint32_t>(result.meshPageIndices.size());
+	if (result.pageBlobs.size() != sCount) {
 		spdlog::error("CLod streaming: group {} (local {}) expected {} page blobs but got {}",
-			result.groupGlobalIndex, localIndex, sCount, streamedPageCount);
+			result.groupGlobalIndex, localIndex, sCount, result.pageBlobs.size());
 		return DiskStreamingApplyResult::FailedPermanent;
 	}
 
-	if (useDirectStorageGpuUpload && result.directStoragePageBlobOffsets.size() != sCount) {
-		spdlog::error("CLod streaming: group {} (local {}) expected {} page blob offsets but got {}",
-			result.groupGlobalIndex, localIndex, sCount, result.directStoragePageBlobOffsets.size());
-		return DiskStreamingApplyResult::FailedPermanent;
-	}
-
-	if (preAllocatedPages.size() != sCount) {
-		spdlog::error("CLod streaming: group {} pre-allocated {} pages but expected {}",
-			result.groupGlobalIndex, preAllocatedPages.size(), sCount);
-		return DiskStreamingApplyResult::FailedPermanent;
-	}
-
-	// Upload blobs to pre-allocated pages.
 	size_t totalBlobBytes = 0;
 	uint32_t fetchedPageCount = 0;
-	std::vector<GroupPageMapEntry> pageMapEntries(sCount);
-	std::vector<PagePool::PageAllocation> pageAllocations;
-	pageAllocations.reserve(sCount);
-	std::vector<br::DirectStorageBufferRegionCopy> directStorageCopies;
-	if (useDirectStorageGpuUpload) {
-		directStorageCopies.reserve(sCount);
-	}
-
 	for (uint32_t ci = 0; ci < sCount; ++ci) {
 		const bool needsFetch = result.segmentNeedsFetch.empty()
-			|| (ci < static_cast<uint32_t>(result.segmentNeedsFetch.size()) && result.segmentNeedsFetch[ci]);
-		const size_t blobSize = useDirectStorageGpuUpload
-			? static_cast<size_t>(result.directStoragePageBlobSizes[ci])
-			: result.pageBlobs[ci].size();
+			|| ci >= static_cast<uint32_t>(result.segmentNeedsFetch.size())
+			|| result.segmentNeedsFetch[ci];
+		const size_t blobSize = result.pageBlobs[ci].size();
 		if (needsFetch) {
+			if (blobSize == 0u) {
+				spdlog::error(
+					"CLod streaming: group {} page {} was marked for fetch but has no payload bytes",
+					result.groupGlobalIndex,
+					ci);
+				return DiskStreamingApplyResult::FailedPermanent;
+			}
 			++fetchedPageCount;
 			totalBlobBytes += blobSize;
 		}
-
-		const uint32_t pageID = preAllocatedPages[ci];
-		PagePool::PageAllocation pageAlloc{ pageID, 1 };
-
-		// Only upload if we fetched this segment (blob non-empty).
-		// Skipped segments still have valid data on the slab from a
-		// previous partial eviction.
-		if (useDirectStorageGpuUpload) {
-			if (needsFetch) {
-				if (blobSize > m_clodPagePool->GetPageSize()) {
-					spdlog::error("CLod streaming: group {} page {} size {} exceeds page pool size {}",
-						result.groupGlobalIndex,
-						ci,
-						blobSize,
-						m_clodPagePool->GetPageSize());
-					return DiskStreamingApplyResult::FailedPermanent;
-				}
-
-				br::DirectStorageBufferRegionCopy copy{};
-				copy.sourceOffset = result.directStoragePageBlobOffsets[ci];
-				copy.sourceSizeBytes = result.directStoragePageBlobSizes[ci];
-				copy.uncompressedSizeBytes = result.directStoragePageBlobSizes[ci];
-				copy.destinationResource = m_clodPagePool->GetSlab(m_clodPagePool->PageToSlabIndex(pageID))->GetAPIResource();
-				copy.destinationOffset = m_clodPagePool->PageToSlabByteOffset(pageID);
-				directStorageCopies.push_back(copy);
-			}
-		} else {
-			const auto& blob = result.pageBlobs[ci];
-			if (!blob.empty()) {
-				m_clodPagePool->UploadToPage(pageID, 0, blob.data(), blob.size());
-			}
-		}
-
-		pageMapEntries[ci].slabDescriptorIndex = m_clodPagePool->GetSlabDescriptorIndex(pageAlloc);
-		pageMapEntries[ci].slabByteOffset = static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(pageID));
-		pageAllocations.push_back(pageAlloc);
 	}
 
-	if (useDirectStorageGpuUpload && !directStorageCopies.empty()) {
-		const std::wstring containerPath = CLodCache::ResolveContainerPath(result.cacheSource);
-		if (containerPath.empty()) {
-			spdlog::error("CLod streaming: DirectStorage upload container path was empty for group {}",
-				result.groupGlobalIndex);
-			return DiskStreamingApplyResult::FailedPermanent;
-		}
-
-		std::string directStorageMessage;
-		DirectStorageAsyncRequestHandle uploadHandle = DirectStorageManager::GetInstance().EnqueueUploadBufferRegionsFromFile(
-				containerPath,
-				directStorageCopies,
-				&directStorageMessage);
-		if (!uploadHandle.IsValid()) {
-			spdlog::error(
-				"CLod streaming: DirectStorage page-pool upload failed for group {}: {}",
-				result.groupGlobalIndex,
-				directStorageMessage);
-			return DiskStreamingApplyResult::FailedPermanent;
-		}
-
-		CLodPendingDirectStorageUpload pendingUpload{};
-		pendingUpload.groupGlobalIndex = result.groupGlobalIndex;
-		pendingUpload.generation = result.generation;
-		pendingUpload.sharedState = sharedState;
-		pendingUpload.groupLocalIndex = localIndex;
-		pendingUpload.chunk = chunk;
-		pendingUpload.pageAllocations = std::move(pageAllocations);
-		pendingUpload.pageMapEntries = std::move(pageMapEntries);
-		pendingUpload.fetchedPageCount = fetchedPageCount;
-		pendingUpload.totalBlobBytes = static_cast<uint64_t>(totalBlobBytes);
-		pendingUpload.uploadPathLabel = result.uploadPathLabel;
-		pendingUpload.uploadHandle = std::move(uploadHandle);
-		m_clodPendingDirectStorageUploads.push_back(std::move(pendingUpload));
-		return DiskStreamingApplyResult::DeferredPendingUpload;
-	}
-
-	auto& residentAllocations = sharedState->residentGroupAllocations[localIndex];
-	residentAllocations.Reset();
-	residentAllocations.pageAllocations = std::move(pageAllocations);
-
-	// Upload GroupPageMap entries for this group
-	if (sharedState->ownedPageMapView && !pageMapEntries.empty()) {
-		const uint32_t pageMapOffset = group.pageMapBase;
-		for (uint32_t i = 0; i < sCount; ++i) {
-			sharedState->pageMapEntriesCPU[pageMapOffset + i] = pageMapEntries[i];
-		}
-		m_clodGroupPageMap->UpdateView(
-			sharedState->ownedPageMapView.get(),
-			sharedState->pageMapEntriesCPU.data());
-	}
-
-	// Page slab info is now stored per-page in GroupPageMapEntry, not in the group chunk.
-	spdlog::info(
-		"CLod streaming: group {} applied via {} (fetchedPages={}/{}, bytes={}, reusedPages={})",
+	spdlog::debug(
+		"CLod streaming: group {} prepared via {} (fetchedPages={}/{}, bytes={}, reusedPages={})",
 		result.groupGlobalIndex,
 		fetchedPageCount == 0u ? "ReusedExistingPages" : result.uploadPathLabel.c_str(),
 		fetchedPageCount,
@@ -1068,21 +954,17 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 		totalBlobBytes,
 		sCount - fetchedPageCount);
 
-	// Commit chunk updates.
-	sharedState->baselineGroupChunks[localIndex] = chunk;
-	if (localIndex < sharedState->groupResidentFlags.size()) {
-		sharedState->groupResidentFlags[localIndex] = 1u;
-	}
-
-	// Debug stats
-	{
-		m_debugResidentAllocations.fetch_add(static_cast<uint32_t>(residentAllocations.pageAllocations.size()), std::memory_order_relaxed);
-		m_debugTotalStreamedBytes.fetch_add(totalBlobBytes, std::memory_order_relaxed);
-		m_debugResidentGroups.fetch_add(1u, std::memory_order_relaxed);
-	}
-
-	UploadCLodGroupChunkTable(*sharedState);
-	return DiskStreamingApplyResult::Applied;
+	outCompletion.groupGlobalIndex = result.groupGlobalIndex;
+	outCompletion.success = true;
+	outCompletion.chunk = chunk;
+	outCompletion.meshPageIndices = result.meshPageIndices;
+	outCompletion.segmentNeedsFetch = result.segmentNeedsFetch;
+	outCompletion.pageBlobs = std::move(result.pageBlobs);
+	outCompletion.totalStreamedBytes = static_cast<uint64_t>(totalBlobBytes);
+	outCompletion.fetchedPageCount = fetchedPageCount;
+	outCompletion.uploadPathLabel = result.uploadPathLabel;
+	outCompletion.prefetchedChildLayouts = std::move(result.prefetchedChildLayouts);
+	return DiskStreamingApplyResult::Prepared;
 }
 
 void MeshManager::FinalizePendingCLodDirectStorageUploads(
@@ -1093,7 +975,23 @@ void MeshManager::FinalizePendingCLodDirectStorageUploads(
 		auto& pendingUpload = m_clodPendingDirectStorageUploads[uploadIndex];
 
 		auto finishUpload = [&](bool success) {
-			outCompletions.push_back({ pendingUpload.groupGlobalIndex, success });
+			CLodDiskStreamingCompletion completion{};
+			completion.groupGlobalIndex = pendingUpload.groupGlobalIndex;
+			completion.success = success;
+			if (success) {
+				completion.chunk = pendingUpload.chunk;
+				completion.meshPageIndices = pendingUpload.meshPageIndices;
+				completion.preAllocatedPages = pendingUpload.pageIds;
+				completion.segmentNeedsFetch = pendingUpload.segmentNeedsFetch;
+				completion.pageAllocations = pendingUpload.pageAllocations;
+				completion.pageMapEntries = pendingUpload.pageMapEntries;
+				completion.generation = pendingUpload.generation;
+				completion.totalStreamedBytes = pendingUpload.totalBlobBytes;
+				completion.fetchedPageCount = pendingUpload.fetchedPageCount;
+				completion.uploadPathLabel = pendingUpload.uploadPathLabel;
+				completion.prefetchedChildLayouts = std::move(pendingUpload.prefetchedChildLayouts);
+			}
+			outCompletions.push_back(std::move(completion));
 			outFinishedGroups.push_back(pendingUpload.groupGlobalIndex);
 			m_clodPendingDirectStorageUploads.erase(m_clodPendingDirectStorageUploads.begin() + static_cast<std::ptrdiff_t>(uploadIndex));
 		};
@@ -1123,53 +1021,16 @@ void MeshManager::FinalizePendingCLodDirectStorageUploads(
 			continue;
 		}
 
-		bool applied = false;
-		{
-			std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
-			auto sharedState = pendingUpload.sharedState;
-			if (sharedState != nullptr &&
-				pendingUpload.groupLocalIndex < sharedState->baselineGroupChunks.size() &&
-				pendingUpload.groupLocalIndex < sharedState->residentGroupAllocations.size() &&
-				pendingUpload.groupLocalIndex < sharedState->groups.size()) {
-				const auto& group = sharedState->groups[pendingUpload.groupLocalIndex];
-				auto& residentAllocations = sharedState->residentGroupAllocations[pendingUpload.groupLocalIndex];
-				residentAllocations.Reset();
-				residentAllocations.pageAllocations = pendingUpload.pageAllocations;
+		spdlog::debug(
+			"CLod streaming: group {} prepared via {} after DirectStorage upload (fetchedPages={}/{}, bytes={}, reusedPages={})",
+			pendingUpload.groupGlobalIndex,
+			pendingUpload.fetchedPageCount == 0u ? "ReusedExistingPages" : pendingUpload.uploadPathLabel.c_str(),
+			pendingUpload.fetchedPageCount,
+			static_cast<uint32_t>(pendingUpload.meshPageIndices.size()),
+			pendingUpload.totalBlobBytes,
+			static_cast<uint32_t>(pendingUpload.meshPageIndices.size()) - pendingUpload.fetchedPageCount);
 
-				if (sharedState->ownedPageMapView && !pendingUpload.pageMapEntries.empty()) {
-					const uint32_t pageMapOffset = group.pageMapBase;
-					for (uint32_t i = 0; i < group.pageCount; ++i) {
-						sharedState->pageMapEntriesCPU[pageMapOffset + i] = pendingUpload.pageMapEntries[i];
-					}
-					m_clodGroupPageMap->UpdateView(
-						sharedState->ownedPageMapView.get(),
-						sharedState->pageMapEntriesCPU.data());
-				}
-
-				spdlog::info(
-					"CLod streaming: group {} applied via {} (fetchedPages={}/{}, bytes={}, reusedPages={})",
-					pendingUpload.groupGlobalIndex,
-					pendingUpload.fetchedPageCount == 0u ? "ReusedExistingPages" : pendingUpload.uploadPathLabel.c_str(),
-					pendingUpload.fetchedPageCount,
-					group.pageCount,
-					pendingUpload.totalBlobBytes,
-					group.pageCount - pendingUpload.fetchedPageCount);
-
-				sharedState->baselineGroupChunks[pendingUpload.groupLocalIndex] = pendingUpload.chunk;
-				if (pendingUpload.groupLocalIndex < sharedState->groupResidentFlags.size()) {
-					sharedState->groupResidentFlags[pendingUpload.groupLocalIndex] = 1u;
-				}
-
-				m_debugResidentAllocations.fetch_add(static_cast<uint32_t>(residentAllocations.pageAllocations.size()), std::memory_order_relaxed);
-				m_debugTotalStreamedBytes.fetch_add(pendingUpload.totalBlobBytes, std::memory_order_relaxed);
-				m_debugResidentGroups.fetch_add(1u, std::memory_order_relaxed);
-
-				UploadCLodGroupChunkTable(*sharedState);
-				applied = true;
-			}
-		}
-
-		finishUpload(applied);
+		finishUpload(true);
 	}
 }
 
@@ -1180,6 +1041,10 @@ void MeshManager::DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStre
 }
 
 bool MeshManager::FreeCLodGroupEviction(uint32_t groupGlobalIndex) {
+	return EvictCLodGroupResidency(groupGlobalIndex, false);
+}
+
+bool MeshManager::EvictCLodGroupResidency(uint32_t groupGlobalIndex, bool clearPageMapEntries) {
 	uint32_t localIndex = 0u;
 	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
 	if (sharedState == nullptr) {
@@ -1187,7 +1052,136 @@ bool MeshManager::FreeCLodGroupEviction(uint32_t groupGlobalIndex) {
 	}
 
 	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
-	return ApplyCLodGroupEviction(*sharedState, localIndex);
+	const bool evicted = ApplyCLodGroupEviction(*sharedState, localIndex, clearPageMapEntries);
+	return evicted;
+}
+
+bool MeshManager::CommitCLodGroupResidency(
+	uint32_t groupGlobalIndex,
+	const ClusterLODGroupChunk& chunk,
+	std::span<const uint32_t> meshPageIndices,
+	std::span<const GroupPageMapEntry> pageMapEntries,
+	std::span<const PagePool::PageAllocation> pageAllocations,
+	uint64_t streamedBytes) {
+	uint32_t localIndex = 0u;
+	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
+	if (sharedState == nullptr ||
+		localIndex >= sharedState->baselineGroupChunks.size() ||
+		localIndex >= sharedState->residentGroupAllocations.size() ||
+		localIndex >= sharedState->groupResidentFlags.size()) {
+		return false;
+	}
+
+	const auto expectedMeshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
+	if (meshPageIndices.size() != expectedMeshPageIndices.size() ||
+		pageMapEntries.size() != expectedMeshPageIndices.size() ||
+		pageAllocations.size() != expectedMeshPageIndices.size()) {
+		spdlog::warn(
+			"CLod streaming: refusing to commit group {} residency because payload page counts do not match expected group pages (meshPages={}, pageMapEntries={}, allocations={}, expected={})",
+			groupGlobalIndex,
+			meshPageIndices.size(),
+			pageMapEntries.size(),
+			pageAllocations.size(),
+			expectedMeshPageIndices.size());
+		return false;
+	}
+	if (!expectedMeshPageIndices.empty() && sharedState->ownedPageMapView == nullptr) {
+		spdlog::warn(
+			"CLod streaming: refusing to commit group {} residency because the mesh page-map view is missing",
+			groupGlobalIndex);
+		return false;
+	}
+
+	for (size_t i = 0; i < expectedMeshPageIndices.size(); ++i) {
+		if (meshPageIndices[i] != expectedMeshPageIndices[i] ||
+			meshPageIndices[i] >= sharedState->pageMapEntriesCPU.size() ||
+			!pageAllocations[i].IsValid() ||
+			pageMapEntries[i].slabDescriptorIndex == 0u) {
+			spdlog::warn(
+				"CLod streaming: refusing to commit group {} residency because page {} is not fully renderable",
+				groupGlobalIndex,
+				i);
+			return false;
+		}
+		if (m_clodPagePool != nullptr) {
+			const uint32_t expectedSlabDescriptor = m_clodPagePool->GetSlabDescriptorIndex(pageAllocations[i]);
+			const uint32_t expectedSlabByteOffset =
+				static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(pageAllocations[i].firstPageID));
+			if (pageMapEntries[i].slabDescriptorIndex != expectedSlabDescriptor ||
+				pageMapEntries[i].slabByteOffset != expectedSlabByteOffset) {
+				spdlog::warn(
+					"CLod streaming: refusing to commit group {} residency because page {} map entry points at slab/offset {}:{} but allocation page {} resolves to {}:{}",
+					groupGlobalIndex,
+					i,
+					pageMapEntries[i].slabDescriptorIndex,
+					pageMapEntries[i].slabByteOffset,
+					pageAllocations[i].firstPageID,
+					expectedSlabDescriptor,
+					expectedSlabByteOffset);
+				return false;
+			}
+		}
+	}
+
+	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+
+	auto& residentAllocations = sharedState->residentGroupAllocations[localIndex];
+	const bool wasResident = IsCLodGroupResident(*sharedState, localIndex);
+	const uint32_t previousAllocationCount = static_cast<uint32_t>(residentAllocations.pageAllocations.size());
+
+	residentAllocations.Reset();
+	residentAllocations.pageAllocations.assign(pageAllocations.begin(), pageAllocations.end());
+
+	if (sharedState->ownedPageMapView) {
+		for (size_t i = 0; i < meshPageIndices.size(); ++i) {
+			const uint32_t meshPageIndex = meshPageIndices[i];
+			if (meshPageIndex < sharedState->pageMapEntriesCPU.size()) {
+				const GroupPageMapEntry previousEntry = sharedState->pageMapEntriesCPU[meshPageIndex];
+				sharedState->pageMapEntriesCPU[meshPageIndex] = pageMapEntries[i];
+				if (m_clodPageMapWriteCallback) {
+					CLodPageMapWriteEvent event{};
+					event.reason = CLodPageMapWriteReason::Commit;
+					event.groupGlobalIndex = groupGlobalIndex;
+					event.groupLocalIndex = localIndex;
+					event.groupsBase = sharedState->groupsBase;
+					event.meshPageIndex = meshPageIndex;
+					event.physicalPage = pageAllocations[i].firstPageID;
+					event.slabDescriptorIndex = pageMapEntries[i].slabDescriptorIndex;
+					event.slabByteOffset = pageMapEntries[i].slabByteOffset;
+					event.previousSlabDescriptorIndex = previousEntry.slabDescriptorIndex;
+					event.previousSlabByteOffset = previousEntry.slabByteOffset;
+					m_clodPageMapWriteCallback(event);
+				}
+			}
+		}
+		for (size_t i = 0; i < meshPageIndices.size(); ++i) {
+			UploadCLodGroupPageMapRange(*sharedState, meshPageIndices[i], std::span<const GroupPageMapEntry>(&pageMapEntries[i], 1));
+		}
+	}
+
+	sharedState->baselineGroupChunks[localIndex] = chunk;
+	sharedState->groupResidentFlags[localIndex] = 1u;
+
+	if (!wasResident) {
+		m_debugResidentGroups.fetch_add(1u, std::memory_order_relaxed);
+	}
+	if (streamedBytes != 0u) {
+		m_debugTotalStreamedBytes.fetch_add(streamedBytes, std::memory_order_relaxed);
+	}
+	const uint32_t newAllocationCount = static_cast<uint32_t>(residentAllocations.pageAllocations.size());
+	if (newAllocationCount >= previousAllocationCount) {
+		m_debugResidentAllocations.fetch_add(newAllocationCount - previousAllocationCount, std::memory_order_relaxed);
+	} else {
+		const uint32_t diff = previousAllocationCount - newAllocationCount;
+		const uint32_t prev = m_debugResidentAllocations.load(std::memory_order_relaxed);
+		m_debugResidentAllocations.store(prev >= diff ? prev - diff : 0u, std::memory_order_relaxed);
+	}
+	UploadCLodGroupChunk(*sharedState, localIndex);
+	return true;
+}
+
+void MeshManager::SetCLodPageMapWriteCallback(std::function<void(const CLodPageMapWriteEvent&)> fn) {
+	m_clodPageMapWriteCallback = std::move(fn);
 }
 
 bool MeshManager::IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const {
@@ -1195,16 +1189,235 @@ bool MeshManager::IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const {
 	return m_clodDiskStreamingQueuedGroups.count(groupGlobalIndex) != 0;
 }
 
-bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout) {
-	uint32_t localIndex = 0u;
-	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
-	if (sharedState == nullptr || sharedState->mesh == nullptr) {
+bool MeshManager::HasPendingCLodDirectStorageLaunches() const {
+	std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
+	return !m_clodPendingDirectStorageLaunches.empty();
+}
+
+bool MeshManager::HasPendingCLodDirectStorageUploads() const {
+	std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
+	return !m_clodPendingDirectStorageUploads.empty();
+}
+
+void MeshManager::SetCLodStreamingUploadFunction(PagePool::UploadFn fn) {
+	m_clodStreamingUploadFn = std::move(fn);
+	if (m_clodPagePool != nullptr) {
+		m_clodPagePool->SetUploadFunction(m_clodStreamingUploadFn);
+	}
+}
+
+void MeshManager::CollectCLodDirectStorageCompletionWaits(std::vector<ExternalTimelinePoint>& outWaits) const {
+	std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
+	outWaits.reserve(outWaits.size() + m_clodPendingDirectStorageUploads.size());
+	for (const auto& pendingUpload : m_clodPendingDirectStorageUploads) {
+		if (pendingUpload.completionTimeline.IsValid() && pendingUpload.completionValue != 0) {
+			outWaits.push_back({ pendingUpload.completionTimeline, pendingUpload.completionValue });
+		}
+	}
+}
+
+bool MeshManager::LaunchPendingCLodDirectStorageUploads(rhi::Timeline waitTimeline, uint64_t waitValue) {
+	if (!waitTimeline.IsValid() || waitValue == 0 || !m_clodDirectStorageCompletionFenceHandle.IsValid()) {
 		return false;
 	}
 
-	bool queued = false;
-	QueueCLodDiskStreamingRequest(groupGlobalIndex, *sharedState, localIndex, queued, segmentNeedsFetch, preAllocatedPages, priority, prefetchedLayout);
-	return queued;
+	std::vector<CLodPendingDirectStorageLaunch> launches;
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
+		if (m_clodPendingDirectStorageLaunches.empty()) {
+			return false;
+		}
+		launches = std::move(m_clodPendingDirectStorageLaunches);
+		m_clodPendingDirectStorageLaunches.clear();
+	}
+
+	std::vector<CLodPendingDirectStorageUpload> activeUploads;
+	std::vector<CLodDiskStreamingCompletion> failedCompletions;
+	std::vector<uint32_t> failedGroups;
+	activeUploads.reserve(launches.size());
+	failedCompletions.reserve(launches.size());
+	failedGroups.reserve(launches.size());
+
+	for (auto& launch : launches) {
+		const uint64_t completionValue =
+			m_clodDirectStorageCompletionFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+
+		std::string directStorageMessage;
+		DirectStorageAsyncRequestHandle uploadHandle =
+			DirectStorageManager::GetInstance().EnqueueUploadBufferRegionsFromFileAfterFence(
+				CLodCache::ResolveContainerPath(launch.cacheSource),
+				launch.copies,
+				DirectStorageFencePoint{ waitTimeline, waitValue },
+				DirectStorageFenceWaitMode::BeforeGpuWork,
+				DirectStorageFencePoint{ m_clodDirectStorageCompletionFenceHandle, completionValue },
+				&directStorageMessage);
+
+		if (!uploadHandle.IsValid()) {
+			spdlog::error(
+				"CLod streaming: DirectStorage Queue3 page-pool launch failed for group {}: {}",
+				launch.groupGlobalIndex,
+				directStorageMessage);
+			failedCompletions.push_back({ launch.groupGlobalIndex, false });
+			failedGroups.push_back(launch.groupGlobalIndex);
+			continue;
+		}
+
+		CLodPendingDirectStorageUpload pendingUpload{};
+		pendingUpload.groupGlobalIndex = launch.groupGlobalIndex;
+		pendingUpload.generation = launch.generation;
+		pendingUpload.sharedState = std::move(launch.sharedState);
+		pendingUpload.groupLocalIndex = launch.groupLocalIndex;
+		pendingUpload.chunk = launch.chunk;
+		pendingUpload.pageAllocations = std::move(launch.pageAllocations);
+		pendingUpload.pageMapEntries = std::move(launch.pageMapEntries);
+		pendingUpload.meshPageIndices = std::move(launch.meshPageIndices);
+		pendingUpload.segmentNeedsFetch = std::move(launch.segmentNeedsFetch);
+		pendingUpload.fetchedPageCount = launch.fetchedPageCount;
+		pendingUpload.totalBlobBytes = launch.totalBlobBytes;
+		pendingUpload.uploadPathLabel = std::move(launch.uploadPathLabel);
+		pendingUpload.uploadHandle = std::move(uploadHandle);
+		pendingUpload.completionTimeline = m_clodDirectStorageCompletionFenceHandle;
+		pendingUpload.completionValue = completionValue;
+		pendingUpload.pageIds = std::move(launch.pageIds);
+		pendingUpload.prefetchedChildLayouts = std::move(launch.prefetchedChildLayouts);
+		activeUploads.push_back(std::move(pendingUpload));
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
+		m_clodPendingDirectStorageUploads.insert(
+			m_clodPendingDirectStorageUploads.end(),
+			std::make_move_iterator(activeUploads.begin()),
+			std::make_move_iterator(activeUploads.end()));
+		m_clodDiskStreamingCompletions.insert(
+			m_clodDiskStreamingCompletions.end(),
+			failedCompletions.begin(),
+			failedCompletions.end());
+	}
+	if (!failedGroups.empty()) {
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+		for (uint32_t group : failedGroups) {
+			m_clodDiskStreamingQueuedGroups.erase(group);
+		}
+	}
+
+	return true;
+}
+
+bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority, const CLodCache::GroupPayloadLayoutMetadata* prefetchedLayout) {
+	CLodGroupDiskIOBatchRequest request{};
+	request.groupGlobalIndex = groupGlobalIndex;
+	request.segmentNeedsFetch = segmentNeedsFetch;
+	request.preAllocatedPages = preAllocatedPages;
+	request.priority = priority;
+	if (prefetchedLayout != nullptr && prefetchedLayout->IsValid()) {
+		request.prefetchedLayout = *prefetchedLayout;
+	}
+
+	std::vector<CLodGroupDiskIOBatchRequest> requests;
+	requests.push_back(std::move(request));
+	std::vector<bool> queuedByRequest;
+	QueueCLodGroupDiskIOBatch(requests, &queuedByRequest);
+	return !queuedByRequest.empty() && queuedByRequest[0];
+}
+
+uint32_t MeshManager::QueueCLodGroupDiskIOBatch(const std::vector<CLodGroupDiskIOBatchRequest>& requests, std::vector<bool>* outQueuedByRequest) {
+	struct PreparedRequest {
+		uint32_t sourceIndex = 0u;
+		CLodDiskStreamingRequest request;
+	};
+
+	if (outQueuedByRequest != nullptr) {
+		outQueuedByRequest->assign(requests.size(), false);
+	}
+
+	std::vector<PreparedRequest> prepared;
+	prepared.reserve(requests.size());
+
+	for (uint32_t requestIndex = 0; requestIndex < static_cast<uint32_t>(requests.size()); ++requestIndex) {
+		const auto& batchRequest = requests[requestIndex];
+		uint32_t localIndex = 0u;
+		auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(batchRequest.groupGlobalIndex, localIndex);
+		if (sharedState == nullptr || sharedState->mesh == nullptr) {
+			continue;
+		}
+
+		auto* mesh = sharedState->mesh;
+		if (localIndex >= mesh->GetCLodGroupCount() ||
+			localIndex >= sharedState->residentGroupAllocations.size()) {
+			continue;
+		}
+
+		const auto& groupChunkHints = mesh->GetCLodGroupChunkHints();
+		if (localIndex >= groupChunkHints.size()) {
+			continue;
+		}
+
+		const auto& sourceChunk = groupChunkHints[localIndex];
+		const auto& residentAllocations = sharedState->residentGroupAllocations[localIndex];
+		const bool hasRequiredAllocations =
+			IsCLodGroupResident(*sharedState, localIndex) &&
+			(!residentAllocations.pageAllocations.empty() || sourceChunk.pageCount == 0u);
+		if (hasRequiredAllocations || !mesh->HasCLodDiskStreamingSource()) {
+			continue;
+		}
+
+		const auto& pageDiskLocators = mesh->GetCLodPageDiskLocators();
+		if (localIndex >= sharedState->groups.size() ||
+			pageDiskLocators.empty()) {
+			continue;
+		}
+		const ClusterLODGroup& group = sharedState->groups[localIndex];
+		std::vector<uint32_t> meshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
+		if (std::any_of(meshPageIndices.begin(), meshPageIndices.end(), [&](uint32_t pageIndex) { return pageIndex >= pageDiskLocators.size(); })) {
+			continue;
+		}
+		if ((!batchRequest.segmentNeedsFetch.empty() && batchRequest.segmentNeedsFetch.size() != meshPageIndices.size()) ||
+			(!batchRequest.preAllocatedPages.empty() && batchRequest.preAllocatedPages.size() != meshPageIndices.size())) {
+			spdlog::warn(
+				"CLod streaming: refusing to queue group {} because request page arrays do not cover all group pages",
+				batchRequest.groupGlobalIndex);
+			continue;
+		}
+
+		PreparedRequest preparedRequest{};
+		preparedRequest.sourceIndex = requestIndex;
+		preparedRequest.request.groupGlobalIndex = batchRequest.groupGlobalIndex;
+		preparedRequest.request.groupLocalIndex = localIndex;
+		preparedRequest.request.groupsBase = sharedState->groupsBase;
+		preparedRequest.request.cacheSource = mesh->GetCLodCacheSource();
+		preparedRequest.request.pageDiskLocators = pageDiskLocators;
+		preparedRequest.request.pageMapBase = group.pageMapBase;
+		preparedRequest.request.pageCount = static_cast<uint32_t>(meshPageIndices.size());
+		preparedRequest.request.meshPageIndices = std::move(meshPageIndices);
+		if (batchRequest.prefetchedLayout.has_value() && batchRequest.prefetchedLayout->IsValid()) {
+			preparedRequest.request.prefetchedLayout = batchRequest.prefetchedLayout;
+		}
+		preparedRequest.request.segmentNeedsFetch = batchRequest.segmentNeedsFetch;
+		preparedRequest.request.preAllocatedPages = batchRequest.preAllocatedPages;
+		preparedRequest.request.childLayoutPrefetchGroups = batchRequest.childLayoutPrefetchGroups;
+		preparedRequest.request.generation = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
+		preparedRequest.request.priority = batchRequest.priority;
+		prepared.push_back(std::move(preparedRequest));
+	}
+
+	uint32_t queuedCount = 0u;
+	if (!prepared.empty()) {
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+		for (auto& preparedRequest : prepared) {
+			const uint32_t groupGlobalIndex = preparedRequest.request.groupGlobalIndex;
+			const bool queued = m_clodDiskStreamingQueuedGroups.insert(groupGlobalIndex).second;
+			if (outQueuedByRequest != nullptr) {
+				(*outQueuedByRequest)[preparedRequest.sourceIndex] = queued;
+			}
+			if (queued) {
+				m_clodDiskStreamingRequests.push_back(std::move(preparedRequest.request));
+				queuedCount++;
+			}
+		}
+	}
+
+	return queuedCount;
 }
 
 bool MeshManager::TryGetCLodGroupPayloadLayout(uint32_t groupGlobalIndex, CLodCache::GroupPayloadLayoutMetadata& outLayout, std::string* outMessage) {
@@ -1230,36 +1443,50 @@ bool MeshManager::TryGetCLodGroupPayloadLayout(uint32_t groupGlobalIndex, CLodCa
 		return false;
 	}
 
-	const auto& groupDiskLocators = mesh->GetCLodGroupDiskLocators();
-	if (groupLocalIndex >= groupDiskLocators.size()) {
+	const auto& pageDiskLocators = mesh->GetCLodPageDiskLocators();
+	if (groupLocalIndex >= sharedState->groups.size() ||
+		pageDiskLocators.empty()) {
 		if (outMessage) {
-			*outMessage = "group disk locator missing";
+			*outMessage = "mesh page disk locator missing";
+		}
+		return false;
+	}
+	std::vector<uint32_t> meshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, groupLocalIndex);
+	if (std::any_of(meshPageIndices.begin(), meshPageIndices.end(), [&](uint32_t pageIndex) { return pageIndex >= pageDiskLocators.size(); })) {
+		if (outMessage) {
+			*outMessage = "mesh page disk locator missing";
 		}
 		return false;
 	}
 
 	std::ifstream file;
-	uint32_t groupCount = 0u;
-	if (!CLodCache::OpenContainerFile(mesh->GetCLodCacheSource(), file, groupCount)) {
+	uint32_t pageCount = 0u;
+	if (!CLodCache::OpenContainerFile(mesh->GetCLodCacheSource(), file, pageCount)) {
 		if (outMessage) {
 			*outMessage = "failed to open CLod container";
 		}
 		return false;
 	}
 
-	if (groupLocalIndex >= groupCount) {
+	if (pageCount != pageDiskLocators.size()) {
 		if (outMessage) {
-			*outMessage = "group local index is out of bounds for CLod container";
+			*outMessage = "mesh page locator count does not match CLod container";
 		}
 		return false;
 	}
 
-	if (!CLodCache::GetGroupPayloadLayout(file, groupDiskLocators[groupLocalIndex], outLayout)) {
+	if (!CLodCache::GetMeshPagePayloadLayout(
+		std::span<const ClusterLODGroupDiskLocator>(pageDiskLocators.data(), pageDiskLocators.size()),
+		std::span<const uint32_t>(meshPageIndices.data(), meshPageIndices.size()),
+		outLayout)) {
 		if (outMessage) {
-			*outMessage = "failed to read CLod group payload layout";
+			*outMessage = "failed to read CLod mesh page payload layout";
 		}
 		return false;
 	}
+	outLayout.groupChunkMetadata = groupLocalIndex < sharedState->baselineGroupChunks.size()
+		? std::optional<ClusterLODGroupChunk>(sharedState->baselineGroupChunks[groupLocalIndex])
+		: std::nullopt;
 
 	if (outMessage) {
 		*outMessage = "read CLod group payload layout";
@@ -1282,6 +1509,14 @@ MeshManager::CLodGroupStreamingInfo MeshManager::GetCLodGroupStreamingInfo(uint3
 	}
 
 	info.hint = hints[localIndex];
+	info.groupsBase = sharedState->groupsBase;
+	if (localIndex < sharedState->groups.size()) {
+		const ClusterLODGroup& group = sharedState->groups[localIndex];
+		info.group = group;
+		info.pageMapBase = group.pageMapBase;
+		info.meshPageIndices = GetCLodGroupMeshPageIndices(*sharedState, localIndex);
+		info.pageCount = static_cast<uint32_t>(info.meshPageIndices.size());
+	}
 	info.vertexByteSize = sharedState->mesh->GetPerMeshCBData().vertexByteSize;
 	info.valid = true;
 	return info;
@@ -1300,6 +1535,23 @@ bool MeshManager::IsCLodGroupResident(const CLodSharedStreamingState& state, uin
 	return state.groupResidentFlags[groupLocalIndex] != 0u;
 }
 
+bool MeshManager::IsCLodMeshPageReferencedByResidentGroup(const CLodSharedStreamingState& state, uint32_t meshPageIndex) const {
+	const size_t groupCount = std::min(state.groups.size(), state.groupResidentFlags.size());
+	for (size_t groupLocalIndex = 0; groupLocalIndex < groupCount; ++groupLocalIndex) {
+		if (state.groupResidentFlags[groupLocalIndex] == 0u) {
+			continue;
+		}
+
+		const std::vector<uint32_t> meshPageIndices = GetCLodGroupMeshPageIndices(
+			state,
+			static_cast<uint32_t>(groupLocalIndex));
+		if (std::find(meshPageIndices.begin(), meshPageIndices.end(), meshPageIndex) != meshPageIndices.end()) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex) {
 	if (groupLocalIndex >= state.residentGroupAllocations.size()) {
 		return;
@@ -1315,21 +1567,6 @@ void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& 
 	if (groupLocalIndex < state.baselineGroupChunks.size()) {
 		auto& chunk = state.baselineGroupChunks[groupLocalIndex];
 		ZeroCLodGroupChunkCounts(chunk);
-	}
-
-	// Zero out the GroupPageMap entries for this group.
-	// Use state.groups (the retained copy) instead of state.mesh->GetCLodGroups()
-	// because the mesh releases its CPU hierarchy data after setup.
-	if (state.ownedPageMapView && groupLocalIndex < state.groups.size()) {
-		const auto& grp = state.groups[groupLocalIndex];
-		if (grp.pageCount > 0) {
-			for (uint32_t i = 0; i < grp.pageCount; ++i) {
-				state.pageMapEntriesCPU[grp.pageMapBase + i] = {};
-			}
-			m_clodGroupPageMap->UpdateView(
-				state.ownedPageMapView.get(),
-				state.pageMapEntriesCPU.data());
-		}
 	}
 
 	residentAllocations.Reset();
@@ -1354,10 +1591,91 @@ void MeshManager::UploadCLodGroupChunkTable(const CLodSharedStreamingState& stat
 		}
 	}
 
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			materializedGroupChunks.data(),
+			materializedGroupChunks.size() * sizeof(ClusterLODGroupChunk),
+			rg::runtime::UploadTarget::FromShared(m_clodSharedGroupChunks),
+			state.groupChunksView->GetOffset());
+		return;
+	}
+
 	m_clodSharedGroupChunks->UpdateView(state.groupChunksView, materializedGroupChunks.data());
 }
 
-bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex) {
+void MeshManager::UploadCLodGroupChunk(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) {
+	if (state.groupChunksView == nullptr
+		|| groupLocalIndex >= state.baselineGroupChunks.size()
+		|| groupLocalIndex >= state.groupResidentFlags.size()) {
+		return;
+	}
+
+	ClusterLODGroupChunk materializedGroupChunk = state.baselineGroupChunks[groupLocalIndex];
+	if (state.groupResidentFlags[groupLocalIndex] == 0u) {
+		ZeroCLodGroupChunkCounts(materializedGroupChunk);
+	}
+
+	const size_t byteOffset =
+		state.groupChunksView->GetOffset() + static_cast<size_t>(groupLocalIndex) * sizeof(ClusterLODGroupChunk);
+	const size_t byteSize = sizeof(ClusterLODGroupChunk);
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			&materializedGroupChunk,
+			byteSize,
+			rg::runtime::UploadTarget::FromShared(m_clodSharedGroupChunks),
+			byteOffset);
+		return;
+	}
+
+	auto bulkWrite = m_clodSharedGroupChunks->BeginBulkWrite();
+	if (bulkWrite.data != nullptr && byteOffset + byteSize <= bulkWrite.capacity) {
+		std::memcpy(bulkWrite.data + byteOffset, &materializedGroupChunk, byteSize);
+		m_clodSharedGroupChunks->EndBulkWrite(byteOffset, byteSize);
+		return;
+	}
+
+	UploadCLodGroupChunkTable(state);
+}
+
+void MeshManager::UploadCLodGroupPageMapRange(
+	CLodSharedStreamingState& state,
+	uint32_t pageMapOffset,
+	std::span<const GroupPageMapEntry> pageMapEntries) {
+	if (state.ownedPageMapView == nullptr || pageMapEntries.empty()) {
+		return;
+	}
+
+	const size_t byteOffset =
+		state.ownedPageMapView->GetOffset() + static_cast<size_t>(pageMapOffset) * sizeof(GroupPageMapEntry);
+	const size_t byteSize = pageMapEntries.size_bytes();
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			pageMapEntries.data(),
+			byteSize,
+			rg::runtime::UploadTarget::FromShared(m_clodGroupPageMap),
+			byteOffset);
+		return;
+	}
+
+	auto bulkWrite = m_clodGroupPageMap->BeginBulkWrite();
+	if (bulkWrite.data != nullptr && byteOffset + byteSize <= bulkWrite.capacity) {
+		std::memcpy(bulkWrite.data + byteOffset, pageMapEntries.data(), byteSize);
+		m_clodGroupPageMap->EndBulkWrite(byteOffset, byteSize);
+		return;
+	}
+
+	if (m_clodStreamingUploadFn) {
+		m_clodStreamingUploadFn(
+			state.pageMapEntriesCPU.data(),
+			state.pageMapEntriesCPU.size() * sizeof(GroupPageMapEntry),
+			rg::runtime::UploadTarget::FromShared(m_clodGroupPageMap),
+			state.ownedPageMapView->GetOffset());
+	} else {
+		m_clodGroupPageMap->UpdateView(state.ownedPageMapView.get(), state.pageMapEntriesCPU.data());
+	}
+}
+
+bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool clearPageMapEntries) {
 	if (state.groupChunksView == nullptr || groupLocalIndex >= state.groupCount || groupLocalIndex >= state.baselineGroupChunks.size()) {
 		return false;
 	}
@@ -1366,7 +1684,60 @@ bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32
 		return false;
 	}
 
+	std::vector<uint32_t> meshPageIndices;
+	if (clearPageMapEntries) {
+		meshPageIndices = GetCLodGroupMeshPageIndices(state, groupLocalIndex);
+	}
+
+	auto clearUnreferencedPageMapEntries = [&]() {
+		if (!clearPageMapEntries || state.ownedPageMapView == nullptr) {
+			return;
+		}
+
+		const GroupPageMapEntry zeroEntry{};
+		for (uint32_t meshPageIndex : meshPageIndices) {
+			if (meshPageIndex >= state.pageMapEntriesCPU.size()) {
+				continue;
+			}
+			const GroupPageMapEntry previousEntry = state.pageMapEntriesCPU[meshPageIndex];
+			if (IsCLodMeshPageReferencedByResidentGroup(state, meshPageIndex)) {
+				if (previousEntry.slabDescriptorIndex != 0u && m_clodPageMapWriteCallback) {
+					CLodPageMapWriteEvent event{};
+					event.reason = CLodPageMapWriteReason::EvictClearSkippedResidentReference;
+					event.groupGlobalIndex = state.groupsBase + groupLocalIndex;
+					event.groupLocalIndex = groupLocalIndex;
+					event.groupsBase = state.groupsBase;
+					event.meshPageIndex = meshPageIndex;
+					event.slabDescriptorIndex = previousEntry.slabDescriptorIndex;
+					event.slabByteOffset = previousEntry.slabByteOffset;
+					event.previousSlabDescriptorIndex = previousEntry.slabDescriptorIndex;
+					event.previousSlabByteOffset = previousEntry.slabByteOffset;
+					event.referencedResidentGroupCount = 1u;
+					m_clodPageMapWriteCallback(event);
+				}
+				continue;
+			}
+			state.pageMapEntriesCPU[meshPageIndex] = zeroEntry;
+			if (previousEntry.slabDescriptorIndex != 0u && m_clodPageMapWriteCallback) {
+				CLodPageMapWriteEvent event{};
+				event.reason = CLodPageMapWriteReason::EvictClear;
+				event.groupGlobalIndex = state.groupsBase + groupLocalIndex;
+				event.groupLocalIndex = groupLocalIndex;
+				event.groupsBase = state.groupsBase;
+				event.meshPageIndex = meshPageIndex;
+				event.slabDescriptorIndex = zeroEntry.slabDescriptorIndex;
+				event.slabByteOffset = zeroEntry.slabByteOffset;
+				event.previousSlabDescriptorIndex = previousEntry.slabDescriptorIndex;
+				event.previousSlabByteOffset = previousEntry.slabByteOffset;
+				m_clodPageMapWriteCallback(event);
+			}
+			UploadCLodGroupPageMapRange(state, meshPageIndex, std::span<const GroupPageMapEntry>(&zeroEntry, 1));
+		}
+	};
+
 	if (!IsCLodGroupResident(state, groupLocalIndex)) {
+		UploadCLodGroupChunk(state, groupLocalIndex);
+		clearUnreferencedPageMapEntries();
 		return true; // Already non-resident.
 	}
 
@@ -1385,8 +1756,8 @@ bool MeshManager::ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32
 		}
 	}
 	DeallocateCLodGroupChunkAllocations(state, groupLocalIndex);
-
-	UploadCLodGroupChunkTable(state);
+	UploadCLodGroupChunk(state, groupLocalIndex);
+	clearUnreferencedPageMapEntries();
 	return true;
 }
 
@@ -1639,7 +2010,8 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 			if (result.directStorageGpuUploadPending) {
 				for (uint32_t i = 0; i < static_cast<uint32_t>(result.directStoragePageBlobSizes.size()); ++i) {
 					const bool needsFetch = result.segmentNeedsFetch.empty()
-						|| (i < static_cast<uint32_t>(result.segmentNeedsFetch.size()) && result.segmentNeedsFetch[i]);
+						|| i >= static_cast<uint32_t>(result.segmentNeedsFetch.size())
+						|| result.segmentNeedsFetch[i];
 					if (needsFetch) {
 						total += static_cast<uint64_t>(result.directStoragePageBlobSizes[i]);
 					}
@@ -1657,6 +2029,63 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 	}
 
 	return stats;
+}
+
+void MeshManager::GetCLodRayTracingResidencySnapshot(CLodRayTracingResidencySnapshot& outSnapshot) const {
+	outSnapshot.residentGroups.clear();
+	outSnapshot.pagePool = m_clodPagePool.get();
+	outSnapshot.pagePoolGeneration = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
+
+	const_cast<MeshManager*>(this)->RebuildCLodSharedStreamingRangeIndex();
+
+	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+	for (const CLodSharedStreamingRange& range : m_clodSharedStreamingRanges) {
+		const auto& state = range.state;
+		if (!state) {
+			continue;
+		}
+
+		const uint32_t groupCount = std::min<uint32_t>(
+			state->groupCount,
+			static_cast<uint32_t>(state->groups.size()));
+		for (uint32_t localGroupIndex = 0; localGroupIndex < groupCount; ++localGroupIndex) {
+			if (!IsCLodGroupResident(*state, localGroupIndex)) {
+				continue;
+			}
+
+			if (localGroupIndex >= state->residentGroupAllocations.size() ||
+				localGroupIndex >= state->baselineGroupChunks.size()) {
+				continue;
+			}
+
+			const ClusterLODGroup& group = state->groups[localGroupIndex];
+			std::vector<uint32_t> meshPageIndices = GetCLodGroupMeshPageIndices(*state, localGroupIndex);
+			if (meshPageIndices.size() != state->residentGroupAllocations[localGroupIndex].pageAllocations.size()) {
+				continue;
+			}
+
+			CLodRayTracingResidentGroup rtGroup{};
+			rtGroup.groupGlobalIndex = range.begin + localGroupIndex;
+			rtGroup.groupLocalIndex = localGroupIndex;
+			rtGroup.group = group;
+			rtGroup.chunk = state->baselineGroupChunks[localGroupIndex];
+			rtGroup.meshPageIndices = std::move(meshPageIndices);
+			rtGroup.pageAllocations = state->residentGroupAllocations[localGroupIndex].pageAllocations;
+
+			const uint32_t firstSegment = group.firstSegment;
+			const uint32_t segmentCount = group.segmentCount;
+			if (firstSegment < state->segments.size()) {
+				const uint32_t clampedSegmentCount = std::min<uint32_t>(
+					segmentCount,
+					static_cast<uint32_t>(state->segments.size() - firstSegment));
+				rtGroup.segments.assign(
+					state->segments.begin() + firstSegment,
+					state->segments.begin() + firstSegment + clampedSegmentCount);
+			}
+
+			outSnapshot.residentGroups.push_back(std::move(rtGroup));
+		}
+	}
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

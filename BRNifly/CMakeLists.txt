@@ -1,0 +1,65 @@
+cmake_minimum_required(VERSION 3.16)
+
+if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    project(BRNifly LANGUAGES CXX)
+endif()
+
+find_package(nlohmann_json REQUIRED CONFIG)
+find_package(spdlog REQUIRED CONFIG)
+find_package(pxr REQUIRED CONFIG)
+
+add_executable(BRNifly
+    "src/main.cpp"
+)
+
+set_target_properties(BRNifly PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/BRNifly"
+)
+
+target_link_libraries(BRNifly PRIVATE
+    nlohmann_json::nlohmann_json
+    spdlog::spdlog_header_only
+    usd
+    usdGeom
+    usdShade
+    sdf
+    tf
+    vt
+    arch
+)
+
+get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+set(BRNIFLY_USD_ROOT "${REPO_ROOT}/ThirdParty" CACHE PATH "")
+target_include_directories(BRNifly BEFORE PRIVATE
+    "${BRNIFLY_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/"
+)
+
+if (MSVC)
+    target_compile_options(BRNifly PRIVATE
+        /Zc:preprocessor
+        /EHsc
+        /bigobj
+        /wd4828 /wd4514 /wd5038 /wd4100 /wd5219
+        /wd4625 /wd4626 /wd4820 /wd4365 /wd4464
+        /wd4062 /wd5026 /wd5027 /wd5246 /wd4191
+        /wd4061 /wd4623 /wd4710 /wd4324 /wd5267
+        /wd5045
+    )
+    target_compile_options(BRNifly PRIVATE /external:anglebrackets /external:W0)
+endif()
+
+target_compile_definitions(BRNifly PRIVATE NOMINMAX _UNICODE UNICODE)
+
+set(BRNIFLY_USD_RUNTIME_ROOT "${REPO_ROOT}/ThirdParty/usd_$<IF:$<CONFIG:Debug>,dbg,rel>")
+add_custom_command(TARGET BRNifly POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${BRNIFLY_USD_RUNTIME_ROOT}/lib"
+        "$<TARGET_FILE_DIR:BRNifly>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${BRNIFLY_USD_RUNTIME_ROOT}/bin/tbb.dll"
+        "$<TARGET_FILE_DIR:BRNifly>/tbb.dll"
+    COMMENT "Syncing OpenUSD runtime dependencies for BRNifly"
+    VERBATIM
+)

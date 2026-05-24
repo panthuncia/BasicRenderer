@@ -1,5 +1,10 @@
 #include "Managers/Singletons/DeviceManager.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <string>
+
 #include <spdlog/spdlog.h>
 #include <rhi_debug.h>
 
@@ -44,6 +49,46 @@ bool IsDiagnosticsBuild() {
     return false;
 #endif
 }
+
+std::string GetEnvironmentString(const char* name) {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, name) != 0 || value == nullptr) {
+        return {};
+    }
+
+    std::string result(value);
+    free(value);
+    return result;
+}
+
+std::string NormalizeBackendName(std::string value) {
+    value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char ch) { return std::isspace(ch) != 0 || ch == '-' || ch == '_'; }), value.end());
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+rhi::Backend ParseBackendName(const std::string& value, rhi::Backend fallback) {
+    const std::string normalized = NormalizeBackendName(value);
+    if (normalized == "vulkan" || normalized == "vk") {
+        return rhi::Backend::Vulkan;
+    }
+    if (normalized == "d3d12" || normalized == "dx12" || normalized == "direct3d12") {
+        return rhi::Backend::D3D12;
+    }
+    return fallback;
+}
+
+rhi::Backend GetRequestedBackend() {
+    rhi::Backend backend = backend = SettingsManager::GetInstance().getSettingGetter<rhi::Backend>("rhiBackend")();
+
+    const std::string envBackend = GetEnvironmentString("BASICRENDERER_RHI_BACKEND");
+    if (!envBackend.empty()) {
+        backend = ParseBackendName(envBackend, backend);
+    }
+
+    return backend;
+}
 }
 
 DeviceManager& DeviceManager::GetInstance() {
@@ -77,6 +122,10 @@ void DeviceManager::Initialize() {
         enableRuntimeInstrumentation = false;
     }
 
+#if !BASICRHI_ENABLE_RESHAPE
+    enableRuntimeInstrumentation = false;
+#endif
+
     try {
         enableSynchronousRecording = settingsManager.getSettingGetter<bool>("reshapeSynchronousRecording")();
     }
@@ -100,21 +149,28 @@ void DeviceManager::Initialize() {
         enableTexelAddressing,
         numFramesInFlight);
 
-    const rhi::Backend backend = rhi::Backend::D3D12;
+    const rhi::Backend backend = GetRequestedBackend();
 
-    rhi::CreateD3D12Device(
-        rhi::DeviceCreateInfo{
-            .backend = backend,
-            .framesInFlight = numFramesInFlight,
-            .enableDebug = enableDebug,
-            .instrumentation = {
-                .enableRuntimeInstrumentation = enableRuntimeInstrumentation,
-                .enableSynchronousRecording = enableSynchronousRecording,
-                .enableTexelAddressing = enableTexelAddressing,
-            },
+    const rhi::DeviceCreateInfo createInfo{
+        .backend = backend,
+        .framesInFlight = numFramesInFlight,
+        .enableDebug = enableDebug,
+        .instrumentation = {
+            .enableRuntimeInstrumentation = enableRuntimeInstrumentation,
+            .enableSynchronousRecording = enableSynchronousRecording,
+            .enableTexelAddressing = enableTexelAddressing,
         },
-        m_device,
-        enableStreamline);
+    };
+
+    const rhi::Result createResult = backend == rhi::Backend::Vulkan
+        ? rhi::CreateVulkanDevice(createInfo, m_device, enableStreamline)
+        : rhi::CreateD3D12Device(createInfo, m_device, enableStreamline);
+
+    if (!rhi::IsOk(createResult) || !m_device) {
+        spdlog::error("DeviceManager::Initialize failed to create backend {} result={}", static_cast<uint32_t>(backend), static_cast<uint32_t>(createResult));
+        m_backend = rhi::Backend::Null;
+        return;
+    }
 
     m_backend = backend;
 
@@ -169,6 +225,9 @@ void DeviceManager::Cleanup() {
     m_copyQueue.Reset();
     m_backend = rhi::Backend::Null;
     m_meshShadersSupported = false;
+    m_rayTracingFeatures = {};
+    m_rayTracingSupported = false;
+    m_clodRayTracingSupported = false;
 
     if (m_device) {
         m_device.Reset();
@@ -177,6 +236,9 @@ void DeviceManager::Cleanup() {
 
 void DeviceManager::CheckGPUFeatures() {
     m_meshShadersSupported = false;
+    m_rayTracingFeatures = {};
+    m_rayTracingSupported = false;
+    m_clodRayTracingSupported = false;
     if (!m_device) {
         return;
     }
@@ -184,6 +246,28 @@ void DeviceManager::CheckGPUFeatures() {
     MeshShaderFeatureInfo meshShaderFeatures{};
     if (rhi::IsOk(m_device->QueryFeatureInfo(&meshShaderFeatures.header))) {
         m_meshShadersSupported = meshShaderFeatures.meshShader;
+    }
+
+    RayTracingFeatureInfo rayTracingFeatures{};
+    if (rhi::IsOk(m_device->QueryFeatureInfo(&rayTracingFeatures.header))) {
+        m_rayTracingFeatures = rayTracingFeatures;
+        m_rayTracingSupported = rayTracingFeatures.pipeline && rayTracingFeatures.accelerationStructure;
+        m_clodRayTracingSupported = m_rayTracingSupported
+            && rayTracingFeatures.gpuRtasOperations
+            && rayTracingFeatures.clusterAccelerationStructure
+            && rayTracingFeatures.maxClusterVertices > 0u
+            && rayTracingFeatures.maxClusterTriangles > 0u;
+
+        spdlog::info(
+            "DeviceManager RT caps pipeline={} rayQuery={} indirect={} gpuRtas={} clusters={} backendTier={} maxClusterVerts={} maxClusterTris={}",
+            rayTracingFeatures.pipeline,
+            rayTracingFeatures.rayQuery,
+            rayTracingFeatures.indirect,
+            rayTracingFeatures.gpuRtasOperations,
+            rayTracingFeatures.clusterAccelerationStructure,
+            static_cast<uint32_t>(rayTracingFeatures.backendTier),
+            rayTracingFeatures.maxClusterVertices,
+            rayTracingFeatures.maxClusterTriangles);
     }
 }
 

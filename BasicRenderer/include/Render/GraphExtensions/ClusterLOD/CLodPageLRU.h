@@ -9,8 +9,7 @@
 // - Each page in the pool occupies exactly one node in the list.
 // - Front = least-recently-used, back = most-recently-used.
 // - Touch() moves a node to the back in O(1).
-// - PopOldest() rotates the oldest evictable page to MRU and returns it.
-// - Pinned pages stay in the LRU but are skipped by PopOldest().
+// - PopOldest() rotates the oldest page to MRU and returns it.
 //
 // Thread safety: none - intended to be owned by a single thread (the worker).
 class CLodPageLRU {
@@ -30,11 +29,11 @@ public:
     void Remove(uint32_t pageID);
 
     // Move an existing page to the back (most-recently-used).
-    // No-op if not present or pinned.
+    // No-op if not present.
     void Touch(uint32_t pageID);
 
-    // Return the least-recently-used evictable page and move it to MRU.
-    // Returns ~0u if every tracked page is pinned or the LRU is empty.
+    // Return the least-recently-used page and move it to MRU.
+    // Returns ~0u if the LRU is empty.
     uint32_t PopOldest();
 
     // Is this page tracked in the LRU?
@@ -46,11 +45,11 @@ public:
     // Clear all entries (LRU + pinned).
     void Clear();
 
-    // Pinned page tracking (still represented in the LRU).
+    // Compatibility no-ops while the streaming experiment ignores page locks.
     void Pin(uint32_t pageID);
     void Unpin(uint32_t pageID);
     bool IsPinned(uint32_t pageID) const;
-    uint32_t PinnedCount() const { return static_cast<uint32_t>(m_pinned.size()); }
+    uint32_t PinnedCount() const { return 0u; }
 
 private:
     struct Node {
@@ -71,6 +70,6 @@ private:
     // pageID -> Node* for O(1) lookup.
     std::unordered_map<uint32_t, Node*> m_map;
 
-    // Pinned pages - always resident, never evictable.
+    // Retained only to avoid churn in the class layout during the experiment.
     std::unordered_set<uint32_t> m_pinned;
 };

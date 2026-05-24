@@ -4,9 +4,9 @@
 #include "gbuffer.hlsl"
 
 // Root constants (via ExecuteIndirect / command signature):
-//   UintRootConstant0 = materialId
-//   UintRootConstant1 = baseOffset into PixelListBuffer
-//   UintRootConstant2 = count (number of pixels for this material)
+//   IndirectCommandSignatureRootConstant0 = materialId
+//   IndirectCommandSignatureRootConstant1 = baseOffset into PixelListBuffer
+//   IndirectCommandSignatureRootConstant2 = count (number of pixels for this material)
 [shader("compute")]
 [numthreads(MATERIAL_EXECUTION_GROUP_SIZE, 1, 1)]
 void EvaluateMaterialGroupCS(
@@ -14,9 +14,9 @@ void EvaluateMaterialGroupCS(
     uint groupIndex : SV_GroupIndex
 )
 {
-    uint baseOffset = UintRootConstant1;
-    uint count = UintRootConstant2;
-    uint dispatchXDimension = UintRootConstant3;
+    uint baseOffset = IndirectCommandSignatureRootConstant1;
+    uint count = IndirectCommandSignatureRootConstant2;
+    uint dispatchXDimension = IndirectCommandSignatureRootConstant3;
 
     uint idx = dispatchThreadId.y * dispatchXDimension + dispatchThreadId.x;
     if (idx >= count)

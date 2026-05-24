@@ -95,6 +95,7 @@ void SortedUnsignedIntBuffer::StageOrUpload(const void* data, size_t size, size_
     const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
     if (staged) {
+        MarkUploadPolicyDirty();
         return;
     }
 

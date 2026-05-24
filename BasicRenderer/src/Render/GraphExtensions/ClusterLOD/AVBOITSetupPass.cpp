@@ -50,23 +50,25 @@ void AVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* builder)
         builder->WithShaderResource(m_depthWarpLUTBuffer);
     }
 
-    builder->WithUnorderedAccess(
+    builder->WithUnorderedAccessClear(
         m_occupancyTexture,
         m_coverageTexture,
         m_occupancySliceMaskTexture,
-        m_scalarExtinctionTexture,
-        m_chromaticExtinctionTexture,
         m_integratedTransmittanceTexture,
         m_zeroTransmittanceSliceTexture);
 
+    builder->WithUnorderedAccess(
+        m_scalarExtinctionTexture,
+        m_chromaticExtinctionTexture);
+
     if (m_accumulationTexture) {
-        builder->WithRenderTarget(m_accumulationTexture);
+        builder->WithRenderTargetClear(m_accumulationTexture);
     }
     if (m_normalizationTexture) {
-        builder->WithRenderTarget(m_normalizationTexture);
+        builder->WithRenderTargetClear(m_normalizationTexture);
     }
     if (m_shadingExtinctionTexture) {
-        builder->WithRenderTarget(m_shadingExtinctionTexture);
+        builder->WithRenderTargetClear(m_shadingExtinctionTexture);
     }
 }
 

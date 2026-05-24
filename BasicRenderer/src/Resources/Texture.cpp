@@ -139,6 +139,17 @@ bool IsConditionedCacheFilePath(const std::string& path) {
 	return br::processed_texture_cache::IsConditionedCacheExtension(extension);
 }
 
+bool ShouldPreserveAlphaCoverage(const TextureFileMeta& meta, const TextureDescription& desc) {
+	if (!meta.processing.isParticipatingMaterialTexture || meta.alphaIsAllOpaque) {
+		return false;
+	}
+	if (desc.isArray || desc.isCubemap || desc.channels != 4 || desc.imageDimensions.empty()) {
+		return false;
+	}
+
+	return rhi::helpers::stripSrgb(desc.format) == rhi::Format::R8G8B8A8_UNorm;
+}
+
 bool ReadProcessedTextureCacheHeader(const std::wstring& filePath, br::processed_texture_cache::FileHeader& header, std::string* outError = nullptr) {
 	if (outError) {
 		outError->clear();
@@ -1586,7 +1597,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 			m_image = factory.CreateAlwaysResidentPixelBuffer(
 				sourceData->desc,
 				TextureFactory::TextureInitialData::FromBytes(sourceData->subresources),
-				m_name);
+				m_name,
+				ShouldPreserveAlphaCoverage(m_meta, sourceData->desc));
 			m_hasUploadedFinalImage = true;
 			m_hasUploadedPlaceholder = false;
 			SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
@@ -1690,7 +1702,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					m_image = factory.CreateAlwaysResidentPixelBuffer(
 						result->desc,
 						TextureFactory::TextureInitialData::FromBytes(result->subresources),
-						m_name);
+						m_name,
+						ShouldPreserveAlphaCoverage(m_meta, result->desc));
 					SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
 					SetPendingTopMip(desiredResidentTopMip);
 					RecordUploadPath(
@@ -1740,7 +1753,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				m_image = factory.CreateAlwaysResidentPixelBuffer(
 					fallbackSourceData->desc,
 					TextureFactory::TextureInitialData::FromBytes(fallbackSourceData->subresources),
-					m_name);
+					m_name,
+					ShouldPreserveAlphaCoverage(m_meta, fallbackSourceData->desc));
 				RefreshStreamingStateFromDescription();
 				SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
 				SetPendingTopMip(desiredResidentTopMip);
@@ -1790,7 +1804,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 		m_image = factory.CreateAlwaysResidentPixelBuffer(
 			immediateSourceData->desc,
 			TextureFactory::TextureInitialData::FromBytes(immediateSourceData->subresources),
-			m_name);
+			m_name,
+			ShouldPreserveAlphaCoverage(m_meta, immediateSourceData->desc));
 		RecordUploadPath(TextureUploadPathTelemetry::CpuImmediateUpload, "texture uploaded through TextureFactory without preprocessing");
 		m_hasUploadedFinalImage = true;
 		RefreshStreamingStateFromDescription();

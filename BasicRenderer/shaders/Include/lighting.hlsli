@@ -236,7 +236,7 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
                 environmentBufferDescriptorIndex);
 #endif
 
-    if (enablePunctualLights)
+    if (GetRootEnablePunctualLights())
     {
         LightingParameters lightingParameters;
         lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
@@ -306,7 +306,7 @@ float3 lightFragmentColor(FragmentInfo fragmentInfo, Camera mainCamera, uint act
 #endif
             LightInfo light = lights[index];
             float shadow = 0.0;
-            if (enableShadows)
+            if (GetRootEnableShadows())
             {
                 if (light.shadowViewInfoIndex != -1)
                 {
@@ -444,7 +444,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
     uint clusterLightCount = 0; // Number of lights in the cluster
 #endif
         
-    if (enablePunctualLights)
+    if (GetRootEnablePunctualLights())
     {
         LightingParameters lightingParameters;
         lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
@@ -533,7 +533,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif
             LightInfo light = lights[index];
             float shadow = 0.0;
-            if (enableShadows)
+            if (GetRootEnableShadows())
             {
                 if (light.shadowViewInfoIndex != -1)
                 {

@@ -41,9 +41,11 @@ namespace {
 			world.component<Components::ActiveScene>().add(flecs::Exclusive);
 			world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
 			world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
+			world.component<Components::RenderBridgeSceneDiff>().add(flecs::Exclusive);
 			world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
 			world.add<Components::GlobalMeshLibrary>();
 			world.set<Components::DrawStats>({ 0, {} });
+			world.set<Components::RenderBridgeSceneDiff>({});
 
 			flecs::entity game = world.pipeline()
 				.with(flecs::System)
@@ -68,6 +70,43 @@ namespace {
 				.event(flecs::OnSet)
 				.each([](flecs::entity e, Components::Scale&) {
 					e.add<Components::TransformDirty>();
+				});
+			world.observer<Components::MeshInstances>()
+				.event(flecs::OnSet)
+				.each([](flecs::entity e, Components::MeshInstances&) {
+					e.add<Components::RenderBridgeContentDirty>();
+				});
+			world.observer<Components::MeshInstances>()
+				.event(flecs::OnRemove)
+				.each([](flecs::entity e, Components::MeshInstances&) {
+					if (const auto* stableSceneID = e.try_get<Components::StableSceneID>()) {
+						auto& diff = e.world().get_mut<Components::RenderBridgeSceneDiff>();
+						diff.removedRenderableIDs.push_back(stableSceneID->value);
+						++diff.generation;
+					}
+				});
+			world.observer<Components::Camera>()
+				.event(flecs::OnRemove)
+				.each([](flecs::entity e, Components::Camera&) {
+					if (const auto* stableSceneID = e.try_get<Components::StableSceneID>()) {
+						auto& diff = e.world().get_mut<Components::RenderBridgeSceneDiff>();
+						diff.removedCameraIDs.push_back(stableSceneID->value);
+						++diff.generation;
+					}
+				});
+			world.observer<Components::Light>()
+				.event(flecs::OnRemove)
+				.each([](flecs::entity e, Components::Light&) {
+					if (const auto* stableSceneID = e.try_get<Components::StableSceneID>()) {
+						auto& diff = e.world().get_mut<Components::RenderBridgeSceneDiff>();
+						diff.removedLightIDs.push_back(stableSceneID->value);
+						++diff.generation;
+					}
+				});
+			world.observer<Components::Name>()
+				.event(flecs::OnSet)
+				.each([](flecs::entity e, Components::Name&) {
+					e.add<Components::RenderBridgeContentDirty>();
 				});
 
 			// Transform system: only recompute matrices for dirty entities
@@ -298,8 +337,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 				meshInstance->SyncSkinningStateFromSkeleton();
 			}
 
-			// Increment material usage count
-			meshInstance->GetMesh()->material->EnsureTexturesUploaded(*m_managerInterface.GetTextureFactory());
+			// Register material residency. MaterialManager drains texture/material GPU updates from dirty queues.
 			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
 			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
 			meshInstance->GetMesh()->SetMaterialDataIndex(materialDataIndex);
@@ -311,6 +349,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			// Register mesh if not already present
 			if (!globalMeshLibrary.meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 				globalMeshLibrary.meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+				++globalMeshLibrary.generation;
 				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), useMeshletReorderedVertices);
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);

@@ -77,14 +77,12 @@ public:
         }
 
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
-            MESH_RESOURCE_IDFENTIFIERS,
             Builtin::PrimaryCamera::VisibilityTexture,
             //Builtin::PrimaryCamera::VisibleClusterTable,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::PerMeshBuffer,
             Builtin::CameraBuffer,
-            Builtin::PostSkinningVertices,
             Builtin::NormalMatrixBuffer,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
@@ -96,7 +94,9 @@ public:
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,
+            Builtin::CLod::GroupPageMap,
             Builtin::CLod::MeshMetadata,
+            Builtin::SkeletonResources::InverseSkinMatrices,
             Builtin::PerMaterialOpenPBRDataBuffer)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
@@ -208,6 +208,9 @@ public:
                 auto shaderDefines = psoMgr.GetShaderDefines(0, flags);
                 shaderDefines.push_back({L"VISUTIL_SPECIALIZED_MATERIAL_EVAL", L"1"});
                 shaderDefines.push_back({L"VISUTIL_USE_COMPACT_MATERIAL_EVAL", L"1"});
+                if (flags & MaterialCompileFlags::MaterialCompileDoubleSided) {
+                    shaderDefines.push_back({ L"VISUTIL_DOUBLE_SIDED_GBUFFER_RESOLVE", L"1" });
+                }
                 auto [newIter, _] = m_psoCache.emplace(
                     flags,
                     psoMgr.MakeComputePipeline(

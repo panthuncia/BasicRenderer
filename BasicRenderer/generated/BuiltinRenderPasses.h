@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE — DO NOT EDIT
+// GENERATED CODE - DO NOT EDIT
 
 struct Engine {
   struct Culling {

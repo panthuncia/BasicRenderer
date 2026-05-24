@@ -17,19 +17,22 @@ static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_JOINTS = 1u << 1;
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_WEIGHTS = 1u << 2;
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_COLOR = 1u << 3;
 
+static constexpr uint32_t CLOD_POSITION_FORMAT_FLOAT3 = 1u;
+static constexpr uint32_t CLOD_POSITION_FORMAT_FLOAT3_STRIDE_BYTES = sizeof(float) * 3u;
+
 // Embedded at byte 0 of each page-tile in the page pool.
 // Compression params moved to per-meshlet descriptors.
 // 16 x uint32 = 64 bytes.
 struct CLodPageHeader
 {
 	uint32_t meshletCount = 0;            // [0] number of meshlets in this page
-	uint32_t compressedPositionQuantExp = 0; // [1] mesh-wide quantization exponent
+	uint32_t compressedPositionQuantExp = 0; // [1] CLOD_POSITION_FORMAT_* value
 	uint32_t attributeMask = 0;           // [2] page-wide optional non-UV attribute mask
 	uint32_t uvSetCount = 0;              // [3] UV set count packed into this page
 
 	uint32_t descriptorOffset = 0;        // [4] byte offset to CLodMeshletDescriptor array
 	uint32_t uvDescriptorOffset = 0;      // [5] byte offset to CLodMeshletUvDescriptor table
-	uint32_t positionBitstreamOffset = 0; // [6] byte offset to position bitstream
+	uint32_t positionBitstreamOffset = 0; // [6] byte offset to native position stream
 	uint32_t normalArrayOffset = 0;       // [7] byte offset to normal array (oct-encoded uint32 per vertex)
 	uint32_t colorArrayOffset = 0;        // [8] byte offset to RGBA8_UNORM color array per vertex
 	uint32_t jointArrayOffset = 0;        // [9] byte offset to two-uint4 joint array per vertex
@@ -46,22 +49,22 @@ static_assert(sizeof(CLodPageHeader) == 64, "CLodPageHeader must be 64 bytes");
 struct CLodMeshletDescriptor
 {
 	// Stream offsets within the page
-	uint32_t positionBitOffset = 0;       // [0] bit offset into page position bitstream
+	uint32_t positionBitOffset = 0;       // [0] byte offset into page native position stream
 	uint32_t vertexAttributeOffset = 0;   // [1] element offset into page vertex-attribute arrays
 	uint32_t triangleByteOffset = 0;      // [2] byte offset into page triangle stream
 	uint32_t boneListOffset = 0;          // [3] uint offset into page bone-index stream
 
-	// Per-meshlet compression parameters
-	int32_t  minQx = 0;                   // [4] quantization offset X
-	int32_t  minQy = 0;                   // [5] quantization offset Y
-	int32_t  minQz = 0;                   // [6] quantization offset Z
+	// Reserved for future compact position encodings.
+	int32_t  minQx = 0;                   // [4]
+	int32_t  minQy = 0;                   // [5]
+	int32_t  minQz = 0;                   // [6]
 
-	// Packed: bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
+	// Packed: reserved:24 | vertexCount:8
 	uint32_t bitsAndVertexCount = 0;      // [7]
 	// Packed: triangleCount:16 | refinedGroupId+1:16 (0 = terminal, >0 = groupId+1)
 	uint32_t triangleCountAndRefinedGroup = 0; // [8]
 	uint32_t boneCount = 0;               // [9]
-	uint32_t reserved2 = 0;               // [10]
+	uint32_t sourceGroupLocalIndex = 0xFFFFFFFFu; // [10] temporary diagnostic source group tag
 	uint32_t reserved3 = 0;               // [11]
 
 	// Bounding sphere (object space)
@@ -97,7 +100,7 @@ struct ClusterLODGroupChunk
 	uint32_t groupVertexCount = 0;
 	uint32_t meshletCount = 0;
 	uint32_t meshletTrianglesByteCount = 0;
-	uint32_t compressedPositionQuantExp = 0;
+	uint32_t compressedPositionQuantExp = CLOD_POSITION_FORMAT_FLOAT3;
 	uint32_t compressedFlags = 0;
 };
 
@@ -110,7 +113,7 @@ struct ClusterLODGroupSegment
 	int32_t  refinedGroup;              // group id to refine into, or -1
 	uint32_t firstMeshletInPage;         // page-local start meshlet index
 	uint32_t meshletCount;               // number of meshlets in this segment
-	uint32_t pageIndex = 0;              // group-local page index (0..pageCount-1)
+	uint32_t pageIndex = 0;              // mesh-local page-map index
 };
 
 struct ClusterLODGroup
@@ -127,9 +130,60 @@ struct ClusterLODGroup
 
 	uint32_t terminalSegmentCount = 0;
 	uint32_t flags = 0;         // Bit 0: IS_VOXEL_GROUP
-	uint32_t pageMapBase = 0;   // absolute index into GroupPageMap buffer
-	uint32_t pageCount = 0;     // number of pages for this group
+	uint32_t pageMapBase = 0;   // mesh-local compatibility page-map interval base
+	uint32_t pageCount = 0;     // compatibility interval size for group-triggered streaming
 	int32_t  parentGroupId = -1; // mesh-local group index of the parent group (-1 for root)
+	float maxParentError = 0.0f; // max error of any parent group that refines into this group
+	float representationError = 0.0f; // actual render representation error; currently used by voxel groups
 };
 
 static constexpr uint32_t CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
+
+static constexpr uint32_t CLOD_VOXEL_STATIC_BONE_INDEX = 0xFFFFFFFFu;
+static constexpr uint32_t CLOD_VOXEL_MAX_CUBES_PER_CLUSTER = 128u;
+
+struct CLodVoxelGroupDescriptor
+{
+	DirectX::XMFLOAT4 aabbMinAndVoxelWidth = {}; // xyz=min, w=voxel width
+	DirectX::XMFLOAT4 aabbMaxAndError = {};      // xyz=max, w=accepted voxel error
+	uint32_t firstCluster = 0;
+	uint32_t clusterCount = 0;
+	uint32_t firstCube = 0;
+	uint32_t cubeCount = 0;
+	uint32_t resolution = 0;
+	uint32_t flags = 0;
+	uint32_t reserved0 = 0;
+	uint32_t reserved1 = 0;
+};
+static_assert(sizeof(CLodVoxelGroupDescriptor) == 64, "CLodVoxelGroupDescriptor must be 64 bytes");
+
+struct CLodVoxelClusterRecord
+{
+	uint32_t firstCube = 0;
+	uint32_t cubeCount = 0;
+	int32_t refinedGroup = -1;
+	uint32_t flags = 0;
+	DirectX::XMFLOAT4 bounds = {};
+};
+static_assert(sizeof(CLodVoxelClusterRecord) == 32, "CLodVoxelClusterRecord must be 32 bytes");
+
+struct CLodVoxelCubeRecord
+{
+	uint32_t cubeCoord = 0; // x:10 | y:10 | z:10 in 4x4x4-cell cube coordinates
+	uint32_t dominantBoneIndex = CLOD_VOXEL_STATIC_BONE_INDEX;
+	uint64_t occupancyMask = 0;
+	float opacitySum = 0.0f;
+	uint32_t firstAttribute = 0; // first of 64 CLodVoxelAttributeSample records for this cube
+	int32_t refinedGroup = -1;
+	uint32_t reserved0 = 0;
+};
+static_assert(sizeof(CLodVoxelCubeRecord) == 32, "CLodVoxelCubeRecord must be 32 bytes");
+
+struct CLodVoxelAttributeSample
+{
+	// xy = oct-encoded object-space symmetry axis, z/w = sigmaPerp/sigmaParallel.
+	DirectX::XMFLOAT4 sggxAxisAndSigmas = { 0.0f, 0.0f, 1.0e-4f, 0.5f };
+	float opacity = 0.0f;
+	DirectX::XMFLOAT2 uv = { 0.0f, 0.0f };
+};
+static_assert(sizeof(CLodVoxelAttributeSample) == 28, "CLodVoxelAttributeSample must be 28 bytes");

@@ -3,24 +3,50 @@
 #
 cmake_minimum_required (VERSION 3.10)
 
-set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+foreach(_basicrenderer_cached_tool
+    CMAKE_C_COMPILER
+    CMAKE_CXX_COMPILER
+    CMAKE_LINKER
+    CMAKE_AR
+    CMAKE_MT
+    CMAKE_RC_COMPILER
+    Z_VCPKG_CL)
+  if(DEFINED ${_basicrenderer_cached_tool}
+      AND IS_ABSOLUTE "${${_basicrenderer_cached_tool}}"
+      AND NOT EXISTS "${${_basicrenderer_cached_tool}}")
+    message(STATUS "Clearing stale cached tool path ${_basicrenderer_cached_tool}: ${${_basicrenderer_cached_tool}}")
+    unset(${_basicrenderer_cached_tool} CACHE)
+  endif()
+endforeach()
 
-# Enable Zi for debug builds on MSVC
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR CMAKE_TOOLCHAIN_FILE STREQUAL "")
+  set(_basicrenderer_vcpkg_toolchain "")
+
+  if(DEFINED ENV{VCPKG_ROOT})
+    set(_basicrenderer_vcpkg_toolchain "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+  endif()
+
+  if(CMAKE_HOST_WIN32 AND NOT EXISTS "${_basicrenderer_vcpkg_toolchain}")
+    file(GLOB _basicrenderer_vs_vcpkg_toolchains
+      "C:/Program Files/Microsoft Visual Studio/*/*/VC/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    )
+    if(_basicrenderer_vs_vcpkg_toolchains)
+      list(GET _basicrenderer_vs_vcpkg_toolchains 0 _basicrenderer_vcpkg_toolchain)
+    endif()
+  endif()
+
+  if(EXISTS "${_basicrenderer_vcpkg_toolchain}")
+    set(CMAKE_TOOLCHAIN_FILE "${_basicrenderer_vcpkg_toolchain}" CACHE FILEPATH "")
+  elseif(DEFINED ENV{VCPKG_ROOT})
+    message(FATAL_ERROR "VCPKG_ROOT is set, but the vcpkg toolchain file was not found at '${_basicrenderer_vcpkg_toolchain}'.")
+  else()
+    message(FATAL_ERROR "Could not find vcpkg. Set VCPKG_ROOT or pass -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake.")
+  endif()
+endif()
+
+# Enable debug information for MSVC builds.
 if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
-
-  if (MSVC AND NOT CMAKE_CROSSCOMPILING)
-    # Native MSVC: use PDB (Program Database) debug info
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
-      "$<IF:$<CONFIG:Debug,RelWithDebInfo>,ProgramDatabase,>"
-    )
-  elseif(MSVC AND CMAKE_CROSSCOMPILING)
-    # clang-cl cross-compile: use embedded CodeView (/Z7) since
-    # lld-link has limited PDB generation support
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
-      "$<IF:$<CONFIG:Debug,RelWithDebInfo>,Embedded,>"
-    )
-  endif()
 endif()
 
 if (POLICY CMP0091)
@@ -29,7 +55,74 @@ endif()
 
 project ("BasicRenderer")
 
+if(MSVC)
+  # Keep compiler debug info in .obj files (/Z7). This avoids large shared
+  # compiler PDBs, which can hit MSVC/PDB API limits before the final link.
+  # The linker still emits an executable PDB when /DEBUG is enabled.
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+    "$<IF:$<CONFIG:Debug,RelWithDebInfo>,Embedded,>"
+  )
+
+  foreach(_basicrenderer_debug_info_config DEBUG RELWITHDEBINFO)
+    foreach(_basicrenderer_debug_info_lang C CXX)
+      set(_basicrenderer_debug_info_flags_var
+        "CMAKE_${_basicrenderer_debug_info_lang}_FLAGS_${_basicrenderer_debug_info_config}"
+      )
+      if(DEFINED ${_basicrenderer_debug_info_flags_var})
+        string(REPLACE "/Zi" "/Z7" ${_basicrenderer_debug_info_flags_var} "${${_basicrenderer_debug_info_flags_var}}")
+        string(REPLACE "/ZI" "/Z7" ${_basicrenderer_debug_info_flags_var} "${${_basicrenderer_debug_info_flags_var}}")
+        set(${_basicrenderer_debug_info_flags_var}
+          "${${_basicrenderer_debug_info_flags_var}}"
+          CACHE STRING "MSVC ${_basicrenderer_debug_info_config} ${_basicrenderer_debug_info_lang} flags" FORCE
+        )
+      endif()
+    endforeach()
+  endforeach()
+endif()
+
 option(BASICRHI_ENABLE_RESHAPE "Enable GPU-Reshape-backed debug instrumentation in BasicRHI" OFF)
+option(BASICRENDERER_BUILD_BRNIFLY "Build the GPL-separated BRNifly NIF middleware executable" ON)
+set(BASICRENDERER_VULKAN_INCLUDE_DIR "" CACHE PATH "Preferred Vulkan SDK include directory. Leave empty to auto-detect a Vulkan SDK with VK_EXT_descriptor_heap.")
+
+function(basicrenderer_detect_vulkan_headers out_var)
+  set(_basicrenderer_vulkan_include_candidates)
+
+  if(BASICRENDERER_VULKAN_INCLUDE_DIR)
+    list(APPEND _basicrenderer_vulkan_include_candidates "${BASICRENDERER_VULKAN_INCLUDE_DIR}")
+  endif()
+
+  if(DEFINED ENV{VULKAN_SDK} AND NOT "$ENV{VULKAN_SDK}" STREQUAL "")
+    list(APPEND _basicrenderer_vulkan_include_candidates "$ENV{VULKAN_SDK}/Include")
+  endif()
+
+  if(CMAKE_HOST_WIN32)
+    file(GLOB _basicrenderer_vulkan_sdk_dirs LIST_DIRECTORIES true "C:/VulkanSDK/*")
+    list(SORT _basicrenderer_vulkan_sdk_dirs COMPARE NATURAL ORDER DESCENDING)
+    foreach(_basicrenderer_vulkan_sdk_dir IN LISTS _basicrenderer_vulkan_sdk_dirs)
+      list(APPEND _basicrenderer_vulkan_include_candidates "${_basicrenderer_vulkan_sdk_dir}/Include")
+    endforeach()
+  endif()
+
+  foreach(_basicrenderer_vulkan_include IN LISTS _basicrenderer_vulkan_include_candidates)
+    set(_basicrenderer_vulkan_core "${_basicrenderer_vulkan_include}/vulkan/vulkan_core.h")
+    if(EXISTS "${_basicrenderer_vulkan_core}")
+      file(STRINGS "${_basicrenderer_vulkan_core}" _basicrenderer_vulkan_has_descriptor_heap
+        REGEX "^#define VK_EXT_descriptor_heap 1$")
+      if(_basicrenderer_vulkan_has_descriptor_heap)
+        set(${out_var} "${_basicrenderer_vulkan_include}" PARENT_SCOPE)
+        return()
+      endif()
+    endif()
+  endforeach()
+
+  set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
+basicrenderer_detect_vulkan_headers(BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR)
+if(BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR)
+  set(Vulkan_INCLUDE_DIR "${BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR}" CACHE PATH "Vulkan include directory" FORCE)
+  message(STATUS "BasicRenderer: using Vulkan headers from ${BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR}")
+endif()
 
 if (WIN32)
   add_compile_definitions(NOMINMAX)
@@ -41,6 +134,30 @@ if (MSVC)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
 endif()
+
+set(_basicrenderer_clang_warning_options
+  -Werror
+  -Wno-unused-command-line-argument
+  -Wno-unused-function
+  -Wno-error=switch
+  -Wno-error=reorder-ctor
+  -Wno-error=unused-variable
+  -Wno-error=unused-but-set-variable
+  -Wno-error=unused-private-field
+  -Wno-error=misleading-indentation
+  -Wno-error=nonportable-include-path
+  -Wno-error=inconsistent-missing-override
+  -Wno-error=format
+  -Wno-error=implicit-float-conversion
+  -Wno-error=missing-braces
+  -Wno-error=braced-scalar-init
+  -Wno-error=pessimizing-move
+  -Wno-error=self-assign-field
+  -Wno-error=unused-lambda-capture
+)
+foreach(_basicrenderer_clang_warning_option IN LISTS _basicrenderer_clang_warning_options)
+  add_compile_options($<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${_basicrenderer_clang_warning_option}>)
+endforeach()
 
 #set(CMAKE_VS_JUST_MY_CODE_DEBUGGING ON) # Skip external code in the debugger.
 
@@ -121,4 +238,7 @@ add_subdirectory("OpenRenderGraph")
 add_subdirectory("BasicScene")
 add_subdirectory ("BasicRenderer")
 add_subdirectory("CLodCacheTool")
+if(BASICRENDERER_BUILD_BRNIFLY)
+  add_subdirectory("BRNifly")
+endif()
 add_subdirectory("UsdPlugins")

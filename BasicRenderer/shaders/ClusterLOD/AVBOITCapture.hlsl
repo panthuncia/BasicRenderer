@@ -79,6 +79,7 @@ void AVBOITCapturePSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFa
         sample.materialInputs,
         viewWS,
         float2(pixel),
+        false,
         true,
         isFrontFace,
         sample.materialFlags);

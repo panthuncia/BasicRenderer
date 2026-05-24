@@ -6,6 +6,24 @@
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
+static const uint CLOD_TELEMETRY_DISABLED_DESCRIPTOR = 0xFFFFFFFFu;
+static const uint WG_COUNTER_RASTER_PIXEL_SHADER_INVOCATIONS = 125u;
+static const uint WG_COUNTER_RASTER_PIXEL_SCISSOR_REJECTED = 126u;
+static const uint WG_COUNTER_RASTER_PIXEL_VSM_CLIPMAP_REJECTED = 129u;
+static const uint WG_COUNTER_RASTER_PIXEL_VSM_PAGE_REJECTED = 130u;
+static const uint WG_COUNTER_RASTER_PIXEL_VSM_WRITES = 131u;
+
+void CLodRasterPixelTelemetryAdd(uint counterIndex, uint value)
+{
+    if (CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX == CLOD_TELEMETRY_DISABLED_DESCRIPTOR || value == 0u)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
+    InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
 ClodViewRasterInfo WaveLoadClodViewRasterInfo(StructuredBuffer<ClodViewRasterInfo> buffer, uint viewID)
 {
     const uint4 matchMask = WaveMatch(viewID);
@@ -70,6 +88,7 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
 {
     (void)isFrontFace;
     (void)primID;
+    CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_SHADER_INVOCATIONS, 1u);
 
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     const ClodViewRasterInfo viewRasterInfo = WaveLoadClodViewRasterInfo(viewRasterInfoBuffer, input.viewID);
@@ -80,6 +99,7 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
         pixel.x >= viewRasterInfo.scissorMaxX ||
         pixel.y >= viewRasterInfo.scissorMaxY)
     {
+        CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_SCISSOR_REJECTED, 1u);
         return;
     }
 
@@ -91,6 +111,7 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     const uint clipmapIndex = CLodVisibleClusterShadowClipmapIndexFromPayload(shadowVsmPayload);
     if (clipmapIndex >= kCLodVirtualShadowClipmapCount)
     {
+        CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_VSM_CLIPMAP_REJECTED, 1u);
         return;
     }
 
@@ -98,6 +119,7 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     const CLodVirtualShadowClipmapInfo clipmapInfo = WaveLoadVirtualShadowClipmapInfo(clipmapInfos, clipmapIndex);
     if (!CLodVirtualShadowClipmapIsValid(clipmapInfo) || clipmapInfo.shadowCameraBufferIndex != input.viewID)
     {
+        CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_VSM_CLIPMAP_REJECTED, 1u);
         return;
     }
 
@@ -110,6 +132,7 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
         const uint2 blockCoord = CLodVisibleClusterVsmBlockCoordFromPayload(shadowVsmPayload);
         if (any(CLodVirtualShadowBlockCoordFromPageCoord(virtualPageCoords) != blockCoord))
         {
+            CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_VSM_PAGE_REJECTED, 1u);
             return;
         }
 
@@ -117,6 +140,7 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
         const uint2 localPageCoord = virtualPageCoords - CLodVisibleClusterVsmBlockOriginPageCoordFromPayload(shadowVsmPayload);
         if (!CLodVirtualShadowBlockActiveRectContainsPage(packedActiveRect, localPageCoord))
         {
+            CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_VSM_PAGE_REJECTED, 1u);
             return;
         }
     }
@@ -129,6 +153,7 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     if ((pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask)) !=
         (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask))
     {
+        CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_VSM_PAGE_REJECTED, 1u);
         return;
     }
 
@@ -143,4 +168,5 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
         pageTable[pageCoords],
         kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask,
         ignored);
+    CLodRasterPixelTelemetryAdd(WG_COUNTER_RASTER_PIXEL_VSM_WRITES, 1u);
 }

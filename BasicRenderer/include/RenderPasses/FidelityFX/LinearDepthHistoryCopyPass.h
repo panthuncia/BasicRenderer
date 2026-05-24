@@ -34,7 +34,7 @@ public:
             }
 
             // Once a view participates in the history copy, phase-1 occlusion can safely consume it.
-            view->gpu.lastFrameLinearDepthValid = true;
+            context.viewManager->MarkDepthHistoryValid(viewID);
             
             const auto& source = view->gpu.linearDepthMap;
             const auto& history = view->gpu.lastFrameLinearDepthMap;

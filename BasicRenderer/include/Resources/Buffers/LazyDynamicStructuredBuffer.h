@@ -76,10 +76,16 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
+        if (view == nullptr) {
+            return;
+        }
+        const uint64_t index = view->GetOffset() / m_elementSize;
+        EnsureCapacityForIndex(index);
         StageOrUpload(data, sizeof(T), view->GetOffset());
     }
 
 	void UpdateAt(uint64_t index, const T& data) {
+        EnsureCapacityForIndex(index);
         StageOrUpload(&data, sizeof(T), index * m_elementSize);
     }
 
@@ -91,6 +97,9 @@ public:
 
     void EndBulkWrite(size_t dirtyOffset, size_t dirtySize) {
         m_uploadPolicyState.CommitBulkRegion(dirtyOffset, dirtySize);
+        if (m_uploadPolicyState.HasPendingWork()) {
+            MarkUploadPolicyDirty();
+        }
     }
 
     uint64_t Size() {
@@ -109,6 +118,18 @@ public:
     void OnUploadPolicyFlush() override {
         SyncUploadPolicyState();
         m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
+    }
+
+    bool HasPendingUploadPolicyWork() const override {
+        return m_uploadPolicyState.HasPendingWork();
+    }
+
+    uint64_t GetUploadPolicyLastFlushWrites() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedWrites;
+    }
+
+    uint64_t GetUploadPolicyLastFlushBytes() const override {
+        return m_uploadPolicyState.GetLastFlushStats().flushedBytes;
     }
 
 private:
@@ -137,6 +158,21 @@ private:
     bool m_UAV = false;
 
     std::vector<EntityComponentBundle> m_metadataBundles;
+
+    void EnsureCapacityForIndex(uint64_t index) {
+        if (index >= m_capacity) {
+            uint32_t newCapacity = m_capacity > 0u ? m_capacity : 1u;
+            while (index >= static_cast<uint64_t>(newCapacity)) {
+                newCapacity *= 2u;
+            }
+            Resize(newCapacity);
+        }
+
+        const uint64_t requiredUsedCapacity = index + 1u;
+        if (requiredUsedCapacity > m_usedCapacity) {
+            m_usedCapacity = requiredUsedCapacity;
+        }
+    }
 
     void AssignDescriptorSlots(uint32_t newCapacity)
     {
@@ -220,6 +256,7 @@ private:
         const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
         if (staged) {
+            MarkUploadPolicyDirty();
             return;
         }
 

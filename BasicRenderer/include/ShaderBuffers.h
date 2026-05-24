@@ -44,12 +44,19 @@ struct CameraInfo {
 
 struct CullingCameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
+    float projX = 0.0f;
     float projY = 0.0f;
-	float zNear = 0.0f;
+    float zNear = 0.0f;
     float errorOverDistanceThreshold = 0.0f; // Threshold for (error * scale) / distance metric
-    float pad[1];
+    unsigned int isOrtho = 0;
+    float pad[3] = {};
+    DirectX::XMFLOAT4 viewRightWorld;
+    DirectX::XMFLOAT4 viewUpWorld;
+    DirectX::XMFLOAT4 viewForwardWorld;
     DirectX::XMMATRIX viewProjection;
     DirectX::XMFLOAT4 viewZ;
+    DirectX::XMMATRIX viewInverse;
+    DirectX::XMMATRIX projectionInverse;
 };
 
 struct PerFrameCB {
@@ -96,6 +103,7 @@ static constexpr unsigned int OBJECT_FLAG_REVERSE_WINDING = 1u << 0;
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
     DirectX::XMMATRIX prevModelMatrix;
+    DirectX::XMMATRIX modelInverseMatrix;
     unsigned int normalMatrixBufferIndex;
     unsigned int objectFlags;
     unsigned int pad[2];
@@ -124,7 +132,6 @@ struct PerMeshInstanceCB {
     unsigned int perMeshBufferIndex;
     unsigned int perObjectBufferIndex;
     unsigned int skinningInstanceSlot;
-    unsigned int postSkinningVertexBufferOffset;
     float skinnedBoundsScale = 1.0f;
     BoundingSphere boundingSphere = {};
 };
@@ -472,8 +479,8 @@ struct VisibleClusterInfo {
 struct SkinningInstanceGPUInfo {
     uint32_t transformOffsetMatrices = 0;
     uint32_t invBindOffsetMatrices = 0;
+    uint32_t inverseSkinOffsetMatrices = 0;
     uint32_t boneCount = 0;
-    uint32_t _pad = 0;
 };
 
 struct MeshInstanceClodOffsets
@@ -493,7 +500,6 @@ struct CLodMeshMetadata
     uint lodLevelInfoBase;
     uint lodLevelCount;
     uint maxDepth;
-    uint pad0;
 };
 
 struct CLodHierarchyLevelInfo
@@ -550,15 +556,6 @@ struct CLodNodeGpuInput {
     uint32_t numRecords = 0;
     uint64_t recordsAddress = 0;
     uint64_t recordStride = 0;
-};
-
-struct CLodDenseClusterWorkRecord {
-    uint32_t instanceIndex = 0;
-    uint32_t viewId = 0;
-    uint32_t groupIdPacked = 0;
-    uint32_t localMeshletIndex = 0;
-    uint32_t pageSlabDescriptorIndex = 0;
-    uint32_t pageSlabByteOffset = 0;
 };
 
 struct CLodMultiNodeGpuInput {
@@ -650,39 +647,14 @@ inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
 
 
 enum RootSignatureLayout {
-    PerObjectRootSignatureIndex,
-    PerMeshRootSignatureIndex,
-	ViewRootSignatureIndex,
-	SettingsRootSignatureIndex,
-	MiscUintRootSignatureIndex,
-	ResourceDescriptorIndicesRootSignatureIndex,
+    MiscUintRootParameterIndex,
+    ResourceDescriptorIndicesRootParameterIndex,
 	IndirectCommandSignatureRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
-enum PerObjectRootConstants {
-	PerObjectBufferIndex,
-	NumPerObjectRootConstants
-};
-
-enum PerMeshRootConstants {
-	PerMeshBufferIndex,
-	PerMeshInstanceBufferIndex,
-	NumPerMeshRootConstants
-};
-
-enum ViewRootConstants {
-	CurrentLightID,
-    LightViewIndex,
-	NumViewRootConstants
-};
-
-enum SettingsRootConstants {
-	EnableShadows,
-	EnablePunctualLights,
-    EnableGTAO,
-	NumSettingsRootConstants
-};
+inline constexpr uint32_t MiscUintRootSignatureIndex = 4;
+inline constexpr uint32_t ResourceDescriptorIndicesRootSignatureIndex = 5;
 
 enum MiscUintRootConstants { // Used for pass-specific one-off constants, including float payloads bit-cast on the shader side via asfloat()
     UintRootConstant0,
@@ -712,7 +684,16 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants, includ
     UintRootConstant24,
     UintRootConstant25,
     UintRootConstant26,
-	NumMiscUintRootConstants
+    UintRootConstant27,
+    MiscPerObjectBufferIndex = UintRootConstant19,
+    MiscPerMeshBufferIndex = UintRootConstant20,
+    MiscPerMeshInstanceBufferIndex = UintRootConstant21,
+    MiscCurrentLightID = UintRootConstant22,
+    MiscLightViewIndex = UintRootConstant23,
+    MiscEnableShadows = UintRootConstant24,
+    MiscEnablePunctualLights = UintRootConstant25,
+    MiscEnableGTAO = UintRootConstant26,
+	NumMiscUintRootConstants = UintRootConstant27 + 1
 };
 
 enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manually

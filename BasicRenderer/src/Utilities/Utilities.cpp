@@ -22,6 +22,7 @@
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "Materials/Material.h"
 #include "Mesh/Mesh.h"
 #include "Mesh/VertexLayout.h"
@@ -1783,7 +1784,7 @@ bool OpenFileDialog(std::wstring& selectedFile, const std::wstring& filter) {
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = fileBuffer;
     ofn.nMaxFile = MAX_PATH;
-    //ofn.lpstrFilter = filter.c_str();  // Use the provided filter
+    ofn.lpstrFilter = filter.c_str();  // Use the provided filter
     ofn.nFilterIndex = 1;  // Default to the first filter
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;  // Prevent directory change
 
@@ -1985,6 +1986,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 
 	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::CreateShared(desc);
 	depthBuffer->SetName("Depth Buffer");
+	rg::memory::SetResourceUsageHint(*depthBuffer, "Depth resources");
 
     TextureDescription downsampledDesc;
     // Pad yres and xres to power of two
@@ -2009,6 +2011,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 
     std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc);
     linearDepthBuffer->SetName("linear Depth Buffer");
+	rg::memory::SetResourceUsageHint(*linearDepthBuffer, "Depth resources");
 
 	// Projected (non-linear) depth for upscalers — R32_Float with UAV+SRV, same resolution as depth buffer
 	TextureDescription projectedDesc;
@@ -2030,6 +2033,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 
 	std::shared_ptr<PixelBuffer> projectedDepthBuffer = PixelBuffer::CreateShared(projectedDesc);
 	projectedDepthBuffer->SetName("Projected Depth Buffer");
+	rg::memory::SetResourceUsageHint(*projectedDepthBuffer, "Depth resources");
 
 	Components::DepthMap depthMap;
 	depthMap.depthMap = depthBuffer;

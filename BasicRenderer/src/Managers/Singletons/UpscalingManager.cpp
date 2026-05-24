@@ -15,9 +15,11 @@
 #include "Utilities/Utilities.h"
 
 #include <sl.h>
+#include <sl_core_api.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
 #include "rhi_interop_dx12.h"
+#include "rhi_interop_vulkan.h"
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
 PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
@@ -60,27 +62,69 @@ namespace {
         }
         return requestedMode;
     }
+
+    bool MakeStreamlineVulkanTextureResource(
+        rhi::Device device,
+        PixelBuffer* texture,
+        rhi::DescriptorSlot viewSlot,
+        VkImageLayout layout,
+        sl::Resource& resource)
+    {
+        if (!texture) {
+            return false;
+        }
+
+        rhi::VulkanResourceInfo resourceInfo{};
+        rhi::VulkanDescriptorSlotInfo slotInfo{};
+        if (!rhi::vulkan::get_resource_info(texture->GetAPIResource(), resourceInfo) ||
+            !rhi::vulkan::get_descriptor_slot_info(device, viewSlot, slotInfo)) {
+            return false;
+        }
+
+        VkImage image = rhi::vulkan::from_native_void<VkImage>(resourceInfo.resource);
+        VkImageView view = rhi::vulkan::from_native_void<VkImageView>(slotInfo.imageView);
+        if (image == VK_NULL_HANDLE || view == VK_NULL_HANDLE) {
+            return false;
+        }
+
+        resource = sl::Resource{ sl::ResourceType::eTex2d, image, nullptr, view, static_cast<uint32_t>(layout) };
+        resource.width = resourceInfo.width;
+        resource.height = resourceInfo.height;
+        resource.nativeFormat = slotInfo.nativeFormat != VK_FORMAT_UNDEFINED ? slotInfo.nativeFormat : resourceInfo.nativeFormat;
+        resource.mipLevels = slotInfo.levelCount != 0 ? slotInfo.levelCount : resourceInfo.mipLevels;
+        resource.arrayLayers = slotInfo.layerCount != 0 ? slotInfo.layerCount : resourceInfo.arrayLayers;
+        resource.flags = resourceInfo.flags;
+        resource.usage = resourceInfo.usage;
+        return resource.nativeFormat != VK_FORMAT_UNDEFINED;
+    }
+
 }
 
-ffxFunctions ffxModule;
-
 bool CheckDLSSSupport(rhi::Device dev, rhi::Backend backend) {
-    if (backend != rhi::Backend::D3D12) {
-        return false;
-    }
-
-    IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
-    if (!ad) {
-        return false;
-    }
-    DXGI_ADAPTER_DESC desc{};
-    if (FAILED(ad->GetDesc(&desc))) {
-        return false;
-    }
-
     sl::AdapterInfo ai{};
-    ai.deviceLUID = reinterpret_cast<uint8_t*>(&desc.AdapterLuid);
-    ai.deviceLUIDSizeInBytes = sizeof(LUID);
+
+    if (backend == rhi::Backend::D3D12) {
+        IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
+        if (!ad) {
+            return false;
+        }
+        DXGI_ADAPTER_DESC desc{};
+        if (FAILED(ad->GetDesc(&desc))) {
+            return false;
+        }
+        ai.deviceLUID = reinterpret_cast<uint8_t*>(&desc.AdapterLuid);
+        ai.deviceLUIDSizeInBytes = sizeof(LUID);
+    }
+    else if (backend == rhi::Backend::Vulkan) {
+        VkPhysicalDevice physicalDevice = rhi::vulkan::get_physical_device(dev);
+        if (physicalDevice == VK_NULL_HANDLE) {
+            return false;
+        }
+        ai.vkPhysicalDevice = physicalDevice;
+    }
+    else {
+        return false;
+    }
 
     sl::Result res = sl::Result::eOk;
     if (SL_FAILED(res, slIsFeatureSupported(sl::kFeatureDLSS, ai))) {
@@ -122,15 +166,6 @@ void UpscalingManager::InitializeAdapter()
         return;
     }
 
-    if (backend != rhi::Backend::D3D12) {
-        m_dlssSupported = false;
-        if (m_upscalingMode == UpscalingMode::DLSS) {
-            m_upscalingMode = UpscalingMode::None;
-        }
-        spdlog::warn("UpscalingManager::InitializeAdapter disabled DLSS because Streamline Vulkan integration is not available in this workspace.");
-        return;
-    }
-
     auto dev = DeviceManager::GetInstance().GetDevice();
 	m_dlssSupported = CheckDLSSSupport(dev, backend); // TODO: Query from RHI
 }
@@ -150,31 +185,36 @@ void UpscalingManager::ProxyDevice() { // TODO: RHI now handles this internally
 }
 
 bool UpscalingManager::InitFFX() {
+    if (m_fsrIntialized) {
+        Shutdown();
+    }
+	m_fsrUpscalingContext = nullptr;
+
     m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
     m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
 	const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
     auto outputRes = m_getOutputRes();
-    auto renderRes = m_getRenderRes();
-	const wchar_t* moduleName = backend == rhi::Backend::Vulkan ? L"amd_fidelityfx_vk.dll" : L"amd_fidelityfx_dx12.dll";
-	auto module = LoadLibrary(moduleName);
-    if (module) {
-        ffxLoadFunctions(&ffxModule, module);
 
-        ffx::CreateContextDescUpscale createUpscaling;
-        createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
-        createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
-        createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
+    ffx::CreateContextDescUpscale createUpscaling;
+    createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
+    createUpscaling.maxRenderSize = { outputRes.x, outputRes.y };
+    createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
 
-        if (!fidelityfx_backend::api::CreateUpscaleContext(m_fsrUpscalingContext, backend, DeviceManager::GetInstance().GetDevice(), createUpscaling)) {
-            spdlog::error("UpscalingManager::InitFFX failed to create context for backend {}", static_cast<uint32_t>(backend));
-            return false;
-        }
-		m_fsrIntialized = true;
-
-		return true;
+    if (!fidelityfx_backend::api::CreateUpscaleContext(m_fsrUpscalingContext, backend, DeviceManager::GetInstance().GetDevice(), createUpscaling)) {
+        spdlog::error("UpscalingManager::InitFFX failed to create context for backend {}", static_cast<uint32_t>(backend));
+		m_fsrUpscalingContext = nullptr;
+        return false;
     }
-	spdlog::error("UpscalingManager::InitFFX failed to load {}", ws2s(moduleName));
-	return false;
+	m_fsrIntialized = true;
+
+	return true;
+}
+
+bool UpscalingManager::EnsureFSRContext() {
+    if (m_fsrIntialized && m_fsrUpscalingContext != nullptr) {
+        return true;
+    }
+    return InitFFX();
 }
 
 DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
@@ -196,16 +236,23 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
         break;
     }
     case UpscalingMode::FSR3: {
+        if (!EnsureFSRContext()) {
+            return { 0.0f, 0.0f };
+        }
+
         auto displayWidth = m_getOutputRes().x;
         auto renderWidth = m_getRenderRes().x;
         float jitterX = 0.0f, jitterY = 0.0f;
-        ffx::ReturnCode                     retCode;
-        int32_t                             jitterPhaseCount;
+        int32_t jitterPhaseCount = 1;
         ffx::QueryDescUpscaleGetJitterPhaseCount getJitterPhaseDesc{};
         getJitterPhaseDesc.displayWidth = displayWidth;
         getJitterPhaseDesc.renderWidth = renderWidth;
         getJitterPhaseDesc.pOutPhaseCount = &jitterPhaseCount;
-        retCode = ffx::Query(m_fsrUpscalingContext, getJitterPhaseDesc);
+        ffx::ReturnCode retCode = fidelityfx_backend::api::Query(m_fsrUpscalingContext, getJitterPhaseDesc);
+        if (retCode != ffx::ReturnCode::Ok || jitterPhaseCount <= 0) {
+            spdlog::warn("UpscalingManager::GetJitter failed to query FSR jitter phase count: {}", static_cast<uint32_t>(retCode));
+            return { 0.0f, 0.0f };
+        }
 
         ffx::QueryDescUpscaleGetJitterOffset getJitterOffsetDesc{};
         getJitterOffsetDesc.index = frameNumber % jitterPhaseCount;
@@ -213,7 +260,11 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
         getJitterOffsetDesc.pOutX = &jitterX;
         getJitterOffsetDesc.pOutY = &jitterY;
 
-        retCode = ffx::Query(m_fsrUpscalingContext, getJitterOffsetDesc);
+        retCode = fidelityfx_backend::api::Query(m_fsrUpscalingContext, getJitterOffsetDesc);
+        if (retCode != ffx::ReturnCode::Ok) {
+            spdlog::warn("UpscalingManager::GetJitter failed to query FSR jitter offset: {}", static_cast<uint32_t>(retCode));
+            return { 0.0f, 0.0f };
+        }
 
         return { jitterX, jitterY };
     }
@@ -224,15 +275,6 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 }
 
 bool UpscalingManager::InitSL() {
-    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
-        m_dlssSupported = false;
-        if (m_upscalingMode == UpscalingMode::DLSS) {
-            m_upscalingMode = UpscalingMode::None;
-        }
-        spdlog::warn("UpscalingManager::InitSL skipped because Streamline Vulkan integration is not available in this workspace.");
-        return false;
-    }
-
     if (!IsStreamlineEnabledSetting()) {
         m_dlssSupported = false;
         if (m_upscalingMode == UpscalingMode::DLSS) {
@@ -296,6 +338,12 @@ void UpscalingManager::Setup() {
         break;
     }
     case UpscalingMode::FSR3: {
+        if (!EnsureFSRContext()) {
+            spdlog::error("UpscalingManager::Setup failed to initialize FSR context; using output resolution as render resolution");
+            SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(outputRes);
+            break;
+        }
+
         DirectX::XMUINT2 optimalRenderRes = {};
         ffxQueryDescUpscaleGetRenderResolutionFromQualityMode queryDesc{};
         queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
@@ -305,7 +353,11 @@ void UpscalingManager::Setup() {
         queryDesc.pOutRenderWidth = &optimalRenderRes.x;
         queryDesc.pOutRenderHeight = &optimalRenderRes.y;
 
-		ffx::Query(m_fsrUpscalingContext, queryDesc);
+        const ffx::ReturnCode queryResult = fidelityfx_backend::api::Query(m_fsrUpscalingContext, queryDesc);
+        if (queryResult != ffx::ReturnCode::Ok || optimalRenderRes.x == 0 || optimalRenderRes.y == 0) {
+            spdlog::error("UpscalingManager::Setup failed to query FSR render resolution: {}", static_cast<uint32_t>(queryResult));
+            optimalRenderRes = outputRes;
+        }
 
         SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(optimalRenderRes);
         
@@ -315,8 +367,9 @@ void UpscalingManager::Setup() {
 }
 
 void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
-    if (DeviceManager::GetInstance().GetBackend() != rhi::Backend::D3D12) {
-        spdlog::warn("UpscalingManager::EvaluateDLSS called on unsupported backend {}; skipping.", static_cast<uint32_t>(DeviceManager::GetInstance().GetBackend()));
+    const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+    if (backend != rhi::Backend::D3D12 && backend != rhi::Backend::Vulkan) {
+        spdlog::warn("UpscalingManager::EvaluateDLSS called on unsupported backend {}; skipping.", static_cast<uint32_t>(backend));
         return;
     }
 
@@ -353,7 +406,7 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     StoreFloat4x4(camera->info.prevUnjitteredProjection, cameraViewToClipPrev);
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
-	consts.jitterOffset.x = camera->jitterPixelSpace.x;
+    consts.jitterOffset.x = camera->jitterPixelSpace.x;
     consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
     // The motion buffer stores currentNdc - prevNdc with unjittered projections.
@@ -383,34 +436,100 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
         spdlog::error("Failed to set DLSS constants");
     }
 
-    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource colorOut = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pUpscaledHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource depth = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource mvec = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pMotionVectors->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    sl::Resource colorIn{};
+    sl::Resource colorOut{};
+    sl::Resource depth{};
+    sl::Resource mvec{};
+    if (backend == rhi::Backend::Vulkan) {
+        rhi::Device device = DeviceManager::GetInstance().GetDevice();
+        const rhi::DescriptorSlot colorInView = pHDRTarget->GetSRVInfo(0).slot;
+        const rhi::DescriptorSlot colorOutView = pUpscaledHDRTarget->HasUAVShaderVisible()
+            ? pUpscaledHDRTarget->GetUAVShaderVisibleInfo(0).slot
+            : pUpscaledHDRTarget->GetSRVInfo(0).slot;
+        const rhi::DescriptorSlot depthView = pDepthTexture->GetSRVInfo(0).slot;
+        const rhi::DescriptorSlot motionVectorView = pMotionVectors->GetSRVInfo(0).slot;
+
+        if (!MakeStreamlineVulkanTextureResource(device, pHDRTarget, colorInView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, colorIn) ||
+            !MakeStreamlineVulkanTextureResource(device, pUpscaledHDRTarget, colorOutView, VK_IMAGE_LAYOUT_GENERAL, colorOut) ||
+            !MakeStreamlineVulkanTextureResource(device, pDepthTexture, depthView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, depth) ||
+            !MakeStreamlineVulkanTextureResource(device, pMotionVectors, motionVectorView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mvec)) {
+            spdlog::error("DLSS evaluation skipped because Vulkan Streamline resource metadata could not be resolved.");
+            return;
+        }
+    }
+    else {
+        colorIn = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        colorOut = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pUpscaledHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        depth = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        mvec = sl::Resource{ sl::ResourceType::eTex2d, rhi::dx12::get_resource(pMotionVectors->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    }
     //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
 
     sl::Extent renderExtent = { 0, 0, renderRes.x, renderRes.y };
     sl::Extent upscaleExtent = { 0, 0, outputRes.x, outputRes.y };
 
-    sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
-    sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &upscaleExtent };
-    sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
-    sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
+    void* nativeCommandList = backend == rhi::Backend::Vulkan
+        ? static_cast<void*>(rhi::vulkan::get_cmd_list(commandList))
+        : static_cast<void*>(rhi::dx12::get_cmd_list(commandList));
 
-    const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
+    if (backend == rhi::Backend::Vulkan) {
+        const sl::ResourceTag tags[] = {
+            sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+            sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &upscaleExtent },
+            sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+            sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+        };
+        if (SL_FAILED(result, slSetTagForFrame(*frameToken, myViewport, tags, _countof(tags), nativeCommandList))) {
+            spdlog::error("Failed to tag Vulkan DLSS resources!");
+            return;
+        }
 
-    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), rhi::dx12::get_cmd_list(commandList))))
-    {
-        spdlog::error("DLSS evaluation failed!");
+        const sl::BaseStructure* inputs[] = { &myViewport };
+        if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), nativeCommandList)))
+        {
+            spdlog::error("DLSS evaluation failed!");
+        }
+
+        rhi::TextureBarrier streamlineOutputBarrier{};
+        streamlineOutputBarrier.texture = pUpscaledHDRTarget->GetAPIResource().GetHandle();
+        streamlineOutputBarrier.range = { 0, pUpscaledHDRTarget->GetMipLevels(), 0, pUpscaledHDRTarget->GetArraySize() };
+        streamlineOutputBarrier.beforeSync = rhi::ResourceSyncState::ClearUnorderedAccessView;
+        streamlineOutputBarrier.afterSync = rhi::ResourceSyncState::AllShading | rhi::ResourceSyncState::ClearUnorderedAccessView;
+        streamlineOutputBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccessClear;
+        streamlineOutputBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess | rhi::ResourceAccessType::UnorderedAccessClear;
+        streamlineOutputBarrier.beforeLayout = rhi::ResourceLayout::UnorderedAccess;
+        streamlineOutputBarrier.afterLayout = rhi::ResourceLayout::UnorderedAccess;
+
+        rhi::BarrierBatch streamlineOutputBatch{};
+        streamlineOutputBatch.textures = { &streamlineOutputBarrier };
+        commandList.Barriers(streamlineOutputBatch);
     }
     else
     {
-        // IMPORTANT: Host is responsible for restoring state on the command list used
-        //restoreState(myCmdList); ??
+        sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
+        sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &upscaleExtent };
+        sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
+        sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent };
+
+        const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
+        if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), nativeCommandList)))
+        {
+            spdlog::error("DLSS evaluation failed!");
+        }
+        else
+        {
+            // IMPORTANT: Host is responsible for restoring state on the command list used
+            //restoreState(myCmdList); ??
+        }
     }
 }
 
 void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    if (!EnsureFSRContext()) {
+        spdlog::warn("UpscalingManager::EvaluateFSR3 skipped dispatch because the FSR context is not initialized");
+        return;
+    }
+
     ffx::DispatchDescUpscale dispatchUpscale{};
     const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
 
@@ -420,23 +539,23 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
         return;
     }
 
-    dispatchUpscale.color = fidelityfx_backend::api::GetResource(backend, pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
-    dispatchUpscale.depth = fidelityfx_backend::api::GetResource(backend, pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
-    dispatchUpscale.motionVectors = fidelityfx_backend::api::GetResource(backend, pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMMON);
-    dispatchUpscale.output = fidelityfx_backend::api::GetResource(backend, pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_COMMON);
+    dispatchUpscale.color = fidelityfx_backend::api::GetResource(backend, pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchUpscale.depth = fidelityfx_backend::api::GetResource(backend, pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchUpscale.motionVectors = fidelityfx_backend::api::GetResource(backend, pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    dispatchUpscale.output = fidelityfx_backend::api::GetResource(backend, pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
     //dispatchUpscale.reactive;
     //dispatchUpscale.transparencyAndComposition;
 
-	auto renderRes = m_getRenderRes();
-	auto outputRes = m_getOutputRes();
+    auto renderRes = m_getRenderRes();
+    auto outputRes = m_getOutputRes();
 
     // Jitter is calculated earlier in the frame using a callback from the camera update
-    dispatchUpscale.jitterOffset.x = camera->jitterPixelSpace.x;
-    dispatchUpscale.jitterOffset.y = camera->jitterPixelSpace.y;
-	// Motion vectors are curNDC - prevNDC in [-1,1]. FSR expects prevScreenPixel - curScreenPixel.
-	// X negated for direction convention; Y positive because direction flip and NDC-Y-up→screen-Y-down cancel.
-	// Divide by 2 because NDC spans 2 units for full screen width/height.
-	dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x) / 2.0f;
+    dispatchUpscale.jitterOffset.x = -camera->jitterPixelSpace.x;
+    dispatchUpscale.jitterOffset.y = -camera->jitterPixelSpace.y;
+    // Motion vectors are curNDC - prevNDC in [-1,1]. FSR expects prevScreenPixel - curScreenPixel.
+    // X negates direction. Y is positive because direction flip and NDC-Y-up to screen-Y-down cancel.
+    // Divide by 2 because NDC spans 2 units for full screen width/height.
+    dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x) / 2.0f;
     dispatchUpscale.motionVectorScale.y = static_cast<float>(renderRes.y) / 2.0f;
     dispatchUpscale.reset = false;
     dispatchUpscale.enableSharpening = false;
@@ -454,11 +573,14 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
     // Setup camera params as required
     dispatchUpscale.cameraFovAngleVertical = camera->fov;
 
-    // Actual physical distances; FFX_UPSCALE_ENABLE_DEPTH_INVERTED handles the reverse-Z layout.
-    dispatchUpscale.cameraNear = camera->zNear;
-    dispatchUpscale.cameraFar = camera->zFar;
+    // FFX expects reversed-Z dispatch planes in reversed order when DEPTH_INVERTED is set.
+    dispatchUpscale.cameraNear = camera->zFar;
+    dispatchUpscale.cameraFar = camera->zNear;
 
-    ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
+    const ffx::ReturnCode dispatchResult = fidelityfx_backend::api::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
+    if (dispatchResult != ffx::ReturnCode::Ok) {
+        spdlog::error("UpscalingManager::EvaluateFSR3 dispatch failed: {}", static_cast<uint32_t>(dispatchResult));
+    }
 }
 
 void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Components::Camera* camera, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
@@ -490,7 +612,64 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
         .depth = 1,
     };
 
+    const bool graphOwnsCopyBarriers = DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan
+        && m_upscalingMode == UpscalingMode::None;
+
+    rhi::TextureSubresourceRange copyRange{};
+    copyRange.baseMip = mipSlice;
+    copyRange.mipCount = 1;
+    copyRange.baseLayer = arraySlice;
+    copyRange.layerCount = 1;
+
+    if (!graphOwnsCopyBarriers) {
+        rhi::TextureBarrier preCopyBarriers[2]{};
+        preCopyBarriers[0].texture = src.texture;
+        preCopyBarriers[0].range = copyRange;
+        preCopyBarriers[0].beforeSync = rhi::ResourceSyncState::All;
+        preCopyBarriers[0].afterSync = rhi::ResourceSyncState::Copy;
+        preCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::Common;
+        preCopyBarriers[0].afterAccess = rhi::ResourceAccessType::CopySource;
+        preCopyBarriers[0].beforeLayout = rhi::ResourceLayout::Common;
+        preCopyBarriers[0].afterLayout = rhi::ResourceLayout::CopySource;
+        preCopyBarriers[1].texture = dst.texture;
+        preCopyBarriers[1].range = copyRange;
+        preCopyBarriers[1].beforeSync = rhi::ResourceSyncState::All;
+        preCopyBarriers[1].afterSync = rhi::ResourceSyncState::Copy;
+        preCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::Common;
+        preCopyBarriers[1].afterAccess = rhi::ResourceAccessType::CopyDest;
+        preCopyBarriers[1].beforeLayout = rhi::ResourceLayout::Common;
+        preCopyBarriers[1].afterLayout = rhi::ResourceLayout::CopyDest;
+
+        rhi::BarrierBatch preCopyBatch{};
+        preCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(preCopyBarriers, 2);
+        commandList.Barriers(preCopyBatch);
+    }
+
     commandList.CopyTextureRegion(dst, src);
+
+    if (!graphOwnsCopyBarriers) {
+        rhi::TextureBarrier postCopyBarriers[2]{};
+        postCopyBarriers[0].texture = src.texture;
+        postCopyBarriers[0].range = copyRange;
+        postCopyBarriers[0].beforeSync = rhi::ResourceSyncState::Copy;
+        postCopyBarriers[0].afterSync = rhi::ResourceSyncState::All;
+        postCopyBarriers[0].beforeAccess = rhi::ResourceAccessType::CopySource;
+        postCopyBarriers[0].afterAccess = rhi::ResourceAccessType::Common;
+        postCopyBarriers[0].beforeLayout = rhi::ResourceLayout::CopySource;
+        postCopyBarriers[0].afterLayout = rhi::ResourceLayout::Common;
+        postCopyBarriers[1].texture = dst.texture;
+        postCopyBarriers[1].range = copyRange;
+        postCopyBarriers[1].beforeSync = rhi::ResourceSyncState::Copy;
+        postCopyBarriers[1].afterSync = rhi::ResourceSyncState::All;
+        postCopyBarriers[1].beforeAccess = rhi::ResourceAccessType::CopyDest;
+        postCopyBarriers[1].afterAccess = rhi::ResourceAccessType::Common;
+        postCopyBarriers[1].beforeLayout = rhi::ResourceLayout::CopyDest;
+        postCopyBarriers[1].afterLayout = rhi::ResourceLayout::Common;
+
+        rhi::BarrierBatch postCopyBatch{};
+        postCopyBatch.textures = rhi::Span<rhi::TextureBarrier>(postCopyBarriers, 2);
+        commandList.Barriers(postCopyBatch);
+    }
 }
 
 void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
@@ -511,8 +690,10 @@ void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components:
 
 void UpscalingManager::Shutdown() {
     if (m_fsrIntialized) {
-        ffx::DestroyContext(m_fsrUpscalingContext);
+        fidelityfx_backend::api::DestroyContext(m_fsrUpscalingContext);
         m_fsrIntialized = false;
     }
+	m_fsrUpscalingContext = nullptr;
+	fidelityfx_backend::api::UnloadModule();
 	// RHI now handles streamline internally
 }

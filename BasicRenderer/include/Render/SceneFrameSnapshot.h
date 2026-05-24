@@ -45,6 +45,8 @@ struct SceneFrameSnapshot {
     uint64_t sourceFrameNumber = 0;
     Components::DrawStats drawStats;
     Components::GlobalMeshLibrary meshLibrary;
+    bool drawStatsChanged = true;
+    bool meshLibraryChanged = true;
 
     // Complete set of alive entity IDs (for stale detection)
     std::unordered_set<StableSceneID> aliveRenderableIDs;
@@ -55,9 +57,14 @@ struct SceneFrameSnapshot {
     std::vector<SnapshotRenderable> changedRenderables;
     std::vector<SnapshotCamera> changedCameras;
     std::vector<SnapshotLight> changedLights;
+    std::vector<StableSceneID> removedRenderableIDs;
+    std::vector<StableSceneID> removedCameraIDs;
+    std::vector<StableSceneID> removedLightIDs;
 
     bool hasPrimaryCamera = false;
     StableSceneID primaryCameraStableID = 0;
+    bool aliveSetsChanged = true;
+    bool aliveSetsComplete = true;
 };
 
 struct SceneOverlapStatus {

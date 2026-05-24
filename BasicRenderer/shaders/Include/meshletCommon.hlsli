@@ -55,12 +55,12 @@ struct MeshletSetup
     uint prevPostSkinningBufferOffset;
     uint groupMeshletTrianglesByteOffset; // Non-CLod triangle buffer offset
 
-    // Per-meshlet compression from CLodMeshletDescriptor
+    // Per-meshlet page stream addressing from CLodMeshletDescriptor
     uint bitsX;
     uint bitsY;
     uint bitsZ;
     int3 minQ;
-    uint positionBitOffset;     // bit offset within page position bitstream
+    uint positionBitOffset;     // byte offset within page position stream
     uint vertexAttributeOffset; // element offset within page vertex-attribute arrays
     uint triangleByteOffset;    // byte offset within page triangle stream
     uint boneListOffset;        // uint offset within page bone-index stream
@@ -107,9 +107,6 @@ bool InitializeMeshletInternal(
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     setup.meshBuffer = perMeshBuffer[meshInstance.perMeshBufferIndex];
@@ -172,12 +169,11 @@ bool InitializeMeshletInternal(
     return true;
 }
 
-// per-draw invocation (mesh shader path uses global root constants set externally)
-// Mesh shader path (root constant perMeshInstanceBufferIndex already set)
+// per-draw invocation (mesh shader path uses root constants set externally)
 bool InitializeMeshlet(uint meshletLocalIndex, out MeshletSetup setup)
 {
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer meshInstance = meshInstanceBuffer[perMeshInstanceBufferIndex];
+    PerMeshInstanceBuffer meshInstance = meshInstanceBuffer[GetRootPerMeshInstanceBufferIndex()];
     return InitializeMeshletInternal(meshletLocalIndex, meshInstance, setup);
 }
 
@@ -189,24 +185,8 @@ bool InitializeMeshletFromDrawCall(uint drawCallID, uint meshletLocalIndex, out 
     return InitializeMeshletInternal(meshletLocalIndex, meshInstance, setup);
 }
 
-uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
+uint3 DecodeTriangleFromBuffer(ByteAddressBuffer triangleBuffer, uint triOffset)
 {
-    ByteAddressBuffer triangleBuffer;
-    uint triOffset;
-
-    if (setup.pagePoolSlabDescriptorIndex != 0u)
-    {
-        // CLod path: triangle stream in slab, addressed by per-meshlet descriptor
-        triangleBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
-        triOffset = setup.triangleStreamBase + setup.triangleByteOffset + triLocalIndex * 3;
-    }
-    else
-    {
-        // Non-CLod path: original triangle buffer
-        triangleBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
-        triOffset = setup.groupMeshletTrianglesByteOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
-    }
-
     uint alignedOffset = (triOffset / 4) * 4;
     uint firstWord = triangleBuffer.Load(alignedOffset);
     uint byteOffset = triOffset % 4;
@@ -238,6 +218,13 @@ uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
     }
 
     return uint3(b0, b1, b2);
+}
+
+uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
+{
+    ByteAddressBuffer triangleBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint triOffset = setup.triangleStreamBase + setup.triangleByteOffset + triLocalIndex * 3;
+    return DecodeTriangleFromBuffer(triangleBuffer, triOffset);
 }
 
 CLodMeshletUvDescriptor LoadMeshletUvDescriptorAbsolute(MeshletSetup setup, uint uvSetIndex)

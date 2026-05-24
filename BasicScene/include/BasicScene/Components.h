@@ -120,6 +120,7 @@ namespace Components {
     struct SceneNode {};
     struct GlobalMeshLibrary {
         std::unordered_map<uint64_t, std::weak_ptr<Mesh>> meshes;
+        uint64_t generation = 0;
     };
 
     struct DrawStats {
@@ -142,6 +143,17 @@ namespace Components {
     /// Set by the transform system on entities whose world Matrix was recomputed this frame.
     /// Consumed by the snapshot export to identify changed entities.
     struct TransformUpdatedThisFrame {};
+
+    /// Set when render-facing non-transform data changed.
+    /// Consumed and cleared by the scene snapshot export.
+    struct RenderBridgeContentDirty {};
+
+    struct RenderBridgeSceneDiff {
+        std::vector<uint64_t> removedRenderableIDs;
+        std::vector<uint64_t> removedCameraIDs;
+        std::vector<uint64_t> removedLightIDs;
+        uint64_t generation = 0;
+    };
 
     struct Name {
         Name() = default;

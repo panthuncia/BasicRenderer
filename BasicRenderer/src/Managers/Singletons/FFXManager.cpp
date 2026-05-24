@@ -4,15 +4,14 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
 #include "FidelityFX/FfxBackendAdapters.h"
-#include "ThirdParty/FFX/ffx_api_loader.h"
 #include "ThirdParty/FFX/host/ffx_sssr.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
 #include "Render/RenderContext.h"
 
-extern ffxFunctions ffxModule;
-
 bool FFXManager::InitFFX() {
+    Shutdown();
+
     m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
     m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
     auto outputRes = m_getOutputRes();
@@ -31,13 +30,25 @@ bool FFXManager::InitFFX() {
     sssrDesc.normalsHistoryBufferFormat = FFX_SURFACE_FORMAT_R32G32B32A32_TYPELESS;
 	sssrDesc.renderSize = { renderRes.x, renderRes.y };
 
-    ffxSssrContextCreate(&m_sssrContext, &sssrDesc);
+    const FfxErrorCode createResult = ffxSssrContextCreate(&m_sssrContext, &sssrDesc);
+    if (createResult != FFX_OK) {
+        spdlog::error("FFXManager::InitFFX failed to create SSSR context for backend {} error {}", static_cast<uint32_t>(backend), static_cast<int>(createResult));
+        Shutdown();
+        return false;
+    }
+
+    m_sssrContextCreated = true;
 
     return true;
 }
 
 void FFXManager::Shutdown() {
-	ffxSssrContextDestroy(&m_sssrContext);
+    if (m_sssrContextCreated) {
+		ffxSssrContextDestroy(&m_sssrContext);
+        m_sssrContext = {};
+        m_sssrContextCreated = false;
+    }
+    m_backendInterface = {};
     if (m_pScratchMemory) {
         free(m_pScratchMemory);
         m_pScratchMemory = nullptr;
@@ -56,6 +67,9 @@ void FFXManager::EvaluateSSSR(rhi::CommandList& commandList,
     PixelBuffer* pReflectionsTarget) {
 
     const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
+    if (!m_sssrContextCreated) {
+        return;
+    }
 
 	FfxSssrDispatchDescription sssrDesc{};
     sssrDesc.brdfTexture = fidelityfx_backend::host::GetResource(backend, pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);

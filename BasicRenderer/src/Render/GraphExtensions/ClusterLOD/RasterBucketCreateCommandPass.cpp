@@ -13,12 +13,14 @@ RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
     std::shared_ptr<Buffer> histogramIndirectCommand,
     std::shared_ptr<Buffer> occlusionReplayStateBuffer,
     std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
-    bool runWhenComputeSWRasterEnabledOnly)
+    bool runWhenComputeSWRasterEnabledOnly,
+    bool patchReplayNodeInputs)
     : m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer))
     , m_histogramIndirectCommand(std::move(histogramIndirectCommand))
     , m_occlusionReplayStateBuffer(std::move(occlusionReplayStateBuffer))
     , m_occlusionNodeGpuInputsBuffer(std::move(occlusionNodeGpuInputsBuffer))
-    , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly) {
+    , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly)
+    , m_patchReplayNodeInputs(patchReplayNodeInputs) {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/clodUtil.hlsl",
@@ -28,8 +30,12 @@ RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
 }
 
 void RasterBucketCreateCommandPass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithShaderResource(m_visibleClustersCounterBuffer, m_occlusionReplayStateBuffer)
-        .WithUnorderedAccess(m_histogramIndirectCommand, m_occlusionNodeGpuInputsBuffer);
+    builder->WithShaderResource(m_visibleClustersCounterBuffer)
+        .WithUnorderedAccess(m_histogramIndirectCommand);
+    if (m_patchReplayNodeInputs) {
+        builder->WithShaderResource(m_occlusionReplayStateBuffer)
+            .WithUnorderedAccess(m_occlusionNodeGpuInputsBuffer);
+    }
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
@@ -52,8 +58,8 @@ PassReturn RasterBucketCreateCommandPass::Execute(PassExecutionContext& executio
     uint32_t rc[NumMiscUintRootConstants] = {};
     rc[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    rc[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
     rc[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
 
     commandList.PushConstants(

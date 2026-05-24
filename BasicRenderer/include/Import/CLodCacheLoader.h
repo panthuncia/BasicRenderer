@@ -4,6 +4,7 @@
 #include <string>
 
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usd/timeCode.h>
 #include <pxr/usd/usdGeom/mesh.h>
 
 #include "Mesh/ClusterLODTypes.h"
@@ -14,12 +15,21 @@ struct MeshCacheIdentity {
 	std::string sourceIdentifier;
 	std::string primPath;
 	std::string subsetName;
+	bool doubleSidedVoxelSourceNormals = false;
 };
 
 MeshCacheIdentity BuildIdentity(
 	const pxr::UsdGeomMesh& mesh,
 	const pxr::UsdStageRefPtr& stage,
-	const std::string& subsetName);
+	const std::string& subsetName,
+	pxr::UsdTimeCode geomTimeCode = pxr::UsdTimeCode::Default());
+
+MeshCacheIdentity BuildIdentity(
+	const pxr::UsdGeomMesh& mesh,
+	const pxr::UsdStageRefPtr& stage,
+	const std::string& subsetName,
+	pxr::UsdTimeCode geomTimeCode,
+	const std::string& sourceIdentifierOverride);
 
 std::optional<ClusterLODPrebuiltData> TryLoadPrebuilt(const MeshCacheIdentity& identity);
 bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload);

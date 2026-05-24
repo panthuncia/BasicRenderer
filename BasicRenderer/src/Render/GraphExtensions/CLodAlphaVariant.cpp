@@ -568,7 +568,7 @@ void CLodAlphaVariant::AppendSinglePassStructuralPasses(
                         extension.m_deepVisibilityOverflowCounterBuffer,
                         slabGroup,
                         MakeVariantResourceName(traits, "Reyes Deep Visibility View Raster Info Buffer"),
-                        CLodReyesPatchVisibilityIndexBase(extension.m_maxVisibleClusters))));
+                        CLodReyesPatchVisibilityIndexBase(extension.m_visibleClusterCapacity))));
         }
     }
 
@@ -836,7 +836,7 @@ void CLodAlphaVariant::AppendSinglePassResolveTail(
             extension.m_deepVisibilityCounterBuffer,
             extension.m_deepVisibilityOverflowCounterBuffer,
             extension.m_deepVisibilityStatsBuffer,
-            CLodReyesPatchVisibilityIndexBase(extension.m_maxVisibleClusters)));
+            CLodReyesPatchVisibilityIndexBase(extension.m_visibleClusterCapacity)));
     resolveDeepVisibilityPassDesc.At(MakeTransparentCompositeInsertPoint());
     outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
 }

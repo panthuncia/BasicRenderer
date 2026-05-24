@@ -90,13 +90,10 @@ public:
 
 		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 
-		unsigned int settings[NumSettingsRootConstants] = {};
-		settings[EnableShadows] = getShadowsEnabled();
-		settings[EnablePunctualLights] = getPunctualLightingEnabled();
-		settings[EnableGTAO] = m_gtaoEnabled;
+		unsigned int settings[] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0,
-			SettingsRootSignatureIndex, 0,
-			NumSettingsRootConstants, settings);
+			MiscUintRootSignatureIndex, MiscEnableShadows,
+			3, settings);
 
 		uint32_t w = context.renderResolution.x;
 		uint32_t h = context.renderResolution.y;

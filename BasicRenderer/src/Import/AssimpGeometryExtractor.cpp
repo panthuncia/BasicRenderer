@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <array>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -15,9 +16,11 @@
 #include <spdlog/spdlog.h>
 
 #include "Import/CLodCacheLoader.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
+#include "Mesh/DefaultCLodSettings.h"
 #include "Utilities/CachePathUtilities.h"
 
 namespace {
@@ -53,8 +56,10 @@ namespace AssimpGeometryExtractor {
 
 ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFilePath) {
 	ExtractionResult result;
+	std::vector<std::optional<ExtractedMesh>> preprocessed(pScene->mNumMeshes);
 
-	for (unsigned int i = 0; i < pScene->mNumMeshes; ++i) {
+	TaskSchedulerManager::GetInstance().ParallelFor("AssimpGeometryExtractor::PreprocessMeshes", pScene->mNumMeshes, [&](size_t meshIndex) {
+		const unsigned int i = static_cast<unsigned int>(meshIndex);
 		aiMesh* aMesh = pScene->mMeshes[i];
 
 		const bool hasBones = aMesh->HasBones();
@@ -223,7 +228,7 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 		auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
 		// Populate MeshIngestBuilder
-		MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags);
+		MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags, GetDefaultBuilderSettings());
         ingest.SetUvSets(std::move(uvSets));
 		ingest.ReserveVertices(numVertices);
 		if (hasBones) {
@@ -266,11 +271,19 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 			}
 		}
 
-		result.meshes.emplace_back(
+		preprocessed[i].emplace(
 			i,
 			aMesh->mMaterialIndex,
 			hasBones,
 			MeshPreprocessResult(std::move(ingest), std::move(cacheIdentity), std::move(prebuiltData)));
+		});
+
+	result.meshes.reserve(pScene->mNumMeshes);
+	for (auto& mesh : preprocessed) {
+		if (!mesh.has_value()) {
+			throw std::runtime_error("Missing preprocessed Assimp mesh data");
+		}
+		result.meshes.push_back(std::move(mesh.value()));
 	}
 
 	return result;

@@ -20,7 +20,7 @@
 namespace {
     // Bump this whenever the shader compiler argument set changes in a way that affects
     // the generated shader bytecode container, especially debug payload availability.
-    constexpr uint64_t kShaderCompilerArgumentFingerprint = 3u;
+    constexpr uint64_t kShaderCompilerArgumentFingerprint = 5u;
 }
 
 namespace {
@@ -578,6 +578,7 @@ const PipelineState& PSOManager::GetClusterLODDeepVisibilityResolvePSO(UINT psoF
 PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
@@ -650,6 +651,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
 PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -715,6 +717,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags ma
 PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -1308,6 +1311,7 @@ PipelineState PSOManager::CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags 
 PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+    defines.push_back({ L"USE_MISC_DRAW_ROOT_CONSTANTS", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -1930,6 +1934,7 @@ void PSOManager::GetPreprocessedBlob(
     opts.entryPoint = entryPoint;
     opts.target = target;
     opts.defines = std::move(defines);
+    opts.emitSpirv = IsSpirvFormat(GetActiveShaderBinaryFormat());
 #if WRITE_DEBUG_FILES
     opts.enableDebugInfo = true;
 #endif
@@ -2300,16 +2305,8 @@ void PSOManager::CompileShader(
     }
     auto result = InvokeCompile(ppBuffer, args, includeHandler.Get(), filename, entryPoint, target);
 
-    ComPtr<IDxcBlobEncoding> errors;
-    result->GetErrorBuffer(&errors);
-    std::string errText{ (char*)errors->GetBufferPointer(),
-                         errors->GetBufferSize() };
-
     auto obj = ExtractObject(result.Get(), filename, opts.enableDebugInfo);
-
-    ThrowIfFailed(
-        result->GetResult(reinterpret_cast<IDxcBlob**>(outBlob.GetAddressOf()))
-    );
+    ThrowIfFailed(obj.As(&outBlob));
 }
 
 void PSOManager::LoadSource(const std::filesystem::path& path, PSOManager::SourceData& sd) {
@@ -2344,16 +2341,35 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
     std::vector<std::wstring>& ownedArgs)
 {
     std::vector<LPCWSTR> args;
+    ownedArgs.reserve(opts.defines.size() + 8u);
 
 	if (opts.entryPoint != L"") { // SM 6.8 libraries don't have entry points
         args.push_back(L"-E"); args.push_back(opts.entryPoint.c_str());
     }
     args.push_back(L"-T"); args.push_back(opts.target.c_str());
 
+    args.push_back(L"-D");
+    args.push_back(opts.emitSpirv ? L"BASICRENDERER_SHADER_API_VULKAN=1" : L"BASICRENDERER_SHADER_API_DX12=1");
+
     if (opts.emitSpirv) {
         args.push_back(L"-spirv");
         args.push_back(L"-fvk-use-dx-layout");
         args.push_back(L"-fspv-target-env=vulkan1.3");
+        args.push_back(L"-fvk-bind-resource-heap");
+        ownedArgs.push_back(std::to_wstring(rhi::VULKAN_RESOURCE_DESCRIPTOR_HEAP_BINDING));
+        args.push_back(ownedArgs.back().c_str());
+        ownedArgs.push_back(std::to_wstring(rhi::VULKAN_DESCRIPTOR_HEAP_SET));
+        args.push_back(ownedArgs.back().c_str());
+        args.push_back(L"-fvk-bind-sampler-heap");
+        ownedArgs.push_back(std::to_wstring(rhi::VULKAN_SAMPLER_DESCRIPTOR_HEAP_BINDING));
+        args.push_back(ownedArgs.back().c_str());
+        ownedArgs.push_back(std::to_wstring(rhi::VULKAN_DESCRIPTOR_HEAP_SET));
+        args.push_back(ownedArgs.back().c_str());
+        args.push_back(L"-fvk-bind-counter-heap");
+        ownedArgs.push_back(std::to_wstring(rhi::VULKAN_COUNTER_DESCRIPTOR_HEAP_BINDING));
+        args.push_back(ownedArgs.back().c_str());
+        ownedArgs.push_back(std::to_wstring(rhi::VULKAN_DESCRIPTOR_HEAP_SET));
+        args.push_back(ownedArgs.back().c_str());
     }
 
     if (opts.warningsAsErrors)
@@ -2418,6 +2434,11 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
         ThrowIfFailed(hr);
     }
 
+    if (!result) {
+        spdlog::error("Shader compile produced no result for {} entry {} target {}", ws2s(filename), ws2s(entryPoint), ws2s(target));
+        ThrowIfFailed(E_FAIL);
+    }
+
     {
         ComPtr<IDxcBlobUtf8> errs;
         result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
@@ -2428,6 +2449,24 @@ ComPtr<IDxcResult> PSOManager::InvokeCompile(
                 ThrowIfFailed(E_FAIL);
             }
         }
+    }
+
+    HRESULT status = S_OK;
+    hr = result->GetStatus(&status);
+    if (FAILED(hr)) {
+        spdlog::error("Failed to query shader compile status for {} entry {} target {}", ws2s(filename), ws2s(entryPoint), ws2s(target));
+        ThrowIfFailed(hr);
+    }
+    if (FAILED(status)) {
+        ComPtr<IDxcBlobUtf8> errs;
+        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
+        if (errs && errs->GetStringLength()) {
+            spdlog::error("Shader compile failed for {} entry {} target {}: {}", ws2s(filename), ws2s(entryPoint), ws2s(target), errs->GetStringPointer());
+        }
+        else {
+            spdlog::error("Shader compile failed for {} entry {} target {} with HRESULT 0x{:08X}", ws2s(filename), ws2s(entryPoint), ws2s(target), static_cast<unsigned int>(status));
+        }
+        ThrowIfFailed(status);
     }
 
     return result;
@@ -2452,15 +2491,20 @@ ComPtr<IDxcBlob> PSOManager::ExtractObject(
         // derive a base name from the suggested pdb path
         ComPtr<IDxcBlobUtf16> pdbPathBlob;
         ComPtr<IDxcBlob>     pdbBlob;
-        ThrowIfFailed(result->GetOutput(
+        const HRESULT pdbHr = result->GetOutput(
             DXC_OUT_PDB,
             IID_PPV_ARGS(pdbBlob.GetAddressOf()),
-            pdbPathBlob.GetAddressOf()));
+            pdbPathBlob.GetAddressOf());
 
-        auto suggested = pdbPathBlob->GetStringPointer();
-        auto baseName = std::filesystem::path(suggested).stem().wstring();
+        if (SUCCEEDED(pdbHr) && pdbBlob && pdbPathBlob) {
+            auto suggested = pdbPathBlob->GetStringPointer();
+            auto baseName = std::filesystem::path(suggested).stem().wstring();
 
-        WriteDebugArtifacts(result, outDir, baseName);
+            WriteDebugArtifacts(result, outDir, baseName);
+        }
+        else {
+            spdlog::debug("Shader compile result for {} did not include separate PDB output; skipping debug artifact write.", ws2s(filename));
+        }
     }
 
     return objectBlob;
@@ -2494,11 +2538,7 @@ void PSOManager::createRootSignature() {
     auto device = DeviceManager::GetInstance().GetDevice();
 
     rhi::PushConstantRangeDesc pcs[] = {
-    { rhi::ShaderStage::All, NumPerObjectRootConstants, /*set*/0, /*binding*/0 },
-    { rhi::ShaderStage::All, NumPerMeshRootConstants,   0, 1 },
-    { rhi::ShaderStage::All, NumViewRootConstants,      0, 2 },
-    { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 3 },
-    { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4 },
+    { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4, rhi::PushConstantRangeType::EmulatedRootConstants },
     { rhi::ShaderStage::All, rg::shaderapi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter, rhi::PushConstantRangeType::EmulatedRootConstants },
     { rhi::ShaderStage::All, rg::shaderapi::kNumIndirectCommandSignatureRootConstants, 0, rg::shaderapi::kIndirectCommandSignatureRootParameter },
     };

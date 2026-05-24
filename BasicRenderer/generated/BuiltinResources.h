@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE — DO NOT EDIT
+// GENERATED CODE - DO NOT EDIT
 
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
@@ -12,7 +12,6 @@ struct Builtin {
     inline static constexpr std::string_view GroupPageMap = "Builtin::CLod::GroupPageMap";
     inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
     inline static constexpr std::string_view MeshMetadata = "Builtin::CLod::MeshMetadata";
-    inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";
     inline static constexpr std::string_view Nodes = "Builtin::CLod::Nodes";
     inline static constexpr std::string_view Offsets = "Builtin::CLod::Offsets";
     inline static constexpr std::string_view PagePoolSlabBase = "Builtin::CLod::PagePoolSlabBase";
@@ -22,12 +21,17 @@ struct Builtin {
     inline static constexpr std::string_view StreamingEvictionExemptBits = "Builtin::CLod::StreamingEvictionExemptBits";
     inline static constexpr std::string_view StreamingLoadCounter = "Builtin::CLod::StreamingLoadCounter";
     inline static constexpr std::string_view StreamingLoadRequestBits = "Builtin::CLod::StreamingLoadRequestBits";
+    inline static constexpr std::string_view StreamingLoadRequestKeys = "Builtin::CLod::StreamingLoadRequestKeys";
     inline static constexpr std::string_view StreamingLoadRequests = "Builtin::CLod::StreamingLoadRequests";
     inline static constexpr std::string_view StreamingNonResidentBits = "Builtin::CLod::StreamingNonResidentBits";
     inline static constexpr std::string_view StreamingRuntimeState = "Builtin::CLod::StreamingRuntimeState";
     inline static constexpr std::string_view StreamingTouchedGroups = "Builtin::CLod::StreamingTouchedGroups";
     inline static constexpr std::string_view StreamingTouchedGroupsBits = "Builtin::CLod::StreamingTouchedGroupsBits";
     inline static constexpr std::string_view StreamingTouchedGroupsCounter = "Builtin::CLod::StreamingTouchedGroupsCounter";
+    inline static constexpr std::string_view VoxelAttributeSamples = "Builtin::CLod::VoxelAttributeSamples";
+    inline static constexpr std::string_view VoxelCubeRecords = "Builtin::CLod::VoxelCubeRecords";
+    inline static constexpr std::string_view VoxelDescriptorIndices = "Builtin::CLod::VoxelDescriptorIndices";
+    inline static constexpr std::string_view VoxelGroupDescriptors = "Builtin::CLod::VoxelGroupDescriptors";
   };
   inline static constexpr std::string_view CameraBuffer = "Builtin::CameraBuffer";
   struct Color {
@@ -83,12 +87,6 @@ struct Builtin {
     inline static constexpr std::string_view TextureStreamingFeedbackBuffer = "Builtin::Material::TextureStreamingFeedbackBuffer";
     inline static constexpr std::string_view TextureStreamingMetadataBuffer = "Builtin::Material::TextureStreamingMetadataBuffer";
   };
-  struct MeshResources {
-    inline static constexpr std::string_view MeshletBounds = "Builtin::MeshResources::MeshletBounds";
-    inline static constexpr std::string_view MeshletOffsets = "Builtin::MeshResources::MeshletOffsets";
-    inline static constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
-    inline static constexpr std::string_view MeshletVertexIndices = "Builtin::MeshResources::MeshletVertexIndices";
-  };
   struct Noise {
     inline static constexpr std::string_view BlueNoise2D = "Builtin::Noise::BlueNoise2D";
   };
@@ -120,8 +118,6 @@ struct Builtin {
     inline static constexpr std::string_view ScreenSpaceReflections = "Builtin::PostProcessing::ScreenSpaceReflections";
     inline static constexpr std::string_view UpscaledHDR = "Builtin::PostProcessing::UpscaledHDR";
   };
-  inline static constexpr std::string_view PostSkinningVertices = "Builtin::PostSkinningVertices";
-  inline static constexpr std::string_view PreSkinningVertices = "Builtin::PreSkinningVertices";
   struct PrimaryCamera {
     inline static constexpr std::string_view DepthTexture = "Builtin::PrimaryCamera::DepthTexture";
     struct IndirectCommandBuffers {
@@ -142,6 +138,7 @@ struct Builtin {
   struct SkeletonResources {
     inline static constexpr std::string_view BoneTransforms = "Builtin::SkeletonResources::BoneTransforms";
     inline static constexpr std::string_view InverseBindMatrices = "Builtin::SkeletonResources::InverseBindMatrices";
+    inline static constexpr std::string_view InverseSkinMatrices = "Builtin::SkeletonResources::InverseSkinMatrices";
     inline static constexpr std::string_view SkinningInstanceInfo = "Builtin::SkeletonResources::SkinningInstanceInfo";
   };
 };

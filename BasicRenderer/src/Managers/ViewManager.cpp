@@ -16,7 +16,7 @@
 
 namespace
 {
-    constexpr float kClusterLodErrorPixels = 3.0f;
+    constexpr float kClusterLodErrorPixels = 1.0f;
 
     float ComputeErrorOverDistanceThreshold(const CameraInfo& cameraInfo, float errorPixels)
     {
@@ -57,10 +57,17 @@ namespace
     {
         CullingCameraInfo cullInfo{};
         cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
+        cullInfo.projX = DirectX::XMVectorGetX(cameraInfo.jitteredProjection.r[0]);
         cullInfo.projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]);
         cullInfo.zNear = cameraInfo.zNear;
         cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
+        cullInfo.isOrtho = cameraInfo.isOrtho;
+        DirectX::XMStoreFloat4(&cullInfo.viewRightWorld, DirectX::XMVectorSetW(cameraInfo.viewInverse.r[0], 0.0f));
+        DirectX::XMStoreFloat4(&cullInfo.viewUpWorld, DirectX::XMVectorSetW(cameraInfo.viewInverse.r[1], 0.0f));
+        DirectX::XMStoreFloat4(&cullInfo.viewForwardWorld, DirectX::XMVectorSetW(DirectX::XMVectorNegate(cameraInfo.viewInverse.r[2]), 0.0f));
         cullInfo.viewProjection = cameraInfo.viewProjection;
+        cullInfo.viewInverse = cameraInfo.viewInverse;
+        cullInfo.projectionInverse = cameraInfo.projectionInverse;
         cullInfo.viewZ = {
             DirectX::XMVectorGetZ(cameraInfo.view.r[0]),
             DirectX::XMVectorGetZ(cameraInfo.view.r[1]),
@@ -124,6 +131,7 @@ uint64_t ViewManager::CreateView(const CameraInfo& cameraInfo,
     v.gpu.linearDepthMap = params.linearDepthMap;
 
     m_views.emplace(id, std::move(v));
+    ++m_resourceLayoutRevision;
 
     if (m_events.onCreated) m_events.onCreated(m_views[id]);
     return id;
@@ -167,6 +175,7 @@ void ViewManager::DestroyView(uint64_t viewID) {
     }
 
     m_views.erase(it);
+    ++m_resourceLayoutRevision;
     if (m_events.onDestroyed) m_events.onDestroyed(viewID);
 }
 
@@ -199,6 +208,7 @@ void ViewManager::AttachDepth(uint64_t viewID,
     if (m_events.onDepthAttached) {
         m_events.onDepthAttached(*v);
     }
+    ++m_resourceLayoutRevision;
 }
 
 void ViewManager::AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> visibilityBuffer) {
@@ -209,6 +219,7 @@ void ViewManager::AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelB
     if (m_events.onVisibilityBufferAttached) {
         m_events.onVisibilityBufferAttached(*v);
     }
+    ++m_resourceLayoutRevision;
 }
 
 std::shared_ptr<PixelBuffer> ViewManager::EnsureCLodDeepVisibilityHeadPointers(uint64_t viewID)
@@ -242,14 +253,28 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
     auto* v = Get(viewID);
     if (!v) return;
     std::lock_guard<std::mutex> lock(m_cameraUpdateMutex);
+    const bool depthSliceChanged = v->cameraInfo.depthBufferArrayIndex != cameraInfo.depthBufferArrayIndex;
     v->cameraInfo = cameraInfo;
     m_cameraBuffer->UpdateView(v->gpu.cameraBufferView.get(), &cameraInfo);
 	CullingCameraInfo cullInfo = BuildCullingCameraInfo(cameraInfo);
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
+    if (depthSliceChanged) {
+        ++m_resourceLayoutRevision;
+    }
     
     if (m_events.onCameraUpdated) {
         m_events.onCameraUpdated(*v);
     }
+}
+
+void ViewManager::MarkDepthHistoryValid(uint64_t viewID) {
+    auto* v = Get(viewID);
+    if (!v || v->gpu.lastFrameLinearDepthValid) {
+        return;
+    }
+
+    v->gpu.lastFrameLinearDepthValid = true;
+    ++m_resourceLayoutRevision;
 }
 
 View* ViewManager::Get(uint64_t viewID) {

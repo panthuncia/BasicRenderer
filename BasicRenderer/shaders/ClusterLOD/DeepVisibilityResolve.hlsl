@@ -201,6 +201,7 @@ void CLodDeepVisibilityResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
                 sample.materialInputs,
                 viewWS,
                 float2(pixel),
+                false,
                 true,
                 !isBackface,
                 sample.materialFlags);

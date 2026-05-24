@@ -20,10 +20,12 @@ set(CLOD_SHARED_SOURCES
     "${BR_SRC}/Import/GlTFGeometryExtractor.cpp"
     "${BR_SRC}/Import/AssimpGeometryExtractor.cpp"
     "${BR_SRC}/Import/USDGeometryExtractor.cpp"
+    "${BR_SRC}/Import/BRNiflyClient.cpp"
 
     # CLod build & cache infrastructure
     "${BR_SRC}/Import/CLodCache.cpp"
     "${BR_SRC}/Import/CLodCacheLoader.cpp"
+    "${BR_SRC}/Import/DefaultCLodSettings.cpp"
     "${BR_SRC}/Mesh/MeshIngestBuilder.cpp"
     "${BR_SRC}/Mesh/ClusterLOD.cpp"
     "${BR_SRC}/Mesh/ClusterLODUtilities.cpp"

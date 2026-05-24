@@ -59,7 +59,7 @@ int generate_cpp(json& data, const char* out_path) {
     std::string result;
     result += "#pragma once\n\n";
     result += "#include <string_view>\n";
-    result += "// GENERATED CODE — DO NOT EDIT\n\n";
+    result += "// GENERATED CODE - DO NOT EDIT\n\n";
 
     // for each top-level object in the JSON, emit a top-level struct
     for (auto& [nsName, nsObj] : data.items()) {
@@ -95,7 +95,7 @@ int generate_hlsl(json& data, const char* out_path) {
     // Genrate include guard
 	result += "#ifndef BUILTIN_RESOURCES_H\n";
 	result += "#define BUILTIN_RESOURCES_H\n\n";
-    result += "// GENERATED CODE — DO NOT EDIT\n\n";
+    result += "// GENERATED CODE - DO NOT EDIT\n\n";
 
     // for each top-level object in the JSON, emit a top-level struct
     for (auto& [nsName, nsObj] : data.items()) {

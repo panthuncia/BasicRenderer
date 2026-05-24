@@ -7,10 +7,12 @@
 #include <unordered_map>
 #include <set>
 #include <algorithm>
+#include <optional>
 
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/metrics.h>
+#include <pxr/usd/usdGeom/gprim.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdSkel/bindingAPI.h>
@@ -25,9 +27,11 @@
 #include <spdlog/spdlog.h>
 
 #include "Import/CLodCacheLoader.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
+#include "Mesh/DefaultCLodSettings.h"
 
 using namespace pxr;
 
@@ -745,13 +749,16 @@ MeshPreprocessResult ExtractSubMesh(
 	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<UsdSkelSkinningQuery>& skinQ,
 	const VtTokenArray& skelJointOrderRaw,
-	const VtTokenArray& skelJointOrderMapped)
+	const VtTokenArray& skelJointOrderMapped,
+	bool doubleSidedVoxelSourceNormals,
+	const std::string& sourceIdentifierOverride)
 {
 	std::string subsetName = subset
 		? subset->GetPrim().GetName().GetString()
 		: std::string{};
 
-	auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subsetName);
+	auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subsetName, geomTimeCode, sourceIdentifierOverride);
+	cacheIdentity.doubleSidedVoxelSourceNormals = doubleSidedVoxelSourceNormals;
 	spdlog::info("    ExtractSubMesh: prim='{}' subset='{}' source='{}'",
 		cacheIdentity.primPath, subsetName, cacheIdentity.sourceIdentifier);
 	spdlog::info("    Geometry sample time for prim='{}' is {}",
@@ -781,9 +788,11 @@ MeshPreprocessResult ExtractSubMesh(
 		loadedVertCount, indices.size(), vertexSize, vertexFlags);
 
 	// Populate MeshIngestBuilder
+	ClusterLODBuilderSettings builderSettings = GetDefaultBuilderSettings();
+	builderSettings.doubleSidedVoxelSourceNormals = doubleSidedVoxelSourceNormals;
 	MeshIngestBuilder ingest(vertexSize,
 		(skinningData && *skinningData) ? skinningVertexSize : 0,
-		vertexFlags);
+		vertexFlags, builderSettings);
     ingest.SetUvSets(std::move(uvSets));
 
 	const size_t vertexCount = rawData->size() / static_cast<size_t>(vertexSize);
@@ -849,34 +858,47 @@ MeshPreprocessResult ExtractSubMesh(
 		previewSubdiv || previewTopology);
 }
 
-StageExtractionResult ExtractAll(const std::string& filePath) {
+StageExtractionResult ExtractAllFromStage(
+	const UsdStageRefPtr& stage,
+	const std::string& sourceIdentifier) {
 	StageExtractionResult result;
 
-	spdlog::info("  USD ExtractAll: opening stage '{}'", filePath);
-	UsdStageRefPtr stage = UsdStage::Open(filePath);
 	if (!stage) {
-		spdlog::error("  USD stage open FAILED for '{}'", filePath);
+		spdlog::error("  USD stage extraction received a null stage.");
 		return result;
 	}
-	spdlog::info("  USD stage opened successfully.");
+	spdlog::info("  USD stage ready for extraction. sourceIdentifier='{}'", sourceIdentifier);
 
 	double metersPerUnit = UsdGeomGetStageMetersPerUnit(stage);
 	spdlog::info("  metersPerUnit = {}", metersPerUnit);
 
 	UsdSkelCache skelCache;
 
-	size_t totalPrims = 0;
-	for (auto const& prim : UsdPrimRange(stage->GetPseudoRoot()))
-		++totalPrims;
-	spdlog::info("  Stage has {} total prims.", totalPrims);
+	struct MeshWorkItem {
+		UsdGeomMesh mesh;
+		std::optional<UsdSkelSkinningQuery> skinQ;
+		VtTokenArray skelJointOrderRaw;
+		VtTokenArray skelJointOrderMapped;
+		std::vector<UsdGeomSubset> subsets;
+		std::string primPath;
+		bool doubleSided = false;
+	};
 
-	for (auto const& prim : UsdPrimRange(stage->GetPseudoRoot())) {
-		UsdGeomMesh mesh(prim);
+	size_t totalPrims = 0;
+	std::vector<MeshWorkItem> meshWorkItems;
+	const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
+	auto primRange = UsdPrimRange(stage->GetPseudoRoot());
+	for (auto primIt = primRange.begin(); primIt != primRange.end(); ++primIt) {
+		++totalPrims;
+		UsdGeomMesh mesh(*primIt);
 		if (!mesh)
 			continue;
 
-		result.meshesProcessed++;
-		spdlog::info("  Found mesh #{}: '{}'", result.meshesProcessed, prim.GetPath().GetString());
+		bool doubleSided = false;
+		UsdGeomGprim gprim(mesh.GetPrim());
+		if (gprim) {
+			gprim.GetDoubleSidedAttr().Get(&doubleSided, geomTimeCode);
+		}
 
 		// Attempt skinning query TODO: CLod skinning
 		auto skinQ = GetSkinningQuery(mesh, skelCache);
@@ -902,29 +924,62 @@ StageExtractionResult ExtractAll(const std::string& filePath) {
 		UsdShadeMaterialBindingAPI bindAPI(mesh);
 		auto subsets = bindAPI.GetMaterialBindSubsets();
 		spdlog::info("    {} material subset(s) for mesh '{}'",
-			subsets.size(), prim.GetPath().GetString());
+			subsets.size(), mesh.GetPrim().GetPath().GetString());
 
-		// Default UV set for CLI
-		const std::vector<std::string> requiredUvSetNames = { "st" };
-		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
-
-		if (subsets.empty()) {
-			ExtractSubMesh(mesh, std::nullopt, stage, geomTimeCode, metersPerUnit,
-				requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
-			result.submeshesProcessed++;
-			result.cachesBuilt++;
-		}
-		else {
-			for (auto const& subset : subsets) {
-				ExtractSubMesh(mesh, std::make_optional(subset), stage, geomTimeCode, metersPerUnit,
-					requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
-				result.submeshesProcessed++;
-				result.cachesBuilt++;
-			}
-		}
+		meshWorkItems.push_back(MeshWorkItem{
+			.mesh = mesh,
+			.skinQ = std::move(skinQ),
+			.skelJointOrderRaw = std::move(skelJointOrderRaw),
+			.skelJointOrderMapped = std::move(skelJointOrderMapped),
+			.subsets = std::move(subsets),
+			.primPath = mesh.GetPrim().GetPath().GetString(),
+			.doubleSided = doubleSided
+			});
 	}
 
+	spdlog::info("  Stage has {} total prims.", totalPrims);
+	result.meshesProcessed = meshWorkItems.size();
+
+	const std::vector<std::string> requiredUvSetNames = { "st" };
+
+	TaskSchedulerManager::GetInstance().ParallelFor("USDGeometryExtractor::PreprocessMeshes", meshWorkItems.size(), [&](size_t meshIndex) {
+		const MeshWorkItem& workItem = meshWorkItems[meshIndex];
+		spdlog::info("  Found mesh #{}: '{}'", meshIndex + 1, workItem.primPath);
+
+		if (workItem.subsets.empty()) {
+			ExtractSubMesh(workItem.mesh, std::nullopt, stage, geomTimeCode, metersPerUnit,
+				requiredUvSetNames, workItem.skinQ, workItem.skelJointOrderRaw, workItem.skelJointOrderMapped,
+				workItem.doubleSided, sourceIdentifier);
+		}
+		else {
+			TaskSchedulerManager::GetInstance().ParallelFor("USDGeometryExtractor::PreprocessSubsets", workItem.subsets.size(), [&](size_t subsetIndex) {
+				ExtractSubMesh(workItem.mesh, std::make_optional(workItem.subsets[subsetIndex]), stage, geomTimeCode, metersPerUnit,
+					requiredUvSetNames, workItem.skinQ, workItem.skelJointOrderRaw, workItem.skelJointOrderMapped,
+					workItem.doubleSided, sourceIdentifier);
+				});
+		}
+		});
+
+	for (const MeshWorkItem& workItem : meshWorkItems) {
+		result.submeshesProcessed += workItem.subsets.empty() ? 1 : workItem.subsets.size();
+	}
+	result.cachesBuilt = result.submeshesProcessed;
+
 	return result;
+}
+
+StageExtractionResult ExtractAll(const std::string& filePath) {
+	StageExtractionResult result;
+
+	spdlog::info("  USD ExtractAll: opening stage '{}'", filePath);
+	UsdStageRefPtr stage = UsdStage::Open(filePath);
+	if (!stage) {
+		spdlog::error("  USD stage open FAILED for '{}'", filePath);
+		return result;
+	}
+	spdlog::info("  USD stage opened successfully.");
+
+	return ExtractAllFromStage(stage);
 }
 
 } // namespace USDGeometryExtractor

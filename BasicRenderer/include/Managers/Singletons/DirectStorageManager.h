@@ -60,6 +60,17 @@ struct DirectStorageBufferRegionCopy {
     uint64_t destinationOffset = 0;
 };
 
+struct DirectStorageFencePoint {
+    rhi::Timeline timeline;
+    uint64_t value = 0;
+};
+
+enum class DirectStorageFenceWaitMode : uint8_t {
+    BeforeDestinationWrite,
+    BeforeGpuWork,
+    BeforeSourceAccess,
+};
+
 enum class DirectStorageAsyncRequestState : uint8_t {
     Invalid = 0,
     Pending,
@@ -139,6 +150,13 @@ public:
         const std::wstring& path,
         const std::vector<DirectStorageBufferRegionCopy>& regions,
         std::string* outMessage = nullptr);
+    DirectStorageAsyncRequestHandle EnqueueUploadBufferRegionsFromFileAfterFence(
+        const std::wstring& path,
+        const std::vector<DirectStorageBufferRegionCopy>& regions,
+        DirectStorageFencePoint waitPoint,
+        DirectStorageFenceWaitMode waitMode,
+        DirectStorageFencePoint completionPoint,
+        std::string* outMessage = nullptr);
     bool UploadBufferRegionsFromFile(
         const std::wstring& path,
         const std::vector<DirectStorageBufferRegionCopy>& regions,
@@ -199,6 +217,8 @@ private:
 using DirectStorageManager = br::DirectStorageManager;
 using DirectStorageQueueKind = br::DirectStorageQueueKind;
 using DirectStorageBufferRegionCopy = br::DirectStorageBufferRegionCopy;
+using DirectStorageFencePoint = br::DirectStorageFencePoint;
+using DirectStorageFenceWaitMode = br::DirectStorageFenceWaitMode;
 using DirectStorageTextureSubresourceRangeCopy = br::DirectStorageTextureSubresourceRangeCopy;
 using DirectStorageAsyncRequestHandle = br::DirectStorageAsyncRequestHandle;
 using DirectStorageAsyncRequestState = br::DirectStorageAsyncRequestState;
