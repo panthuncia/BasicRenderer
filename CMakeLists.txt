@@ -135,6 +135,30 @@ if (MSVC)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
 endif()
 
+set(_basicrenderer_clang_warning_options
+  -Werror
+  -Wno-unused-command-line-argument
+  -Wno-unused-function
+  -Wno-error=switch
+  -Wno-error=reorder-ctor
+  -Wno-error=unused-variable
+  -Wno-error=unused-but-set-variable
+  -Wno-error=unused-private-field
+  -Wno-error=misleading-indentation
+  -Wno-error=nonportable-include-path
+  -Wno-error=inconsistent-missing-override
+  -Wno-error=format
+  -Wno-error=implicit-float-conversion
+  -Wno-error=missing-braces
+  -Wno-error=braced-scalar-init
+  -Wno-error=pessimizing-move
+  -Wno-error=self-assign-field
+  -Wno-error=unused-lambda-capture
+)
+foreach(_basicrenderer_clang_warning_option IN LISTS _basicrenderer_clang_warning_options)
+  add_compile_options($<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${_basicrenderer_clang_warning_option}>)
+endforeach()
+
 #set(CMAKE_VS_JUST_MY_CODE_DEBUGGING ON) # Skip external code in the debugger.
 
 # Gather precompiled dependencies

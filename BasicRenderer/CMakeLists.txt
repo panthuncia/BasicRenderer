@@ -778,12 +778,13 @@ if (MSVC)
   target_compile_options(${PROJECT_NAME} PRIVATE /external:anglebrackets /external:W0) # Disable warnings in external headers
   # Clang (via clang-cl) warns about MSVC-specific flags it ignores; suppress those warnings-as-errors
   target_compile_options(${PROJECT_NAME} PRIVATE $<$<CXX_COMPILER_ID:Clang>:
+      -Werror
       -Wno-unused-command-line-argument
+      -Wno-unused-function
       -Wno-error=switch
       -Wno-error=reorder-ctor
       -Wno-error=unused-variable
       -Wno-error=unused-but-set-variable
-      -Wno-error=unused-function
       -Wno-error=unused-private-field
       -Wno-error=misleading-indentation
       -Wno-error=nonportable-include-path
@@ -821,12 +822,13 @@ if (MSVC)
   )
   target_compile_options(ShaderPreprocessTests PRIVATE /external:anglebrackets /external:W0)
   target_compile_options(ShaderPreprocessTests PRIVATE $<$<CXX_COMPILER_ID:Clang>:
+      -Werror
       -Wno-unused-command-line-argument
+      -Wno-unused-function
       -Wno-error=switch
       -Wno-error=reorder-ctor
       -Wno-error=unused-variable
       -Wno-error=unused-but-set-variable
-      -Wno-error=unused-function
       -Wno-error=unused-private-field
       -Wno-error=misleading-indentation
       -Wno-error=nonportable-include-path
@@ -862,11 +864,10 @@ set(BASICRENDERER_MSVC_PDB_LINK_OPTIONS
     $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CROSSCOMPILING)
-    # VS 2026 no longer supports /DEBUG:FASTLINK, and this executable's full
-    # PDB exceeds MSVC's database limits even with larger pages. Keep compile
-    # debug info embedded in .obj files via /Z7, but skip the merged exe PDB.
+    # Use larger PDB pages for native MSVC to avoid "limit exceeded for program
+    # database" when debug symbols grow large.
     list(APPEND BASICRENDERER_MSVC_PDB_LINK_OPTIONS
-        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/PDB:NONE>
+        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/PDBPAGESIZE:16384>
     )
 endif()
 

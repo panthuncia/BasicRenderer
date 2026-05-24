@@ -626,9 +626,18 @@ std::optional<fs::path> FindNiflyDll(const char* argv0)
 {
     std::vector<fs::path> candidates;
 
+#ifdef _WIN32
+    char* envPath = nullptr;
+    size_t envPathLength = 0;
+    if (_dupenv_s(&envPath, &envPathLength, "NIFLYDLL_PATH") == 0 && envPath) {
+        candidates.emplace_back(envPath);
+        std::free(envPath);
+    }
+#else
     if (const char* envPath = std::getenv("NIFLYDLL_PATH")) {
         candidates.emplace_back(envPath);
     }
+#endif
 
     const fs::path exePath = fs::absolute(argv0).parent_path();
     candidates.push_back(exePath / "NiflyDLL.dll");
