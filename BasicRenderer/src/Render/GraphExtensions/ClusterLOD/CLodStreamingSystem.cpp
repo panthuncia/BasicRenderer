@@ -87,10 +87,13 @@ namespace {
                 m_prepareFrameWork();
             }
 
-            StreamingUploadInputs nextInputs{};
-            if (m_consumeUploads) {
-                nextInputs.uploads = m_consumeUploads();
+            if (!m_uploadSnapshotValid) {
+                m_uploadSnapshot = m_consumeUploads ? m_consumeUploads() : std::vector<StreamingUploadDescriptor>{};
+                m_uploadSnapshotValid = true;
             }
+
+            StreamingUploadInputs nextInputs{};
+            nextInputs.uploads = m_uploadSnapshot;
             if (!nextInputs.uploads.empty() && m_makePoolResolver) {
                 nextInputs.poolResolver = m_makePoolResolver();
             }
@@ -104,14 +107,6 @@ namespace {
         }
 
         void DeclareResourceUsages(CopyPassBuilder* builder) override {
-            for (const auto& upload : m_inputs.uploads) {
-                if (upload.dstResource) {
-                    builder->WithCopyDest(upload.dstResource);
-                }
-            }
-            if (m_inputs.poolResolver) {
-                builder->WithCopyDest(*m_inputs.poolResolver);
-            }
             builder->PreferQueue(QueueKind::Copy);
         }
 
@@ -127,6 +122,8 @@ namespace {
                     upload.srcUploadBuffer, upload.srcOffset,
                     upload.size);
             }
+            m_uploadSnapshot.clear();
+            m_uploadSnapshotValid = false;
         }
 
         PassReturn Execute(PassExecutionContext&) override { return {}; }
@@ -136,8 +133,10 @@ namespace {
         PrepareFrameWorkFn m_prepareFrameWork;
         ConsumeUploadsFn m_consumeUploads;
         MakePoolResolverFn m_makePoolResolver;
+        mutable std::vector<StreamingUploadDescriptor> m_uploadSnapshot;
         mutable StreamingUploadInputs m_inputs;
         mutable std::vector<CLodStreamingUploadSnapshotKey> m_snapshotKey;
+        mutable bool m_uploadSnapshotValid = false;
         mutable bool m_initialized = false;
     };
 
@@ -183,16 +182,6 @@ namespace {
         }
 
         void DeclareResourceUsages(CopyPassBuilder* builder) override {
-            if (m_inputs.uploadInstance && m_inputs.uploadInstance->HasPendingWork()) {
-                std::vector<std::shared_ptr<Resource>> dests;
-                m_inputs.uploadInstance->CollectPendingDestinations(dests);
-                for (auto& dst : dests) {
-                    builder->WithCopyDest(dst);
-                }
-            }
-            if (m_inputs.poolResolver) {
-                builder->WithCopyDest(*m_inputs.poolResolver);
-            }
             builder->PreferQueue(QueueKind::Copy);
         }
 
@@ -277,27 +266,6 @@ namespace {
         }
 
         void DeclareResourceUsages(CopyPassBuilder* builder) override {
-            if (!m_armed) {
-                builder->PreferQueue(QueueKind::Copy);
-                return;
-            }
-
-            builder->WithCopySource(m_snapshot.inputs.counterSource);
-            builder->WithCopySource(m_snapshot.inputs.requestsSource);
-            builder->WithCopySource(m_snapshot.inputs.usedGroupsCounterSource);
-            builder->WithCopySource(m_snapshot.inputs.usedGroupsBufferSource);
-            builder->WithCopyDest(m_snapshot.counterStaging);
-            builder->WithCopyDest(m_snapshot.requestsStaging);
-            builder->WithCopyDest(m_snapshot.usedGroupsCounterStaging);
-            builder->WithCopyDest(m_snapshot.usedGroupsBufferStaging);
-            if (m_snapshot.inputs.sourceGroupMismatchCounterSource && m_snapshot.sourceGroupMismatchCounterStaging) {
-                builder->WithCopySource(m_snapshot.inputs.sourceGroupMismatchCounterSource);
-                builder->WithCopyDest(m_snapshot.sourceGroupMismatchCounterStaging);
-            }
-            if (m_snapshot.inputs.sourceGroupMismatchDetailsSource && m_snapshot.sourceGroupMismatchDetailsStaging) {
-                builder->WithCopySource(m_snapshot.inputs.sourceGroupMismatchDetailsSource);
-                builder->WithCopyDest(m_snapshot.sourceGroupMismatchDetailsStaging);
-            }
             builder->PreferQueue(QueueKind::Copy);
         }
 
@@ -1047,6 +1015,8 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
 
     auto streamingUploadInsertPoint =
         RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
+    streamingUploadInsertPoint.AlsoBefore("GTAOFilterPass");
+    streamingUploadInsertPoint.AlsoBefore("DeferredShadingPass");
     streamingUploadInsertPoint.keepExtensionOrder = false;
     outPasses.push_back(
         RenderGraph::ExternalPassDesc::Copy(
@@ -1062,6 +1032,8 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
 
     auto asyncUploadInsertPoint =
         RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
+    asyncUploadInsertPoint.AlsoBefore("GTAOFilterPass");
+    asyncUploadInsertPoint.AlsoBefore("DeferredShadingPass");
     asyncUploadInsertPoint.keepExtensionOrder = false;
     outPasses.push_back(
         RenderGraph::ExternalPassDesc::Copy(

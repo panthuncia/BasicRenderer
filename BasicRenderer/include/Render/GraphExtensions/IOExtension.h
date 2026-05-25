@@ -96,9 +96,11 @@ public:
 		// the frame pass stage so newly queued uploads are visible this frame.
 		if (auto* uploadService = rg.GetUploadService()) {
 			if (auto upload = uploadService->GetUploadPass()) {
+				auto lateUploadsInsertPoint = RenderGraph::ExternalInsertPoint::After("Builtin::Uploads");
+				lateUploadsInsertPoint.AlsoBefore("ClearVisibilityBufferPass");
 				outPasses.push_back(
 					RenderGraph::ExternalPassDesc::Render("Builtin::LateUploads", upload)
-						.At(RenderGraph::ExternalInsertPoint::After("Builtin::Uploads")));
+						.At(std::move(lateUploadsInsertPoint)));
 			}
 		}
 
