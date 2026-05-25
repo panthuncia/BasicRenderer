@@ -24,7 +24,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - TAA/upscaling with DLSS/FSR
   
 ## Technical Features
-- A powerful render graph for automatic resource transitions and queue synchronization. Supports both retained-mode and immediate-mode GPU command execution.
+- A powerful render graph for automatic resource transitions and queue synchronization. Supports both retained-mode and immediate-mode GPU command execution, and caches itself automatically for better performance.
 - Low-level RHI (Only DX12 backend implemented, for now, but built to support Vulkan)
 - Shader-instrumentation debugging, using [GPU Reshape](https://github.com/GPUOpen-Tools/GPU-Reshape)'s backend
 - GPU-driven rendering with compute culling & ExecuteIndirect

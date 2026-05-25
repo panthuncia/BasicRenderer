@@ -1185,7 +1185,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("rayTracedReflectionLodBias", 0.0f);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphVramDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphDisableCaching", false);
     settingsManager.registerSetting<bool>("renderGraphQueueSyncTraceEnabled", false);
@@ -1218,7 +1218,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("renderGraphReplayRelaxAliasPlacement", true);
     settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>(CLodStreamingCpuUploadBudgetSettingName, 500u);
-    settingsManager.registerSetting<bool>(CLodStreamingEnableDirectStorageSettingName, false);
+    settingsManager.registerSetting<bool>(CLodStreamingEnableDirectStorageSettingName, true);
     settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
     settingsManager.registerSetting<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName, CLodVirtualShadowDefaultBackingResolution);
