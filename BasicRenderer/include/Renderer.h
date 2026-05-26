@@ -13,6 +13,7 @@
 #include <mutex>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include <flecs.h>
 
 #include <rhi.h>
@@ -87,6 +88,8 @@ public:
     void SetEnvironment(std::string name);
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 	bool IsInitialized() const { return m_isInitialized; }
+    void SetExternalSceneMode(bool enabled);
+    void IngestExternalSnapshot(const br::render::SceneFrameSnapshot& snapshot);
 
 private:
 	bool m_isInitialized = false;
@@ -186,6 +189,7 @@ private:
     void RunAnimationUpdateStage(float elapsedSeconds);
     void RunTransformPropagationStage();
     void RunSceneBridgeSyncStage();
+    void RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapshot& snapshot);
     void ApplyPrimaryCameraInput(float elapsedSeconds);
     void ApplyPrimaryCameraInputToRenderBridge(float elapsedSeconds);
     void SetSceneRenderOverlapEnabled(bool enabled);
@@ -248,6 +252,7 @@ private:
     int32_t m_lastFrameTaskNodeIndex = -1;
     br::render::SceneRenderBridge m_sceneRenderBridge;
     bool m_sceneRenderOverlapEnabled = true;
+    bool m_externalSceneMode = false;
     bool m_swapChainReady = true;
     bool m_loggedSwapChainNotReady = false;
 
@@ -278,6 +283,8 @@ private:
 
     std::mutex m_pendingSceneExplorerEditsMutex;
     std::unordered_map<uint64_t, PendingSceneExplorerEdit> m_pendingSceneExplorerEdits;
+    std::unordered_set<uint64_t> m_externalRegisteredMeshes;
+    std::unordered_set<uint64_t> m_externalRegisteredMeshInstances;
 
     std::shared_ptr<rg::runtime::IUploadPolicyService> m_uploadPolicyService = nullptr;
 

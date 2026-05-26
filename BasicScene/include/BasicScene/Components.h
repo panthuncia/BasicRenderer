@@ -95,6 +95,10 @@ namespace Components {
         CameraInfo info;
     };
 
+    struct ExternalCameraMatrices {
+        CameraInfo info;
+    };
+
     struct PrimaryCamera {};
 
     struct ProjectionMatrix {

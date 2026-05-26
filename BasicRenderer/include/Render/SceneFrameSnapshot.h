@@ -28,6 +28,8 @@ struct SnapshotCamera {
     Components::Camera camera;
     std::string name;
     bool primary = false;
+    bool useExternalMatrices = false;
+    Components::ExternalCameraMatrices externalMatrices;
 };
 
 struct SnapshotLight {

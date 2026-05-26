@@ -788,6 +788,11 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             CopyCommonComponents(dst, camera.stableID, camera.name, camera.matrix);
             dst.add<Components::RenderTransformUpdated>();
             SyncCameraDerivedState(dst, camera.camera, camera.primary, *viewManager, renderResolution.x, renderResolution.y);
+            if (camera.useExternalMatrices) {
+                dst.set<Components::ExternalCameraMatrices>(camera.externalMatrices);
+            } else {
+                dst.remove<Components::ExternalCameraMatrices>();
+            }
             if (camera.primary) {
                 dst.add<Components::PrimaryCamera>();
                 m_primaryCameraEntityId = dst.id();

@@ -75,6 +75,9 @@
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
 #include "Render/TbbTaskService.h"
+#include "Mesh/MeshInstance.h"
+#include "Render/DrawWorkload.h"
+#include "Render/RasterBucketFlags.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -484,6 +487,78 @@ void Renderer::RunSceneBridgeSyncStage() {
         return;
     }
     m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+}
+
+void Renderer::SetExternalSceneMode(bool enabled) {
+    if (m_externalSceneMode == enabled) {
+        return;
+    }
+
+    m_externalSceneMode = enabled;
+    if (enabled) {
+        SetSceneRenderOverlapEnabled(false);
+        InvalidateSceneOverlapState();
+        m_warnedNullScene = false;
+        m_warnedMissingPrimaryCamera = false;
+    }
+}
+
+void Renderer::IngestExternalSnapshot(const br::render::SceneFrameSnapshot& snapshot) {
+    SetExternalSceneMode(true);
+    RegisterExternalSnapshotMeshes(snapshot);
+    m_sceneRenderBridge.IngestSnapshot(snapshot, m_managerInterface);
+    m_hasCommittedSceneSnapshot = true;
+    m_lastCommittedSceneSnapshotSequence = snapshot.snapshotSequence;
+    m_lastCommittedSceneSourceFrame = snapshot.sourceFrameNumber;
+}
+
+void Renderer::RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapshot& snapshot) {
+    if (!m_pMeshManager || !m_pMaterialManager || !m_pIndirectCommandBufferManager) {
+        return;
+    }
+
+    const bool useMeshletReorderedVertices = getMeshShadersEnabled ? getMeshShadersEnabled() : m_useMeshShaders;
+
+    for (const auto& renderable : snapshot.changedRenderables) {
+        for (const auto& meshInstance : renderable.meshInstances.meshInstances) {
+            if (!meshInstance) {
+                continue;
+            }
+
+            auto mesh = meshInstance->GetMesh();
+            if (!mesh || !mesh->material) {
+                continue;
+            }
+
+            if (m_externalRegisteredMeshes.insert(mesh->GetGlobalID()).second) {
+                m_pMaterialManager->IncrementMaterialUsageCount(*mesh->material);
+                const auto materialDataIndex = m_pMaterialManager->GetMaterialSlot(mesh->material->GetMaterialID());
+                mesh->SetMaterialDataIndex(materialDataIndex);
+
+                auto rasterFlags = mesh->material->Technique().rasterFlags;
+                if ((mesh->GetPerMeshCBData().vertexFlags & VERTEX_SKINNED) != 0u) {
+                    rasterFlags |= MaterialRasterFlagsSkinned;
+                }
+                const auto rasterBucketIndex = m_pMaterialManager->AcquireRasterBucket(rasterFlags);
+                mesh->SetRasterBucketIndex(rasterBucketIndex);
+
+                m_pMeshManager->AddMesh(mesh, useMeshletReorderedVertices);
+
+                for (const auto& pass : mesh->material->Technique().passes) {
+                    m_pIndirectCommandBufferManager->RegisterWorkload({
+                        mesh->material->Technique().compileFlags,
+                        pass,
+                        false
+                    });
+                }
+            }
+
+            const auto instanceKey = reinterpret_cast<uint64_t>(meshInstance.get());
+            if (m_externalRegisteredMeshInstances.insert(instanceKey).second) {
+                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
+            }
+        }
+    }
 }
 
 void Renderer::ApplyPrimaryCameraInput(float elapsedSeconds) {
@@ -903,12 +978,25 @@ void Renderer::RunRenderResourceSyncStage() {
     {
         ZoneScopedN("Renderer::Update::RenderResourceSync::CameraSync");
         m_renderSyncCameraQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Camera& camera, Components::RenderViewRef& renderView) {
-            const XMMATRIX cameraModel = RemoveScalingFromMatrix(worldMatrix.matrix);
-            const XMMATRIX view = XMMatrixInverse(nullptr, cameraModel);
+            const auto* externalCamera = entity.try_get<Components::ExternalCameraMatrices>();
+            const XMMATRIX cameraModel = externalCamera ? externalCamera->info.viewInverse : RemoveScalingFromMatrix(worldMatrix.matrix);
+            const XMMATRIX view = externalCamera ? externalCamera->info.view : XMMatrixInverse(nullptr, cameraModel);
             DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
             camera.info.prevJitteredProjection = camera.info.jitteredProjection;
             camera.info.prevUnjitteredProjection = camera.info.unjitteredProjection;
-            if (m_jitter && entity.has<Components::PrimaryCamera>()) {
+            if (externalCamera) {
+                projection = externalCamera->info.unjitteredProjection;
+                camera.info.clippingPlanes[0] = externalCamera->info.clippingPlanes[0];
+                camera.info.clippingPlanes[1] = externalCamera->info.clippingPlanes[1];
+                camera.info.clippingPlanes[2] = externalCamera->info.clippingPlanes[2];
+                camera.info.clippingPlanes[3] = externalCamera->info.clippingPlanes[3];
+                camera.info.clippingPlanes[4] = externalCamera->info.clippingPlanes[4];
+                camera.info.clippingPlanes[5] = externalCamera->info.clippingPlanes[5];
+                camera.info.fov = externalCamera->info.fov;
+                camera.info.aspectRatio = externalCamera->info.aspectRatio;
+                camera.info.zNear = externalCamera->info.zNear;
+                camera.info.zFar = externalCamera->info.zFar;
+            } else if (m_jitter && entity.has<Components::PrimaryCamera>()) {
                 const auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
                 camera.jitterPixelSpace = jitterPixelSpace;
                 const auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -928,8 +1016,12 @@ void Renderer::RunRenderResourceSyncStage() {
             camera.info.viewProjection = XMMatrixMultiply(camera.info.view, projection);
             camera.info.projectionInverse = XMMatrixInverse(nullptr, projection);
 
-            const auto pos = GetGlobalPositionFromMatrix(worldMatrix.matrix);
-            camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
+            if (externalCamera) {
+                camera.info.positionWorldSpace = externalCamera->info.positionWorldSpace;
+            } else {
+                const auto pos = GetGlobalPositionFromMatrix(worldMatrix.matrix);
+                camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
+            }
 
             m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
         });
@@ -1034,6 +1126,20 @@ void Renderer::CreateDefaultEnvironmentResources() {
 }
 
 bool Renderer::IsSceneReadyForFrame(bool logWarnings) {
+    if (m_externalSceneMode) {
+        if (!m_sceneRenderBridge.HasPrimaryCamera()) {
+            if (logWarnings && !m_warnedMissingPrimaryCamera) {
+                spdlog::warn("Renderer: external scene snapshot has no primary camera. Skipping frame update work.");
+            }
+            m_warnedMissingPrimaryCamera = true;
+            return false;
+        }
+
+        m_warnedNullScene = false;
+        m_warnedMissingPrimaryCamera = false;
+        return true;
+    }
+
     if (!currentScene) {
         if (logWarnings && !m_warnedNullScene) {
             spdlog::warn("Renderer: current scene is null. Skipping scene update/render work until a valid scene is set.");
@@ -1062,19 +1168,23 @@ bool Renderer::IsSceneReadyForFrame(bool logWarnings) {
 }
 
 flecs::entity Renderer::GetValidatedPrimaryRenderCamera(bool attemptResync) {
-    if (!currentScene || !RendererECSManager::GetInstance().IsAlive()) {
+    if (!RendererECSManager::GetInstance().IsAlive()) {
         return {};
     }
 
-    if (m_sceneRenderOverlapEnabled && !HasCommittedSceneSnapshot()) {
+    if (!m_externalSceneMode && !currentScene) {
         return {};
     }
 
-    if (!m_sceneRenderOverlapEnabled && !currentScene->HasUsablePrimaryCamera()) {
+    if (!m_externalSceneMode && m_sceneRenderOverlapEnabled && !HasCommittedSceneSnapshot()) {
         return {};
     }
 
-    if (m_sceneRenderOverlapEnabled && NeedsSceneSnapshotBootstrap()) {
+    if (!m_externalSceneMode && !m_sceneRenderOverlapEnabled && !currentScene->HasUsablePrimaryCamera()) {
+        return {};
+    }
+
+    if (!m_externalSceneMode && m_sceneRenderOverlapEnabled && NeedsSceneSnapshotBootstrap()) {
         if (attemptResync) {
             BootstrapCommittedSceneSnapshot();
         }
@@ -1093,7 +1203,7 @@ flecs::entity Renderer::GetValidatedPrimaryRenderCamera(bool attemptResync) {
     };
 
     auto primaryCamera = m_sceneRenderBridge.GetPrimaryCameraEntity();
-    if (!validateCamera(primaryCamera) && attemptResync && !m_sceneRenderOverlapEnabled) {
+    if (!m_externalSceneMode && !validateCamera(primaryCamera) && attemptResync && !m_sceneRenderOverlapEnabled) {
         m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
         primaryCamera = m_sceneRenderBridge.GetPrimaryCameraEntity();
     }
@@ -1750,9 +1860,15 @@ void Renderer::Update(float elapsedSeconds) {
 
     runCapturedStage("SceneExplorerEdits", [&]() {
         ZoneScopedN("Renderer::Update::SceneExplorerEdits");
-        FlushPendingSceneExplorerEdits();
+        if (!m_externalSceneMode) {
+            FlushPendingSceneExplorerEdits();
+        }
     });
-    if (m_sceneRenderOverlapEnabled) {
+    if (m_externalSceneMode) {
+        runCapturedStage("ExternalScene", []() {
+            ZoneScopedN("Renderer::Update::ExternalScene");
+        });
+    } else if (m_sceneRenderOverlapEnabled) {
         if (NeedsSceneSnapshotBootstrap()) {
             runCapturedStage("BootstrapSceneSnapshot", [&]() {
                 ZoneScopedN("Renderer::Update::BootstrapSceneSnapshot");
@@ -1778,7 +1894,9 @@ void Renderer::Update(float elapsedSeconds) {
     }
 
     runCapturedStage("AnimationUpdate", [&]() {
-        RunAnimationUpdateStage(elapsedSeconds);
+        if (!m_externalSceneMode) {
+            RunAnimationUpdateStage(elapsedSeconds);
+        }
     });
     // Flush deferred functions before rebuilding the render graph so that
     // deferred state changes (e.g. environment creation from SetEnvironmentInternal)
@@ -1894,10 +2012,12 @@ void Renderer::Update(float elapsedSeconds) {
     });
     world.defer_end();
 
-    runCapturedStage("ScheduleSceneUpdate", [&]() {
-        ZoneScopedN("Renderer::Update::ScheduleSceneUpdate");
-        ScheduleSceneUpdateTask(elapsedSeconds);
-    });
+    if (!m_externalSceneMode) {
+        runCapturedStage("ScheduleSceneUpdate", [&]() {
+            ZoneScopedN("Renderer::Update::ScheduleSceneUpdate");
+            ScheduleSceneUpdateTask(elapsedSeconds);
+        });
+    }
 
     runCapturedStage("BeginUploadPolicyFrame", [&]() {
         ZoneScopedN("Renderer::Update::BeginUploadPolicyFrame");
