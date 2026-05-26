@@ -83,6 +83,7 @@ endif()
 find_package(spdlog CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(Microsoft.GSL CONFIG REQUIRED)
 if(TARGET imgui::imgui)
     set_property(TARGET imgui::imgui PROPERTY INTERFACE_LINK_LIBRARIES "")
 endif()
@@ -209,8 +210,19 @@ target_link_libraries(resource_codegen
     fmt::fmt
 )
 
+set(BASICRENDERER_DEMO_TARGET BasicRendererDemo)
+
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
-add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
+set(BASICRENDERER_DEMO_SOURCE "${BASICRENDERER_SOURCE_ROOT}/src/BasicRenderer.cpp")
+list(REMOVE_ITEM SOURCES "${BASICRENDERER_DEMO_SOURCE}")
+
+add_library(${PROJECT_NAME} STATIC ${SOURCES})
+add_library(BasicRenderer::BasicRenderer ALIAS ${PROJECT_NAME})
+add_executable(${BASICRENDERER_DEMO_TARGET} WIN32 "${BASICRENDERER_DEMO_SOURCE}")
+set_target_properties(${BASICRENDERER_DEMO_TARGET} PROPERTIES
+    OUTPUT_NAME ${PROJECT_NAME}
+    ARCHIVE_OUTPUT_NAME ${BASICRENDERER_DEMO_TARGET}
+)
 add_executable(ShaderPreprocessTests "tests/ShaderPreprocessTests.cpp")
 
 set(BASICRENDERER_IMGUI_SOURCE_VERSION "1.91.9" CACHE STRING "ImGui source release used when vcpkg's transient build tree is unavailable.")
@@ -292,6 +304,7 @@ target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/s
 
 if (CMAKE_VERSION VERSION_GREATER 3.14)
   set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
+  set_property(TARGET ${BASICRENDERER_DEMO_TARGET} PROPERTY CXX_STANDARD 23)
   set_property(TARGET ShaderPreprocessTests PROPERTY CXX_STANDARD 23)
 endif()
 
@@ -420,7 +433,8 @@ function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_n
         )
     endif()
 
-    add_dependencies(BasicRenderer "${target_name}_sync")
+    add_dependencies(${PROJECT_NAME} "${target_name}_sync")
+    add_dependencies(${BASICRENDERER_DEMO_TARGET} "${target_name}_sync")
 endfunction()
 
 set(SHADERS_SOURCE_DIR "${BASICRENDERER_SOURCE_ROOT}/shaders")
@@ -748,7 +762,9 @@ add_symlink_or_copy_per_config(
 
 if (MSVC)
   target_compile_options(${PROJECT_NAME} PRIVATE /Zc:preprocessor)
+  target_compile_options(${BASICRENDERER_DEMO_TARGET} PRIVATE /Zc:preprocessor)
   target_compile_options(${PROJECT_NAME} PRIVATE /WX)
+  target_compile_options(${BASICRENDERER_DEMO_TARGET} PRIVATE /WX)
   target_compile_options(ShaderPreprocessTests PRIVATE /Zc:preprocessor)
   target_compile_options(ShaderPreprocessTests PRIVATE /WX)
   target_compile_options(${PROJECT_NAME} PRIVATE 
@@ -774,10 +790,54 @@ if (MSVC)
       /wd5267
       /wd5045
   )
+  target_compile_options(${BASICRENDERER_DEMO_TARGET} PRIVATE 
+      /wd4828 
+      /wd4514 
+      /wd5038 
+      /wd4100 
+      /wd5219 
+      /wd4625 
+      /wd4626 
+      /wd4820 
+      /wd4365 
+      /wd4464 
+      /wd4062 
+      /wd5026 
+      /wd5027 
+      /wd5246
+      /wd4191
+      /wd4061
+      /wd4623
+      /wd4710
+      /wd4324
+      /wd5267
+      /wd5045
+  )
   #target_compile_options(${PROJECT_NAME} PRIVATE /Wall)
   target_compile_options(${PROJECT_NAME} PRIVATE /external:anglebrackets /external:W0) # Disable warnings in external headers
+  target_compile_options(${BASICRENDERER_DEMO_TARGET} PRIVATE /external:anglebrackets /external:W0)
   # Clang (via clang-cl) warns about MSVC-specific flags it ignores; suppress those warnings-as-errors
   target_compile_options(${PROJECT_NAME} PRIVATE $<$<CXX_COMPILER_ID:Clang>:
+      -Werror
+      -Wno-unused-command-line-argument
+      -Wno-unused-function
+      -Wno-error=switch
+      -Wno-error=reorder-ctor
+      -Wno-error=unused-variable
+      -Wno-error=unused-but-set-variable
+      -Wno-error=unused-private-field
+      -Wno-error=misleading-indentation
+      -Wno-error=nonportable-include-path
+      -Wno-error=inconsistent-missing-override
+      -Wno-error=format
+      -Wno-error=implicit-float-conversion
+      -Wno-error=missing-braces
+      -Wno-error=braced-scalar-init
+      -Wno-error=pessimizing-move
+      -Wno-error=self-assign-field
+      -Wno-error=unused-lambda-capture
+  >)
+  target_compile_options(${BASICRENDERER_DEMO_TARGET} PRIVATE $<$<CXX_COMPILER_ID:Clang>:
       -Werror
       -Wno-unused-command-line-argument
       -Wno-unused-function
@@ -843,14 +903,15 @@ if (MSVC)
   >)
 endif()
 
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/)
 if(BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR)
     target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_DETECTED_VULKAN_INCLUDE_DIR}")
 endif()
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/")
 target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/ThirdParty")
 target_include_directories(${PROJECT_NAME} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/volk")
+target_include_directories(${BASICRENDERER_DEMO_TARGET} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/ThirdParty")
+target_include_directories(${BASICRENDERER_DEMO_TARGET} BEFORE PRIVATE "${BASICRENDERER_REPO_ROOT}/volk")
 target_include_directories(ShaderPreprocessTests BEFORE PRIVATE "${BASICRENDERER_SOURCE_ROOT}" "${BASICRENDERER_SOURCE_ROOT}/src" include/)
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
@@ -874,6 +935,9 @@ endif()
 target_link_options(${PROJECT_NAME} PRIVATE
     ${BASICRENDERER_MSVC_PDB_LINK_OPTIONS}
 )
+target_link_options(${BASICRENDERER_DEMO_TARGET} PRIVATE
+    ${BASICRENDERER_MSVC_PDB_LINK_OPTIONS}
+)
 target_link_options(ShaderPreprocessTests PRIVATE
     ${BASICRENDERER_MSVC_PDB_LINK_OPTIONS}
 )
@@ -889,6 +953,14 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   $<$<CONFIG:Release>:BUILD_TYPE=BUILD_TYPE_RELEASE>
   $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
     BASICRENDERER_HAS_DIRECTSTORAGE=$<IF:$<BOOL:${BASICRENDERER_HAS_DIRECTSTORAGE}>,1,0>
+)
+target_compile_definitions(${BASICRENDERER_DEMO_TARGET} PRIVATE
+  BUILD_TYPE_DEBUG=0
+  BUILD_TYPE_RELEASE=1
+  BUILD_TYPE_RELEASE_DEBUG=2
+  $<$<CONFIG:Debug>:BUILD_TYPE=BUILD_TYPE_DEBUG>
+  $<$<CONFIG:Release>:BUILD_TYPE=BUILD_TYPE_RELEASE>
+  $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
 )
 target_compile_definitions(ShaderPreprocessTests PRIVATE
   BUILD_TYPE_DEBUG=0
@@ -935,9 +1007,31 @@ PRIVATE
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )
 
+target_link_libraries(${PROJECT_NAME}
+PUBLIC
+    spdlog::spdlog_header_only
+    Microsoft.GSL::GSL
+    Microsoft::DirectX-Headers
+    meshoptimizer
+    flecs::flecs
+    Streamline::headers
+    OpenRenderGraph::OpenRenderGraph
+    BasicScene::BasicScene
+    BasicRHI::BasicRHI
+)
+
 if(TARGET BasicRenderer_DirectStorage)
     target_link_libraries(${PROJECT_NAME} PRIVATE BasicRenderer_DirectStorage)
 endif()
+
+target_link_libraries(${BASICRENDERER_DEMO_TARGET}
+PRIVATE
+    ${PROJECT_NAME}
+    spdlog::spdlog_header_only
+    imgui::imgui
+    Pix::headers
+    "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib"
+)
 
 if(BASICRENDERER_DIRECTSTORAGE_DLL)
     set(DIRECTSTORAGE_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/dstorage.dll")
@@ -963,6 +1057,9 @@ if(BASICRHI_ENABLE_RESHAPE AND (TARGET GRS.Backends.DX12.Layer OR TARGET GRS.Bac
     target_link_directories(${PROJECT_NAME} PRIVATE
         "${CMAKE_BINARY_DIR}/External/lib"
     )
+    target_link_directories(${BASICRENDERER_DEMO_TARGET} PRIVATE
+        "${CMAKE_BINARY_DIR}/External/lib"
+    )
 
     set(_basicrenderer_stage_reshape_debug_backend OFF)
     set(_basicrenderer_stage_reshape_waterfall_backend OFF)
@@ -980,10 +1077,10 @@ if(BASICRHI_ENABLE_RESHAPE AND (TARGET GRS.Backends.DX12.Layer OR TARGET GRS.Bac
             list(APPEND _basicrenderer_reshape_plugin_copy_commands
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "$<TARGET_FILE:${plugin_target}>"
-                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/$<TARGET_FILE_NAME:${plugin_target}>"
+                    "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/$<TARGET_FILE_NAME:${plugin_target}>"
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${plugin_manifest}"
-                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/${plugin_manifest_name}"
+                    "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/${plugin_manifest_name}"
             )
             set(_basicrenderer_reshape_plugins "${_basicrenderer_reshape_plugins}" PARENT_SCOPE)
             set(_basicrenderer_reshape_plugin_copy_commands "${_basicrenderer_reshape_plugin_copy_commands}" PARENT_SCOPE)
@@ -1018,16 +1115,16 @@ if(BASICRHI_ENABLE_RESHAPE AND (TARGET GRS.Backends.DX12.Layer OR TARGET GRS.Bac
         list(APPEND _basicrenderer_reshape_backend_copy_commands
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:GRS.Backends.DX12.Layer>"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/$<TARGET_FILE_NAME:GRS.Backends.DX12.Layer>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxil.dll"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxil.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Dependencies/DXC/GRS.dxil.dll"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxcompiler.dll"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxcompiler.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Dependencies/DXC/GRS.dxcompiler.dll"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE_DIR:GRS.Backends.DX12.Layer>/Dependencies/DXC/GRS.dxilconv.dll"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC/GRS.dxilconv.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Dependencies/DXC/GRS.dxilconv.dll"
         )
     endif()
     if(TARGET GRS.Backends.Vulkan.Layer)
@@ -1035,42 +1132,42 @@ if(BASICRHI_ENABLE_RESHAPE AND (TARGET GRS.Backends.DX12.Layer OR TARGET GRS.Bac
         list(APPEND _basicrenderer_reshape_backend_copy_commands
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:GRS.Backends.Vulkan.Layer>"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/$<TARGET_FILE_NAME:GRS.Backends.Vulkan.Layer>"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/$<TARGET_FILE_NAME:GRS.Backends.Vulkan.Layer>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${BASICRENDERER_REPO_ROOT}/GPU-Reshape/Source/Backends/Vulkan/Layer/Resources/VK_LAYER_GPUOPEN_GRS.json"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/VK_LAYER_GPUOPEN_GRS.json"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/VK_LAYER_GPUOPEN_GRS.json"
         )
     endif()
 
-    add_dependencies(${PROJECT_NAME}
+    add_dependencies(${BASICRENDERER_DEMO_TARGET}
         ${_basicrenderer_reshape_backend_targets}
     )
 
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Dependencies/DXC"
+    add_custom_command(TARGET ${BASICRENDERER_DEMO_TARGET} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Dependencies/DXC"
         ${_basicrenderer_reshape_backend_copy_commands}
         ${_basicrenderer_reshape_plugin_copy_commands}
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Debug.Backend.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/GRS.Features.Debug.Backend.dll"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Debug.xml"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/Debug.xml"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Waterfall.Backend.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/GRS.Features.Waterfall.Backend.dll"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Waterfall.xml"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/Waterfall.xml"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.DeviceCommands.Backend.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/GRS.Features.DeviceCommands.Backend.dll"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/DeviceCommands.xml"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/DeviceCommands.xml"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.Loop.Backend.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/GRS.Features.Loop.Backend.dll"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/Loop.xml"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/Loop.xml"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/GRS.Features.ExportStability.Backend.dll"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/GRS.Features.ExportStability.Backend.dll"
             COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/Plugins/ExportStability.xml"
+                "$<TARGET_FILE_DIR:${BASICRENDERER_DEMO_TARGET}>/Plugins/ExportStability.xml"
     )
 endif()
 
