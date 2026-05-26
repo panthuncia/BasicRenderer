@@ -769,6 +769,7 @@ void Scene::Activate(ManagerInterface managerInterface) {
 	ActivateHierarchy(ECSSceneRoot);
 	ActivateAllAnimatedEntities();
 
+	ECSSceneRoot.add<Components::ActiveScene>();
 	ECSSceneRoot.add<Components::Active>();
 
 	MakeResident();

@@ -29,6 +29,7 @@ public:
     void Clear(const ManagerInterface& managerInterface);
 
     bool HasPrimaryCamera() const;
+    flecs::entity GetSceneRoot() const;
     flecs::entity GetPrimaryCameraEntity() const;
     void ResyncPrimaryCameraDepth(ViewManager& viewManager, uint32_t renderWidth, uint32_t renderHeight);
 
@@ -37,6 +38,7 @@ private:
     void InvalidateExportQueries();
 
     std::unordered_map<uint64_t, BridgedEntityState> m_bridgedEntities;
+    uint64_t m_sceneRootEntityId = 0;
     uint64_t m_primaryCameraEntityId = 0;
     uint64_t m_currentIngestionFrame = 0;
 

@@ -39,13 +39,16 @@ public:
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
-	std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(const DrawWorkloadKey& workloadKey) {
+	std::shared_ptr<SortedUnsignedIntBuffer> TryGetActiveDrawSetIndices(const DrawWorkloadKey& workloadKey) {
 		auto it = m_activeDrawSetIndices.find(workloadKey);
-		if (it != m_activeDrawSetIndices.end()) {
-			return it->second;
-		} else {
+		return it != m_activeDrawSetIndices.end() ? it->second : nullptr;
+	}
+	std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(const DrawWorkloadKey& workloadKey) {
+		auto buffer = TryGetActiveDrawSetIndices(workloadKey);
+		if (!buffer) {
 			throw std::runtime_error("Active draw set indices for given flags not found");
 		}
+		return buffer;
 	}
 	std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(MaterialCompileFlags flags, const RenderPhase& renderPhase, bool clodOnly = false) {
         return GetActiveDrawSetIndices(DrawWorkloadKey { flags, renderPhase, clodOnly });

@@ -566,9 +566,19 @@ PassReturn HierarchicalCullingPass::Execute(PassExecutionContext& executionConte
                 if (count == 0) {
                     continue;
                 }
+                const auto activeDrawSetIndices = context.objectManager->TryGetActiveDrawSetIndices(wl.key);
+                if (!activeDrawSetIndices) {
+                    spdlog::warn(
+                        "HierarchicalCullingPass: skipping stale workload without active draw set indices flags={} phase={} clodOnly={} count={}",
+                        static_cast<std::uint64_t>(wl.key.compileFlags),
+                        wl.key.renderPhase.hash,
+                        wl.key.clodOnly,
+                        count);
+                    continue;
+                }
                 ObjectCullRecord record{};
                 record.viewDataIndex = cameraBufferIndex;
-                record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.key)->GetSRVInfo(0).slot.index;
+                record.activeDrawSetIndicesSRVIndex = activeDrawSetIndices->GetSRVInfo(0).slot.index;
                 record.activeDrawCount = count;
                 record.dispatchGridX = static_cast<uint>((count + 63) / 64);
                 record.dispatchGridY = 1;

@@ -346,18 +346,44 @@ flecs::entity GetOrCreateBridgedEntity(
     flecs::world& renderWorld,
     std::unordered_map<uint64_t, br::render::SceneRenderBridge::BridgedEntityState>& bridgedEntities,
     uint64_t stableSceneID,
-    uint64_t currentFrame) {
+    uint64_t currentFrame,
+    flecs::entity sceneRoot) {
     if (auto it = bridgedEntities.find(stableSceneID); it != bridgedEntities.end()) {
         it->second.lastSeenFrame = currentFrame;
         flecs::entity existing{ renderWorld, it->second.renderEntityId };
         if (existing.is_alive()) {
+            if (sceneRoot.is_alive()) {
+                existing.child_of(sceneRoot);
+            }
             return existing;
         }
     }
 
     auto dst = renderWorld.entity();
+    if (sceneRoot.is_alive()) {
+        dst.child_of(sceneRoot);
+    }
     bridgedEntities[stableSceneID] = { dst.id(), currentFrame, 0, DirectX::XMMatrixIdentity() };
     return dst;
+}
+
+flecs::entity EnsureExternalSceneRoot(flecs::world& renderWorld, uint64_t& sceneRootEntityId) {
+    if (sceneRootEntityId != 0) {
+        flecs::entity root{ renderWorld, sceneRootEntityId };
+        if (root.is_alive()) {
+            return root;
+        }
+    }
+
+    auto root = renderWorld.entity("SARP External Scene")
+        .add<Components::SceneRoot>()
+        .add<Components::ActiveScene>()
+        .add<Components::Active>()
+        .set<Components::StableSceneID>({ 0x53415250524F4F54ULL })
+        .set<Components::Name>("SARP External Scene")
+        .set<Components::Matrix>(DirectX::XMMatrixIdentity());
+    sceneRootEntityId = root.id();
+    return root;
 }
 
 uint64_t GetStableSceneID(flecs::entity entity) {
@@ -576,6 +602,10 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
         snapshotCamera.matrix = matrix;
         snapshotCamera.camera = camera;
         snapshotCamera.primary = src.has<Components::PrimaryCamera>();
+        if (const auto* externalMatrices = src.try_get<Components::ExternalCameraMatrices>()) {
+            snapshotCamera.useExternalMatrices = true;
+            snapshotCamera.externalMatrices = *externalMatrices;
+        }
         if (const auto* name = src.try_get<Components::Name>()) {
             snapshotCamera.name = name->name;
         }
@@ -660,6 +690,7 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
 void SceneRenderBridge::Clear(const ManagerInterface& managerInterface) {
     if (!RendererECSManager::GetInstance().IsAlive()) {
         m_bridgedEntities.clear();
+        m_sceneRootEntityId = 0;
         m_primaryCameraEntityId = 0;
         m_lastExportedMeshGeneration.clear();
         m_lastExportedAliveRenderableIDs.clear();
@@ -678,7 +709,15 @@ void SceneRenderBridge::Clear(const ManagerInterface& managerInterface) {
         DestroyBridgedEntity(renderWorld, state.renderEntityId, managerInterface);
     }
 
+    if (m_sceneRootEntityId != 0) {
+        flecs::entity root{ renderWorld, m_sceneRootEntityId };
+        if (root.is_alive()) {
+            root.destruct();
+        }
+    }
+
     m_bridgedEntities.clear();
+    m_sceneRootEntityId = 0;
     m_primaryCameraEntityId = 0;
     m_lastExportedMeshGeneration.clear();
     m_lastExportedAliveRenderableIDs.clear();
@@ -727,6 +766,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
 
     ++m_currentIngestionFrame;
     m_primaryCameraEntityId = 0;
+    auto sceneRoot = EnsureExternalSceneRoot(renderWorld, m_sceneRootEntityId);
 
     {
         ZoneScopedN("SceneRenderBridge::IngestSnapshot::GlobalComponents");
@@ -742,7 +782,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     {
         ZoneScopedN("SceneRenderBridge::IngestSnapshot::ChangedRenderables");
         for (const auto& renderable : snapshot.changedRenderables) {
-            auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, renderable.stableID, m_currentIngestionFrame);
+            auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, renderable.stableID, m_currentIngestionFrame, sceneRoot);
 
             auto& entityState = m_bridgedEntities[renderable.stableID];
             const bool meshChanged = entityState.meshGeneration != renderable.meshInstances.generation;
@@ -784,7 +824,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     {
         ZoneScopedN("SceneRenderBridge::IngestSnapshot::ChangedCameras");
         for (const auto& camera : snapshot.changedCameras) {
-            auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, camera.stableID, m_currentIngestionFrame);
+            auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, camera.stableID, m_currentIngestionFrame, sceneRoot);
             CopyCommonComponents(dst, camera.stableID, camera.name, camera.matrix);
             dst.add<Components::RenderTransformUpdated>();
             SyncCameraDerivedState(dst, camera.camera, camera.primary, *viewManager, renderResolution.x, renderResolution.y);
@@ -807,7 +847,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     {
         ZoneScopedN("SceneRenderBridge::IngestSnapshot::ChangedLights");
         for (const auto& light : snapshot.changedLights) {
-            auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, light.stableID, m_currentIngestionFrame);
+            auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, light.stableID, m_currentIngestionFrame, sceneRoot);
             CopyCommonComponents(dst, light.stableID, light.name, light.matrix);
             dst.add<Components::RenderTransformUpdated>();
             const auto* frustumPlanes = light.frustumPlanes ? &light.frustumPlanes.value() : nullptr;
@@ -901,6 +941,16 @@ bool SceneRenderBridge::HasPrimaryCamera() const {
     auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
     flecs::entity entity{ renderWorld, m_primaryCameraEntityId };
     return entity.is_alive();
+}
+
+flecs::entity SceneRenderBridge::GetSceneRoot() const {
+    if (m_sceneRootEntityId == 0 || !RendererECSManager::GetInstance().IsAlive()) {
+        return {};
+    }
+
+    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
+    flecs::entity root{ renderWorld, m_sceneRootEntityId };
+    return root.is_alive() ? root : flecs::entity{};
 }
 
 flecs::entity SceneRenderBridge::GetPrimaryCameraEntity() const {

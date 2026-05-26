@@ -1244,6 +1244,9 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
+        if (m_externalSceneMode) {
+            return m_sceneRenderBridge.GetSceneRoot();
+        }
         if (!currentScene || m_sceneTaskInFlight.load()) {
             return {};
         }

@@ -159,7 +159,7 @@ void PureComputeObjectCullCS(const uint3 vDispatchThreadID : SV_DispatchThreadID
             }
         }
     }
-
+    
     if (culled) {
         return;
     }
