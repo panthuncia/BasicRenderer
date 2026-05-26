@@ -31,7 +31,11 @@ target_link_libraries(BRNifly PRIVATE
 )
 
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-set(BRNIFLY_USD_ROOT "${REPO_ROOT}/ThirdParty" CACHE PATH "")
+if(DEFINED BASICRENDERER_USD_ROOT)
+    set(BRNIFLY_USD_ROOT "${BASICRENDERER_USD_ROOT}" CACHE PATH "" FORCE)
+else()
+    set(BRNIFLY_USD_ROOT "${REPO_ROOT}/ThirdParty" CACHE PATH "")
+endif()
 target_include_directories(BRNifly BEFORE PRIVATE
     "${BRNIFLY_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/"
 )
@@ -52,7 +56,7 @@ endif()
 
 target_compile_definitions(BRNifly PRIVATE NOMINMAX _UNICODE UNICODE)
 
-set(BRNIFLY_USD_RUNTIME_ROOT "${REPO_ROOT}/ThirdParty/usd_$<IF:$<CONFIG:Debug>,dbg,rel>")
+set(BRNIFLY_USD_RUNTIME_ROOT "${BRNIFLY_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>")
 add_custom_command(TARGET BRNifly POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${BRNIFLY_USD_RUNTIME_ROOT}/lib"
