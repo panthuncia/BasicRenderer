@@ -459,6 +459,10 @@ PassReturn HierarchicalCullingPass::Execute(PassExecutionContext& executionConte
     if (kDisableVirtualShadowDirtyPageCulling && UsesVirtualShadowOutput(m_rasterOutputKind)) {
         workGraphFlags |= CLOD_WG_FLAG_DISABLE_SHADOW_DIRTY_PAGE_CULLING;
     }
+    if (UsesVirtualShadowOutput(m_rasterOutputKind) &&
+        SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowPredictiveLodInvalidationSettingName)()) {
+        workGraphFlags |= CLOD_WG_FLAG_VSM_PREDICTIVE_LOD_INVALIDATION;
+    }
     constexpr uint32_t swRasterThreshold = 16; // pixel diameter threshold
     workGraphFlags |= (swRasterThreshold << CLOD_WG_SW_RASTER_THRESHOLD_SHIFT);
     if (!m_isFirstPass) {

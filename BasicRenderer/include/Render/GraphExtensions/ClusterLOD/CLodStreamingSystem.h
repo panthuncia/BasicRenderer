@@ -117,6 +117,7 @@ private:
     void PollCompletedReadbackSlots();
     void StreamingWorkerMain();
     void ProcessStreamingRequestsBudgeted();
+    void PrepareStreamingFrameWork();
     bool EnsureParallelSortResources();
     void DestroyParallelSortResources();
 
@@ -130,6 +131,7 @@ private:
         uint32_t rejectedPendingWrite = 0;
         uint32_t rejectedHierarchy = 0;
         uint32_t rejectedEvictFailed = 0;
+        uint32_t rejectedEvictionBudget = 0;
         uint32_t rejectedDirtyMetadata = 0;
         uint32_t evicted = 0;
         uint32_t freeClean = 0;
@@ -256,6 +258,8 @@ private:
     std::vector<uint32_t> m_pendingLoadPriorityByGroup;
     uint32_t m_streamingRequestsInProgressCount = 0u;
     uint32_t m_pendingStreamingRequestCount = 0u;
+    uint32_t m_pagePopEvictionsThisUpdate = 0u;
+    uint32_t m_pagePopEvictionBudgetThisUpdate = 0u;
     std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
     bool m_pageLruInitialized = false;
     uint32_t m_streamingResidentGroupsCount = 0u;
@@ -279,6 +283,7 @@ private:
     std::vector<uint32_t> m_pendingStreamingRequestGenerationByGroup;
     CLodPriorityMode m_priorityMode = CLodPriorityMode::Max;
     bool m_streamingDomainDirty = true;
+    bool m_streamingFrameWorkPrepared = false;
     uint64_t m_streamingDiagnosticTick = 0;
     std::unordered_map<uint32_t, uint64_t> m_lastInProgressSuppressionLogTick;
 
