@@ -154,10 +154,13 @@ void LightManager::RemoveLight(flecs::entity light) {
 	}
 
 	auto& viewInfo = light.get<Components::LightViewInfo>();
-	m_activeLightIndices->Remove(viewInfo.lightBufferIndex);
-	m_lightBuffer->Remove(viewInfo.lightBufferView.get());
+	if (viewInfo.lightBufferView) {
+		m_activeLightIndices->Remove(viewInfo.lightBufferIndex);
+		m_lightBuffer->Remove(viewInfo.lightBufferView.get());
+	}
 
 	RemoveLightViewInfo(light);
+	light.remove<Components::LightViewInfo>();
 }
 
 unsigned int LightManager::GetNumLights() {
@@ -504,22 +507,28 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 void LightManager::RemoveLightViewInfo(flecs::entity light) {
 
 	//m_pCommandBufferManager->UnregisterBuffers(light.id()); // Remove indirect command buffers
-	auto& lightInfo = light.get<Components::Light>();
-	auto& viewInfo = light.get<Components::LightViewInfo>();
-	switch (lightInfo.type) {
+	const auto* lightInfo = light.try_get<Components::Light>();
+	const auto* viewInfo = light.try_get<Components::LightViewInfo>();
+	if (!lightInfo || !viewInfo || !lightInfo->lightInfo.shadowCaster) {
+		return;
+	}
+
+	switch (lightInfo->type) {
 	case Components::LightType::Point: {
-		auto& views = viewInfo.viewIDs;
-		for (int i = 0; i < 6; i++) {
+		const auto& views = viewInfo->viewIDs;
+		for (size_t i = 0; i < views.size(); i++) {
 			m_pViewManager->DestroyView(views[i]);
 		}
 		break;
 	}
 	case Components::LightType::Spot: {
-		m_pViewManager->DestroyView(viewInfo.viewIDs[0]);
+		for (const auto viewID : viewInfo->viewIDs) {
+			m_pViewManager->DestroyView(viewID);
+		}
 		break;
 	}
 	case Components::LightType::Directional: {
-		auto& views = viewInfo.viewIDs;
+		const auto& views = viewInfo->viewIDs;
 		for (size_t i = 0; i < views.size(); i++) {
 			m_pViewManager->DestroyView(views[i]);
 		}
