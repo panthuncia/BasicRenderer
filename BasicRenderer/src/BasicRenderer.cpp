@@ -352,7 +352,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto robot = LoadModel("models/robot.usdz");
 
-	auto zorah = LoadModel("models/zorahv2/zorah_main_public.v2.gltf");
+	//auto zorah = LoadModel("models/zorahv2/zorah_main_public.v2.gltf");
 
 	//auto island = LoadModel("models/island/usd/elements/isMountainB/instance.usda");
 
@@ -367,7 +367,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto needles = LoadModel("models/Trees/PineTree.usd");
 
+	auto farmhouse = LoadModel("models/farmhouse01.nif");
+
     renderer.SetCurrentScene(baseScene);
+
+	renderer.GetCurrentScene()->AppendScene(farmhouse->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(needles->Clone());
 
@@ -385,7 +389,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//renderer.GetCurrentScene()->AppendScene(island->Clone());
 
-	renderer.GetCurrentScene()->AppendScene(zorah->Clone());
+	//renderer.GetCurrentScene()->AppendScene(zorah->Clone());
 
     //mountainScene = LoadModel("models/terrain.glb");
  //   mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });

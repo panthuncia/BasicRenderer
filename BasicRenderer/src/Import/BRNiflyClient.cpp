@@ -203,6 +203,42 @@ std::optional<std::string> ExistingExecutable(const fs::path& candidate)
     return std::nullopt;
 }
 
+std::string ResolveInputFilePath(const std::string& filePath)
+{
+    const fs::path input(filePath);
+    std::error_code ec;
+
+    if (input.is_absolute()) {
+        fs::path resolved = fs::weakly_canonical(input, ec);
+        return ec ? input.string() : resolved.string();
+    }
+
+    std::vector<fs::path> candidates;
+    candidates.push_back(fs::current_path(ec) / input);
+
+#ifdef _WIN32
+    if (auto exeDir = GetCurrentExecutableDirectory()) {
+        const fs::path base(*exeDir);
+        candidates.push_back(base / input);
+        candidates.push_back(base / "BasicRenderer" / input);
+        candidates.push_back(base.parent_path() / input);
+        candidates.push_back(base.parent_path() / "BasicRenderer" / input);
+    }
+#endif
+
+    for (const fs::path& candidate : candidates) {
+        ec.clear();
+        if (fs::is_regular_file(candidate, ec)) {
+            fs::path resolved = fs::weakly_canonical(candidate, ec);
+            return ec ? candidate.string() : resolved.string();
+        }
+    }
+
+    ec.clear();
+    fs::path absolute = fs::absolute(input, ec);
+    return ec ? filePath : absolute.string();
+}
+
 std::vector<std::string> JsonStringArray(const json& value)
 {
     std::vector<std::string> result;
@@ -288,7 +324,8 @@ std::optional<json> RunJsonFileCommand(
     const fs::path responsePath = fs::temp_directory_path() /
         ("brnifly_response_" + std::to_string(reinterpret_cast<std::uintptr_t>(errorMessage)) + ".json");
 
-    auto envelope = RunJsonCommand(options, { "--convert-usd-json-file", nifPath, responsePath.string() }, executablePath, errorMessage);
+    const std::string resolvedNifPath = ResolveInputFilePath(nifPath);
+    auto envelope = RunJsonCommand(options, { "--convert-usd-json-file", resolvedNifPath, responsePath.string() }, executablePath, errorMessage);
     if (!envelope) {
         return std::nullopt;
     }
