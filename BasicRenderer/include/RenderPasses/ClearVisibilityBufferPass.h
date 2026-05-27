@@ -3,6 +3,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Resources/PixelBuffer.h"
 
 class ClearVisibilityBufferPass : public RenderPass {
 public:
@@ -20,6 +21,7 @@ public:
 			Builtin::Color::HDRColorTarget,
 			Builtin::DebugVisualization);
 		builder->WithDepthStencilClear(Builtin::PrimaryCamera::DepthTexture);
+		builder->WithRenderTargetClear(Builtin::PrimaryCamera::LinearDepthMap);
 	}
 
 	void Setup() override {
@@ -33,6 +35,7 @@ public:
 		m_motionVectors = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors);
 		m_HDRColorTarget = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Color::HDRColorTarget);
 		m_depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture);
+		m_linearDepthTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 		m_debugVisualization = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::DebugVisualization);
 	}
 
@@ -93,6 +96,15 @@ public:
 		clearResource(m_motionVectors);
 		clearResource(m_HDRColorTarget); // TODO: Only needed because of non-zero initialized memory issue- make a clear manager instead?
 		clearDepth(m_depthTexture); // same
+		if (m_linearDepthTexture) {
+			for (unsigned int slice = 0; slice < m_linearDepthTexture->GetNumRTVSlices(); ++slice) {
+				for (unsigned int mip = 0; mip < m_linearDepthTexture->GetNumRTVMipLevels(); ++mip) {
+					commandList.ClearRenderTargetView(
+						m_linearDepthTexture->GetRTVInfo(mip, slice).slot,
+						m_linearDepthTexture->GetClearColor());
+				}
+			}
+		}
 
 		// Clear debug visualization texture to sentinel (0xFFFFFFFF)
 		{
@@ -123,5 +135,6 @@ private:
 	GloballyIndexedResource* m_motionVectors;
 	GloballyIndexedResource* m_HDRColorTarget;
 	GloballyIndexedResource* m_depthTexture;
+	PixelBuffer* m_linearDepthTexture;
 	GloballyIndexedResource* m_debugVisualization;
 };

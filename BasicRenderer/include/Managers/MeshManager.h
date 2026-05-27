@@ -284,6 +284,7 @@ private:
 		// object lifetime or summary state.
 		std::vector<int32_t> parentGroupByLocal;
 		std::vector<float> groupErrorByLocal;
+		std::vector<ClusterLODRuntimeSummary::GroupRange> coarsestRanges;
 
 		// GroupPageMap buffer view for this mesh's page map entries.
 		std::unique_ptr<BufferView> ownedPageMapView;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,19 @@
 #include "Import/MeshPreprocessData.h"
 
 namespace USDGeometryExtractor {
+
+struct BenchmarkStats {
+	std::uint64_t submeshes = 0;
+	std::uint64_t clodCacheHits = 0;
+	std::uint64_t clodCacheMisses = 0;
+	std::uint64_t loadGeomMs = 0;
+	std::uint64_t clodBuildMs = 0;
+	std::uint64_t clodSaveMs = 0;
+	std::uint64_t clodReloadMs = 0;
+};
+
+void ResetBenchmarkStats();
+BenchmarkStats GetBenchmarkStats();
 
 // Extract geometry for a single mesh (or mesh+subset), populate
 // MeshIngestBuilder, and build/load CLod cache.

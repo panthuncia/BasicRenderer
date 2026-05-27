@@ -511,10 +511,19 @@ namespace CLodCache {
 	namespace {
 		bool SaveImpl(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload, ClusterLODPrebuiltData* outSavedPrebuiltData)
 		{
+			static std::mutex usdCacheWriteMutex;
+			std::lock_guard<std::mutex> usdCacheWriteLock(usdCacheWriteMutex);
+
 			const std::wstring fileName = BuildCacheFileName(key, buildConfigHash);
 			const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
 			const std::wstring containerFileName = BuildGroupContainerFileName(key, buildConfigHash);
 			const std::wstring containerPath = GetCacheFilePathBySource(containerFileName, key.sourceIdentifier);
+			if (std::filesystem::exists(cachePath)) {
+				spdlog::warn(
+					"Skipping CLod cache save because metadata file already exists but did not load cleanly: {}",
+					ws2s(cachePath));
+				return false;
+			}
 
 			spdlog::info("CLodCache::SaveImpl  metadata='{}' container='{}'",
 				ws2s(cachePath), ws2s(containerPath));
@@ -630,6 +639,11 @@ namespace CLodCache {
 		std::stringstream ss;
 		ss << "clod_" << std::hex << hashSeed << ".usdc";
 		return s2ws(ss.str());
+	}
+
+	std::wstring GetCacheFilePathForSource(const std::wstring& fileName, const std::string& sourceIdentifier)
+	{
+		return GetCacheFilePathBySource(fileName, sourceIdentifier);
 	}
 
 	std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConfigHash)

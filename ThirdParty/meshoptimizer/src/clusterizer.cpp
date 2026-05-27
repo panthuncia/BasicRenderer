@@ -1592,8 +1592,15 @@ meshopt_Bounds meshopt_computeClusterBounds(const unsigned int* indices, size_t 
 		float dc = cx * normals[i][0] + cy * normals[i][1] + cz * normals[i][2];
 		float dn = axis[0] * normals[i][0] + axis[1] * normals[i][1] + axis[2] * normals[i][2];
 
-		// dn should be larger than mindp cutoff above
-		assert(dn > 0.f);
+		// dn should be larger than mindp cutoff above. Some real-world assets can
+		// still produce numerically inconsistent cones here; fall back to a
+		// conservative non-culling cone instead of aborting debug builds.
+		if (dn <= 0.f)
+		{
+			bounds.cone_cutoff = 1;
+			bounds.cone_cutoff_s8 = 127;
+			return bounds;
+		}
 		float t = dc / dn;
 
 		maxt = (t > maxt) ? t : maxt;

@@ -53,6 +53,7 @@ std::wstring ResolveContainerPath(const ClusterLODCacheSource& cacheSource);
 
 uint64_t ComputeBuildConfigHash();
 std::wstring BuildCacheFileName(const CacheKey& key, uint64_t buildConfigHash);
+std::wstring GetCacheFilePathForSource(const std::wstring& fileName, const std::string& sourceIdentifier);
 
 std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConfigHash);
 bool Save(const CacheKey& key, const CacheData& data);

@@ -21,6 +21,10 @@ namespace USDLoader {
 
 	std::shared_ptr<Scene> LoadModel(std::string file, const ImportSettings& settings);
 	std::shared_ptr<Scene> LoadModel(std::string file);
+	std::shared_ptr<Scene> LoadModelFromFile(
+		const std::string& filePath,
+		const InMemoryStageOptions& options,
+		const ImportSettings& settings = {});
 	std::shared_ptr<Scene> LoadModelFromStage(
 		const pxr::UsdStageRefPtr& stage,
 		const InMemoryStageOptions& options,

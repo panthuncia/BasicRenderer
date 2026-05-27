@@ -404,6 +404,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			const auto& summary = mesh->GetCLodRuntimeSummary();
 			sharedState->parentGroupByLocal = summary.parentGroupByLocal;
 			sharedState->groupErrorByLocal = summary.groupErrorByLocal;
+			sharedState->coarsestRanges = summary.coarsestRanges;
 		}
 
 		// Compute total mesh-local page-map entries needed for this mesh.
@@ -1795,7 +1796,7 @@ void MeshManager::GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGr
 	seenRanges.reserve(m_clodStreamingStateByInstanceIndex.size());
 
 	for (const auto& [_, state] : m_clodStreamingStateByInstanceIndex) {
-		if (state.groupCount == 0u || state.instance == nullptr || state.instance->GetMesh() == nullptr) {
+		if (state.groupCount == 0u || state.sharedMeshState == nullptr) {
 			continue;
 		}
 
@@ -1804,12 +1805,12 @@ void MeshManager::GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGr
 			continue;
 		}
 
-		const auto& summary = state.instance->GetMesh()->GetCLodRuntimeSummary();
-		if (summary.coarsestRanges.empty()) {
+		const auto& coarsestRanges = state.sharedMeshState->coarsestRanges;
+		if (coarsestRanges.empty()) {
 			continue;
 		}
 
-		for (const auto& localRange : summary.coarsestRanges) {
+		for (const auto& localRange : coarsestRanges) {
 			if (localRange.groupCount == 0u || localRange.firstGroup >= state.groupCount) {
 				continue;
 			}
@@ -1837,7 +1838,7 @@ void MeshManager::GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGro
 	seenRanges.reserve(m_clodStreamingStateByInstanceIndex.size());
 
 	for (const auto& [_, state] : m_clodStreamingStateByInstanceIndex) {
-		if (state.groupCount == 0u || state.instance == nullptr || state.instance->GetMesh() == nullptr) {
+		if (state.groupCount == 0u || state.sharedMeshState == nullptr) {
 			continue;
 		}
 
@@ -1846,8 +1847,8 @@ void MeshManager::GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGro
 			continue;
 		}
 
-		const auto& summary = state.instance->GetMesh()->GetCLodRuntimeSummary();
-		const uint32_t localGroupCount = std::min<uint32_t>(state.groupCount, static_cast<uint32_t>(summary.parentGroupByLocal.size()));
+		const auto& parentMap = state.sharedMeshState->parentGroupByLocal;
+		const uint32_t localGroupCount = std::min<uint32_t>(state.groupCount, static_cast<uint32_t>(parentMap.size()));
 		if (localGroupCount == 0u) {
 			continue;
 		}
@@ -1859,7 +1860,7 @@ void MeshManager::GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGro
 		}
 
 		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
-			const int32_t parentLocal = summary.parentGroupByLocal[groupLocalIndex];
+			const int32_t parentLocal = parentMap[groupLocalIndex];
 			if (parentLocal < 0) {
 				continue;
 			}
@@ -1905,14 +1906,12 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 		const uint32_t rangeEnd = state.groupsBase + state.groupCount;
 		outSnapshot.maxGroupIndex = std::max(outSnapshot.maxGroupIndex, rangeEnd);
 
-		if (state.instance == nullptr || state.instance->GetMesh() == nullptr) {
+		if (state.sharedMeshState == nullptr) {
 			continue;
 		}
 
-		const auto& summary = state.instance->GetMesh()->GetCLodRuntimeSummary();
-
 		// Coarsest ranges (same as GetCLodCoarsestUniqueAssetGroupRanges)
-		for (const auto& localRange : summary.coarsestRanges) {
+		for (const auto& localRange : state.sharedMeshState->coarsestRanges) {
 			if (localRange.groupCount == 0u || localRange.firstGroup >= state.groupCount) {
 				continue;
 			}
@@ -1929,9 +1928,7 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 		}
 
 		// Prefer the parent map cached in the shared streaming state.
-		const auto& parentMap = (state.sharedMeshState && !state.sharedMeshState->parentGroupByLocal.empty())
-			? state.sharedMeshState->parentGroupByLocal
-			: summary.parentGroupByLocal;
+		const auto& parentMap = state.sharedMeshState->parentGroupByLocal;
 		const uint32_t localGroupCount = std::min<uint32_t>(state.groupCount, static_cast<uint32_t>(parentMap.size()));
 		if (localGroupCount == 0u) {
 			continue;
@@ -1959,9 +1956,7 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 		}
 
 		// Original error values for residency-driven error override
-		const auto& errorMap = (state.sharedMeshState && !state.sharedMeshState->groupErrorByLocal.empty())
-			? state.sharedMeshState->groupErrorByLocal
-			: summary.groupErrorByLocal;
+		const auto& errorMap = state.sharedMeshState->groupErrorByLocal;
 		const uint32_t errorLocalCount = std::min<uint32_t>(localGroupCount, static_cast<uint32_t>(errorMap.size()));
 		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < errorLocalCount; ++groupLocalIndex) {
 			const uint32_t globalIndex = state.groupsBase + groupLocalIndex;

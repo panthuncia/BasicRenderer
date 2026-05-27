@@ -1,5 +1,7 @@
 #include "Utilities/CachePathUtilities.h"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <mutex>
 #include <system_error>
@@ -97,6 +99,21 @@ std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& 
 
 std::string NormalizeCacheSourcePath(const std::string& path) {
 	if (path.empty()) return path;
+
+	constexpr std::string_view sarpNifScheme = "sarp-nif://";
+	if (path.size() >= sarpNifScheme.size() &&
+		std::equal(sarpNifScheme.begin(), sarpNifScheme.end(), path.begin(), [](char a, char b) {
+			return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+		})) {
+		std::string normalized = "sarp-nif://";
+		normalized.reserve(path.size());
+		for (std::size_t i = sarpNifScheme.size(); i < path.size(); ++i) {
+			const char ch = path[i] == '\\' ? '/' : path[i];
+			normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+		}
+		return normalized;
+	}
+
 	std::error_code ec;
 	auto canonical = std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
 	if (ec) return path; // if canonicalisation fails, use original

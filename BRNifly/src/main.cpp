@@ -1698,6 +1698,9 @@ std::optional<std::string> ConvertShapesToUsd(
         mesh.CreateFaceVertexCountsAttr(VtValue(faceVertexCounts));
         mesh.CreateFaceVertexIndicesAttr(VtValue(faceVertexIndices));
         mesh.CreateSubdivisionSchemeAttr(VtValue(UsdGeomTokens->none));
+        if ((shape.shader.value("shaderFlags2", 0u) & (1u << 4)) != 0u) {
+            mesh.CreateDoubleSidedAttr(VtValue(true));
+        }
 
         if (shape.normals.size() == shape.positions.size()) {
             VtArray<GfVec3f> normals;

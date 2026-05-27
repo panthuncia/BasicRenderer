@@ -8,6 +8,8 @@
 #include <set>
 #include <algorithm>
 #include <optional>
+#include <atomic>
+#include <chrono>
 
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdGeom/tokens.h>
@@ -392,7 +394,7 @@ static void LoadGeom(
 			vertexFlags |= VertexFlags::VERTEX_COLORS;
 		}
 		else {
-			spdlog::warn(
+			spdlog::debug(
 				"Mesh '{}' authored primvars:displayColor but it could not be flattened at geometry sample time {}; ignoring vertex colors for preview extraction.",
 				primName,
 				geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
@@ -712,6 +714,54 @@ static void LoadGeom(
 
 namespace USDGeometryExtractor {
 
+namespace {
+	struct AtomicBenchmarkStats {
+		std::atomic<std::uint64_t> submeshes{ 0 };
+		std::atomic<std::uint64_t> clodCacheHits{ 0 };
+		std::atomic<std::uint64_t> clodCacheMisses{ 0 };
+		std::atomic<std::uint64_t> loadGeomMs{ 0 };
+		std::atomic<std::uint64_t> clodBuildMs{ 0 };
+		std::atomic<std::uint64_t> clodSaveMs{ 0 };
+		std::atomic<std::uint64_t> clodReloadMs{ 0 };
+	};
+
+	AtomicBenchmarkStats g_benchmarkStats;
+
+	std::uint64_t ElapsedMs(std::chrono::steady_clock::time_point begin, std::chrono::steady_clock::time_point end)
+	{
+		return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count());
+	}
+
+	void AddMs(std::atomic<std::uint64_t>& target, std::chrono::steady_clock::time_point begin)
+	{
+		target.fetch_add(ElapsedMs(begin, std::chrono::steady_clock::now()), std::memory_order_relaxed);
+	}
+}
+
+void ResetBenchmarkStats()
+{
+	g_benchmarkStats.submeshes.store(0, std::memory_order_relaxed);
+	g_benchmarkStats.clodCacheHits.store(0, std::memory_order_relaxed);
+	g_benchmarkStats.clodCacheMisses.store(0, std::memory_order_relaxed);
+	g_benchmarkStats.loadGeomMs.store(0, std::memory_order_relaxed);
+	g_benchmarkStats.clodBuildMs.store(0, std::memory_order_relaxed);
+	g_benchmarkStats.clodSaveMs.store(0, std::memory_order_relaxed);
+	g_benchmarkStats.clodReloadMs.store(0, std::memory_order_relaxed);
+}
+
+BenchmarkStats GetBenchmarkStats()
+{
+	BenchmarkStats stats;
+	stats.submeshes = g_benchmarkStats.submeshes.load(std::memory_order_relaxed);
+	stats.clodCacheHits = g_benchmarkStats.clodCacheHits.load(std::memory_order_relaxed);
+	stats.clodCacheMisses = g_benchmarkStats.clodCacheMisses.load(std::memory_order_relaxed);
+	stats.loadGeomMs = g_benchmarkStats.loadGeomMs.load(std::memory_order_relaxed);
+	stats.clodBuildMs = g_benchmarkStats.clodBuildMs.load(std::memory_order_relaxed);
+	stats.clodSaveMs = g_benchmarkStats.clodSaveMs.load(std::memory_order_relaxed);
+	stats.clodReloadMs = g_benchmarkStats.clodReloadMs.load(std::memory_order_relaxed);
+	return stats;
+}
+
 std::optional<UsdSkelSkinningQuery> GetSkinningQuery(
 	const UsdGeomMesh& mesh,
 	const UsdSkelCache& skelCache)
@@ -765,7 +815,16 @@ MeshPreprocessResult ExtractSubMesh(
 		cacheIdentity.primPath,
 		geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
 
+	g_benchmarkStats.submeshes.fetch_add(1, std::memory_order_relaxed);
+	const auto cacheLoadBegin = std::chrono::steady_clock::now();
 	auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+	AddMs(g_benchmarkStats.clodReloadMs, cacheLoadBegin);
+	if (prebuiltData.has_value()) {
+		g_benchmarkStats.clodCacheHits.fetch_add(1, std::memory_order_relaxed);
+	}
+	else {
+		g_benchmarkStats.clodCacheMisses.fetch_add(1, std::memory_order_relaxed);
+	}
 	if (prebuiltData.has_value())
 		spdlog::info("    Cache HIT for prim='{}' subset='{}'", cacheIdentity.primPath, subsetName);
 	else
@@ -779,9 +838,11 @@ MeshPreprocessResult ExtractSubMesh(
 	std::vector<UINT32> indices;
 	unsigned int vertexFlags = 0;
     std::vector<MeshUvSetData> uvSets;
+	const auto loadGeomBegin = std::chrono::steady_clock::now();
 	LoadGeom(rawData, skinningData, vertexSize, skinningVertexSize,
 		indices, vertexFlags, uvSets, mesh, subset, geomTimeCode, metersPerUnit, requiredUvSetNames,
 		skinQ, skelJointOrderRaw, skelJointOrderMapped);
+	AddMs(g_benchmarkStats.loadGeomMs, loadGeomBegin);
 
 	const size_t loadedVertCount = rawData ? (rawData->size() / static_cast<size_t>(vertexSize > 0 ? vertexSize : 1)) : 0;
 	spdlog::info("    LoadGeom done: {} verts, {} indices, vertexSize={}, flags=0x{:X}",
@@ -817,17 +878,23 @@ MeshPreprocessResult ExtractSubMesh(
 	// Build CLod cache if needed
 	if (!prebuiltData.has_value()) {
 		spdlog::info("    Building CLod artifacts...");
+		const auto clodBuildBegin = std::chrono::steady_clock::now();
 		ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
+		AddMs(g_benchmarkStats.clodBuildMs, clodBuildBegin);
 		ClusterLODPrebuiltData savedPrebuiltData;
 		spdlog::info("    CLod artifacts built: {} groups, {} nodes",
 			artifacts.prebuiltData.groups.size(), artifacts.prebuiltData.nodes.size());
 
 		spdlog::info("    Saving cache to disk...");
+		const auto clodSaveBegin = std::chrono::steady_clock::now();
 		if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData,
 			artifacts.cacheBuildData.AsPayload(), &savedPrebuiltData))
 		{
+			AddMs(g_benchmarkStats.clodSaveMs, clodSaveBegin);
 			spdlog::info("    Cache SAVED successfully.");
+			const auto clodReloadBegin = std::chrono::steady_clock::now();
 			auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+			AddMs(g_benchmarkStats.clodReloadMs, clodReloadBegin);
 			if (diskBackedPrebuilt.has_value())
 				prebuiltData = std::move(diskBackedPrebuilt);
 			else {

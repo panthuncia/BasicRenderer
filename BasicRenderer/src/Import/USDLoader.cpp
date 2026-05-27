@@ -1267,6 +1267,21 @@ namespace USDLoader {
         return runtimeMaterial;
     }
 
+	bool IsUnsupportedBrNiflySkinnedMesh(const UsdGeomMesh& mesh)
+	{
+		const UsdPrim prim = mesh.GetPrim();
+		if (!prim) {
+			return false;
+		}
+
+		if (prim.HasCustomDataKey(TfToken("brnifly:jointNames"))) {
+			return true;
+		}
+
+		return static_cast<bool>(prim.GetAttribute(TfToken("primvars:brnifly:jointIndices"))) ||
+			static_cast<bool>(prim.GetAttribute(TfToken("primvars:brnifly:jointWeights")));
+	}
+
     std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets, bool forceDoubleSided = false) {
         if (!material) {
             return ResolveDefaultUsdMaterial(forceDoubleSided);
@@ -1311,7 +1326,8 @@ namespace USDLoader {
 		double metersPerUnit,
 		const std::string& directory,
 		bool isUSDZ,
-		const ImportSettings& importSettings)
+		const ImportSettings& importSettings,
+		const std::string& sourceIdentifierOverride = {})
 	{
 		struct MeshPreprocessWorkItem {
 			std::string meshPath;
@@ -1342,6 +1358,13 @@ namespace USDLoader {
 
 			UsdGeomMesh mesh(prim);
 			if (mesh) {
+				if (IsUnsupportedBrNiflySkinnedMesh(mesh)) {
+					spdlog::info(
+						"Skipping BRNifly skinned mesh '{}' until NIF skeleton pose updates are supported.",
+						mesh.GetPrim().GetPath().GetString());
+					return;
+				}
+
 				auto skinQ = USDGeometryExtractor::GetSkinningQuery(mesh, preprocessSkelCache);
 				VtTokenArray skelJointOrderRaw;
 				VtTokenArray skelJointOrderMapped;
@@ -1444,7 +1467,8 @@ namespace USDLoader {
 				workItem.skinQ,
 				workItem.skelJointOrderRaw,
 				workItem.skelJointOrderMapped,
-				workItem.authoredDoubleSided || workItem.inferredDoubleSided);
+				workItem.authoredDoubleSided || workItem.inferredDoubleSided,
+				sourceIdentifierOverride);
 			});
 
 		for (size_t workIndex = 0; workIndex < workItems.size(); ++workIndex) {
@@ -1656,6 +1680,13 @@ namespace USDLoader {
 		UsdGeomMesh mesh(prim);
 		if (!mesh) {
 			return; // Not a mesh prim
+		}
+
+		if (IsUnsupportedBrNiflySkinnedMesh(mesh)) {
+			spdlog::info(
+				"Skipping BRNifly skinned mesh '{}' until NIF skeleton pose updates are supported.",
+				mesh.GetPrim().GetPath().GetString());
+			return;
 		}
 
 		auto skinningQuery = USDGeometryExtractor::GetSkinningQuery(mesh, skelCache);
@@ -2053,7 +2084,7 @@ namespace USDLoader {
 		const bool isUSDZ = options.isUsdPackage;
 		const std::string directory = options.sourceDirectory;
 
-		PreprocessAllMeshes(stage, metersPerUnit, directory, isUSDZ, importSettings);
+		PreprocessAllMeshes(stage, metersPerUnit, directory, isUSDZ, importSettings, options.sourceIdentifier);
 
 		ParseNodeHierarchy(scene, stage, metersPerUnit, upRot, directory, skelCache, isUSDZ);
 
@@ -2075,6 +2106,19 @@ namespace USDLoader {
 		options.sourceDirectory = std::filesystem::path(filePath).parent_path().string();
 		options.layerIdentifierHint = std::filesystem::path(filePath).filename().string();
 		options.isUsdPackage = std::filesystem::path(filePath).extension() == ".usdz";
+
+		return LoadModelFromStage(stage, options, importSettings);
+	}
+
+	std::shared_ptr<Scene> LoadModelFromFile(
+		const std::string& filePath,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
+		UsdStageRefPtr stage = UsdStage::Open(filePath);
+		if (!stage) {
+			spdlog::error("USD stage open failed for {}", filePath);
+			return nullptr;
+		}
 
 		return LoadModelFromStage(stage, options, importSettings);
 	}
