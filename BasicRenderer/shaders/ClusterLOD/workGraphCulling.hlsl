@@ -250,6 +250,11 @@ bool CLodWorkGraphOcclusionEnabled()
     return (CLOD_WG_FLAGS & CLOD_WG_FLAG_OCCLUSION_ENABLED) != 0u;
 }
 
+bool CLodWorkGraphFrustumCullingEnabled()
+{
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_DISABLE_FRUSTUM_CULLING) == 0u;
+}
+
 bool CLodWorkGraphSWRasterEnabled()
 {
 #if CLOD_WG_ENABLE_SW_CLASSIFICATION
@@ -1134,7 +1139,8 @@ void CLodAppendVoxelRasterClusterWork(
         const float3 clusterWorldCenter = mul(float4(voxelCluster.bounds.xyz, 1.0f), objectModelMatrix).xyz;
         const float clusterWorldRadius = voxelCluster.bounds.w * lodUniformScale;
         const float3 clusterViewCenter = mul(float4(clusterWorldCenter, 1.0f), cullCamera.view).xyz;
-        if (SphereOutsideFrustumViewSpace(clusterViewCenter, clusterWorldRadius, cullCamera))
+        if (CLodWorkGraphFrustumCullingEnabled() &&
+            SphereOutsideFrustumViewSpace(clusterViewCenter, clusterWorldRadius, cullCamera))
         {
             continue;
         }
@@ -1841,7 +1847,7 @@ void WG_ObjectCull(
             WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_INVALID_BOUNDS, 1);
             culled = true;
         }
-        else {
+        else if (CLodWorkGraphFrustumCullingEnabled()) {
             [unroll]
             for (uint planeIndex = 0u; planeIndex < 6u; ++planeIndex)
             {
@@ -1982,7 +1988,10 @@ void WG_TraverseNodes(
         const float nodeLodRadiusObjectSpace = node.metric.lodCenterAndRadius.w;
         const float3 nodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, objectModelMatrix, cullCamera.view);
         const float nodeRadiusWorld = nodeCullRadiusObjectSpace * cullUniformScale;
-        const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, cullCamera);
+        const bool nodeCulled =
+            CLodWorkGraphFrustumCullingEnabled() &&
+            !replaySource &&
+            SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, cullCamera);
     #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
         const bool objectInvalidatedThisFrame = CLodVirtualShadowInstanceInvalidatedThisFrame(rec.instanceIndex);
         const bool dirtyPageCullingEnabled = CLodWorkGraphShadowDirtyPageCullingEnabled() && !objectInvalidatedThisFrame;
@@ -2245,7 +2254,9 @@ void WG_TraverseNodes(
                                 const float childCullRadiusOS = isSkinned ? instanceData.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
                                 const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, cullCamera.view);
                                 const float childRadiusWorld = childCullRadiusOS * cullUniformScale;
-                                if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, cullCamera)) {
+                                if (CLodWorkGraphFrustumCullingEnabled() &&
+                                    !replaySource &&
+                                    SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, cullCamera)) {
                                     WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
                                     continue;
                                 }
@@ -2646,7 +2657,10 @@ void ClusterCullBody(
                 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
                 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
                 meshletRadiusWorld = meshletBounds.sphere.w * cullUniformScale;
-                survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
+                survives =
+                    !CLodWorkGraphFrustumCullingEnabled() ||
+                    replaySource ||
+                    !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
                 
                 if (!survives) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM, 1);

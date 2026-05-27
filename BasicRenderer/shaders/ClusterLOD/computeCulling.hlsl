@@ -144,7 +144,7 @@ void PureComputeObjectCullCS(const uint3 vDispatchThreadID : SV_DispatchThreadID
         WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_INVALID_BOUNDS, 1);
         culled = true;
     }
-    else {
+    else if (CLodWorkGraphFrustumCullingEnabled()) {
         [unroll]
         for (uint planeIndex = 0u; planeIndex < 6u; ++planeIndex)
         {
@@ -261,7 +261,10 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
     const float nodeLodRadiusObjectSpace = node.metric.lodCenterAndRadius.w;
     const float3 nodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, objectModelMatrix, cullCamera.view);
     const float nodeRadiusWorld = nodeCullRadiusObjectSpace * cullUniformScale;
-    const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, cullCamera);
+    const bool nodeCulled =
+        CLodWorkGraphFrustumCullingEnabled() &&
+        !replaySource &&
+        SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, cullCamera);
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
     const bool objectInvalidatedThisFrame = CLodVirtualShadowInstanceInvalidatedThisFrame(rec.instanceIndex);
@@ -486,7 +489,9 @@ void PureComputeTraverseFrontierCS(const uint3 dispatchThreadID : SV_DispatchThr
         const float childCullRadiusOS = isSkinned ? instanceData.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
         const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, cullCamera.view);
         const float childRadiusWorld = childCullRadiusOS * cullUniformScale;
-        if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, cullCamera)) {
+        if (CLodWorkGraphFrustumCullingEnabled() &&
+            !replaySource &&
+            SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, cullCamera)) {
             WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
             continue;
         }

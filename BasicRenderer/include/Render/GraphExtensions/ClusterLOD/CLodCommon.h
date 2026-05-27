@@ -28,6 +28,7 @@ inline constexpr const char* CLodPageJobRecordCapacitySettingName = "clodPageJob
 inline constexpr const char* CLodPageJobForceAllSettingName = "clodPageJobForceAll";
 inline constexpr const char* CLodForceTraversalDepthRootSettingName = "clodForceTraversalDepthRoot";
 inline constexpr const char* CLodPureComputePhase2ExpansionFactorSettingName = "clodPureComputePhase2ExpansionFactor";
+inline constexpr const char* CLodFrustumCullingSettingName = "clodFrustumCulling";
 inline constexpr uint32_t CLodPureComputePhase2ExpansionFactorDefault = 2u;
 inline constexpr uint32_t CLodPureComputePhase2ExpansionFactorMin = 1u;
 inline constexpr uint32_t CLodPureComputePhase2ExpansionFactorMax = 64u;

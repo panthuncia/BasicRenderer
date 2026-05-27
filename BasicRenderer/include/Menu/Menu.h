@@ -528,6 +528,10 @@ private:
 	std::function<bool()> getMeshletCullingEnabled;
 	std::function<void(bool)> setMeshletCullingEnabled;
 
+    bool m_clodFrustumCulling = true;
+    std::function<bool()> getCLodFrustumCulling;
+    std::function<void(bool)> setCLodFrustumCulling;
+
     CLodCullingBackend m_clodCullingBackend = CLodCullingBackend::WorkGraph;
     std::function<CLodCullingBackend()> getCLodCullingBackend;
     std::function<void(CLodCullingBackend)> setCLodCullingBackend;
@@ -971,6 +975,11 @@ inline void Menu::Initialize(HWND hwnd, rhi::Swapchain swapChain) {
 	setMeshletCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletCulling");
 	meshletCulling = getMeshletCullingEnabled();
 	observerSetting(meshletCulling, "enableMeshletCulling");
+
+    getCLodFrustumCulling = settingsManager.getSettingGetter<bool>(CLodFrustumCullingSettingName);
+    setCLodFrustumCulling = settingsManager.getSettingSetter<bool>(CLodFrustumCullingSettingName);
+    m_clodFrustumCulling = getCLodFrustumCulling();
+    observerSetting(m_clodFrustumCulling, CLodFrustumCullingSettingName);
 
     getCLodCullingBackend = settingsManager.getSettingGetter<CLodCullingBackend>(CLodCullingBackendSettingName);
     setCLodCullingBackend = settingsManager.getSettingSetter<CLodCullingBackend>(CLodCullingBackendSettingName);
@@ -1490,6 +1499,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
+        if (ImGui::Checkbox("CLod Frustum Culling", &m_clodFrustumCulling)) {
+            setCLodFrustumCulling(m_clodFrustumCulling);
+        }
         int clodCullingBackendIndex = static_cast<int>(m_clodCullingBackend);
         if (ImGui::Combo("CLod Culling Backend", &clodCullingBackendIndex, CLodCullingBackendNames, CLodCullingBackendCount)) {
             clodCullingBackendIndex = std::clamp(clodCullingBackendIndex, 0, CLodCullingBackendCount - 1);

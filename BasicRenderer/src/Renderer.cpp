@@ -1278,6 +1278,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<uint32_t>(CLodPageJobRecordCapacitySettingName, CLodPageJobDefaultRecordCapacity);
     settingsManager.registerSetting<bool>(CLodPageJobForceAllSettingName, false);
     settingsManager.registerSetting<uint32_t>(CLodForceTraversalDepthRootSettingName, CLodForceTraversalDepthRootDisabled);
+    settingsManager.registerSetting<bool>(CLodFrustumCullingSettingName, true);
     settingsManager.registerSetting<uint32_t>(
         CLodPureComputePhase2ExpansionFactorSettingName,
         CLodPureComputePhase2ExpansionFactorDefault);

@@ -634,6 +634,9 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
         SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowPredictiveLodInvalidationSettingName)()) {
         workGraphFlags |= CLOD_WG_FLAG_VSM_PREDICTIVE_LOD_INVALIDATION;
     }
+    if (!SettingsManager::GetInstance().getSettingGetter<bool>(CLodFrustumCullingSettingName)()) {
+        workGraphFlags |= CLOD_WG_FLAG_DISABLE_FRUSTUM_CULLING;
+    }
     constexpr uint32_t swRasterThreshold = 16u;
     workGraphFlags |= (swRasterThreshold << CLOD_WG_SW_RASTER_THRESHOLD_SHIFT);
     if (!m_isFirstPass) {
