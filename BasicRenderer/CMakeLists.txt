@@ -747,11 +747,24 @@ add_symlink_or_copy_per_config(
 )
 
 add_symlink_or_copy_per_config(
-    "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/bin/tbb$<$<CONFIG:Debug>:_debug>.dll"
-    "${BASICRENDERER_OUTPUT_ROOT}/tbb$<$<CONFIG:Debug>:_debug>.dll"
+    "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/bin/tbb.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/tbb.dll"
     FALSE  # IS_DIRECTORY
     "tbb"
 )
+
+add_custom_target(
+    tbb_config_sync ALL
+    COMMENT "Syncing config-specific TBB runtime"
+    VERBATIM
+    COMMAND ${CMAKE_COMMAND}
+        "-DSOURCE_DIR=${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/bin"
+        "-DDESTINATION_DIR=${BASICRENDERER_OUTPUT_ROOT}"
+        "-DCONFIG=$<CONFIG>"
+        -P "${CMAKE_CURRENT_LIST_DIR}/cmake/SyncTbbRuntime.cmake"
+)
+add_dependencies(${PROJECT_NAME} tbb_config_sync)
+add_dependencies(${BASICRENDERER_DEMO_TARGET} tbb_config_sync)
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd"

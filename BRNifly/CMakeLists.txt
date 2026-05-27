@@ -58,12 +58,11 @@ target_compile_definitions(BRNifly PRIVATE NOMINMAX _UNICODE UNICODE)
 
 set(BRNIFLY_USD_RUNTIME_ROOT "${BRNIFLY_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>")
 add_custom_command(TARGET BRNifly POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${BRNIFLY_USD_RUNTIME_ROOT}/lib"
-        "$<TARGET_FILE_DIR:BRNifly>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${BRNIFLY_USD_RUNTIME_ROOT}/bin/tbb.dll"
-        "$<TARGET_FILE_DIR:BRNifly>/tbb.dll"
+    COMMAND ${CMAKE_COMMAND}
+        "-DUSD_RUNTIME_ROOT=${BRNIFLY_USD_RUNTIME_ROOT}"
+        "-DTARGET_DIR=$<TARGET_FILE_DIR:BRNifly>"
+        "-DCONFIG=$<CONFIG>"
+        -P "${CMAKE_CURRENT_LIST_DIR}/cmake/SyncUsdRuntime.cmake"
     COMMENT "Syncing OpenUSD runtime dependencies for BRNifly"
     VERBATIM
 )
