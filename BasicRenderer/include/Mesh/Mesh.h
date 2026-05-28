@@ -8,6 +8,7 @@
 #include <string>
 #include <stdexcept>
 #include <unordered_map>
+#include <array>
 #include <rhi.h>
 #include <meshoptimizer.h>
 
@@ -57,6 +58,21 @@ public:
 	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }
 	void SetSkinJointNames(std::vector<std::string> names) { m_skinJointNames = std::move(names); }
 	const std::vector<std::string>& GetSkinJointNames() const { return m_skinJointNames; }
+	void SetSkinJointSourceIndices(std::vector<std::uint32_t> indices) { m_skinJointSourceIndices = std::move(indices); }
+	const std::vector<std::uint32_t>& GetSkinJointSourceIndices() const { return m_skinJointSourceIndices; }
+	void SetSkinInverseBindMatrices(std::vector<DirectX::XMMATRIX> matrices) { m_skinInverseBindMatrices = std::move(matrices); }
+	const std::vector<DirectX::XMMATRIX>& GetSkinInverseBindMatrices() const { return m_skinInverseBindMatrices; }
+	void SetSkinningDebugSample(std::vector<std::uint32_t> joints, std::vector<float> weights, std::vector<float> positions = {}, std::vector<float> normals = {})
+	{
+		m_skinningDebugJoints = std::move(joints);
+		m_skinningDebugWeights = std::move(weights);
+		m_skinningDebugPositions = std::move(positions);
+		m_skinningDebugNormals = std::move(normals);
+	}
+	const std::vector<std::uint32_t>& GetSkinningDebugJoints() const { return m_skinningDebugJoints; }
+	const std::vector<float>& GetSkinningDebugWeights() const { return m_skinningDebugWeights; }
+	const std::vector<float>& GetSkinningDebugPositions() const { return m_skinningDebugPositions; }
+	const std::vector<float>& GetSkinningDebugNormals() const { return m_skinningDebugNormals; }
 
 	uint32_t GetCLodMeshletCount() {
 		return m_perMeshBufferData.clodNumMeshlets;
@@ -260,4 +276,10 @@ private:
 
 	std::shared_ptr<Skeleton> m_baseSkeleton = nullptr;
 	std::vector<std::string> m_skinJointNames;
+	std::vector<std::uint32_t> m_skinJointSourceIndices;
+	std::vector<DirectX::XMMATRIX> m_skinInverseBindMatrices;
+	std::vector<std::uint32_t> m_skinningDebugJoints;
+	std::vector<float> m_skinningDebugWeights;
+	std::vector<float> m_skinningDebugPositions;
+	std::vector<float> m_skinningDebugNormals;
 };

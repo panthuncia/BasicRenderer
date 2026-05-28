@@ -104,7 +104,22 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
 		skinningVertices = std::move(skinningData);
 	}
 
-    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, std::move(meshData.uvSets), meshData.material, vertexFlags, std::move(prebuiltClusterLOD));
+    auto mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, std::move(meshData.uvSets), meshData.material, vertexFlags, std::move(prebuiltClusterLOD));
+    if (hasJoints && numVertices != 0) {
+        const size_t availableJointCount = meshData.joints.size() / numVertices;
+        const size_t availableWeightCount = meshData.weights.size() / numVertices;
+        const size_t sampleCount = std::min({ kMaxSkinInfluences, availableJointCount, availableWeightCount });
+        std::vector<uint32_t> sampleJoints;
+        std::vector<float> sampleWeights;
+        sampleJoints.reserve(sampleCount);
+        sampleWeights.reserve(sampleCount);
+        for (size_t influenceIndex = 0; influenceIndex < sampleCount; ++influenceIndex) {
+            sampleJoints.push_back(meshData.joints[influenceIndex]);
+            sampleWeights.push_back(meshData.weights[influenceIndex]);
+        }
+        mesh->SetSkinningDebugSample(std::move(sampleJoints), std::move(sampleWeights));
+    }
+    return mesh;
 }
 
 XMMATRIX RemoveScalingFromMatrix(const XMMATRIX& initialMatrix) {

@@ -109,6 +109,7 @@ Skeleton::Skeleton(const Skeleton& other)
         m_restLocalTransforms = other.m_restLocalTransforms;
         m_evalOrder = other.m_evalOrder;
         m_inverseBindMatrices = other.m_inverseBindMatrices;
+        m_skinningGPUFlags = other.m_skinningGPUFlags;
 
         animations = other.animations;
         animationsByName = other.animationsByName;
@@ -124,6 +125,7 @@ Skeleton::Skeleton(const Skeleton& other)
     m_activeAnimationIndex = other.m_activeAnimationIndex;
     m_currentAnimationConservativeBoundsScale = other.m_currentAnimationConservativeBoundsScale;
     m_externalPose = other.m_externalPose;
+    m_skinningGPUFlags = other.m_skinningGPUFlags;
 
     EnsureInstanceBuffersSized_();
 
@@ -158,6 +160,14 @@ std::shared_ptr<Skeleton> Skeleton::GetBaseSkeletonShared() const
         return nullptr;
     }
     return m_baseSkeleton;
+}
+
+uint32_t Skeleton::GetSkinningGPUFlags() const noexcept
+{
+    if (m_isBaseSkeleton) {
+        return m_skinningGPUFlags;
+    }
+    return m_baseSkeleton ? m_baseSkeleton->m_skinningGPUFlags : m_skinningGPUFlags;
 }
 
 // TODO: Inheritance from external parents currently disabled- is it correct to apply these if the renderable entity is already being scaled based on the same parent?

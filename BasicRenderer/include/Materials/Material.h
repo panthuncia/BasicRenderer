@@ -237,6 +237,7 @@ public:
     TechniqueDescriptor const& Technique() const { return m_technique; }
     OpenPBRMaterialParameters const& GetOpenPBRMaterial() const { return m_openPBRMaterial; }
     OpenPBRTextureBindings const& GetOpenPBRTextures() const { return m_openPBRTextures; }
+    MaterialDescription ToCacheDescription() const;
     static void DestroyDefaultMaterial() {
         defaultMaterial.reset();
     }

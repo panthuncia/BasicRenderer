@@ -87,6 +87,8 @@ public:
     // Optional hook for SkeletonManager (or draw-data) to store an instance slot/index.
     uint32_t GetSkinningInstanceSlot() const noexcept { return m_skinningInstanceSlot; }
     void     SetSkinningInstanceSlot(uint32_t slot) noexcept { m_skinningInstanceSlot = slot; }
+    uint32_t GetSkinningGPUFlags() const noexcept;
+    void     SetSkinningGPUFlags(uint32_t flags) noexcept { m_skinningGPUFlags = flags; }
 
 private:
     // Shared (BASE) data
@@ -118,6 +120,7 @@ private:
     float m_currentAnimationConservativeBoundsScale = 1.0f;
 
     uint32_t m_skinningInstanceSlot = 0xFFFFFFFF;
+    uint32_t m_skinningGPUFlags = 0;
 
     bool m_isBaseSkeleton = false;
 

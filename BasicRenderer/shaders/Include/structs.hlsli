@@ -674,7 +674,13 @@ struct SkinningInstanceGPUInfo
     uint invBindOffsetMatrices;
     uint inverseSkinOffsetMatrices;
     uint boneCount;
+    uint flags;
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
+
+static const uint SkinningInstanceFlag_RowVectorSkinMatrix = 1u << 0;
 
 // TODO: packing?
 /*

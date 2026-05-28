@@ -5,12 +5,16 @@
 #include <cctype>
 #include <cstdint>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <pxr/base/tf/token.h>
@@ -23,8 +27,12 @@
 
 #include "Import/BRNiflyClient.h"
 #include "Import/CLodCache.h"
+#include "Animation/Skeleton.h"
+#include "Materials/Material.h"
+#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
 #include "Utilities/CachePathUtilities.h"
+#include "Utilities/Utilities.h"
 
 namespace NifLoader {
 namespace {
@@ -32,7 +40,7 @@ namespace {
 namespace fs = std::filesystem;
 using namespace pxr;
 
-constexpr int kAssetCacheSchemaVersion = 1;
+constexpr int kAssetCacheSchemaVersion = 6;
 constexpr std::string_view kAssetCacheSuffix = ".asset.usdc";
 constexpr std::string_view kRootPrimPath = "/BRNifly";
 
@@ -168,9 +176,19 @@ fs::path CLodCacheRoot()
     return fs::current_path() / "cache" / "clod";
 }
 
+fs::path AssetPathIndexRoot()
+{
+    return CLodCacheRoot() / "nif_asset_index";
+}
+
+fs::path AssetManifestPath()
+{
+    return AssetPathIndexRoot() / "manifest.tsv";
+}
+
 struct AssetCacheIndex {
-    std::once_flag buildOnce;
     std::mutex mutex;
+    bool manifestLoaded{ false };
     std::unordered_map<std::string, std::vector<fs::path>> byPathHash;
 };
 
@@ -194,51 +212,82 @@ void SortNewestFirst(std::vector<fs::path>& paths)
     });
 }
 
-void BuildAssetCacheIndex()
+void StoreAssetManifest(const std::unordered_map<std::string, std::vector<fs::path>>& byPathHash)
 {
-    auto& index = GetAssetCacheIndex();
-    std::unordered_map<std::string, std::vector<fs::path>> built;
-    const fs::path root = CLodCacheRoot();
+    const fs::path manifestPath = AssetManifestPath();
     std::error_code ec;
-    if (fs::is_directory(root, ec)) {
-        for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
-             !ec && it != end;
-             it.increment(ec)) {
-            if (!it->is_regular_file(ec)) {
-                continue;
-            }
+    fs::create_directories(manifestPath.parent_path(), ec);
+    if (ec) {
+        return;
+    }
 
-            const auto path = it->path();
-            if (!HasAssetCacheSuffix(path)) {
-                continue;
-            }
+    const fs::path tempPath = manifestPath.string() + ".tmp";
+    {
+        std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            return;
+        }
 
-            const std::string pathHash = ExtractPathHashFromFileName(path);
-            if (!pathHash.empty()) {
-                built[pathHash].push_back(path);
+        for (const auto& [pathHash, paths] : byPathHash) {
+            for (const auto& path : paths) {
+                out << pathHash << '\t' << path.string() << '\n';
             }
         }
     }
 
-    for (auto& [_, paths] : built) {
-        SortNewestFirst(paths);
+    fs::rename(tempPath, manifestPath, ec);
+    if (ec) {
+        fs::remove(manifestPath, ec);
+        ec.clear();
+        fs::rename(tempPath, manifestPath, ec);
+    }
+}
+
+void LoadAssetManifestLocked(AssetCacheIndex& index)
+{
+    if (index.manifestLoaded) {
+        return;
+    }
+    index.manifestLoaded = true;
+
+    std::unordered_map<std::string, std::vector<fs::path>> loaded;
+    const fs::path manifestPath = AssetManifestPath();
+    std::ifstream manifest(manifestPath, std::ios::binary);
+    if (manifest) {
+        std::string line;
+        while (std::getline(manifest, line)) {
+            if (line.empty()) {
+                continue;
+            }
+
+            const auto tab = line.find('\t');
+            if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size()) {
+                continue;
+            }
+
+            std::string pathHash = line.substr(0, tab);
+            fs::path path(line.substr(tab + 1));
+            if (!pathHash.empty() && HasAssetCacheSuffix(path) && ExtractPathHashFromFileName(path) == pathHash) {
+                loaded[std::move(pathHash)].push_back(std::move(path));
+            }
+        }
     }
 
-    std::lock_guard<std::mutex> lock(index.mutex);
-    index.byPathHash = std::move(built);
+    index.byPathHash = std::move(loaded);
 }
 
 std::vector<fs::path> FindCachedAssets(const std::string& pathHash)
 {
     auto& index = GetAssetCacheIndex();
-    std::call_once(index.buildOnce, BuildAssetCacheIndex);
-
-    std::lock_guard<std::mutex> lock(index.mutex);
-    auto it = index.byPathHash.find(pathHash);
-    if (it == index.byPathHash.end()) {
-        return {};
+    {
+        std::lock_guard<std::mutex> lock(index.mutex);
+        LoadAssetManifestLocked(index);
+        auto it = index.byPathHash.find(pathHash);
+        if (it != index.byPathHash.end()) {
+            return it->second;
+        }
     }
-    return it->second;
+    return {};
 }
 
 void RegisterCachedAsset(const std::string& pathHash, const fs::path& cachePath)
@@ -248,13 +297,14 @@ void RegisterCachedAsset(const std::string& pathHash, const fs::path& cachePath)
     }
 
     auto& index = GetAssetCacheIndex();
-    std::call_once(index.buildOnce, BuildAssetCacheIndex);
 
     std::lock_guard<std::mutex> lock(index.mutex);
+    LoadAssetManifestLocked(index);
     auto& paths = index.byPathHash[pathHash];
     if (std::find(paths.begin(), paths.end(), cachePath) == paths.end()) {
         paths.push_back(cachePath);
         SortNewestFirst(paths);
+        StoreAssetManifest(index.byPathHash);
     }
 }
 
@@ -355,7 +405,13 @@ void SetAssetCacheMetadata(
     SetStringMetadata(root, "sarp:nifAssetCache:sourcePath", sourcePath);
 }
 
-std::optional<fs::path> WriteAssetCache(
+struct AssetCacheWriteResult
+{
+    fs::path path;
+    bool wrote{ false };
+};
+
+std::optional<AssetCacheWriteResult> WriteAssetCache(
     const BRNiflyClient::UsdAssetPackage& package,
     const std::string& normalizedCacheKey,
     const std::string& pathHash,
@@ -369,8 +425,21 @@ std::optional<fs::path> WriteAssetCache(
     const fs::path cachePath = CLodCache::GetCacheFilePathForSource(s2ws(fileName), stableSourceIdentifier);
     std::error_code existsEc;
     if (fs::is_regular_file(cachePath, existsEc)) {
-        RegisterCachedAsset(pathHash, cachePath);
-        return cachePath;
+        const std::string fileContentHash = ExtractContentHashFromFileName(cachePath);
+        std::string sourceIdentifier;
+        std::string contentHash;
+        std::string reason;
+        UsdStageRefPtr existingStage = UsdStage::Open(cachePath.string(), UsdStage::LoadNone);
+        if (ValidateAssetStage(existingStage, normalizedCacheKey, pathHash, fileContentHash, sourceIdentifier, contentHash, reason)) {
+            RegisterCachedAsset(pathHash, cachePath);
+            return AssetCacheWriteResult{ .path = cachePath, .wrote = false };
+        }
+
+        spdlog::info(
+            "nif_asset_cache=replace_stale game='{}' path='{}' reason='{}'",
+            normalizedCacheKey,
+            cachePath.string(),
+            reason.empty() ? "asset cache validation failed" : reason);
     }
 
     SdfLayerRefPtr sourceLayer = SdfLayer::CreateAnonymous("brnifly_asset_cache_source.usda");
@@ -428,7 +497,7 @@ std::optional<fs::path> WriteAssetCache(
         package.contentHash,
         stableSourceIdentifier);
     RegisterCachedAsset(pathHash, cachePath);
-    return cachePath;
+    return AssetCacheWriteResult{ .path = cachePath, .wrote = true };
 }
 
 std::shared_ptr<Scene> LoadCachedStage(
@@ -442,6 +511,585 @@ std::shared_ptr<Scene> LoadCachedStage(
         cachePath.parent_path().string(),
         "brnifly_" + contentHash + ".asset.usdc");
     return USDLoader::LoadModelFromFile(cachePath.string(), options, settings);
+}
+
+std::optional<USDLoader::ImportedAssetPayload> LoadCachedAssetPayload(
+    const fs::path& cachePath,
+    const std::string& sourceIdentifier,
+    const std::string& contentHash,
+    const USDLoader::ImportSettings& settings,
+    LoadTimingStats* stats)
+{
+    const auto options = MakeStageOptions(
+        sourceIdentifier,
+        cachePath.parent_path().string(),
+        "brnifly_" + contentHash + ".asset.usdc");
+    const auto openBegin = std::chrono::steady_clock::now();
+    UsdStageRefPtr stage = UsdStage::Open(cachePath.string(), UsdStage::LoadNone);
+    if (stats) {
+        stats->usdOpenMs += ElapsedMs(openBegin, std::chrono::steady_clock::now());
+    }
+    if (!stage) {
+        return std::nullopt;
+    }
+
+    const auto extractBegin = std::chrono::steady_clock::now();
+    auto payload = USDLoader::LoadImportedAssetFromStage(stage, options, settings);
+    if (stats) {
+        const auto elapsed = ElapsedMs(extractBegin, std::chrono::steady_clock::now());
+        stats->usdExtractMs += elapsed;
+        stats->meshBuildMs += elapsed;
+        stats->usdLoadMs += elapsed;
+    }
+    return payload;
+}
+
+fs::path PayloadCachePathForAssetCache(const fs::path& cachePath)
+{
+    return fs::path(cachePath.string() + ".sarpbin");
+}
+
+class BinaryWriter
+{
+public:
+    explicit BinaryWriter(const fs::path& path) : out(path, std::ios::binary | std::ios::trunc) {}
+    explicit operator bool() const { return static_cast<bool>(out); }
+
+    template <class T>
+    void Pod(const T& value)
+    {
+        out.write(reinterpret_cast<const char*>(std::addressof(value)), sizeof(T));
+    }
+
+    void Bytes(const void* data, std::uint64_t size)
+    {
+        if (size != 0) {
+            out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
+        }
+    }
+
+    void String(const std::string& value)
+    {
+        const std::uint64_t size = value.size();
+        Pod(size);
+        Bytes(value.data(), size);
+    }
+
+    void WString(const std::wstring& value)
+    {
+        const std::uint64_t size = value.size();
+        Pod(size);
+        Bytes(value.data(), size * sizeof(wchar_t));
+    }
+
+    template <class T>
+    void PodVector(const std::vector<T>& values)
+    {
+        const std::uint64_t size = values.size();
+        Pod(size);
+        Bytes(values.data(), size * sizeof(T));
+    }
+
+    bool Good() const { return static_cast<bool>(out); }
+
+private:
+    std::ofstream out;
+};
+
+class BinaryReader
+{
+public:
+    explicit BinaryReader(const fs::path& path)
+    {
+        std::error_code ec;
+        const auto size = fs::file_size(path, ec);
+        if (ec || size > 512ull * 1024ull * 1024ull) {
+            return;
+        }
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            return;
+        }
+
+        bytes.resize(static_cast<std::size_t>(size));
+        if (!bytes.empty()) {
+            in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            valid = static_cast<bool>(in);
+        }
+        else {
+            valid = true;
+        }
+    }
+
+    explicit operator bool() const { return valid; }
+
+    template <class T>
+    bool Pod(T& value)
+    {
+        if (offset > bytes.size() || bytes.size() - offset < sizeof(T)) {
+            return false;
+        }
+        std::memcpy(std::addressof(value), bytes.data() + offset, sizeof(T));
+        offset += sizeof(T);
+        return true;
+    }
+
+    bool Bytes(void* data, std::uint64_t size)
+    {
+        if (size == 0) {
+            return true;
+        }
+        if (offset > bytes.size() || bytes.size() - offset < size) {
+            return false;
+        }
+        std::memcpy(data, bytes.data() + offset, static_cast<std::size_t>(size));
+        offset += static_cast<std::size_t>(size);
+        return true;
+    }
+
+    bool String(std::string& value)
+    {
+        std::uint64_t size = 0;
+        if (!Pod(size) || size > (64ull * 1024ull * 1024ull)) {
+            return false;
+        }
+        value.resize(static_cast<std::size_t>(size));
+        return Bytes(value.data(), size);
+    }
+
+    bool WString(std::wstring& value)
+    {
+        std::uint64_t size = 0;
+        if (!Pod(size) || size > (64ull * 1024ull * 1024ull / sizeof(wchar_t))) {
+            return false;
+        }
+        value.resize(static_cast<std::size_t>(size));
+        return Bytes(value.data(), size * sizeof(wchar_t));
+    }
+
+    template <class T>
+    bool PodVector(std::vector<T>& values)
+    {
+        std::uint64_t size = 0;
+        if (!Pod(size) || size > (256ull * 1024ull * 1024ull / std::max<std::uint64_t>(1, sizeof(T)))) {
+            return false;
+        }
+        values.resize(static_cast<std::size_t>(size));
+        return Bytes(values.data(), size * sizeof(T));
+    }
+
+private:
+    std::vector<std::uint8_t> bytes;
+    std::size_t offset{ 0 };
+    bool valid{ false };
+};
+
+void WriteMatrix(BinaryWriter& writer, const DirectX::XMMATRIX& matrix)
+{
+    DirectX::XMFLOAT4X4 stored{};
+    DirectX::XMStoreFloat4x4(std::addressof(stored), matrix);
+    writer.Pod(stored);
+}
+
+bool ReadMatrix(BinaryReader& reader, DirectX::XMMATRIX& matrix)
+{
+    DirectX::XMFLOAT4X4 stored{};
+    if (!reader.Pod(stored)) {
+        return false;
+    }
+    matrix = DirectX::XMLoadFloat4x4(std::addressof(stored));
+    return true;
+}
+
+void WriteStringVector(BinaryWriter& writer, std::span<const std::string> values)
+{
+    const std::uint64_t size = values.size();
+    writer.Pod(size);
+    for (const auto& value : values) {
+        writer.String(value);
+    }
+}
+
+bool ReadStringVector(BinaryReader& reader, std::vector<std::string>& values)
+{
+    std::uint64_t size = 0;
+    if (!reader.Pod(size) || size > 100000u) {
+        return false;
+    }
+    values.resize(static_cast<std::size_t>(size));
+    for (auto& value : values) {
+        if (!reader.String(value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void WriteTextureBinding(BinaryWriter& writer, const TextureAndConstant& binding)
+{
+    writer.String(binding.texture ? binding.texture->Meta().filePath : std::string{});
+    writer.Pod(binding.factor.Get());
+    writer.Pod(binding.uvSetIndex);
+    writer.PodVector(binding.channels);
+}
+
+bool ReadTextureBinding(BinaryReader& reader, TextureAndConstant& binding, bool preferSRGB)
+{
+    std::string texturePath;
+    float factor = 1.0f;
+    if (!reader.String(texturePath) || !reader.Pod(factor) || !reader.Pod(binding.uvSetIndex) || !reader.PodVector(binding.channels)) {
+        return false;
+    }
+    binding.factor = factor;
+    if (!texturePath.empty()) {
+        try {
+            binding.texture = LoadTextureFromFile(s2ws(texturePath), nullptr, preferSRGB);
+        } catch (const std::exception& ex) {
+            spdlog::warn("nif_asset_payload_cache: failed to reload texture '{}': {}", texturePath, ex.what());
+            binding.texture.reset();
+        }
+    }
+    return true;
+}
+
+void WriteMaterialDescription(BinaryWriter& writer, const MaterialDescription& desc)
+{
+    writer.Pod(static_cast<std::uint32_t>(desc.materialModel));
+    writer.String(desc.name);
+    writer.Pod(desc.diffuseColor);
+    writer.Pod(desc.emissiveColor);
+    writer.Pod(desc.alphaCutoff);
+    writer.Pod(desc.heightMapScale);
+    writer.Pod(desc.geometricDisplacementMin);
+    writer.Pod(desc.geometricDisplacementMax);
+    writer.Pod(desc.negateNormals);
+    writer.Pod(desc.invertNormalGreen);
+    writer.Pod(desc.forceDoubleSided);
+    writer.Pod(desc.enableGeometricDisplacement);
+    writer.Pod(static_cast<std::uint32_t>(desc.blendState));
+    WriteTextureBinding(writer, desc.baseColor);
+    WriteTextureBinding(writer, desc.metallic);
+    WriteTextureBinding(writer, desc.roughness);
+    WriteTextureBinding(writer, desc.emissive);
+    WriteTextureBinding(writer, desc.opacity);
+    WriteTextureBinding(writer, desc.aoMap);
+    WriteTextureBinding(writer, desc.heightMap);
+    WriteTextureBinding(writer, desc.normal);
+    writer.Pod(desc.openPBR);
+    WriteTextureBinding(writer, desc.openPBRTextures.coatColor);
+    WriteTextureBinding(writer, desc.openPBRTextures.coatWeight);
+    WriteTextureBinding(writer, desc.openPBRTextures.coatRoughness);
+    WriteTextureBinding(writer, desc.openPBRTextures.fuzzColor);
+    WriteTextureBinding(writer, desc.openPBRTextures.fuzzWeight);
+    WriteTextureBinding(writer, desc.openPBRTextures.fuzzRoughness);
+}
+
+bool ReadMaterialDescription(BinaryReader& reader, MaterialDescription& desc)
+{
+    std::uint32_t model = 0;
+    std::uint32_t blend = 0;
+    if (!reader.Pod(model) ||
+        !reader.String(desc.name) ||
+        !reader.Pod(desc.diffuseColor) ||
+        !reader.Pod(desc.emissiveColor) ||
+        !reader.Pod(desc.alphaCutoff) ||
+        !reader.Pod(desc.heightMapScale) ||
+        !reader.Pod(desc.geometricDisplacementMin) ||
+        !reader.Pod(desc.geometricDisplacementMax) ||
+        !reader.Pod(desc.negateNormals) ||
+        !reader.Pod(desc.invertNormalGreen) ||
+        !reader.Pod(desc.forceDoubleSided) ||
+        !reader.Pod(desc.enableGeometricDisplacement) ||
+        !reader.Pod(blend)) {
+        return false;
+    }
+    desc.materialModel = static_cast<MaterialModel>(model);
+    desc.blendState = static_cast<BlendState>(blend);
+    return ReadTextureBinding(reader, desc.baseColor, true) &&
+        ReadTextureBinding(reader, desc.metallic, false) &&
+        ReadTextureBinding(reader, desc.roughness, false) &&
+        ReadTextureBinding(reader, desc.emissive, true) &&
+        ReadTextureBinding(reader, desc.opacity, false) &&
+        ReadTextureBinding(reader, desc.aoMap, false) &&
+        ReadTextureBinding(reader, desc.heightMap, false) &&
+        ReadTextureBinding(reader, desc.normal, false) &&
+        reader.Pod(desc.openPBR) &&
+        ReadTextureBinding(reader, desc.openPBRTextures.coatColor, true) &&
+        ReadTextureBinding(reader, desc.openPBRTextures.coatWeight, false) &&
+        ReadTextureBinding(reader, desc.openPBRTextures.coatRoughness, false) &&
+        ReadTextureBinding(reader, desc.openPBRTextures.fuzzColor, true) &&
+        ReadTextureBinding(reader, desc.openPBRTextures.fuzzWeight, false) &&
+        ReadTextureBinding(reader, desc.openPBRTextures.fuzzRoughness, false);
+}
+
+void WritePrebuilt(BinaryWriter& writer, const ClusterLODPrebuiltData& data)
+{
+    writer.PodVector(data.groups);
+    writer.PodVector(data.segments);
+    writer.PodVector(data.segmentBounds);
+    writer.Pod(data.objectBoundingSphere);
+    writer.PodVector(data.groupChunks);
+    writer.PodVector(data.groupDiskLocators);
+    writer.PodVector(data.pageDiskLocators);
+    writer.PodVector(data.groupPageReferences);
+    writer.PodVector(data.groupPageReferenceOffsets);
+    writer.Pod(data.trianglePageCount);
+    writer.Pod(data.voxelPageBase);
+    writer.Pod(data.voxelPageCount);
+    writer.String(data.cacheSource.sourceIdentifier);
+    writer.String(data.cacheSource.primPath);
+    writer.String(data.cacheSource.subsetName);
+    writer.Pod(data.cacheSource.buildConfigHash);
+    writer.WString(data.cacheSource.containerFileName);
+    writer.PodVector(data.nodes);
+    writer.PodVector(data.lodNodeRanges);
+    writer.PodVector(data.lodLevelRoots);
+    writer.Pod(data.maxDepth);
+    writer.Pod(data.maxTraversalDepth);
+}
+
+bool ReadPrebuilt(BinaryReader& reader, ClusterLODPrebuiltData& data)
+{
+    return reader.PodVector(data.groups) &&
+        reader.PodVector(data.segments) &&
+        reader.PodVector(data.segmentBounds) &&
+        reader.Pod(data.objectBoundingSphere) &&
+        reader.PodVector(data.groupChunks) &&
+        reader.PodVector(data.groupDiskLocators) &&
+        reader.PodVector(data.pageDiskLocators) &&
+        reader.PodVector(data.groupPageReferences) &&
+        reader.PodVector(data.groupPageReferenceOffsets) &&
+        reader.Pod(data.trianglePageCount) &&
+        reader.Pod(data.voxelPageBase) &&
+        reader.Pod(data.voxelPageCount) &&
+        reader.String(data.cacheSource.sourceIdentifier) &&
+        reader.String(data.cacheSource.primPath) &&
+        reader.String(data.cacheSource.subsetName) &&
+        reader.Pod(data.cacheSource.buildConfigHash) &&
+        reader.WString(data.cacheSource.containerFileName) &&
+        reader.PodVector(data.nodes) &&
+        reader.PodVector(data.lodNodeRanges) &&
+        reader.PodVector(data.lodLevelRoots) &&
+        reader.Pod(data.maxDepth) &&
+        reader.Pod(data.maxTraversalDepth);
+}
+
+bool WritePayloadCache(
+    const fs::path& cachePath,
+    const std::string& normalizedCacheKey,
+    const std::string& pathHash,
+    const std::string& contentHash,
+    const USDLoader::ImportedAssetPayload& payload)
+{
+    const fs::path payloadPath = PayloadCachePathForAssetCache(cachePath);
+    std::error_code ec;
+    fs::create_directories(payloadPath.parent_path(), ec);
+    BinaryWriter writer(payloadPath);
+    if (!writer) {
+        return false;
+    }
+
+    const std::uint32_t magic = 0x50524153u; // SARP
+    const std::uint32_t version = 1u;
+    writer.Pod(magic);
+    writer.Pod(version);
+    writer.String(normalizedCacheKey);
+    writer.String(pathHash);
+    writer.String(contentHash);
+
+    std::unordered_map<const Mesh*, std::uint32_t> meshIndices;
+    for (std::uint32_t i = 0; i < payload.meshes.size(); ++i) {
+        meshIndices[payload.meshes[i].get()] = i;
+    }
+
+    const std::uint64_t meshCount = payload.meshes.size();
+    writer.Pod(meshCount);
+    for (const auto& mesh : payload.meshes) {
+        if (!mesh || !mesh->material) {
+            return false;
+        }
+        WriteMaterialDescription(writer, mesh->material->ToCacheDescription());
+        WritePrebuilt(writer, mesh->GetClusterLODPrebuiltData());
+        WriteStringVector(writer, mesh->GetSkinJointNames());
+        writer.PodVector(mesh->GetSkinJointSourceIndices());
+        const auto& inverseBinds = mesh->GetSkinInverseBindMatrices();
+        const std::uint64_t inverseBindCount = inverseBinds.size();
+        writer.Pod(inverseBindCount);
+        for (const auto& matrix : inverseBinds) {
+            WriteMatrix(writer, matrix);
+        }
+        std::uint8_t hasSkeleton = mesh->HasBaseSkin() ? 1u : 0u;
+        writer.Pod(hasSkeleton);
+        if (hasSkeleton) {
+            const auto skeleton = mesh->GetBaseSkin();
+            const auto boneNames = skeleton->GetBoneNames();
+            const auto parents = skeleton->GetParentIndices();
+            const auto skeletonInverseBinds = skeleton->GetInverseBindMatrices();
+            const std::uint64_t boneCount = boneNames.size();
+            writer.Pod(boneCount);
+            for (const auto& name : boneNames) {
+                writer.String(name);
+            }
+            writer.PodVector(std::vector<std::int32_t>(parents.begin(), parents.end()));
+            const std::uint64_t skeletonBindCount = skeletonInverseBinds.size();
+            writer.Pod(skeletonBindCount);
+            for (const auto& matrix : skeletonInverseBinds) {
+                WriteMatrix(writer, matrix);
+            }
+        }
+    }
+
+    const std::uint64_t partCount = payload.parts.size();
+    writer.Pod(partCount);
+    for (const auto& part : payload.parts) {
+        writer.String(part.name);
+        WriteMatrix(writer, part.localMatrix);
+        writer.Pod(part.skinnedShapeIndex);
+        const std::uint64_t partMeshCount = part.meshes.size();
+        writer.Pod(partMeshCount);
+        for (const auto& mesh : part.meshes) {
+            auto it = meshIndices.find(mesh.get());
+            const std::uint32_t meshIndex = it == meshIndices.end() ? UINT32_MAX : it->second;
+            writer.Pod(meshIndex);
+        }
+    }
+    return writer.Good();
+}
+
+std::optional<USDLoader::ImportedAssetPayload> TryLoadPayloadCache(
+    const fs::path& cachePath,
+    const std::string& normalizedCacheKey,
+    const std::string& pathHash,
+    const std::string& contentHash)
+{
+    BinaryReader reader(PayloadCachePathForAssetCache(cachePath));
+    if (!reader) {
+        return std::nullopt;
+    }
+
+    std::uint32_t magic = 0;
+    std::uint32_t version = 0;
+    std::string fileKey;
+    std::string filePathHash;
+    std::string fileContentHash;
+    if (!reader.Pod(magic) || !reader.Pod(version) ||
+        magic != 0x50524153u || version != 1u ||
+        !reader.String(fileKey) || !reader.String(filePathHash) || !reader.String(fileContentHash) ||
+        fileKey != normalizedCacheKey || filePathHash != pathHash || fileContentHash != contentHash) {
+        return std::nullopt;
+    }
+
+    USDLoader::ImportedAssetPayload payload;
+    std::uint64_t meshCount = 0;
+    if (!reader.Pod(meshCount) || meshCount > 100000u) {
+        return std::nullopt;
+    }
+    payload.meshes.reserve(static_cast<std::size_t>(meshCount));
+    for (std::uint64_t meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
+        MaterialDescription desc{};
+        ClusterLODPrebuiltData prebuilt{};
+        if (!ReadMaterialDescription(reader, desc) || !ReadPrebuilt(reader, prebuilt)) {
+            return std::nullopt;
+        }
+        auto material = Material::CreateShared(desc);
+        auto vertices = std::make_unique<std::vector<std::byte>>();
+        std::vector<UINT32> indices;
+        std::vector<MeshUvSetData> uvSets;
+        auto mesh = Mesh::CreateSharedFromIngest(
+            std::move(vertices),
+            0,
+            std::nullopt,
+            0,
+            std::move(indices),
+            std::move(uvSets),
+            material,
+            0,
+            std::move(prebuilt),
+            MeshCpuDataPolicy::ReleaseAfterUpload);
+        if (!mesh) {
+            return std::nullopt;
+        }
+        std::vector<std::string> jointNames;
+        std::vector<std::uint32_t> jointSourceIndices;
+        if (!ReadStringVector(reader, jointNames) || !reader.PodVector(jointSourceIndices)) {
+            return std::nullopt;
+        }
+        mesh->SetSkinJointNames(std::move(jointNames));
+        mesh->SetSkinJointSourceIndices(std::move(jointSourceIndices));
+        std::uint64_t inverseBindCount = 0;
+        if (!reader.Pod(inverseBindCount) || inverseBindCount > 100000u) {
+            return std::nullopt;
+        }
+        std::vector<DirectX::XMMATRIX> inverseBinds;
+        inverseBinds.resize(static_cast<std::size_t>(inverseBindCount));
+        for (auto& matrix : inverseBinds) {
+            if (!ReadMatrix(reader, matrix)) {
+                return std::nullopt;
+            }
+        }
+        mesh->SetSkinInverseBindMatrices(std::move(inverseBinds));
+        std::uint8_t hasSkeleton = 0;
+        if (!reader.Pod(hasSkeleton)) {
+            return std::nullopt;
+        }
+        if (hasSkeleton != 0u) {
+            std::uint64_t boneCount = 0;
+            if (!reader.Pod(boneCount) || boneCount > 100000u) {
+                return std::nullopt;
+            }
+            std::vector<std::string> boneNames;
+            boneNames.resize(static_cast<std::size_t>(boneCount));
+            for (auto& name : boneNames) {
+                if (!reader.String(name)) {
+                    return std::nullopt;
+                }
+            }
+            std::vector<std::int32_t> parents;
+            if (!reader.PodVector(parents)) {
+                return std::nullopt;
+            }
+            std::uint64_t skeletonBindCount = 0;
+            if (!reader.Pod(skeletonBindCount) || skeletonBindCount > 100000u) {
+                return std::nullopt;
+            }
+            std::vector<DirectX::XMMATRIX> skeletonInverseBinds;
+            skeletonInverseBinds.resize(static_cast<std::size_t>(skeletonBindCount));
+            for (auto& matrix : skeletonInverseBinds) {
+                if (!ReadMatrix(reader, matrix)) {
+                    return std::nullopt;
+                }
+            }
+            mesh->SetBaseSkin(std::make_shared<Skeleton>(std::move(boneNames), std::move(parents), std::move(skeletonInverseBinds)));
+        }
+        payload.meshes.push_back(std::move(mesh));
+    }
+
+    std::uint64_t partCount = 0;
+    if (!reader.Pod(partCount) || partCount > 100000u) {
+        return std::nullopt;
+    }
+    payload.parts.reserve(static_cast<std::size_t>(partCount));
+    for (std::uint64_t partIndex = 0; partIndex < partCount; ++partIndex) {
+        USDLoader::RenderablePartPayload part;
+        if (!reader.String(part.name) || !ReadMatrix(reader, part.localMatrix) || !reader.Pod(part.skinnedShapeIndex)) {
+            return std::nullopt;
+        }
+        std::uint64_t partMeshCount = 0;
+        if (!reader.Pod(partMeshCount) || partMeshCount > 100000u) {
+            return std::nullopt;
+        }
+        part.meshes.reserve(static_cast<std::size_t>(partMeshCount));
+        for (std::uint64_t i = 0; i < partMeshCount; ++i) {
+            std::uint32_t meshIndex = UINT32_MAX;
+            if (!reader.Pod(meshIndex) || meshIndex >= payload.meshes.size()) {
+                return std::nullopt;
+            }
+            part.meshes.push_back(payload.meshes[meshIndex]);
+        }
+        payload.parts.push_back(std::move(part));
+    }
+    return payload;
 }
 
 } // namespace
@@ -526,6 +1174,183 @@ std::optional<CachedAssetLoadResult> TryLoadCachedModel(std::string cacheKey, co
     return std::nullopt;
 }
 
+std::optional<USDLoader::ImportedAssetPayload> TryLoadCachedImportedAsset(std::string cacheKey, const USDLoader::ImportSettings& settings, LoadTimingStats* stats)
+{
+    const auto probeBegin = std::chrono::steady_clock::now();
+    const std::string normalizedCacheKey = NormalizeNifCacheKey(cacheKey);
+    if (normalizedCacheKey.empty()) {
+        if (stats) {
+            stats->cacheProbeMs += ElapsedMs(probeBegin, std::chrono::steady_clock::now());
+        }
+        return std::nullopt;
+    }
+
+    const std::string pathHash = Hex64(Fnv1a64(normalizedCacheKey));
+    auto candidates = FindCachedAssets(pathHash);
+    if (candidates.empty()) {
+        spdlog::info("nif_asset_cache=miss game='{}' path_hash='{}' reason='no asset usdc found'", normalizedCacheKey, pathHash);
+        if (stats) {
+            stats->cacheProbeMs += ElapsedMs(probeBegin, std::chrono::steady_clock::now());
+        }
+        return std::nullopt;
+    }
+
+    for (const auto& cachePath : candidates) {
+        const std::string fileContentHash = ExtractContentHashFromFileName(cachePath);
+        std::string sourceIdentifier;
+        std::string contentHash;
+        std::string reason;
+
+        if (auto payload = TryLoadPayloadCache(cachePath, normalizedCacheKey, pathHash, fileContentHash)) {
+            spdlog::info(
+                "nif_asset_payload_cache=hit game='{}' path='{}' content_hash='{}'",
+                normalizedCacheKey,
+                PayloadCachePathForAssetCache(cachePath).string(),
+                fileContentHash);
+            if (stats) {
+                stats->cacheProbeMs += ElapsedMs(probeBegin, std::chrono::steady_clock::now());
+                stats->cacheHit = true;
+                stats->payloadCacheHit = true;
+                stats->cachePath = cachePath;
+                stats->contentHash = fileContentHash;
+                stats->sourceIdentifier = MakeStableSourceIdentifier(normalizedCacheKey, fileContentHash);
+            }
+            return payload;
+        }
+
+        const auto openBegin = std::chrono::steady_clock::now();
+        UsdStageRefPtr stage = UsdStage::Open(cachePath.string(), UsdStage::LoadNone);
+        if (stats) {
+            stats->usdOpenMs += ElapsedMs(openBegin, std::chrono::steady_clock::now());
+        }
+        if (!ValidateAssetStage(stage, normalizedCacheKey, pathHash, fileContentHash, sourceIdentifier, contentHash, reason)) {
+            spdlog::warn(
+                "nif_asset_cache=fallback game='{}' path='{}' reason='{}'",
+                normalizedCacheKey,
+                cachePath.string(),
+                reason);
+            continue;
+        }
+
+        if (stats) {
+            stats->cacheProbeMs += ElapsedMs(probeBegin, std::chrono::steady_clock::now());
+        }
+
+        const auto options = MakeStageOptions(
+            sourceIdentifier,
+            cachePath.parent_path().string(),
+            "brnifly_" + contentHash + ".asset.usdc");
+        const auto extractBegin = std::chrono::steady_clock::now();
+        auto payload = USDLoader::LoadImportedAssetFromStage(stage, options, settings);
+        if (stats) {
+            const auto elapsed = ElapsedMs(extractBegin, std::chrono::steady_clock::now());
+            stats->usdExtractMs += elapsed;
+            stats->meshBuildMs += elapsed;
+            stats->usdLoadMs += elapsed;
+        }
+        if (!payload) {
+            spdlog::warn(
+                "nif_asset_cache=fallback game='{}' path='{}' content_hash='{}' reason='cached USD payload load failed'",
+                normalizedCacheKey,
+                cachePath.string(),
+                contentHash);
+            continue;
+        }
+        WritePayloadCache(cachePath, normalizedCacheKey, pathHash, contentHash, *payload);
+
+        spdlog::info(
+            "nif_asset_cache=hit game='{}' path='{}' content_hash='{}' source_identifier='{}'",
+            normalizedCacheKey,
+            cachePath.string(),
+            contentHash,
+            sourceIdentifier);
+        if (stats) {
+            stats->cacheHit = true;
+            stats->cachePath = cachePath;
+            stats->sourceIdentifier = sourceIdentifier;
+            stats->contentHash = contentHash;
+        }
+        return payload;
+    }
+
+    if (stats) {
+        stats->cacheProbeMs += ElapsedMs(probeBegin, std::chrono::steady_clock::now());
+    }
+    return std::nullopt;
+}
+
+std::optional<USDLoader::ImportedAssetPayload> LoadImportedAssetWithCacheKey(std::string filePath, std::string cacheKey, const USDLoader::ImportSettings& settings, LoadTimingStats* stats)
+{
+    const std::string normalizedCacheKey = NormalizeNifCacheKey(cacheKey.empty() ? filePath : cacheKey);
+    const std::string pathHash = Hex64(Fnv1a64(normalizedCacheKey));
+    if (IsKnownNonRenderableNif(normalizedCacheKey)) {
+        spdlog::info("Skipping known non-renderable NIF '{}'", normalizedCacheKey);
+        return std::nullopt;
+    }
+
+    std::string errorMessage;
+    const auto brniflyBegin = std::chrono::steady_clock::now();
+    auto package = BRNiflyClient::ConvertNifToUsd(filePath, {}, &errorMessage);
+    if (stats) {
+        stats->brniflyMs += ElapsedMs(brniflyBegin, std::chrono::steady_clock::now());
+    }
+    if (!package) {
+        spdlog::error("NIF import failed for '{}': {}", filePath, errorMessage);
+        return std::nullopt;
+    }
+
+    for (const auto& diagnostic : package->diagnostics) {
+        if (diagnostic.level == "warning") {
+            spdlog::warn("BRNifly: {}", diagnostic.message);
+        }
+        else if (diagnostic.level == "error") {
+            spdlog::error("BRNifly: {}", diagnostic.message);
+        }
+        else {
+            spdlog::info("BRNifly: {}", diagnostic.message);
+        }
+    }
+
+    const std::string stableSourceIdentifier = MakeStableSourceIdentifier(normalizedCacheKey, package->contentHash);
+    const std::string sourceDirectory = fs::path(filePath).parent_path().string();
+    const auto assetWriteBegin = std::chrono::steady_clock::now();
+    const auto cachePath = WriteAssetCache(package.value(), normalizedCacheKey, pathHash, stableSourceIdentifier, sourceDirectory);
+    if (stats) {
+        stats->assetWriteMs += ElapsedMs(assetWriteBegin, std::chrono::steady_clock::now());
+    }
+    if (cachePath) {
+        if (stats) {
+            stats->assetCacheWritten = cachePath->wrote;
+            stats->cachePath = cachePath->path;
+            stats->sourceIdentifier = stableSourceIdentifier;
+            stats->contentHash = package->contentHash;
+        }
+        if (auto payload = LoadCachedAssetPayload(cachePath->path, stableSourceIdentifier, package->contentHash, settings, stats)) {
+            WritePayloadCache(cachePath->path, normalizedCacheKey, pathHash, package->contentHash, *payload);
+            return payload;
+        }
+        spdlog::warn(
+            "nif_asset_cache=fallback game='{}' path='{}' content_hash='{}' reason='fresh cached USD payload load failed; loading in-memory USD'",
+            normalizedCacheKey,
+            cachePath->path.string(),
+            package->contentHash);
+    }
+
+    auto options = MakeStageOptions(
+        stableSourceIdentifier,
+        sourceDirectory,
+        "brnifly_" + package->contentHash + ".usda");
+    const auto extractBegin = std::chrono::steady_clock::now();
+    auto payload = USDLoader::LoadImportedAssetFromUsdBytes(package->rootLayerText, options, settings);
+    if (stats) {
+        const auto elapsed = ElapsedMs(extractBegin, std::chrono::steady_clock::now());
+        stats->usdExtractMs += elapsed;
+        stats->meshBuildMs += elapsed;
+        stats->usdLoadMs += elapsed;
+    }
+    return payload;
+}
+
 std::shared_ptr<Scene> LoadModelWithCacheKey(std::string filePath, std::string cacheKey, const USDLoader::ImportSettings& settings, LoadTimingStats* stats)
 {
     const std::string normalizedCacheKey = NormalizeNifCacheKey(cacheKey.empty() ? filePath : cacheKey);
@@ -567,13 +1392,13 @@ std::shared_ptr<Scene> LoadModelWithCacheKey(std::string filePath, std::string c
     }
     if (cachePath) {
         if (stats) {
-            stats->assetCacheWritten = true;
-            stats->cachePath = *cachePath;
+            stats->assetCacheWritten = cachePath->wrote;
+            stats->cachePath = cachePath->path;
             stats->sourceIdentifier = stableSourceIdentifier;
             stats->contentHash = package->contentHash;
         }
         const auto usdLoadBegin = std::chrono::steady_clock::now();
-        auto scene = LoadCachedStage(*cachePath, stableSourceIdentifier, package->contentHash, settings);
+        auto scene = LoadCachedStage(cachePath->path, stableSourceIdentifier, package->contentHash, settings);
         if (stats) {
             stats->usdLoadMs += ElapsedMs(usdLoadBegin, std::chrono::steady_clock::now());
         }
@@ -583,7 +1408,7 @@ std::shared_ptr<Scene> LoadModelWithCacheKey(std::string filePath, std::string c
         spdlog::warn(
             "nif_asset_cache=fallback game='{}' path='{}' content_hash='{}' reason='fresh cached USD load failed; loading in-memory USD'",
             normalizedCacheKey,
-            cachePath->string(),
+            cachePath->path.string(),
             package->contentHash);
     }
 

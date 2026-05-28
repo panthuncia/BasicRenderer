@@ -135,6 +135,48 @@ void Material::ForEachReferencedTexture(const std::function<void(const std::shar
     visitTexture(m_openPBRTextures.fuzzRoughness.texture);
 }
 
+MaterialDescription Material::ToCacheDescription() const
+{
+    MaterialDescription desc{};
+    desc.name = m_name;
+    desc.diffuseColor = m_baseColorFactor;
+    desc.emissiveColor = m_emissiveFactor;
+    desc.alphaCutoff = m_materialData.alphaCutoff;
+    desc.heightMapScale = m_materialData.heightMapScale;
+    desc.geometricDisplacementMin = m_materialData.geometricDisplacementMin;
+    desc.geometricDisplacementMax = m_materialData.geometricDisplacementMax;
+    desc.enableGeometricDisplacement = m_materialData.geometricDisplacementEnabled != 0u;
+    desc.forceDoubleSided = (m_materialData.materialFlags & MaterialFlags::MATERIAL_DOUBLE_SIDED) != 0u;
+    desc.negateNormals = (m_materialData.materialFlags & MaterialFlags::MATERIAL_NEGATE_NORMALS) != 0u;
+    desc.invertNormalGreen = (m_materialData.materialFlags & MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN) != 0u;
+    if ((m_materialData.materialFlags & MaterialFlags::MATERIAL_OPACITY_TEXTURE) != 0u) {
+        desc.blendState = BlendState::BLEND_STATE_BLEND;
+    } else if ((m_materialData.materialFlags & MaterialFlags::MATERIAL_ALPHA_TEST) != 0u) {
+        desc.blendState = BlendState::BLEND_STATE_MASK;
+    }
+
+    desc.baseColor = TextureAndConstant{ m_baseColorTexture, 1.0f, m_baseColorChannels };
+    desc.baseColor.uvSetIndex = m_baseColorUvSetIndex;
+    desc.normal = TextureAndConstant{ m_normalTexture, 1.0f, m_normalChannels };
+    desc.normal.uvSetIndex = m_normalUvSetIndex;
+    desc.aoMap = TextureAndConstant{ m_aoMap, 1.0f, m_aoChannel };
+    desc.aoMap.uvSetIndex = m_aoUvSetIndex;
+    desc.heightMap = TextureAndConstant{ m_heightMap, 1.0f, m_heightChannel };
+    desc.heightMap.uvSetIndex = m_heightUvSetIndex;
+    desc.metallic = TextureAndConstant{ m_metallicTexture, m_metallicFactor, m_metallicChannel };
+    desc.metallic.uvSetIndex = m_metallicUvSetIndex;
+    desc.roughness = TextureAndConstant{ m_roughnessTexture, m_roughnessFactor, m_roughnessChannel };
+    desc.roughness.uvSetIndex = m_roughnessUvSetIndex;
+    desc.emissive = TextureAndConstant{ m_emissiveTexture, 1.0f, m_emissiveChannels };
+    desc.emissive.uvSetIndex = m_emissiveUvSetIndex;
+    desc.opacity = TextureAndConstant{ m_opacityTexture, m_baseColorFactor.w };
+    desc.opacity.uvSetIndex = m_opacityUvSetIndex;
+    desc.openPBR = m_openPBRMaterial;
+    desc.openPBRTextures = m_openPBRTextures;
+    desc.materialModel = MaterialModel::OpenPBR;
+    return desc;
+}
+
 void Material::SetHeightmap(std::shared_ptr<TextureAsset> heightmap) {
     m_materialData.materialFlags |= MaterialFlags::MATERIAL_PARALLAX;
     m_heightMap = heightmap;

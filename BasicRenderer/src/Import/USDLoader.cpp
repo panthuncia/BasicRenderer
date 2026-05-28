@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstring>
 #include <cctype>
+#include <cstdlib>
 #include <unordered_set>
 #include <cmath>
 
@@ -197,7 +198,7 @@ namespace USDLoader {
 		}
 	};
 
-	LoadingCaches loadingCache;
+	thread_local LoadingCaches loadingCache;
 
 	static uint32_t GetUsdPointInstancerMaxInstances() {
 		static std::function<uint32_t(void)> getMaxInstances;
@@ -260,7 +261,31 @@ namespace USDLoader {
 				static_cast<float>(scale[0]),
 				static_cast<float>(scale[1]),
 				static_cast<float>(scale[2]))
-			});
+		});
+	}
+
+	static DirectX::XMMATRIX DirectXMatrixFromUsdMatrix(
+		const GfMatrix4d& matrix,
+		double metersPerUnit)
+	{
+		const GfTransform transform(matrix);
+		const GfVec3d translation = transform.GetTranslation();
+		const GfQuaternion rotation = transform.GetRotation().GetQuaternion();
+		const GfVec3d scale = transform.GetScale();
+
+		return DirectX::XMMatrixScaling(
+			static_cast<float>(scale[0]),
+			static_cast<float>(scale[1]),
+			static_cast<float>(scale[2])) *
+			DirectX::XMMatrixRotationQuaternion(DirectX::XMVectorSet(
+				static_cast<float>(rotation.GetImaginary()[0]),
+				static_cast<float>(rotation.GetImaginary()[1]),
+				static_cast<float>(rotation.GetImaginary()[2]),
+				static_cast<float>(rotation.GetReal()))) *
+			DirectX::XMMatrixTranslation(
+				static_cast<float>(translation[0] * metersPerUnit),
+				static_cast<float>(translation[1] * metersPerUnit),
+				static_cast<float>(translation[2] * metersPerUnit));
 	}
 
 	static void ApplyPointInstancerPScaleFallback(
@@ -1338,6 +1363,88 @@ namespace USDLoader {
 		return ParseJsonStringArray(value.UncheckedGet<std::string>());
 	}
 
+	std::vector<float> ParseJsonFloatArray(std::string_view text)
+	{
+		std::vector<float> values;
+		const char* begin = text.data();
+		const char* const end = begin + text.size();
+		while (begin < end) {
+			char* parsedEnd = nullptr;
+			const float value = std::strtof(begin, &parsedEnd);
+			if (parsedEnd != begin) {
+				values.push_back(value);
+				begin = parsedEnd;
+				continue;
+			}
+			++begin;
+		}
+		return values;
+	}
+
+	std::vector<std::uint32_t> ParseJsonUIntArray(std::string_view text)
+	{
+		std::vector<std::uint32_t> values;
+		const char* begin = text.data();
+		const char* const end = begin + text.size();
+		while (begin < end) {
+			char* parsedEnd = nullptr;
+			const long value = std::strtol(begin, &parsedEnd, 10);
+			if (parsedEnd != begin) {
+				if (value >= 0) {
+					values.push_back(static_cast<std::uint32_t>(value));
+				}
+				begin = parsedEnd;
+				continue;
+			}
+			++begin;
+		}
+		return values;
+	}
+
+	std::vector<std::uint32_t> GetBrNiflyJointSourceIndices(const UsdPrim& prim)
+	{
+		if (!prim) {
+			return {};
+		}
+		const VtValue value = prim.GetCustomDataByKey(TfToken("brnifly:jointSourceIndices"));
+		if (!value.IsHolding<std::string>()) {
+			return {};
+		}
+		return ParseJsonUIntArray(value.UncheckedGet<std::string>());
+	}
+
+	std::vector<XMMATRIX> GetBrNiflySkinToBoneTransforms(const UsdPrim& prim)
+	{
+		if (!prim) {
+			return {};
+		}
+		const VtValue value = prim.GetCustomDataByKey(TfToken("brnifly:skinToBoneTransforms"));
+		if (!value.IsHolding<std::string>()) {
+			return {};
+		}
+
+		constexpr size_t kTransformFloatCount = 13;
+		const auto floats = ParseJsonFloatArray(value.UncheckedGet<std::string>());
+		if (floats.empty() || (floats.size() % kTransformFloatCount) != 0u) {
+			return {};
+		}
+
+		std::vector<XMMATRIX> matrices;
+		matrices.reserve(floats.size() / kTransformFloatCount);
+		for (size_t offset = 0; offset + kTransformFloatCount <= floats.size(); offset += kTransformFloatCount) {
+			const float* x = floats.data() + offset;
+			const float scale = x[12];
+			// Nifly exports MatTransform as translation, row-major rotation, scale.
+			// Match the row-vector NiTransform snapshot layout used by the live Skyrim bridge.
+			matrices.push_back(XMMATRIX(
+				x[3] * scale, x[6] * scale, x[9] * scale, 0.0f,
+				x[4] * scale, x[7] * scale, x[10] * scale, 0.0f,
+				x[5] * scale, x[8] * scale, x[11] * scale, 0.0f,
+				x[0], x[1], x[2], 1.0f));
+		}
+		return matrices;
+	}
+
     std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets, bool forceDoubleSided = false) {
         if (!material) {
             return ResolveDefaultUsdMaterial(forceDoubleSided);
@@ -1586,6 +1693,14 @@ namespace USDLoader {
 				if (!jointNames.empty()) {
 					mPtr->SetSkinJointNames(std::move(jointNames));
 				}
+				auto jointSourceIndices = GetBrNiflyJointSourceIndices(mesh.GetPrim());
+				if (!jointSourceIndices.empty()) {
+					mPtr->SetSkinJointSourceIndices(std::move(jointSourceIndices));
+				}
+				auto skinToBoneTransforms = GetBrNiflySkinToBoneTransforms(mesh.GetPrim());
+				if (!skinToBoneTransforms.empty()) {
+					mPtr->SetSkinInverseBindMatrices(std::move(skinToBoneTransforms));
+				}
 				outMeshes.push_back(mPtr);
 			}
 		}
@@ -1724,6 +1839,101 @@ namespace USDLoader {
 		}
 
 		return animation;
+	}
+
+	std::shared_ptr<Skeleton> BuildPayloadSkeleton(
+		const UsdSkelSkeleton& skel,
+		const VtTokenArray& rawJointOrder,
+		const UsdSkelSkeletonQuery& skelQuery,
+		double metersPerUnit)
+	{
+		if (loadingCache.skeletonMap.contains(skel.GetPrim().GetPath().GetString())) {
+			return loadingCache.skeletonMap[skel.GetPrim().GetPath().GetString()];
+		}
+
+		const auto& topology = skelQuery.GetTopology();
+		pxr::VtArray<pxr::GfMatrix4d> bindXforms;
+		skel.GetBindTransformsAttr().Get(&bindXforms);
+		if (bindXforms.size() < rawJointOrder.size()) {
+			spdlog::warn(
+				"Skeleton '{}' bind transform count ({}) is smaller than joint count ({}); missing joints will use identity bind transforms.",
+				skel.GetPrim().GetPath().GetString(),
+				bindXforms.size(),
+				rawJointOrder.size());
+		}
+
+		std::vector<std::string> boneNames;
+		std::vector<int32_t> parentIndices;
+		std::vector<DirectX::XMMATRIX> inverseBindMatrices;
+		boneNames.reserve(rawJointOrder.size());
+		parentIndices.reserve(rawJointOrder.size());
+		inverseBindMatrices.reserve(rawJointOrder.size());
+
+		for (size_t i = 0; i < rawJointOrder.size(); ++i) {
+			boneNames.push_back(rawJointOrder[i].GetString());
+			parentIndices.push_back(topology.GetParent(i));
+
+			const GfMatrix4d bindMatrix = i < bindXforms.size() ? bindXforms[i] : GfMatrix4d(1.0);
+			inverseBindMatrices.push_back(DirectX::XMMatrixInverse(nullptr, DirectXMatrixFromUsdMatrix(bindMatrix, metersPerUnit)));
+		}
+
+		auto skeleton = std::make_shared<Skeleton>(std::move(boneNames), std::move(parentIndices), std::move(inverseBindMatrices));
+		loadingCache.skeletonMap[skel.GetPrim().GetPath().GetString()] = skeleton;
+		return skeleton;
+	}
+
+	std::vector<std::shared_ptr<Mesh>> ProcessMeshForPayload(
+		const UsdPrim& prim,
+		UsdSkelCache& skelCache,
+		const UsdStageRefPtr& stage,
+		double metersPerUnit,
+		GfRotation upRot,
+		const std::string& directory,
+		bool isUSDZ)
+	{
+		UsdGeomMesh mesh(prim);
+		if (!mesh || IsUnsupportedBrNiflySkinnedMesh(mesh)) {
+			return {};
+		}
+
+		auto skinningQuery = USDGeometryExtractor::GetSkinningQuery(mesh, skelCache);
+		UsdSkelBindingAPI bindingAPI(prim);
+		std::shared_ptr<Skeleton> skeleton;
+		VtTokenArray skelJointOrderRaw;
+		VtTokenArray skelJointOrderMapped;
+
+		if (bindingAPI) {
+			UsdSkelSkeleton skel;
+			if (bindingAPI.GetSkeleton(&skel)) {
+				skelCache.Populate(UsdSkelRoot(skel.GetPrim()), UsdPrimDefaultPredicate);
+				auto skelQuery = skelCache.GetSkelQuery(skel);
+				skelJointOrderRaw = skelQuery.GetJointOrder();
+
+				if (!skinningQuery) {
+					throw std::runtime_error("Mesh is skinned but no skinning query found.");
+				}
+
+				auto& mapper = skinningQuery->GetJointMapper();
+				if (mapper && !mapper->IsIdentity()) {
+					mapper->Remap(skelJointOrderRaw, &skelJointOrderMapped);
+				}
+				else {
+					skelJointOrderMapped = skelJointOrderRaw;
+				}
+
+				skeleton = BuildPayloadSkeleton(skel, skelJointOrderRaw, skelQuery, metersPerUnit);
+			}
+		}
+
+		auto processedMeshes = ProcessMesh(mesh, stage, metersPerUnit, upRot, directory, isUSDZ, skelCache, skelJointOrderRaw, skelJointOrderMapped);
+		if (skeleton) {
+			for (auto& processedMesh : processedMeshes) {
+				if (processedMesh) {
+					processedMesh->SetBaseSkin(skeleton);
+				}
+			}
+		}
+		return processedMeshes;
 	}
 
 	void ProcessMeshAndAnimations(
@@ -2090,6 +2300,85 @@ namespace USDLoader {
 
 	}
 
+	ImportedAssetPayload ParseImportedAssetPayload(
+		const pxr::UsdStageRefPtr& stage,
+		double metersPerUnit,
+		GfRotation upRot,
+		const std::string& directory,
+		UsdSkelCache& skelCache,
+		bool isUSDZ)
+	{
+		ImportedAssetPayload payload;
+		std::unordered_set<std::uint64_t> meshIDs;
+		std::uint32_t skinnedShapeIndex = 0;
+		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
+
+		std::function<void(const UsdPrim&, DirectX::XMMATRIX, bool)> recurse =
+			[&](const UsdPrim& prim, DirectX::XMMATRIX parentMatrix, bool hasCorrectedAxis) {
+				if (prim.IsA<UsdGeomImageable>()) {
+					UsdGeomImageable imageable(prim);
+					if (imageable.ComputeVisibility(geomTimeCode) == UsdGeomTokens->invisible) {
+						return;
+					}
+				}
+
+				GfMatrix4d localUsdMatrix(1.0);
+				bool resetsXformStack = false;
+				bool nextHasCorrectedAxis = hasCorrectedAxis;
+				if (prim.IsA<UsdGeomXformable>()) {
+					UsdGeomXformable xform(prim);
+					xform.GetLocalTransformation(&localUsdMatrix, &resetsXformStack, geomTimeCode);
+					if (!nextHasCorrectedAxis || resetsXformStack) {
+						GfMatrix4d rotMat(upRot, GfVec3d(0.0));
+						localUsdMatrix = localUsdMatrix * rotMat;
+						nextHasCorrectedAxis = true;
+					}
+				}
+
+				const auto localMatrix = DirectXMatrixFromUsdMatrix(localUsdMatrix, metersPerUnit);
+				const auto worldMatrix = resetsXformStack ? localMatrix : localMatrix * parentMatrix;
+
+				if (prim.IsA<UsdGeomPointInstancer>()) {
+					spdlog::warn(
+						"USD payload import currently skips PointInstancer '{}'; use the scene import path for instanced USD assets.",
+						prim.GetPath().GetString());
+					return;
+				}
+
+				auto meshes = ProcessMeshForPayload(prim, skelCache, stage, metersPerUnit, upRot, directory, isUSDZ);
+				if (!meshes.empty()) {
+					RenderablePartPayload part;
+					part.localMatrix = worldMatrix;
+					part.name = prim.GetName().GetString();
+
+					bool hasSkinnedMesh = false;
+					for (const auto& mesh : meshes) {
+						if (!mesh) {
+							continue;
+						}
+						part.meshes.push_back(mesh);
+						hasSkinnedMesh = hasSkinnedMesh || ((mesh->GetPerMeshCBData().vertexFlags & VERTEX_SKINNED) != 0u);
+						if (meshIDs.insert(mesh->GetGlobalID()).second) {
+							payload.meshes.push_back(mesh);
+						}
+					}
+					if (!part.meshes.empty()) {
+						if (hasSkinnedMesh) {
+							part.skinnedShapeIndex = skinnedShapeIndex++;
+						}
+						payload.parts.push_back(std::move(part));
+					}
+				}
+
+				for (auto child : prim.GetFilteredChildren(UsdTraverseInstanceProxies())) {
+					recurse(child, worldMatrix, nextHasCorrectedAxis);
+				}
+			};
+
+		recurse(stage->GetPseudoRoot(), DirectX::XMMatrixIdentity(), false);
+		return payload;
+	}
+
 	std::shared_ptr<Scene> LoadModelFromStage(
 		const UsdStageRefPtr& stage,
 		const InMemoryStageOptions& options,
@@ -2153,6 +2442,50 @@ namespace USDLoader {
 		return scene;
 	}
 
+	std::optional<ImportedAssetPayload> LoadImportedAssetFromStage(
+		const UsdStageRefPtr& stage,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
+		if (!stage) {
+			spdlog::error("USD payload stage open failed for in-memory source '{}'", options.sourceIdentifier);
+			return std::nullopt;
+		}
+
+		auto ctx = stage->GetPathResolverContext();
+		ArResolverContextBinder binder(ctx);
+
+		auto metersPerUnit = UsdGeomGetStageMetersPerUnit(stage);
+		TfToken upAxis = UsdGeomGetStageUpAxis(stage);
+		GfRotation upRot;
+		if (upAxis == UsdGeomTokens->z) {
+			upRot = GfRotation(GfVec3d(1, 0, 0), -90.0);
+		}
+		else if (upAxis == UsdGeomTokens->y) {
+			upRot = GfRotation(GfVec3d(0, 1, 0), 0);
+		}
+		else if (upAxis == UsdGeomTokens->x) {
+			upRot = GfRotation(GfVec3d(0, 1, 0), -90.0);
+		}
+		else {
+			spdlog::warn("Unknown Up Axis: {}", upAxis.GetString());
+		}
+
+		try {
+			UsdSkelCache skelCache;
+			const bool isUSDZ = options.isUsdPackage;
+			const std::string directory = options.sourceDirectory;
+
+			PreprocessAllMeshes(stage, metersPerUnit, directory, isUSDZ, importSettings, options.sourceIdentifier);
+			auto payload = ParseImportedAssetPayload(stage, metersPerUnit, upRot, directory, skelCache, isUSDZ);
+			loadingCache.Clear();
+			return payload;
+		}
+		catch (...) {
+			loadingCache.Clear();
+			throw;
+		}
+	}
+
 	std::shared_ptr<Scene> LoadModel(std::string filePath, const ImportSettings& importSettings) {
 
 		UsdStageRefPtr stage = UsdStage::Open(filePath);
@@ -2170,6 +2503,19 @@ namespace USDLoader {
 		return LoadModelFromStage(stage, options, importSettings);
 	}
 
+	std::optional<ImportedAssetPayload> LoadImportedAssetFromFile(
+		const std::string& filePath,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
+		UsdStageRefPtr stage = UsdStage::Open(filePath);
+		if (!stage) {
+			spdlog::error("USD payload stage open failed for {}", filePath);
+			return std::nullopt;
+		}
+
+		return LoadImportedAssetFromStage(stage, options, importSettings);
+	}
+
 	std::shared_ptr<Scene> LoadModelFromFile(
 		const std::string& filePath,
 		const InMemoryStageOptions& options,
@@ -2181,6 +2527,26 @@ namespace USDLoader {
 		}
 
 		return LoadModelFromStage(stage, options, importSettings);
+	}
+
+	std::optional<ImportedAssetPayload> LoadImportedAssetFromUsdBytes(
+		const std::string& usdText,
+		const InMemoryStageOptions& options,
+		const ImportSettings& importSettings) {
+		const std::string identifierHint = options.layerIdentifierHint.empty() ? std::string("in_memory.usda") : options.layerIdentifierHint;
+		SdfLayerRefPtr rootLayer = SdfLayer::CreateAnonymous(identifierHint);
+		if (!rootLayer || !rootLayer->ImportFromString(usdText)) {
+			spdlog::error("Failed to import in-memory USD payload layer '{}'.", identifierHint);
+			return std::nullopt;
+		}
+
+		UsdStageRefPtr stage = UsdStage::Open(rootLayer);
+		if (!stage) {
+			spdlog::error("Failed to open in-memory USD payload stage '{}'.", identifierHint);
+			return std::nullopt;
+		}
+
+		return LoadImportedAssetFromStage(stage, options, importSettings);
 	}
 
 	std::shared_ptr<Scene> LoadModelFromUsdBytes(

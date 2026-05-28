@@ -1,11 +1,17 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <cstdint>
 #include <string>
+#include <vector>
+
+#include <DirectXMath.h>
 
 #include <pxr/usd/usd/stage.h>
 
 class Scene;
+class Mesh;
 
 namespace USDLoader {
 	struct ImportSettings {
@@ -19,6 +25,18 @@ namespace USDLoader {
 		bool isUsdPackage = false;
 	};
 
+	struct RenderablePartPayload {
+		std::vector<std::shared_ptr<Mesh>> meshes;
+		DirectX::XMMATRIX localMatrix{ DirectX::XMMatrixIdentity() };
+		std::string name;
+		std::uint32_t skinnedShapeIndex{ static_cast<std::uint32_t>(-1) };
+	};
+
+	struct ImportedAssetPayload {
+		std::vector<std::shared_ptr<Mesh>> meshes;
+		std::vector<RenderablePartPayload> parts;
+	};
+
 	std::shared_ptr<Scene> LoadModel(std::string file, const ImportSettings& settings);
 	std::shared_ptr<Scene> LoadModel(std::string file);
 	std::shared_ptr<Scene> LoadModelFromFile(
@@ -30,6 +48,19 @@ namespace USDLoader {
 		const InMemoryStageOptions& options,
 		const ImportSettings& settings = {});
 	std::shared_ptr<Scene> LoadModelFromUsdBytes(
+		const std::string& usdText,
+		const InMemoryStageOptions& options,
+		const ImportSettings& settings = {});
+
+	std::optional<ImportedAssetPayload> LoadImportedAssetFromFile(
+		const std::string& filePath,
+		const InMemoryStageOptions& options,
+		const ImportSettings& settings = {});
+	std::optional<ImportedAssetPayload> LoadImportedAssetFromStage(
+		const pxr::UsdStageRefPtr& stage,
+		const InMemoryStageOptions& options,
+		const ImportSettings& settings = {});
+	std::optional<ImportedAssetPayload> LoadImportedAssetFromUsdBytes(
 		const std::string& usdText,
 		const InMemoryStageOptions& options,
 		const ImportSettings& settings = {});

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <directxmath.h>
 #include <memory>
@@ -385,6 +386,24 @@ public:
 		if (byteCount != m_skinningVertexSize) {
 			throw std::runtime_error("MeshIngestBuilder skinning vertex byte size mismatch");
 		}
+		constexpr size_t kMaxDebugVertices = 4u;
+		constexpr size_t kMaxSkinInfluences = 8u;
+		if (m_skinningDebugPositions.size() / 3u < kMaxDebugVertices) {
+			const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
+			const size_t weightsOffset = jointsOffset + sizeof(uint32_t) * kMaxSkinInfluences;
+			if (byteCount >= weightsOffset + sizeof(float) * kMaxSkinInfluences) {
+				const auto oldJointCount = m_skinningDebugJoints.size();
+				const auto oldPositionCount = m_skinningDebugPositions.size();
+				m_skinningDebugJoints.resize(oldJointCount + kMaxSkinInfluences);
+				m_skinningDebugWeights.resize(oldJointCount + kMaxSkinInfluences);
+				m_skinningDebugPositions.resize(oldPositionCount + 3u);
+				m_skinningDebugNormals.resize(oldPositionCount + 3u);
+				std::memcpy(m_skinningDebugPositions.data() + oldPositionCount, data, sizeof(float) * 3u);
+				std::memcpy(m_skinningDebugNormals.data() + oldPositionCount, data + sizeof(DirectX::XMFLOAT3), sizeof(float) * 3u);
+				std::memcpy(m_skinningDebugJoints.data() + oldJointCount, data + jointsOffset, sizeof(uint32_t) * kMaxSkinInfluences);
+				std::memcpy(m_skinningDebugWeights.data() + oldJointCount, data + weightsOffset, sizeof(float) * kMaxSkinInfluences);
+			}
+		}
 		m_skinningVertices.insert(m_skinningVertices.end(), data, data + byteCount);
 	}
 
@@ -428,6 +447,10 @@ private:
 	unsigned int m_flags = 0;
 	std::vector<std::byte> m_vertices;
 	std::vector<std::byte> m_skinningVertices;
+	std::vector<uint32_t> m_skinningDebugJoints;
+	std::vector<float> m_skinningDebugWeights;
+	std::vector<float> m_skinningDebugPositions;
+	std::vector<float> m_skinningDebugNormals;
 	std::vector<uint32_t> m_indices;
 	std::vector<MeshUvSetData> m_uvSets;
 	ClusterLODBuilderSettings m_clusterLODBuilderSettings{};

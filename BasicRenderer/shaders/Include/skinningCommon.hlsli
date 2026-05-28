@@ -5,12 +5,14 @@
 #include "structs.hlsli"
 #include "vertex.hlsli"
 
+typedef row_major float4x4 SkinningMatrix;
+
 bool IsValidSkinningInstanceSlot(uint skinningInstanceSlot)
 {
     return skinningInstanceSlot != 0xFFFFFFFFu;
 }
 
-float SkinningMaxAxisScale_RowVector(float4x4 M)
+float SkinningMaxAxisScale_RowVector(SkinningMatrix M)
 {
     float sx = length(M[0].xyz);
     float sy = length(M[1].xyz);
@@ -33,15 +35,20 @@ float4x4 LoadBoneSkinMatrix(uint skinningInstanceSlot, uint jointIndex)
 
     StructuredBuffer<SkinningInstanceGPUInfo> skinningInstanceBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::SkinningInstanceInfo)];
-    StructuredBuffer<float4x4> boneTransformsBuffer =
+    StructuredBuffer<SkinningMatrix> boneTransformsBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::BoneTransforms)];
-    StructuredBuffer<float4x4> inverseBindMatricesBuffer =
+    StructuredBuffer<SkinningMatrix> inverseBindMatricesBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::InverseBindMatrices)];
 
     SkinningInstanceGPUInfo skinningInfo = skinningInstanceBuffer[skinningInstanceSlot];
-    matrix bone = boneTransformsBuffer[skinningInfo.transformOffsetMatrices + jointIndex];
-    matrix bind = inverseBindMatricesBuffer[skinningInfo.invBindOffsetMatrices + jointIndex];
-    return transpose(mul(bone, bind));
+    SkinningMatrix bone = boneTransformsBuffer[skinningInfo.transformOffsetMatrices + jointIndex];
+    SkinningMatrix bind = inverseBindMatricesBuffer[skinningInfo.invBindOffsetMatrices + jointIndex];
+    SkinningMatrix skin = mul(bone, bind);
+    if ((skinningInfo.flags & SkinningInstanceFlag_RowVectorSkinMatrix) != 0u)
+    {
+        return skin;
+    }
+    return transpose(skin);
 }
 
 float4x4 LoadBoneInverseSkinMatrix(uint skinningInstanceSlot, uint jointIndex)
@@ -53,11 +60,16 @@ float4x4 LoadBoneInverseSkinMatrix(uint skinningInstanceSlot, uint jointIndex)
 
     StructuredBuffer<SkinningInstanceGPUInfo> skinningInstanceBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::SkinningInstanceInfo)];
-    StructuredBuffer<float4x4> inverseSkinMatricesBuffer =
+    StructuredBuffer<SkinningMatrix> inverseSkinMatricesBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::InverseSkinMatrices)];
 
     SkinningInstanceGPUInfo skinningInfo = skinningInstanceBuffer[skinningInstanceSlot];
-    return transpose(inverseSkinMatricesBuffer[skinningInfo.inverseSkinOffsetMatrices + jointIndex]);
+    SkinningMatrix inverseSkin = inverseSkinMatricesBuffer[skinningInfo.inverseSkinOffsetMatrices + jointIndex];
+    if ((skinningInfo.flags & SkinningInstanceFlag_RowVectorSkinMatrix) != 0u)
+    {
+        return inverseSkin;
+    }
+    return transpose(inverseSkin);
 }
 
 float4x4 IdentitySkinMatrix()

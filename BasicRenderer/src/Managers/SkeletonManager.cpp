@@ -125,6 +125,7 @@ uint32_t SkeletonManager::AcquireSkinningInstance(const std::shared_ptr<Skeleton
     info.invBindOffsetMatrices = rec.invBindOffsetMatrices;
     info.inverseSkinOffsetMatrices = rec.inverseSkinOffsetMatrices;
     info.boneCount = rec.boneCount;
+    info.flags = baseShared->GetSkinningGPUFlags();
 
     m_instanceInfo->UpdateAt(rec.instanceSlot, info);
 

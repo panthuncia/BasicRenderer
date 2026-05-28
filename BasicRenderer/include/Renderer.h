@@ -89,6 +89,7 @@ public:
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 	bool IsInitialized() const { return m_isInitialized; }
     void SetExternalSceneMode(bool enabled);
+    void SetSceneRenderOverlapEnabled(bool enabled);
     void IngestExternalSnapshot(const br::render::SceneFrameSnapshot& snapshot);
 
 private:
@@ -192,7 +193,6 @@ private:
     void RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapshot& snapshot);
     void ApplyPrimaryCameraInput(float elapsedSeconds);
     void ApplyPrimaryCameraInputToRenderBridge(float elapsedSeconds);
-    void SetSceneRenderOverlapEnabled(bool enabled);
     void InvalidateSceneOverlapState();
     void RunRenderResourceSyncStage();
     void FlushPendingSceneExplorerEdits();

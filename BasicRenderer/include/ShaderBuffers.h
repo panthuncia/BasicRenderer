@@ -481,7 +481,13 @@ struct SkinningInstanceGPUInfo {
     uint32_t invBindOffsetMatrices = 0;
     uint32_t inverseSkinOffsetMatrices = 0;
     uint32_t boneCount = 0;
+    uint32_t flags = 0;
+    uint32_t pad0 = 0;
+    uint32_t pad1 = 0;
+    uint32_t pad2 = 0;
 };
+
+constexpr uint32_t kSkinningInstanceFlagRowVectorSkinMatrix = 1u << 0;
 
 struct MeshInstanceClodOffsets
 {

@@ -10,6 +10,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -47,6 +48,8 @@ namespace fs = std::filesystem;
 using namespace pxr;
 
 namespace {
+
+constexpr std::string_view kUsdContentIdentityVersion = "brnifly-usd-content-v7";
 
 struct Diagnostic {
     std::string level;
@@ -396,6 +399,9 @@ using GetShapeSkinBoneCountFn = int (*)(void*, void*);
 using GetShapeSkinBoneNamesFn = int (*)(void*, void*, char*, int);
 using GetShapeSkinWeightsCountFn = int (*)(void*, void*, int);
 using GetShapeSkinWeightsFn = int (*)(void*, void*, int, VertexWeightPair*, int);
+using GetShapePartitionSkinningFn = int (*)(void*, void*, uint16_t*, float*, int);
+using GetShapeSkinToBoneFn = bool (*)(void*, void*, const char*, float*);
+using GetShapeSkinToBoneByIndexFn = bool (*)(void*, void*, int, float*);
 using SegmentCountFn = int (*)(void*, void*);
 using GetSegmentFileFn = int (*)(void*, void*, char*, int);
 using GetSegmentsFn = int (*)(void*, void*, int*, int);
@@ -455,6 +461,9 @@ struct NiflyApi {
     GetShapeSkinBoneNamesFn getShapeSkinBoneNames = nullptr;
     GetShapeSkinWeightsCountFn getShapeSkinWeightsCount = nullptr;
     GetShapeSkinWeightsFn getShapeSkinWeights = nullptr;
+    GetShapePartitionSkinningFn getShapePartitionSkinning = nullptr;
+    GetShapeSkinToBoneFn getShapeSkinToBone = nullptr;
+    GetShapeSkinToBoneByIndexFn getShapeSkinToBoneByIndex = nullptr;
     SegmentCountFn segmentCount = nullptr;
     GetSegmentFileFn getSegmentFile = nullptr;
     GetSegmentsFn getSegments = nullptr;
@@ -524,6 +533,9 @@ struct NiflyApi {
           getShapeSkinBoneNames(other.getShapeSkinBoneNames),
           getShapeSkinWeightsCount(other.getShapeSkinWeightsCount),
           getShapeSkinWeights(other.getShapeSkinWeights),
+          getShapePartitionSkinning(other.getShapePartitionSkinning),
+          getShapeSkinToBone(other.getShapeSkinToBone),
+          getShapeSkinToBoneByIndex(other.getShapeSkinToBoneByIndex),
           segmentCount(other.segmentCount),
           getSegmentFile(other.getSegmentFile),
           getSegments(other.getSegments),
@@ -598,6 +610,9 @@ struct NiflyApi {
             getShapeSkinBoneNames = other.getShapeSkinBoneNames;
             getShapeSkinWeightsCount = other.getShapeSkinWeightsCount;
             getShapeSkinWeights = other.getShapeSkinWeights;
+            getShapePartitionSkinning = other.getShapePartitionSkinning;
+            getShapeSkinToBone = other.getShapeSkinToBone;
+            getShapeSkinToBoneByIndex = other.getShapeSkinToBoneByIndex;
             segmentCount = other.segmentCount;
             getSegmentFile = other.getSegmentFile;
             getSegments = other.getSegments;
@@ -733,6 +748,9 @@ std::optional<NiflyApi> LoadNiflyApi(const char* argv0, std::vector<Diagnostic>&
     api.getShapeSkinBoneNames = LoadProc<GetShapeSkinBoneNamesFn>(module, "getShapeSkinBoneNames");
     api.getShapeSkinWeightsCount = LoadProc<GetShapeSkinWeightsCountFn>(module, "getShapeSkinWeightsCount");
     api.getShapeSkinWeights = LoadProc<GetShapeSkinWeightsFn>(module, "getShapeSkinWeights");
+    api.getShapePartitionSkinning = LoadProc<GetShapePartitionSkinningFn>(module, "getShapePartitionSkinning");
+    api.getShapeSkinToBone = LoadProc<GetShapeSkinToBoneFn>(module, "getShapeSkinToBone");
+    api.getShapeSkinToBoneByIndex = LoadProc<GetShapeSkinToBoneByIndexFn>(module, "getShapeSkinToBoneByIndex");
     api.segmentCount = LoadProc<SegmentCountFn>(module, "segmentCount");
     api.getSegmentFile = LoadProc<GetSegmentFileFn>(module, "getSegmentFile");
     api.getSegments = LoadProc<GetSegmentsFn>(module, "getSegments");
@@ -854,6 +872,8 @@ struct ShapeData {
     std::vector<uint16_t> triangles;
     std::vector<std::string> textures;
     std::vector<std::string> boneNames;
+    std::vector<int> boneSourceIndices;
+    std::vector<float> skinToBoneTransforms;
     std::vector<int> jointIndices;
     std::vector<float> jointWeights;
     json shader = json::object();
@@ -1053,76 +1073,195 @@ std::vector<NodeData> ReadNodes(const NiflyApi& api, void* nifHandle)
 
 void ReadShapeSkinning(const NiflyApi& api, void* nifHandle, void* shapeHandle, int vertexCount, ShapeData& shape)
 {
-    // Skyrim's NiSkinInstance::LinkObject builds the render palette from NiSkinData::bones.
-    // The broader NiBoneContainer boneRefs list can include joints that are not uploaded for the draw.
-    const bool hasSkinDataApi =
+    auto readSkinToBoneTransforms = [&](std::span<const int> originalBoneIndices = {}) {
+        shape.skinToBoneTransforms.clear();
+        if (shape.boneNames.empty()) {
+            return;
+        }
+
+        constexpr size_t kTransformFloatCount = 13;
+        shape.skinToBoneTransforms.reserve(shape.boneNames.size() * kTransformFloatCount);
+        std::array<float, kTransformFloatCount> xform{};
+        for (size_t boneIndex = 0; boneIndex < shape.boneNames.size(); ++boneIndex) {
+            xform.fill(0.0f);
+            bool hasTransform = false;
+            if (api.getShapeSkinToBoneByIndex && boneIndex < originalBoneIndices.size()) {
+                // Partition skinning compacts NiSkinData indices for BasicRenderer's
+                // single mesh palette. Keep skin-to-bone binds tied to the original
+                // NiSkinData slot, since name lookup is ambiguous on actor assets with
+                // duplicated or side-remapped bone display names.
+                hasTransform = api.getShapeSkinToBoneByIndex(nifHandle, shapeHandle, originalBoneIndices[boneIndex], xform.data());
+            }
+            if (!hasTransform && api.getShapeSkinToBone) {
+                const auto& boneName = shape.boneNames[boneIndex];
+                hasTransform = api.getShapeSkinToBone(nifHandle, shapeHandle, boneName.c_str(), xform.data());
+            }
+            if (hasTransform) {
+                shape.skinToBoneTransforms.insert(shape.skinToBoneTransforms.end(), xform.begin(), xform.end());
+            } else {
+                shape.skinToBoneTransforms.clear();
+                return;
+            }
+        }
+    };
+
+    if (api.getShapePartitionSkinning && api.getShapeSkinBoneCount && api.getShapeSkinBoneNames) {
+        const int boneCount = api.getShapeSkinBoneCount(nifHandle, shapeHandle);
+        if (boneCount > 0 && vertexCount > 0) {
+            std::vector<uint16_t> partitionJointIndices(static_cast<size_t>(vertexCount) * 4u, 0);
+            std::vector<float> partitionJointWeights(static_cast<size_t>(vertexCount) * 4u, 0.0f);
+            // Skyrim loads NiSkinPartition bone indices as local palette slots and remaps
+            // them through Partition::bones before indexing NiSkinData/boneWorldTransforms.
+            const int touchedVertices = api.getShapePartitionSkinning(
+                nifHandle,
+                shapeHandle,
+                partitionJointIndices.data(),
+                partitionJointWeights.data(),
+                vertexCount);
+            if (touchedVertices > 0) {
+                const std::string namesText = ReadCStringDynamic([&](char* buffer, int size) {
+                    return api.getShapeSkinBoneNames(nifHandle, shapeHandle, buffer, size);
+                });
+                std::vector<std::string> boneNames = SplitLines(namesText);
+                if (boneNames.empty()) {
+                    for (int i = 0; i < boneCount; ++i) {
+                        boneNames.push_back("bone_" + std::to_string(i));
+                    }
+                }
+
+                std::vector<int> jointIndices;
+                jointIndices.reserve(partitionJointIndices.size());
+                std::vector<int> globalToCompact(static_cast<size_t>(boneCount), -1);
+                std::vector<std::string> compactBoneNames;
+                std::vector<int> compactToGlobalBoneIndices;
+
+                for (size_t i = 0; i < partitionJointIndices.size(); ++i) {
+                    const uint16_t globalBone = partitionJointIndices[i];
+                    if (i < partitionJointWeights.size() && partitionJointWeights[i] <= 0.0f) {
+                        jointIndices.push_back(0);
+                        continue;
+                    }
+                    if (globalBone >= static_cast<uint16_t>(boneCount)) {
+                        jointIndices.push_back(0);
+                        continue;
+                    }
+
+                    int& compactBone = globalToCompact[globalBone];
+                    if (compactBone < 0) {
+                        compactBone = static_cast<int>(compactBoneNames.size());
+                        compactToGlobalBoneIndices.push_back(static_cast<int>(globalBone));
+                        if (globalBone < boneNames.size() && !boneNames[globalBone].empty()) {
+                            compactBoneNames.push_back(boneNames[globalBone]);
+                        } else {
+                            compactBoneNames.push_back("bone_" + std::to_string(globalBone));
+                        }
+                    }
+                    jointIndices.push_back(compactBone);
+                }
+
+                // The game renders each skin partition through a compact palette of
+                // bones actually used by that partition. BasicRenderer uses one mesh
+                // palette, so collapse NiSkinData indices to the used set instead of
+                // exporting the full shape bone list; otherwise vertices can index a
+                // different palette than Skyrim's live CBuffer order.
+                shape.boneNames = std::move(compactBoneNames);
+                shape.boneSourceIndices = std::move(compactToGlobalBoneIndices);
+                readSkinToBoneTransforms(compactToGlobalBoneIndices);
+                shape.jointIndices = std::move(jointIndices);
+                shape.jointWeights = std::move(partitionJointWeights);
+                return;
+            }
+        }
+    }
+
+    // Fallback for older NiflyDLL builds and non-partitioned skins. The raw BSTriShape
+    // weightBones stream can be in partition-local palette space on Skyrim SSE assets,
+    // so it is intentionally lower priority than getShapePartitionSkinning above.
+    const bool hasShapeWeightApi =
+        api.getShapeBoneCount &&
+        api.getShapeBoneNames &&
+        api.getShapeBoneWeightsCount &&
+        api.getShapeBoneWeights &&
+        api.getShapeBoneCount(nifHandle, shapeHandle) > 0;
+    const bool hasSkinDataFallbackApi =
         api.getShapeSkinBoneCount &&
         api.getShapeSkinBoneNames &&
         api.getShapeSkinWeightsCount &&
         api.getShapeSkinWeights &&
         api.getShapeSkinBoneCount(nifHandle, shapeHandle) > 0;
-    const auto getBoneCount = hasSkinDataApi ? api.getShapeSkinBoneCount : api.getShapeBoneCount;
-    const auto getBoneNames = hasSkinDataApi ? api.getShapeSkinBoneNames : api.getShapeBoneNames;
-    const auto getWeightsCount = hasSkinDataApi ? api.getShapeSkinWeightsCount : api.getShapeBoneWeightsCount;
-    const auto getWeights = hasSkinDataApi ? api.getShapeSkinWeights : api.getShapeBoneWeights;
 
-    if (!getBoneCount || !getBoneNames || !getWeightsCount || !getWeights) {
-        return;
-    }
-
-    const int boneCount = getBoneCount(nifHandle, shapeHandle);
-    if (boneCount <= 0 || vertexCount <= 0) {
-        return;
-    }
-
-    const std::string namesText = ReadCStringDynamic([&](char* buffer, int size) { return getBoneNames(nifHandle, shapeHandle, buffer, size); });
-    shape.boneNames = SplitLines(namesText);
-    if (shape.boneNames.empty()) {
-        for (int i = 0; i < boneCount; ++i) {
-            shape.boneNames.push_back("bone_" + std::to_string(i));
+    auto readWeights = [&](auto getBoneCount, auto getBoneNames, auto getWeightsCount, auto getWeights) {
+        const int boneCount = getBoneCount(nifHandle, shapeHandle);
+        if (boneCount <= 0 || vertexCount <= 0) {
+            return false;
         }
-    }
 
-    struct Influence { int joint = 0; float weight = 0.0f; };
-    std::vector<std::vector<Influence>> influences(static_cast<size_t>(vertexCount));
-    for (int boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
-        const int weightCount = getWeightsCount(nifHandle, shapeHandle, boneIndex);
-        if (weightCount <= 0) {
-            continue;
-        }
-        std::vector<VertexWeightPair> weights(static_cast<size_t>(weightCount));
-        const int written = getWeights(nifHandle, shapeHandle, boneIndex, weights.data(), weightCount);
-        for (int i = 0; i < written && i < weightCount; ++i) {
-            const uint16_t vertex = weights[static_cast<size_t>(i)].vertex;
-            if (vertex < influences.size() && weights[static_cast<size_t>(i)].weight > 0.0f) {
-                influences[vertex].push_back(Influence{boneIndex, weights[static_cast<size_t>(i)].weight});
+        const std::string namesText = ReadCStringDynamic([&](char* buffer, int size) { return getBoneNames(nifHandle, shapeHandle, buffer, size); });
+        std::vector<std::string> boneNames = SplitLines(namesText);
+        if (boneNames.empty()) {
+            for (int i = 0; i < boneCount; ++i) {
+                boneNames.push_back("bone_" + std::to_string(i));
             }
         }
-    }
 
-    shape.jointIndices.assign(static_cast<size_t>(vertexCount) * 4u, 0);
-    shape.jointWeights.assign(static_cast<size_t>(vertexCount) * 4u, 0.0f);
-    bool hasAnyWeights = false;
-    for (size_t vertex = 0; vertex < influences.size(); ++vertex) {
-        auto& vertexInfluences = influences[vertex];
-        std::sort(vertexInfluences.begin(), vertexInfluences.end(), [](const Influence& a, const Influence& b) { return a.weight > b.weight; });
-        const size_t count = std::min<size_t>(4, vertexInfluences.size());
-        float total = 0.0f;
-        for (size_t i = 0; i < count; ++i) {
-            total += vertexInfluences[i].weight;
+        struct Influence { int joint = 0; float weight = 0.0f; };
+        std::vector<std::vector<Influence>> influences(static_cast<size_t>(vertexCount));
+        for (int boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
+            const int weightCount = getWeightsCount(nifHandle, shapeHandle, boneIndex);
+            if (weightCount <= 0) {
+                continue;
+            }
+            std::vector<VertexWeightPair> weights(static_cast<size_t>(weightCount));
+            const int written = getWeights(nifHandle, shapeHandle, boneIndex, weights.data(), weightCount);
+            for (int i = 0; i < written && i < weightCount; ++i) {
+                const uint16_t vertex = weights[static_cast<size_t>(i)].vertex;
+                if (vertex < influences.size() && weights[static_cast<size_t>(i)].weight > 0.0f) {
+                    influences[vertex].push_back(Influence{boneIndex, weights[static_cast<size_t>(i)].weight});
+                }
+            }
         }
-        if (total <= 0.0f) {
-            continue;
+
+        std::vector<int> jointIndices(static_cast<size_t>(vertexCount) * 4u, 0);
+        std::vector<float> jointWeights(static_cast<size_t>(vertexCount) * 4u, 0.0f);
+        bool hasAnyWeights = false;
+        for (size_t vertex = 0; vertex < influences.size(); ++vertex) {
+            auto& vertexInfluences = influences[vertex];
+            std::sort(vertexInfluences.begin(), vertexInfluences.end(), [](const Influence& a, const Influence& b) { return a.weight > b.weight; });
+            const size_t count = std::min<size_t>(4, vertexInfluences.size());
+            float total = 0.0f;
+            for (size_t i = 0; i < count; ++i) {
+                total += vertexInfluences[i].weight;
+            }
+            if (total <= 0.0f) {
+                continue;
+            }
+            hasAnyWeights = true;
+            for (size_t i = 0; i < count; ++i) {
+                jointIndices[vertex * 4u + i] = vertexInfluences[i].joint;
+                jointWeights[vertex * 4u + i] = vertexInfluences[i].weight / total;
+            }
         }
-        hasAnyWeights = true;
-        for (size_t i = 0; i < count; ++i) {
-            shape.jointIndices[vertex * 4u + i] = vertexInfluences[i].joint;
-            shape.jointWeights[vertex * 4u + i] = vertexInfluences[i].weight / total;
+        if (!hasAnyWeights) {
+            return false;
         }
+
+        shape.boneNames = std::move(boneNames);
+        shape.boneSourceIndices.clear();
+        shape.boneSourceIndices.reserve(static_cast<size_t>(boneCount));
+        for (int boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
+            shape.boneSourceIndices.push_back(boneIndex);
+        }
+        readSkinToBoneTransforms();
+        shape.jointIndices = std::move(jointIndices);
+        shape.jointWeights = std::move(jointWeights);
+        return true;
+    };
+
+    if (hasShapeWeightApi && readWeights(api.getShapeBoneCount, api.getShapeBoneNames, api.getShapeBoneWeightsCount, api.getShapeBoneWeights)) {
+        return;
     }
-    if (!hasAnyWeights) {
-        shape.jointIndices.clear();
-        shape.jointWeights.clear();
+    if (hasSkinDataFallbackApi && readWeights(api.getShapeSkinBoneCount, api.getShapeSkinBoneNames, api.getShapeSkinWeightsCount, api.getShapeSkinWeights)) {
+        return;
     }
 }
 
@@ -1611,7 +1750,10 @@ std::optional<std::string> ConvertShapesToUsd(
 
     UsdGeomXform root = UsdGeomXform::Define(stage, SdfPath("/BRNifly"));
     stage->SetDefaultPrim(root.GetPrim());
-    root.GetPrim().SetCustomDataByKey(TfToken("brnifly:sourcePath"), VtValue(nifPath.string()));
+    // Keep generated USD independent from the absolute path BRNifly was handed.
+    // The renderer cache is keyed by the game path; baking MO2/temp/loose-file
+    // paths into the layer makes one asset produce multiple content hashes.
+    root.GetPrim().SetCustomDataByKey(TfToken("brnifly:sourcePath"), VtValue(nifPath.filename().string()));
     root.GetPrim().SetCustomDataByKey(TfToken("brnifly:gameName"), VtValue(gameName));
     root.GetPrim().SetCustomDataByKey(TfToken("brnifly:unsupportedDataPolicy"), VtValue(std::string("preserve-as-usd-custom-data")));
     if (!rootExtraData.empty()) {
@@ -1780,6 +1922,12 @@ std::optional<std::string> ConvertShapesToUsd(
             jointWeightPrimvar.SetElementSize(4);
             jointWeightPrimvar.Set(jointWeights);
             mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:jointNames"), VtValue(json(shape.boneNames).dump()));
+            if (shape.boneSourceIndices.size() == shape.boneNames.size()) {
+                mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:jointSourceIndices"), VtValue(json(shape.boneSourceIndices).dump()));
+            }
+            if (shape.skinToBoneTransforms.size() == shape.boneNames.size() * 13u) {
+                mesh.GetPrim().SetCustomDataByKey(TfToken("brnifly:skinToBoneTransforms"), VtValue(json(shape.skinToBoneTransforms).dump()));
+            }
         }
 
         if (!shape.textures.empty()) {
@@ -1911,7 +2059,7 @@ json ConvertUsdJson(const char* argv0, const fs::path& nifPath)
         return response;
     }
 
-    const std::string hash = HexHash(Fnv1a64(nifPath.string() + *usdText));
+    const std::string hash = HexHash(Fnv1a64(std::string(kUsdContentIdentityVersion) + "\n" + *usdText));
     response["status"] = "ok";
     response["protocolVersion"] = "1.0";
     response["sourcePath"] = nifPath.string();

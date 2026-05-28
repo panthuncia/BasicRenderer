@@ -324,7 +324,7 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 		skinningVertices = std::make_unique<std::vector<std::byte>>(std::move(m_skinningVertices));
 	}
 
-	return Mesh::CreateSharedFromIngest(
+	auto mesh = Mesh::CreateSharedFromIngest(
 		std::move(vertices),
 		m_vertexSize,
 		std::move(skinningVertices),
@@ -335,6 +335,14 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 		m_flags,
 		std::move(prebuiltClusterLOD),
 		cpuDataPolicy);
+	if (mesh && !m_skinningDebugJoints.empty() && !m_skinningDebugWeights.empty()) {
+		mesh->SetSkinningDebugSample(
+			std::move(m_skinningDebugJoints),
+			std::move(m_skinningDebugWeights),
+			std::move(m_skinningDebugPositions),
+			std::move(m_skinningDebugNormals));
+	}
+	return mesh;
 }
 
 Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, std::vector<MeshUvSetData>&& uvSets, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy, bool deferResourceCreation) {
