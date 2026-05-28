@@ -392,6 +392,10 @@ using GetShapeBoneCountFn = int (*)(void*, void*);
 using GetShapeBoneNamesFn = int (*)(void*, void*, char*, int);
 using GetShapeBoneWeightsCountFn = int (*)(void*, void*, int);
 using GetShapeBoneWeightsFn = int (*)(void*, void*, int, VertexWeightPair*, int);
+using GetShapeSkinBoneCountFn = int (*)(void*, void*);
+using GetShapeSkinBoneNamesFn = int (*)(void*, void*, char*, int);
+using GetShapeSkinWeightsCountFn = int (*)(void*, void*, int);
+using GetShapeSkinWeightsFn = int (*)(void*, void*, int, VertexWeightPair*, int);
 using SegmentCountFn = int (*)(void*, void*);
 using GetSegmentFileFn = int (*)(void*, void*, char*, int);
 using GetSegmentsFn = int (*)(void*, void*, int*, int);
@@ -447,6 +451,10 @@ struct NiflyApi {
     GetShapeBoneNamesFn getShapeBoneNames = nullptr;
     GetShapeBoneWeightsCountFn getShapeBoneWeightsCount = nullptr;
     GetShapeBoneWeightsFn getShapeBoneWeights = nullptr;
+    GetShapeSkinBoneCountFn getShapeSkinBoneCount = nullptr;
+    GetShapeSkinBoneNamesFn getShapeSkinBoneNames = nullptr;
+    GetShapeSkinWeightsCountFn getShapeSkinWeightsCount = nullptr;
+    GetShapeSkinWeightsFn getShapeSkinWeights = nullptr;
     SegmentCountFn segmentCount = nullptr;
     GetSegmentFileFn getSegmentFile = nullptr;
     GetSegmentsFn getSegments = nullptr;
@@ -512,6 +520,10 @@ struct NiflyApi {
           getShapeBoneNames(other.getShapeBoneNames),
           getShapeBoneWeightsCount(other.getShapeBoneWeightsCount),
           getShapeBoneWeights(other.getShapeBoneWeights),
+          getShapeSkinBoneCount(other.getShapeSkinBoneCount),
+          getShapeSkinBoneNames(other.getShapeSkinBoneNames),
+          getShapeSkinWeightsCount(other.getShapeSkinWeightsCount),
+          getShapeSkinWeights(other.getShapeSkinWeights),
           segmentCount(other.segmentCount),
           getSegmentFile(other.getSegmentFile),
           getSegments(other.getSegments),
@@ -582,6 +594,10 @@ struct NiflyApi {
             getShapeBoneNames = other.getShapeBoneNames;
             getShapeBoneWeightsCount = other.getShapeBoneWeightsCount;
             getShapeBoneWeights = other.getShapeBoneWeights;
+            getShapeSkinBoneCount = other.getShapeSkinBoneCount;
+            getShapeSkinBoneNames = other.getShapeSkinBoneNames;
+            getShapeSkinWeightsCount = other.getShapeSkinWeightsCount;
+            getShapeSkinWeights = other.getShapeSkinWeights;
             segmentCount = other.segmentCount;
             getSegmentFile = other.getSegmentFile;
             getSegments = other.getSegments;
@@ -713,6 +729,10 @@ std::optional<NiflyApi> LoadNiflyApi(const char* argv0, std::vector<Diagnostic>&
     api.getShapeBoneNames = LoadProc<GetShapeBoneNamesFn>(module, "getShapeBoneNames");
     api.getShapeBoneWeightsCount = LoadProc<GetShapeBoneWeightsCountFn>(module, "getShapeBoneWeightsCount");
     api.getShapeBoneWeights = LoadProc<GetShapeBoneWeightsFn>(module, "getShapeBoneWeights");
+    api.getShapeSkinBoneCount = LoadProc<GetShapeSkinBoneCountFn>(module, "getShapeSkinBoneCount");
+    api.getShapeSkinBoneNames = LoadProc<GetShapeSkinBoneNamesFn>(module, "getShapeSkinBoneNames");
+    api.getShapeSkinWeightsCount = LoadProc<GetShapeSkinWeightsCountFn>(module, "getShapeSkinWeightsCount");
+    api.getShapeSkinWeights = LoadProc<GetShapeSkinWeightsFn>(module, "getShapeSkinWeights");
     api.segmentCount = LoadProc<SegmentCountFn>(module, "segmentCount");
     api.getSegmentFile = LoadProc<GetSegmentFileFn>(module, "getSegmentFile");
     api.getSegments = LoadProc<GetSegmentsFn>(module, "getSegments");
@@ -1033,16 +1053,29 @@ std::vector<NodeData> ReadNodes(const NiflyApi& api, void* nifHandle)
 
 void ReadShapeSkinning(const NiflyApi& api, void* nifHandle, void* shapeHandle, int vertexCount, ShapeData& shape)
 {
-    if (!api.getShapeBoneCount || !api.getShapeBoneNames || !api.getShapeBoneWeightsCount || !api.getShapeBoneWeights) {
+    // Skyrim's NiSkinInstance::LinkObject builds the render palette from NiSkinData::bones.
+    // The broader NiBoneContainer boneRefs list can include joints that are not uploaded for the draw.
+    const bool hasSkinDataApi =
+        api.getShapeSkinBoneCount &&
+        api.getShapeSkinBoneNames &&
+        api.getShapeSkinWeightsCount &&
+        api.getShapeSkinWeights &&
+        api.getShapeSkinBoneCount(nifHandle, shapeHandle) > 0;
+    const auto getBoneCount = hasSkinDataApi ? api.getShapeSkinBoneCount : api.getShapeBoneCount;
+    const auto getBoneNames = hasSkinDataApi ? api.getShapeSkinBoneNames : api.getShapeBoneNames;
+    const auto getWeightsCount = hasSkinDataApi ? api.getShapeSkinWeightsCount : api.getShapeBoneWeightsCount;
+    const auto getWeights = hasSkinDataApi ? api.getShapeSkinWeights : api.getShapeBoneWeights;
+
+    if (!getBoneCount || !getBoneNames || !getWeightsCount || !getWeights) {
         return;
     }
 
-    const int boneCount = api.getShapeBoneCount(nifHandle, shapeHandle);
+    const int boneCount = getBoneCount(nifHandle, shapeHandle);
     if (boneCount <= 0 || vertexCount <= 0) {
         return;
     }
 
-    const std::string namesText = ReadCStringDynamic([&](char* buffer, int size) { return api.getShapeBoneNames(nifHandle, shapeHandle, buffer, size); });
+    const std::string namesText = ReadCStringDynamic([&](char* buffer, int size) { return getBoneNames(nifHandle, shapeHandle, buffer, size); });
     shape.boneNames = SplitLines(namesText);
     if (shape.boneNames.empty()) {
         for (int i = 0; i < boneCount; ++i) {
@@ -1053,12 +1086,12 @@ void ReadShapeSkinning(const NiflyApi& api, void* nifHandle, void* shapeHandle, 
     struct Influence { int joint = 0; float weight = 0.0f; };
     std::vector<std::vector<Influence>> influences(static_cast<size_t>(vertexCount));
     for (int boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
-        const int weightCount = api.getShapeBoneWeightsCount(nifHandle, shapeHandle, boneIndex);
+        const int weightCount = getWeightsCount(nifHandle, shapeHandle, boneIndex);
         if (weightCount <= 0) {
             continue;
         }
         std::vector<VertexWeightPair> weights(static_cast<size_t>(weightCount));
-        const int written = api.getShapeBoneWeights(nifHandle, shapeHandle, boneIndex, weights.data(), weightCount);
+        const int written = getWeights(nifHandle, shapeHandle, boneIndex, weights.data(), weightCount);
         for (int i = 0; i < written && i < weightCount; ++i) {
             const uint16_t vertex = weights[static_cast<size_t>(i)].vertex;
             if (vertex < influences.size() && weights[static_cast<size_t>(i)].weight > 0.0f) {

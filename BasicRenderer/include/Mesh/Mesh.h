@@ -55,6 +55,8 @@ public:
 	void SetBaseSkin(std::shared_ptr<Skeleton> skeleton);
 	bool HasBaseSkin() const { return m_baseSkeleton != nullptr; }
 	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }
+	void SetSkinJointNames(std::vector<std::string> names) { m_skinJointNames = std::move(names); }
+	const std::vector<std::string>& GetSkinJointNames() const { return m_skinJointNames; }
 
 	uint32_t GetCLodMeshletCount() {
 		return m_perMeshBufferData.clodNumMeshlets;
@@ -257,4 +259,5 @@ private:
 	MeshManager* m_pCurrentMeshManager = nullptr;
 
 	std::shared_ptr<Skeleton> m_baseSkeleton = nullptr;
+	std::vector<std::string> m_skinJointNames;
 };

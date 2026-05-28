@@ -527,6 +527,54 @@ static void LoadGeom(
 
 		vertexFlags |= VertexFlags::VERTEX_SKINNED;
 	}
+	else {
+		UsdGeomPrimvar jointIndexPrimvar = primvarsAPI.GetPrimvar(TfToken("brnifly:jointIndices"));
+		UsdGeomPrimvar jointWeightPrimvar = primvarsAPI.GetPrimvar(TfToken("brnifly:jointWeights"));
+		if (jointIndexPrimvar && jointWeightPrimvar) {
+			VtArray<int> jointIndices;
+			VtArray<float> jointWeights;
+			if (jointIndexPrimvar.ComputeFlattened(&jointIndices, geomTimeCode) &&
+				jointWeightPrimvar.ComputeFlattened(&jointWeights, geomTimeCode)) {
+				unsigned int indexElementSize = (std::max)(1, jointIndexPrimvar.GetElementSize());
+				unsigned int weightElementSize = (std::max)(1, jointWeightPrimvar.GetElementSize());
+				if (indexElementSize == 1 && weightElementSize == 1 &&
+					jointIndices.size() == usdPts.size() * kMaxSkinInfluences &&
+					jointWeights.size() == usdPts.size() * kMaxSkinInfluences) {
+					indexElementSize = kMaxSkinInfluences;
+					weightElementSize = kMaxSkinInfluences;
+				}
+				const unsigned int tupleCount = static_cast<unsigned int>((std::min)(
+					jointIndices.size() / indexElementSize,
+					jointWeights.size() / weightElementSize));
+				const unsigned int maxInfluencesPerJoint = static_cast<unsigned int>(kMaxSkinInfluences);
+				rawJoints.reserve(static_cast<size_t>(tupleCount) * maxInfluencesPerJoint);
+				rawWeights.reserve(static_cast<size_t>(tupleCount) * maxInfluencesPerJoint);
+
+				for (unsigned int tuple = 0; tuple < tupleCount; ++tuple) {
+					for (unsigned int slot = 0; slot < maxInfluencesPerJoint; ++slot) {
+						if (slot < indexElementSize && slot < weightElementSize) {
+							rawJoints.push_back(static_cast<uint32_t>(jointIndices[static_cast<size_t>(tuple) * indexElementSize + slot]));
+							rawWeights.push_back(jointWeights[static_cast<size_t>(tuple) * weightElementSize + slot]);
+						}
+						else {
+							rawJoints.push_back(0u);
+							rawWeights.push_back(0.0f);
+						}
+					}
+				}
+
+				jointInterp = GetInterpolationType(jointIndexPrimvar.GetInterpolation());
+				weightInterp = GetInterpolationType(jointWeightPrimvar.GetInterpolation());
+				vertexFlags |= VertexFlags::VERTEX_SKINNED;
+			}
+			else {
+				spdlog::warn(
+					"Mesh '{}' has BRNifly skinning primvars, but they could not be flattened at geometry sample time {}; importing as rigid geometry.",
+					primName,
+					geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+			}
+		}
+	}
 
 	// allocate output buffers
 	rawData->resize(cornerCount * vertexSize);

@@ -51,6 +51,31 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes,
     // but runtime skinning must use instances.
 }
 
+Skeleton::Skeleton(std::vector<std::string> boneNames,
+    std::vector<int32_t> parentIndices,
+    std::vector<Matrix> inverseBindMatrices)
+{
+    m_isBaseSkeleton = true;
+    m_boneNames = std::move(boneNames);
+    m_parentIndices = std::move(parentIndices);
+    if (m_parentIndices.size() != m_boneNames.size()) {
+        spdlog::warn("Skeleton: parent index count ({}) != bone name count ({}); treating all bones as roots",
+            m_parentIndices.size(),
+            m_boneNames.size());
+        m_parentIndices.assign(m_boneNames.size(), -1);
+    }
+    m_restLocalTransforms.resize(m_boneNames.size());
+    m_rootParentGlobals.assign(m_boneNames.size(), DirectX::XMMatrixIdentity());
+    m_inverseBindMatrices = std::move(inverseBindMatrices);
+    if (m_inverseBindMatrices.size() != m_boneNames.size()) {
+        spdlog::warn("Skeleton: inverse bind count ({}) != bone name count ({}); using identity inverse binds",
+            m_inverseBindMatrices.size(),
+            m_boneNames.size());
+        m_inverseBindMatrices.assign(m_boneNames.size(), DirectX::XMMatrixIdentity());
+    }
+    BuildEvalOrder_();
+}
+
 Skeleton::Skeleton(const std::shared_ptr<Skeleton>& baseSkeleton)
 {
     if (!baseSkeleton) {
@@ -98,6 +123,7 @@ Skeleton::Skeleton(const Skeleton& other)
     m_animationSpeed = other.m_animationSpeed;
     m_activeAnimationIndex = other.m_activeAnimationIndex;
     m_currentAnimationConservativeBoundsScale = other.m_currentAnimationConservativeBoundsScale;
+    m_externalPose = other.m_externalPose;
 
     EnsureInstanceBuffersSized_();
 
@@ -520,6 +546,11 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
         return;
     }
 
+    if (m_externalPose && !force) {
+        m_poseDirty = true;
+        return;
+    }
+
     auto base = GetBaseSkeletonShared();
     if (!base || !base->IsBaseSkeleton()) return;
 
@@ -572,6 +603,27 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
         }
     }
 
+    m_poseDirty = true;
+}
+
+void Skeleton::SetExternalPose(std::span<const Matrix> boneMatrices, float conservativeBoundsScale)
+{
+    if (m_isBaseSkeleton) {
+        spdlog::warn("Skeleton::SetExternalPose called on base skeleton - ignored");
+        return;
+    }
+
+    EnsureInstanceBuffersSized_();
+    const auto copyCount = (std::min)(m_boneMatrices.size(), boneMatrices.size());
+    for (size_t i = 0; i < copyCount; ++i) {
+        m_boneMatrices[i] = boneMatrices[i];
+    }
+    for (size_t i = copyCount; i < m_boneMatrices.size(); ++i) {
+        m_boneMatrices[i] = DirectX::XMMatrixIdentity();
+    }
+
+    m_externalPose = true;
+    m_currentAnimationConservativeBoundsScale = conservativeBoundsScale;
     m_poseDirty = true;
 }
 

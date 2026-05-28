@@ -27,6 +27,10 @@ public:
     Skeleton(const std::vector<flecs::entity>& nodes,
         const std::vector<Matrix>& inverseBindMatrices);
 
+    Skeleton(std::vector<std::string> boneNames,
+        std::vector<int32_t> parentIndices,
+        std::vector<Matrix> inverseBindMatrices);
+
     // Creates an INSTANCE skeleton referencing an existing base skeleton.
     explicit Skeleton(const std::shared_ptr<Skeleton>& baseSkeleton);
 
@@ -61,6 +65,8 @@ public:
     // If called on a BASE skeleton, it logs a warning and does nothing.
 	// Force parameter can be used to force update even if animation is paused.
     void UpdateTransforms(float elapsedSeconds, bool force = false);
+    void SetExternalPose(std::span<const Matrix> boneMatrices, float conservativeBoundsScale = 1.0f);
+    bool HasExternalPose() const noexcept { return m_externalPose; }
 
     // Marks pose dirty. SkeletonManager can use this to decide uploads.
     bool IsPoseDirty() const noexcept { return m_poseDirty; }
@@ -105,6 +111,7 @@ private:
     std::vector<AnimationController> m_controllers;    // one per bone
     std::vector<Matrix> m_boneMatrices;                // final global pose
     bool m_poseDirty = true;
+    bool m_externalPose = false;
 
     float  m_animationSpeed = 1.0f;
     size_t m_activeAnimationIndex = size_t(-1);

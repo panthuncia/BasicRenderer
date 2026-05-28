@@ -1269,17 +1269,73 @@ namespace USDLoader {
 
 	bool IsUnsupportedBrNiflySkinnedMesh(const UsdGeomMesh& mesh)
 	{
-		const UsdPrim prim = mesh.GetPrim();
+		(void)mesh;
+		return false;
+	}
+
+	std::vector<std::string> ParseJsonStringArray(std::string_view text)
+	{
+		std::vector<std::string> values;
+		bool inString = false;
+		bool escape = false;
+		std::string current;
+		for (const char ch : text) {
+			if (!inString) {
+				if (ch == '"') {
+					inString = true;
+					current.clear();
+				}
+				continue;
+			}
+
+			if (escape) {
+				switch (ch) {
+				case '"':
+				case '\\':
+				case '/':
+					current.push_back(ch);
+					break;
+				case 'n':
+					current.push_back('\n');
+					break;
+				case 'r':
+					current.push_back('\r');
+					break;
+				case 't':
+					current.push_back('\t');
+					break;
+				default:
+					current.push_back(ch);
+					break;
+				}
+				escape = false;
+				continue;
+			}
+
+			if (ch == '\\') {
+				escape = true;
+				continue;
+			}
+			if (ch == '"') {
+				values.push_back(current);
+				inString = false;
+				continue;
+			}
+			current.push_back(ch);
+		}
+		return values;
+	}
+
+	std::vector<std::string> GetBrNiflyJointNames(const UsdPrim& prim)
+	{
 		if (!prim) {
-			return false;
+			return {};
 		}
-
-		if (prim.HasCustomDataKey(TfToken("brnifly:jointNames"))) {
-			return true;
+		const VtValue value = prim.GetCustomDataByKey(TfToken("brnifly:jointNames"));
+		if (!value.IsHolding<std::string>()) {
+			return {};
 		}
-
-		return static_cast<bool>(prim.GetAttribute(TfToken("primvars:brnifly:jointIndices"))) ||
-			static_cast<bool>(prim.GetAttribute(TfToken("primvars:brnifly:jointWeights")));
+		return ParseJsonStringArray(value.UncheckedGet<std::string>());
 	}
 
     std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets, bool forceDoubleSided = false) {
@@ -1526,6 +1582,10 @@ namespace USDLoader {
 				record.authoredDoubleSided || subset.inferredDoubleSided || result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			if (mPtr != nullptr) {
+				auto jointNames = GetBrNiflyJointNames(mesh.GetPrim());
+				if (!jointNames.empty()) {
+					mPtr->SetSkinJointNames(std::move(jointNames));
+				}
 				outMeshes.push_back(mPtr);
 			}
 		}
