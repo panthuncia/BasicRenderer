@@ -256,18 +256,16 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
         m_normalTexture->SetGenerateMipmaps(true);
         m_normalTexture->EnsureUploaded(factory);
         const auto uploadPath = m_normalTexture->Meta().uploadPath;
+        const bool hasExplicitNormalPolicy =
+            (m_materialData.materialFlags & (negateNormalsFlag | invertNormalGreenFlag)) != 0u;
         const bool useCanonicalProcessedNormalFormat =
-            m_normalTexture->Meta().fileType == ImageFiletype::DDS ||
-            (m_normalTexture->Meta().processing.semantic == TextureSemantic::Normal &&
-                (m_normalTexture->Meta().isProcessingCacheArtifact ||
-                 uploadPath == TextureUploadPathTelemetry::AsyncProcessingReadyUpload ||
-                 uploadPath == TextureUploadPathTelemetry::ProcessingCacheUpload));
-        if (useCanonicalProcessedNormalFormat) {
+            m_normalTexture->Meta().processing.semantic == TextureSemantic::Normal &&
+            (m_normalTexture->Meta().isProcessingCacheArtifact ||
+             uploadPath == TextureUploadPathTelemetry::AsyncProcessingReadyUpload ||
+             uploadPath == TextureUploadPathTelemetry::ProcessingCacheUpload);
+        if (useCanonicalProcessedNormalFormat && !hasExplicitNormalPolicy) {
             m_materialData.materialFlags |= negateNormalsFlag;
             m_materialData.materialFlags &= ~invertNormalGreenFlag;
-        }
-        else {
-            m_materialData.materialFlags &= ~negateNormalsFlag;
         }
 	}
     if (m_aoMap) {

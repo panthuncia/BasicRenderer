@@ -53,6 +53,27 @@ TextureStreamingGPUInfo LoadTextureStreamingInfo(uint streamingTextureID)
 
 static const uint kTextureStreamingFlagEnabled = 1u << 1;
 
+float3 DecodeMaterialNormalSample(float4 textureNormal, uint3 channels, uint materialFlags)
+{
+    float3 tangentSpaceNormal;
+    if (channels.z >= 4u)
+    {
+        float2 xy = float2(
+            DynamicSwizzle(textureNormal, channels.x),
+            DynamicSwizzle(textureNormal, channels.y)) * 2.0f - 1.0f;
+        tangentSpaceNormal = float3(xy, sqrt(saturate(1.0f - dot(xy, xy))));
+    }
+    else
+    {
+        tangentSpaceNormal = DynamicSwizzle(textureNormal, channels) * 2.0f - 1.0f;
+    }
+
+    tangentSpaceNormal = normalize(tangentSpaceNormal);
+    if ((materialFlags & MATERIAL_NEGATE_NORMALS) != 0u) tangentSpaceNormal = -tangentSpaceNormal;
+    if ((materialFlags & MATERIAL_INVERT_NORMAL_GREEN) != 0u) tangentSpaceNormal.g = -tangentSpaceNormal.g;
+    return tangentSpaceNormal;
+}
+
 bool TextureStreamingHasFullMip0Dimensions(TextureStreamingGPUInfo streamingInfo)
 {
     return streamingInfo.fullWidth != 0u && streamingInfo.fullHeight != 0u;
@@ -1777,11 +1798,8 @@ void SampleMaterialFromUvCache(
             normalDUdy = parallaxDUdy;
         }
 
-        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy, ret).rgb;
-        float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
-
-        if (materialFlags & MATERIAL_NEGATE_NORMALS) tangentSpaceNormal = -tangentSpaceNormal;
-        if (materialFlags & MATERIAL_INVERT_NORMAL_GREEN) tangentSpaceNormal.g = -tangentSpaceNormal.g;
+        float4 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy, ret);
+        float3 tangentSpaceNormal = DecodeMaterialNormalSample(textureNormal, materialInfo.normalChannels, materialFlags);
 
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }
@@ -1998,11 +2016,8 @@ void SampleMaterialEvalFromUvCache(
 #else
         const MaterialUvSample normalUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_NORMAL);
 #endif
-        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalUv.uv, normalUv.dUVdx, normalUv.dUVdy, ret).rgb;
-        float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
-
-        if (materialFlags & MATERIAL_NEGATE_NORMALS) tangentSpaceNormal = -tangentSpaceNormal;
-        if (materialFlags & MATERIAL_INVERT_NORMAL_GREEN) tangentSpaceNormal.g = -tangentSpaceNormal.g;
+        float4 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalUv.uv, normalUv.dUVdx, normalUv.dUVdy, ret);
+        float3 tangentSpaceNormal = DecodeMaterialNormalSample(textureNormal, materialInfo.normalChannels, materialFlags);
 
         normalWS = normalize(mul(tangentSpaceNormal, normalTBN));
     }
@@ -2224,11 +2239,8 @@ void SampleMaterialFromUvCacheRuntime(
             normalDUdy = parallaxDUdy;
         }
 
-        float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy, ret).rgb;
-        float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
-
-        if ((materialFlags & MATERIAL_NEGATE_NORMALS) != 0u) tangentSpaceNormal = -tangentSpaceNormal;
-        if ((materialFlags & MATERIAL_INVERT_NORMAL_GREEN) != 0u) tangentSpaceNormal.g = -tangentSpaceNormal.g;
+        float4 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalSampleUv, normalDUdx, normalDUdy, ret);
+        float3 tangentSpaceNormal = DecodeMaterialNormalSample(textureNormal, materialInfo.normalChannels, materialFlags);
 
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }
@@ -2386,11 +2398,8 @@ void SampleMaterialCorePrecompiled(
     Texture2D<float4> normalTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.normalTextureIndex)];
     SamplerState normalSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.normalSamplerIndex)];
 
-    float3 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, localUV, localDUdx, localDUdy).rgb;
-    float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
-
-    if (materialFlags & MATERIAL_NEGATE_NORMALS)       tangentSpaceNormal = -tangentSpaceNormal;
-    if (materialFlags & MATERIAL_INVERT_NORMAL_GREEN)  tangentSpaceNormal.g = -tangentSpaceNormal.g;
+    float4 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, localUV, localDUdx, localDUdy);
+    float3 tangentSpaceNormal = DecodeMaterialNormalSample(textureNormal, materialInfo.normalChannels, materialFlags);
 
     normalWS = normalize(mul(tangentSpaceNormal, TBN));
 #endif

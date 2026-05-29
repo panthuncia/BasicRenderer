@@ -357,6 +357,9 @@ struct MaterialEvalInfo {
     float4 emissiveFactor;
     uint4 baseColorChannels;
 
+    uint3 normalChannels;
+    uint perMaterialEvalPad0;
+
     uint aoChannel;
     uint heightChannel;
     uint metallicChannel;

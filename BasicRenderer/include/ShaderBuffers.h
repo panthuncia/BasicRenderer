@@ -242,6 +242,9 @@ struct PerMaterialEvalCB {
     DirectX::XMFLOAT4 emissiveFactor;
     DirectX::XMUINT4 baseColorChannels;
 
+    DirectX::XMUINT3 normalChannels;
+    unsigned int perMaterialEvalPad0;
+
     unsigned int aoChannel;
     unsigned int heightChannel;
     unsigned int metallicChannel;

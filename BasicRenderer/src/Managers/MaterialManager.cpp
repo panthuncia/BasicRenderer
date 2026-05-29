@@ -210,6 +210,7 @@ namespace {
 		result.baseColorFactor = base.baseColorFactor;
 		result.emissiveFactor = base.emissiveFactor;
 		result.baseColorChannels = base.baseColorChannels;
+		result.normalChannels = base.normalChannels;
 		result.aoChannel = base.aoChannel;
 		result.heightChannel = base.heightChannel;
 		result.metallicChannel = base.metallicChannel;
