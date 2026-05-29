@@ -1307,6 +1307,25 @@ float3x3 BuildMaterialTBN(
     return cotangent_frame_from_derivs(normalWSBase.xyz, dpdx, dpdy, tbnUv.dUVdx, tbnUv.dUVdy);
 }
 
+float3x3 BuildMaterialTBNFromVertexTangent(
+    in MaterialUvCache cache,
+    in MaterialUvBindings bindings,
+    in float3 normalWSBase,
+    in float3 dpdx,
+    in float3 dpdy,
+    in float4 tangentWS)
+{
+    if (abs(tangentWS.w) > 0.5f && dot(tangentWS.xyz, tangentWS.xyz) > 1.0e-8f)
+    {
+        const float3 N = normalize(normalWSBase);
+        const float3 T = normalize(tangentWS.xyz - N * dot(N, tangentWS.xyz));
+        const float3 B = normalize(cross(T, N)) * (tangentWS.w < 0.0f ? -1.0f : 1.0f);
+        return float3x3(T, B, N);
+    }
+
+    return BuildMaterialTBN(cache, bindings, normalWSBase, dpdx, dpdy);
+}
+
 void AppendOpenPBRForwardUvSamples(
     inout MaterialUvCache cache,
     in VisBufferPSInput input,
@@ -2089,6 +2108,35 @@ void SampleMaterialEvalFromUvCache(
     PopulateLegacyMaterialInputsFromOpenPBRSurface(openPBRSurface, normalWS, ao, ret);
 }
 
+void SampleMaterialFromUvCacheWithVertexTangent(
+    in MaterialUvCache uvCache,
+    in MaterialUvBindings uvBindings,
+    in float3 normalWSBase,
+    in float4 tangentWS,
+    in float3 posWS,
+    in float3 vertexColorMultiplier,
+    in MaterialInfo materialInfo,
+    in uint materialFlags,
+    in float3 dpdx,
+    in float3 dpdy,
+    out MaterialInputs ret)
+{
+    SampleMaterialFromUvCache(uvCache, uvBindings, normalWSBase, posWS, vertexColorMultiplier, materialInfo, materialFlags, dpdx, dpdy, ret);
+
+#if defined(PSO_NORMAL_MAP)
+    if (uvBindings.hasTbnSource && abs(tangentWS.w) > 0.5f && (materialFlags & MATERIAL_NORMAL_MAP) != 0u)
+    {
+        const float3x3 normalTBN = BuildMaterialTBNFromVertexTangent(uvCache, uvBindings, normalWSBase, dpdx, dpdy, tangentWS);
+        Texture2D<float4> normalTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.normalTextureIndex)];
+        SamplerState normalSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.normalSamplerIndex)];
+        const MaterialUvSample normalUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_NORMAL);
+        float4 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalUv.uv, normalUv.dUVdx, normalUv.dUVdy);
+        float3 tangentSpaceNormal = DecodeMaterialNormalSample(textureNormal, materialInfo.normalChannels, materialFlags);
+        ret.normalWS = normalize(mul(tangentSpaceNormal, normalTBN));
+    }
+#endif
+}
+
 void SampleMaterialFromUvCacheRuntime(
     in MaterialUvCache uvCache,
     in MaterialUvBindings uvBindings,
@@ -2493,7 +2541,7 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
     uint materialFlags = materialInfo.materialFlags;
     MaterialUvCache uvCache = BuildSingleUvCache(input.texcoord, ddx(input.texcoord), ddy(input.texcoord));
     MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
-    SampleMaterialFromUvCache(uvCache, uvBindings, input.normalWorldSpace, input.positionWorldSpace.xyz, input.color, materialInfo, materialFlags, ddx(input.positionWorldSpace.xyz), ddy(input.positionWorldSpace.xyz), ret);
+    SampleMaterialFromUvCacheWithVertexTangent(uvCache, uvBindings, input.normalWorldSpace, input.tangentWorldSpace, input.positionWorldSpace.xyz, input.color, materialInfo, materialFlags, ddx(input.positionWorldSpace.xyz), ddy(input.positionWorldSpace.xyz), ret);
 }
 
 void GetMaterialInfoForFragmentPrecompiled(in const PSInput input, out MaterialInputs ret)
@@ -2506,10 +2554,11 @@ void GetMaterialInfoForFragmentPrecompiled(in const PSInput input, out MaterialI
     uint materialFlags = materialInfo.materialFlags;
     MaterialUvCache uvCache = BuildSingleUvCache(input.texcoord, ddx(input.texcoord), ddy(input.texcoord));
     MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
-    SampleMaterialFromUvCache(
+    SampleMaterialFromUvCacheWithVertexTangent(
         uvCache,
         uvBindings,
         input.normalWorldSpace,
+        input.tangentWorldSpace,
         input.positionWorldSpace.xyz,
         input.color,
         materialInfo,
@@ -2517,6 +2566,33 @@ void GetMaterialInfoForFragmentPrecompiled(in const PSInput input, out MaterialI
         ddx(input.positionWorldSpace.xyz),
         ddy(input.positionWorldSpace.xyz),
         ret);
+}
+
+void SampleMaterialFromUvCacheRuntimeWithVertexTangent(
+    in MaterialUvCache uvCache,
+    in MaterialUvBindings uvBindings,
+    in float3 normalWSBase,
+    in float4 tangentWS,
+    in float3 posWS,
+    in float3 vertexColorMultiplier,
+    in MaterialInfo materialInfo,
+    in uint materialFlags,
+    in float3 dpdx,
+    in float3 dpdy,
+    out MaterialInputs ret)
+{
+    SampleMaterialFromUvCacheRuntime(uvCache, uvBindings, normalWSBase, posWS, vertexColorMultiplier, materialInfo, materialFlags, dpdx, dpdy, ret);
+
+    if (uvBindings.hasTbnSource && abs(tangentWS.w) > 0.5f && (materialFlags & MATERIAL_NORMAL_MAP) != 0u)
+    {
+        const float3x3 normalTBN = BuildMaterialTBNFromVertexTangent(uvCache, uvBindings, normalWSBase, dpdx, dpdy, tangentWS);
+        Texture2D<float4> normalTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.normalTextureIndex)];
+        SamplerState normalSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.normalSamplerIndex)];
+        const MaterialUvSample normalUv = ResolveMaterialUvSample(uvCache, uvBindings, MATERIAL_TEXTURE_SLOT_NORMAL);
+        float4 textureNormal = SampleMaterialTexture2DGrad(normalTexture, normalSamplerState, materialInfo.normalStreamingTextureID, normalUv.uv, normalUv.dUVdx, normalUv.dUVdy);
+        float3 tangentSpaceNormal = DecodeMaterialNormalSample(textureNormal, materialInfo.normalChannels, materialFlags);
+        ret.normalWS = normalize(mul(tangentSpaceNormal, normalTBN));
+    }
 }
 
 void SampleMaterialCS(

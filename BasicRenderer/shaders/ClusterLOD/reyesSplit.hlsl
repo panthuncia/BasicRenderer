@@ -450,6 +450,7 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     md.uvBitstreamDirectoryBase = pageSlabByteOffset + hdr.uvBitstreamDirectoryOffset;
     md.positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
     md.normalArrayBase = pageSlabByteOffset + hdr.normalArrayOffset;
+    md.tangentFrameArrayBase = pageSlabByteOffset + hdr.tangentFrameArrayOffset;
     md.colorArrayBase = pageSlabByteOffset + hdr.colorArrayOffset;
     md.jointArrayBase = pageSlabByteOffset + hdr.jointArrayOffset;
     md.weightArrayBase = pageSlabByteOffset + hdr.weightArrayOffset;

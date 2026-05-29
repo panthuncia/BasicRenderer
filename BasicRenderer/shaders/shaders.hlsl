@@ -112,11 +112,17 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     if (vertexFlags & VERTEX_SKINNED) {
         output.normalWorldSpace = normalize(input.normal);
+        output.tangentWorldSpace = (vertexFlags & VERTEX_TANGENTS)
+            ? float4(normalize(input.tangent.xyz), input.tangent.w)
+            : float4(1.0f, 0.0f, 0.0f, 0.0f);
     }
     else {
         StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
         float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
         output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
+        output.tangentWorldSpace = (vertexFlags & VERTEX_TANGENTS)
+            ? float4(normalize(mul(input.tangent.xyz, normalMatrix)), input.tangent.w)
+            : float4(1.0f, 0.0f, 0.0f, 0.0f);
     }
 
     output.color = input.color;

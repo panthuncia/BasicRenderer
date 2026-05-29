@@ -245,6 +245,7 @@ public:
 
     const TextureFileMeta& Meta() const { return m_meta; }
     TextureFileMeta& Meta() { return m_meta; }
+    const TextureDescription& Description() const { return m_desc; }
 
     const TextureProcessingSettings& ProcessingSettings() const { return m_meta.processing; }
     void SetProcessingSettings(TextureProcessingSettings settings);

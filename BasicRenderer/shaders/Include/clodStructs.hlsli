@@ -39,6 +39,7 @@ static const uint CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
 static const uint CLOD_PAGE_ATTRIBUTE_JOINTS = 1u << 1;
 static const uint CLOD_PAGE_ATTRIBUTE_WEIGHTS = 1u << 2;
 static const uint CLOD_PAGE_ATTRIBUTE_COLOR = 1u << 3;
+static const uint CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME = 1u << 4;
 
 static const uint CLOD_POSITION_FORMAT_FLOAT3 = 1u;
 static const uint CLOD_POSITION_FORMAT_FLOAT3_STRIDE_BYTES = 12u;
@@ -62,7 +63,7 @@ struct CLodPageHeader
     uint uvBitstreamDirectoryOffset;  // [11] byte offset to UV bitstream offset table
     uint triangleStreamOffset;        // [12] byte offset to triangle byte stream
     uint boneIndexStreamOffset;       // [13] byte offset to page-local bone-index stream
-    uint reserved0;
+    uint tangentFrameArrayOffset;     // [14] byte offset to tangent-frame angle/sign array
     uint reserved1;
 };
 

@@ -1592,26 +1592,44 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				ensureProcessingPlaceholder("conditioned cache DirectStorage upload pending; placeholder texture uploaded");
 				return;
 			}
-			m_desc = sourceData->desc;
-			RefreshStreamingStateFromDescription();
-			m_image = factory.CreateAlwaysResidentPixelBuffer(
-				sourceData->desc,
-				TextureFactory::TextureInitialData::FromBytes(sourceData->subresources),
-				m_name,
-				ShouldPreserveAlphaCoverage(m_meta, sourceData->desc));
-			m_hasUploadedFinalImage = true;
-			m_hasUploadedPlaceholder = false;
-			SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
-			SetPendingTopMip(desiredResidentTopMip);
-			RecordUploadPath(TextureUploadPathTelemetry::CpuImmediateUpload, "texture data uploaded through TextureFactory without async processing");
-			BumpBindingRevision();
-			if (!m_initialDataString.empty()) {
-				m_initialStorage = m_initialDataString;
+			if (useConditionedCacheResidency) {
+				if (promoteStreamingSourceToProcessedCache()) {
+					m_meta.isProcessingCacheArtifact = true;
+					if (tryAdvanceAsyncDirectStorageReload("texture residency uploaded asynchronously from existing conditioned cache through DirectStorage GPU queue")) {
+						ensureProcessingPlaceholder("conditioned cache DirectStorage upload pending; placeholder texture uploaded");
+						return;
+					}
+					ensureProcessingPlaceholder("conditioned cache DirectStorage upload pending; placeholder texture uploaded");
+					return;
+				}
+
+				// The texture is already in a renderable format, but material streaming still needs a
+				// conditioned cache artifact so DirectStorage can populate residency windows later.
+				// Fall through to RequestProcessing(), which will write/adopt the cache without
+				// forcing this frame down the CPU immediate upload path.
 			}
 			else {
-				m_initialStorage = std::monostate{};
+				m_desc = sourceData->desc;
+				RefreshStreamingStateFromDescription();
+				m_image = factory.CreateAlwaysResidentPixelBuffer(
+					sourceData->desc,
+					TextureFactory::TextureInitialData::FromBytes(sourceData->subresources),
+					m_name,
+					ShouldPreserveAlphaCoverage(m_meta, sourceData->desc));
+				m_hasUploadedFinalImage = true;
+				m_hasUploadedPlaceholder = false;
+				SetResidentMipWindow(desiredResidentTopMip, residentMipCount);
+				SetPendingTopMip(desiredResidentTopMip);
+				RecordUploadPath(TextureUploadPathTelemetry::CpuImmediateUpload, "texture data uploaded through TextureFactory without async processing");
+				BumpBindingRevision();
+				if (!m_initialDataString.empty()) {
+					m_initialStorage = m_initialDataString;
+				}
+				else {
+					m_initialStorage = std::monostate{};
+				}
+				return;
 			}
-			return;
 		}
 	}
 

@@ -32,7 +32,7 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
     uint4 d3 = slab.Load4(pageByteOffset + 48);
     hdr.triangleStreamOffset       = d3.x;
     hdr.boneIndexStreamOffset      = d3.y;
-    hdr.reserved0 = d3.z;
+    hdr.tangentFrameArrayOffset    = d3.z;
     hdr.reserved1 = d3.w;
 
     return hdr;

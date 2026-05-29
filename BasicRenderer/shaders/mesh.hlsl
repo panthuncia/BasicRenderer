@@ -528,11 +528,17 @@ PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint
     
     if (flags & VERTEX_SKINNED) {
         result.normalWorldSpace = normalize(vertex.normal);
+        result.tangentWorldSpace = (flags & VERTEX_TANGENTS)
+            ? float4(normalize(vertex.tangent.xyz), vertex.tangent.w)
+            : float4(1.0f, 0.0f, 0.0f, 0.0f);
     }
     else {
         StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
         float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
         result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
+        result.tangentWorldSpace = (flags & VERTEX_TANGENTS)
+            ? float4(normalize(mul(vertex.tangent.xyz, normalMatrix)), vertex.tangent.w)
+            : float4(1.0f, 0.0f, 0.0f, 0.0f);
     }
     
     result.color = vertex.color;

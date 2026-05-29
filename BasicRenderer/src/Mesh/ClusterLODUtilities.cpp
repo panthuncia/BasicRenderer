@@ -373,6 +373,7 @@ namespace
 		const std::vector<uint64_t>& totalUvBitsPerSet,
 		uint32_t totalVertexCount,
 		uint32_t totalNormalWords,
+		uint32_t totalTangentFrameWords,
 		uint32_t totalColorWords,
 		uint32_t totalBoneIndexCount,
 		uint32_t totalTriangleBytes)
@@ -389,6 +390,10 @@ namespace
 		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u)
 		{
 			size = align4(size) + align4(static_cast<size_t>(totalNormalWords) * sizeof(uint32_t));
+		}
+		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME) != 0u)
+		{
+			size = align4(size) + align4(static_cast<size_t>(totalTangentFrameWords) * sizeof(uint32_t));
 		}
 		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u)
 		{
@@ -490,6 +495,48 @@ namespace
 		const uint16_t x = static_cast<uint16_t>(static_cast<int16_t>(QuantizeSnorm16(oct[0])));
 		const uint16_t y = static_cast<uint16_t>(static_cast<int16_t>(QuantizeSnorm16(oct[1])));
 		return static_cast<uint32_t>(x) | (static_cast<uint32_t>(y) << 16u);
+	}
+
+	DirectX::XMFLOAT3 NormalizeOrFallback(DirectX::XMFLOAT3 value, DirectX::XMFLOAT3 fallback);
+	DirectX::XMFLOAT3 BuildFallbackTangentFromNormal(DirectX::XMFLOAT3 normal);
+
+	void BuildTangentAngleBasis(DirectX::XMFLOAT3 normal, DirectX::XMFLOAT3& tangent, DirectX::XMFLOAT3& bitangent)
+	{
+		normal = NormalizeOrFallback(normal, DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f));
+		tangent = BuildFallbackTangentFromNormal(normal);
+		bitangent = DirectX::XMFLOAT3(
+			tangent.y * normal.z - tangent.z * normal.y,
+			tangent.z * normal.x - tangent.x * normal.z,
+			tangent.x * normal.y - tangent.y * normal.x);
+		bitangent = NormalizeOrFallback(bitangent, DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f));
+	}
+
+	uint32_t PackTangentFrameAngle(DirectX::XMFLOAT3 normal, DirectX::XMFLOAT4 tangent)
+	{
+		normal = NormalizeOrFallback(normal, DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f));
+		DirectX::XMFLOAT3 tangent3(tangent.x, tangent.y, tangent.z);
+		const float projection = tangent3.x * normal.x + tangent3.y * normal.y + tangent3.z * normal.z;
+		tangent3.x -= normal.x * projection;
+		tangent3.y -= normal.y * projection;
+		tangent3.z -= normal.z * projection;
+		tangent3 = NormalizeOrFallback(tangent3, BuildFallbackTangentFromNormal(normal));
+
+		DirectX::XMFLOAT3 basisT;
+		DirectX::XMFLOAT3 basisB;
+		BuildTangentAngleBasis(normal, basisT, basisB);
+
+		const float x = tangent3.x * basisT.x + tangent3.y * basisT.y + tangent3.z * basisT.z;
+		const float y = tangent3.x * basisB.x + tangent3.y * basisB.y + tangent3.z * basisB.z;
+		constexpr float TwoPi = 6.2831853071795864769f;
+		float angle = std::atan2(y, x);
+		if (angle < 0.0f)
+		{
+			angle += TwoPi;
+		}
+
+		const uint32_t angleBits = static_cast<uint32_t>(std::lround(std::clamp(angle / TwoPi, 0.0f, 1.0f) * 65535.0f)) & 0xFFFFu;
+		const uint32_t signBit = tangent.w < 0.0f ? (1u << 16u) : 0u;
+		return angleBits | signBit;
 	}
 
 	uint32_t PackColorUnorm8(DirectX::XMFLOAT3 color)
@@ -1005,6 +1052,8 @@ namespace
 			vertexStrideBytes >= MeshVertexLayout::TexcoordOffset(vertexFlags) + sizeof(float) * 2;
 		const bool hasColorStream = (vertexFlags & VertexFlags::VERTEX_COLORS) != 0u &&
 			vertexStrideBytes >= MeshVertexLayout::ColorOffset(vertexFlags) + sizeof(float) * 3;
+		const bool hasTangentStream = (vertexFlags & VertexFlags::VERTEX_TANGENTS) != 0u &&
+			vertexStrideBytes >= MeshVertexLayout::TangentOffset(vertexFlags) + sizeof(float) * 4;
 		std::vector<DirectX::XMFLOAT3> groupNormals;
 		if (hasNormalStream)
 		{
@@ -1034,6 +1083,20 @@ namespace
 				{
 					groupNormals[groupVertexIndex] = ReadVertexFloat3(vertices, vertexStrideBytes, groupLocalToGlobal[groupVertexIndex], MeshVertexLayout::NormalOffset);
 				}
+			}
+		}
+
+		std::vector<DirectX::XMFLOAT4> groupTangents;
+		if (hasTangentStream)
+		{
+			groupTangents.resize(groupLocalToGlobal.size());
+			for (size_t groupVertexIndex = 0; groupVertexIndex < groupLocalToGlobal.size(); ++groupVertexIndex)
+			{
+				const uint32_t globalVertexIndex = groupLocalToGlobal[groupVertexIndex];
+				DirectX::XMFLOAT4 tangent{};
+				const size_t offset = static_cast<size_t>(globalVertexIndex) * vertexStrideBytes + MeshVertexLayout::TangentOffset(vertexFlags);
+				std::memcpy(&tangent, vertices.data() + offset, sizeof(tangent));
+				groupTangents[groupVertexIndex] = tangent;
 			}
 		}
 
@@ -1156,6 +1219,16 @@ namespace
 			}
 		}
 
+		std::vector<uint32_t> compressedTangentFrameWords;
+		if (hasTangentStream && !groupNormals.empty())
+		{
+			compressedTangentFrameWords.reserve(groupTangents.size());
+			for (size_t groupVertexIndex = 0; groupVertexIndex < groupTangents.size(); ++groupVertexIndex)
+			{
+				compressedTangentFrameWords.push_back(PackTangentFrameAngle(groupNormals[groupVertexIndex], groupTangents[groupVertexIndex]));
+			}
+		}
+
 		output.groupChunk.groupVertexCount = output.group.groupVertexCount;
 		output.groupChunk.meshletCount = static_cast<uint32_t>(output.meshlets.size());
 		output.groupChunk.meshletTrianglesByteCount = static_cast<uint32_t>(output.meshletTriangles.size());
@@ -1169,6 +1242,7 @@ namespace
 		// Per-meshlet compression + page binning + segment creation + page blob construction
 		{
 			const bool hasNormals = !compressedNormalWords.empty();
+			const bool hasTangentFrames = !compressedTangentFrameWords.empty();
 			const bool hasColors = !compressedColorWords.empty();
 			auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
 
@@ -1232,6 +1306,10 @@ namespace
 				if (hasNormals)
 				{
 					comp.attributeMask |= CLOD_PAGE_ATTRIBUTE_NORMAL;
+				}
+				if (hasTangentFrames)
+				{
+					comp.attributeMask |= CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME;
 				}
 				if (hasColors)
 				{
@@ -1311,6 +1389,11 @@ namespace
 				return ((pageMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u) ? meshlet.vertex_count : 0u;
 			};
 
+			auto GetMeshletTangentFrameWords = [&](uint32_t pageMask, const meshopt_Meshlet& meshlet) -> uint32_t
+			{
+				return ((pageMask & CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME) != 0u) ? meshlet.vertex_count : 0u;
+			};
+
 			auto GetMeshletColorWords = [&](uint32_t pageMask, const meshopt_Meshlet& meshlet) -> uint32_t
 			{
 				return ((pageMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? meshlet.vertex_count : 0u;
@@ -1332,6 +1415,7 @@ namespace
 				std::vector<uint64_t> totalUvBitsPerSet;
 				uint32_t totalVertexCount = 0;
 				uint32_t totalNormalWords = 0;
+				uint32_t totalTangentFrameWords = 0;
 				uint32_t totalColorWords = 0;
 				uint32_t totalBoneIndexCount = 0;
 				uint32_t totalTriangleBytes = 0;
@@ -1352,6 +1436,7 @@ namespace
 						totals.totalUvBitsPerSet[uvSetIndex] += GetMeshletUvBits(uvSetIndex, meshlet, comp);
 					}
 					totals.totalNormalWords += GetMeshletNormalWords(pageMask, meshlet);
+					totals.totalTangentFrameWords += GetMeshletTangentFrameWords(pageMask, meshlet);
 					totals.totalColorWords += GetMeshletColorWords(pageMask, meshlet);
 					totals.totalBoneIndexCount += static_cast<uint32_t>(comp.boneList.size());
 					totals.totalTriangleBytes += meshlet.triangle_count * 3u;
@@ -1387,6 +1472,7 @@ namespace
 					candidateTotals.totalUvBitsPerSet,
 					candidateTotals.totalVertexCount,
 					candidateTotals.totalNormalWords,
+					candidateTotals.totalTangentFrameWords,
 					candidateTotals.totalColorWords,
 					candidateTotals.totalBoneIndexCount,
 					candidateTotals.totalTriangleBytes);
@@ -1506,6 +1592,7 @@ namespace
 				if (pageMeshletCount == 0) continue;
 				const PageTotals pageTotals = ComputePageTotals(page.meshletIndices, page.attributeMask, page.uvSetCount);
 				const bool pageHasNormals = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u;
+				const bool pageHasTangentFrames = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME) != 0u;
 				const bool pageHasColors = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u;
 				const bool pageHasJoints = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) != 0u;
 				const bool pageHasWeights = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) != 0u;
@@ -1526,38 +1613,43 @@ namespace
 					? static_cast<uint32_t>(align4(positionBitstreamOffset + positionBytes))
 					: 0u;
 				const size_t normalBytes = pageHasNormals ? static_cast<size_t>(pageTotals.totalNormalWords) * sizeof(uint32_t) : 0u;
-				const uint32_t colorArrayOffset = pageHasColors
+				const uint32_t tangentFrameArrayOffset = pageHasTangentFrames
 					? static_cast<uint32_t>(align4(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))
 					: 0u;
+				const size_t tangentFrameBytes = pageHasTangentFrames ? static_cast<size_t>(pageTotals.totalTangentFrameWords) * sizeof(uint32_t) : 0u;
+				const size_t afterNormalAndTangentBytes = pageHasTangentFrames
+					? (static_cast<size_t>(tangentFrameArrayOffset) + tangentFrameBytes)
+					: (pageHasNormals
+						? (static_cast<size_t>(normalArrayOffset) + normalBytes)
+						: (static_cast<size_t>(positionBitstreamOffset) + positionBytes));
+				const uint32_t colorArrayOffset = pageHasColors
+					? static_cast<uint32_t>(align4(afterNormalAndTangentBytes))
+					: 0u;
 				const size_t colorBytes = pageHasColors ? static_cast<size_t>(pageTotals.totalColorWords) * sizeof(uint32_t) : 0u;
+				const size_t afterColorBytes = pageHasColors
+					? (static_cast<size_t>(colorArrayOffset) + colorBytes)
+					: afterNormalAndTangentBytes;
 				const uint32_t jointArrayOffset = pageHasJoints
-					? static_cast<uint32_t>(align4(
-						pageHasColors ? (colorArrayOffset + colorBytes) :
-						(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes))))
+					? static_cast<uint32_t>(align4(afterColorBytes))
 					: 0u;
 				const size_t jointBytes = pageHasJoints ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMUINT4) * 2u : 0u;
+				const size_t afterJointBytes = pageHasJoints
+					? (static_cast<size_t>(jointArrayOffset) + jointBytes)
+					: afterColorBytes;
 				const uint32_t weightArrayOffset = pageHasWeights
-					? static_cast<uint32_t>(align4(
-						pageHasJoints ? (jointArrayOffset + jointBytes) :
-						(pageHasColors ? (colorArrayOffset + colorBytes) :
-						(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))))
+					? static_cast<uint32_t>(align4(afterJointBytes))
 					: 0u;
 				const size_t weightBytes = pageHasWeights ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMFLOAT4) * 2u : 0u;
+				const size_t afterWeightBytes = pageHasWeights
+					? (static_cast<size_t>(weightArrayOffset) + weightBytes)
+					: afterJointBytes;
 				const uint32_t uvBitstreamDirectoryOffset = pageHasUvSets
-					? static_cast<uint32_t>(align4(
-						pageHasWeights ? (weightArrayOffset + weightBytes) :
-						(pageHasJoints ? (jointArrayOffset + jointBytes) :
-						(pageHasColors ? (colorArrayOffset + colorBytes) :
-						(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes))))))
+					? static_cast<uint32_t>(align4(afterWeightBytes))
 					: 0u;
 				std::vector<uint32_t> uvBitstreamOffsets(page.uvSetCount, 0u);
 				size_t uvBitstreamCursor = pageHasUvSets
 					? align4(static_cast<size_t>(uvBitstreamDirectoryOffset) + static_cast<size_t>(page.uvSetCount) * sizeof(uint32_t))
-					: align4(
-						pageHasWeights ? (weightArrayOffset + weightBytes) :
-						(pageHasJoints ? (jointArrayOffset + jointBytes) :
-						(pageHasColors ? (colorArrayOffset + colorBytes) :
-						(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))));
+					: align4(afterWeightBytes);
 				for (uint32_t uvSetIndex = 0; uvSetIndex < page.uvSetCount; ++uvSetIndex)
 				{
 					uvBitstreamOffsets[uvSetIndex] = static_cast<uint32_t>(uvBitstreamCursor);
@@ -1658,6 +1750,20 @@ namespace
 							}
 							std::memcpy(blob.data() + normalArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(uint32_t),
 								&normalWord, sizeof(uint32_t));
+						}
+					}
+					if (pageHasTangentFrames)
+					{
+						for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
+						{
+							uint32_t tangentFrameWord = 0u;
+							if ((comp.attributeMask & CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME) != 0u)
+							{
+								const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
+								tangentFrameWord = compressedTangentFrameWords[gv];
+							}
+							std::memcpy(blob.data() + tangentFrameArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(uint32_t),
+								&tangentFrameWord, sizeof(uint32_t));
 						}
 					}
 					if (pageHasColors)
@@ -1795,6 +1901,7 @@ namespace
 				header.uvBitstreamDirectoryOffset = uvBitstreamDirectoryOffset;
 				header.triangleStreamOffset = triangleStreamOffset;
 				header.boneIndexStreamOffset = boneIndexStreamOffset;
+				header.tangentFrameArrayOffset = tangentFrameArrayOffset;
 				std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));
 
 				assert(blob.size() <= CLOD_PAGE_SIZE && "Page blob exceeds CLOD_PAGE_SIZE");
@@ -2443,6 +2550,7 @@ namespace
 					candidateTotals.totalUvBitsPerSet,
 					candidateTotals.totalVertexCount,
 					candidateTotals.totalNormalWords,
+					0u,
 					candidateTotals.totalColorWords,
 					candidateTotals.totalBoneIndexCount,
 					candidateTotals.totalTriangleBytes);

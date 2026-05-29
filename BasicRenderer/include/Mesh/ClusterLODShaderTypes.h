@@ -16,6 +16,7 @@ static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_JOINTS = 1u << 1;
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_WEIGHTS = 1u << 2;
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_COLOR = 1u << 3;
+static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME = 1u << 4;
 
 static constexpr uint32_t CLOD_POSITION_FORMAT_FLOAT3 = 1u;
 static constexpr uint32_t CLOD_POSITION_FORMAT_FLOAT3_STRIDE_BYTES = sizeof(float) * 3u;
@@ -40,7 +41,8 @@ struct CLodPageHeader
 	uint32_t uvBitstreamDirectoryOffset = 0; // [11] byte offset to UV bitstream offset table
 	uint32_t triangleStreamOffset = 0;    // [12] byte offset to triangle byte stream
 	uint32_t boneIndexStreamOffset = 0;   // [13] byte offset to page-local meshlet bone-index stream
-	uint32_t reserved[2] = {};            // [14-15] pad to 64 bytes
+	uint32_t tangentFrameArrayOffset = 0; // [14] byte offset to tangent-frame angle/sign array
+	uint32_t reserved = 0;                // [15] pad to 64 bytes
 };
 static_assert(sizeof(CLodPageHeader) == 64, "CLodPageHeader must be 64 bytes");
 

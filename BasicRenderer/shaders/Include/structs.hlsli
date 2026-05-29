@@ -12,6 +12,7 @@ struct PSInput {
     float3 color : TEXCOORD6; // For models with vertex colors
     float3 normalModelSpace : TEXCOORD7; // For debug view
     uint meshletIndex : TEXCOORD8; // For meshlet debug view
+    float4 tangentWorldSpace : TEXCOORD9;
 };
 
 struct VisBufferPSInput

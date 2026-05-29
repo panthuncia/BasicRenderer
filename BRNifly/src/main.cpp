@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -49,7 +50,7 @@ using namespace pxr;
 
 namespace {
 
-constexpr std::string_view kUsdContentIdentityVersion = "brnifly-usd-content-v7";
+constexpr std::string_view kUsdContentIdentityVersion = "brnifly-usd-content-v8";
 
 struct Diagnostic {
     std::string level;
@@ -302,6 +303,7 @@ using GetShapeBlockNameFn = int (*)(void*, char*, int);
 using GetBlockIdFn = int (*)(void*, void*);
 using GetVertsForShapeFn = int (*)(void*, void*, float*, int, int);
 using GetNormalsForShapeFn = int (*)(void*, void*, float*, int, int);
+using GetTangentsForShapeFn = int (*)(void*, void*, float*, int, int);
 using GetTrianglesFn = int (*)(void*, void*, uint16_t*, int, int);
 using GetUVsFn = int (*)(void*, void*, float*, int, int);
 using GetColorsForShapeFn = int (*)(void*, void*, float*, int);
@@ -435,6 +437,8 @@ struct NiflyApi {
     GetBlockIdFn getBlockId = nullptr;
     GetVertsForShapeFn getVertsForShape = nullptr;
     GetNormalsForShapeFn getNormalsForShape = nullptr;
+    GetTangentsForShapeFn getTangentsForShape = nullptr;
+    GetTangentsForShapeFn getBitangentsForShape = nullptr;
     GetTrianglesFn getTriangles = nullptr;
     GetUVsFn getUVs = nullptr;
     GetColorsForShapeFn getColorsForShape = nullptr;
@@ -507,6 +511,8 @@ struct NiflyApi {
           getBlockId(other.getBlockId),
           getVertsForShape(other.getVertsForShape),
           getNormalsForShape(other.getNormalsForShape),
+          getTangentsForShape(other.getTangentsForShape),
+          getBitangentsForShape(other.getBitangentsForShape),
           getTriangles(other.getTriangles),
           getUVs(other.getUVs),
           getColorsForShape(other.getColorsForShape),
@@ -584,6 +590,8 @@ struct NiflyApi {
             getBlockId = other.getBlockId;
             getVertsForShape = other.getVertsForShape;
             getNormalsForShape = other.getNormalsForShape;
+            getTangentsForShape = other.getTangentsForShape;
+            getBitangentsForShape = other.getBitangentsForShape;
             getTriangles = other.getTriangles;
             getUVs = other.getUVs;
             getColorsForShape = other.getColorsForShape;
@@ -722,6 +730,8 @@ std::optional<NiflyApi> LoadNiflyApi(const char* argv0, std::vector<Diagnostic>&
     }
     api.getVertsForShape = LoadProc<GetVertsForShapeFn>(module, "getVertsForShape");
     api.getNormalsForShape = LoadProc<GetNormalsForShapeFn>(module, "getNormalsForShape");
+    api.getTangentsForShape = LoadProc<GetTangentsForShapeFn>(module, "getTangentsForShape");
+    api.getBitangentsForShape = LoadProc<GetTangentsForShapeFn>(module, "getBitangentsForShape");
     api.getTriangles = LoadProc<GetTrianglesFn>(module, "getTriangles");
     api.getUVs = LoadProc<GetUVsFn>(module, "getUVs");
     api.getColorsForShape = LoadProc<GetColorsForShapeFn>(module, "getColorsForShape");
@@ -867,6 +877,7 @@ struct ShapeData {
     TransformBuf transform;
     std::vector<float> positions;
     std::vector<float> normals;
+    std::vector<float> tangents;
     std::vector<float> uvs;
     std::vector<float> colors;
     std::vector<uint16_t> triangles;
@@ -881,6 +892,36 @@ struct ShapeData {
     json segmentation = json::object();
     json extraData = json::array();
 };
+
+float Dot3(const float* a, const float* b)
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+std::array<float, 3> Cross3(const float* a, const float* b)
+{
+    return {
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    };
+}
+
+void Normalize3(float* v)
+{
+    const float lenSq = Dot3(v, v);
+    if (lenSq <= 1.0e-20f) {
+        v[0] = 1.0f;
+        v[1] = 0.0f;
+        v[2] = 0.0f;
+        return;
+    }
+
+    const float invLen = 1.0f / std::sqrt(lenSq);
+    v[0] *= invLen;
+    v[1] *= invLen;
+    v[2] *= invLen;
+}
 
 struct NodeData {
     void* handle = nullptr;
@@ -1524,6 +1565,40 @@ std::vector<ShapeData> ReadShapes(const NiflyApi& api, void* nifHandle, std::vec
             }
         }
 
+        if (api.getTangentsForShape && api.getBitangentsForShape && shape.normals.size() == static_cast<size_t>(vertexCount) * 3u) {
+            const int tangentCount = api.getTangentsForShape(nifHandle, shapeHandle, nullptr, 0, 0);
+            const int bitangentCount = api.getBitangentsForShape(nifHandle, shapeHandle, nullptr, 0, 0);
+            if (tangentCount == vertexCount && bitangentCount == vertexCount) {
+                std::vector<float> tangentVectors(static_cast<size_t>(vertexCount) * 3u);
+                std::vector<float> bitangentVectors(static_cast<size_t>(vertexCount) * 3u);
+                api.getTangentsForShape(nifHandle, shapeHandle, tangentVectors.data(), static_cast<int>(tangentVectors.size()), 0);
+                api.getBitangentsForShape(nifHandle, shapeHandle, bitangentVectors.data(), static_cast<int>(bitangentVectors.size()), 0);
+
+                shape.tangents.resize(static_cast<size_t>(vertexCount) * 4u);
+                for (int vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+                    const size_t vecBase = static_cast<size_t>(vertexIndex) * 3u;
+                    const size_t tangentBase = static_cast<size_t>(vertexIndex) * 4u;
+                    float normal[3] = { shape.normals[vecBase + 0u], shape.normals[vecBase + 1u], shape.normals[vecBase + 2u] };
+                    float tangent[3] = { tangentVectors[vecBase + 0u], tangentVectors[vecBase + 1u], tangentVectors[vecBase + 2u] };
+                    const float bitangent[3] = { bitangentVectors[vecBase + 0u], bitangentVectors[vecBase + 1u], bitangentVectors[vecBase + 2u] };
+                    Normalize3(normal);
+                    const float tangentProjection = Dot3(tangent, normal);
+                    tangent[0] -= normal[0] * tangentProjection;
+                    tangent[1] -= normal[1] * tangentProjection;
+                    tangent[2] -= normal[2] * tangentProjection;
+                    Normalize3(tangent);
+                    const auto nCrossT = Cross3(normal, tangent);
+                    const float handedness = (nCrossT[0] * bitangent[0] + nCrossT[1] * bitangent[1] + nCrossT[2] * bitangent[2]) < 0.0f
+                        ? 1.0f
+                        : -1.0f;
+                    shape.tangents[tangentBase + 0u] = tangent[0];
+                    shape.tangents[tangentBase + 1u] = tangent[1];
+                    shape.tangents[tangentBase + 2u] = tangent[2];
+                    shape.tangents[tangentBase + 3u] = handedness;
+                }
+            }
+        }
+
         if (api.getUVs) {
             const int uvCount = api.getUVs(nifHandle, shapeHandle, nullptr, 0, 0);
             if (uvCount == vertexCount) {
@@ -1887,18 +1962,27 @@ std::optional<std::string> ConvertShapesToUsd(
             mesh.SetNormalsInterpolation(UsdGeomTokens->vertex);
         }
 
+        UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
+        if (shape.tangents.size() == points.size() * 4u) {
+            VtArray<GfVec4f> tangents;
+            tangents.reserve(points.size());
+            for (size_t i = 0; i + 3 < shape.tangents.size(); i += 4) {
+                tangents.push_back(GfVec4f(shape.tangents[i], shape.tangents[i + 1], shape.tangents[i + 2], shape.tangents[i + 3]));
+            }
+            UsdGeomPrimvar tangentPrimvar = primvars.CreatePrimvar(TfToken("brnifly:tangents"), SdfValueTypeNames->Float4Array, UsdGeomTokens->vertex);
+            tangentPrimvar.Set(tangents);
+        }
+
         if (shape.uvs.size() == points.size() * 2u) {
             VtArray<GfVec2f> uvValues;
             uvValues.reserve(points.size());
             for (size_t i = 0; i + 1 < shape.uvs.size(); i += 2) {
                 uvValues.push_back(GfVec2f(shape.uvs[i], 1.0f - shape.uvs[i + 1]));
             }
-            UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
             UsdGeomPrimvar st = primvars.CreatePrimvar(TfToken("st"), SdfValueTypeNames->TexCoord2fArray, UsdGeomTokens->vertex);
             st.Set(uvValues);
         }
 
-        UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
         if (shape.colors.size() == points.size() * 4u) {
             VtArray<GfVec3f> displayColors;
             VtArray<float> displayOpacity;

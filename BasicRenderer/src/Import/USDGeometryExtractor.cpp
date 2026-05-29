@@ -24,6 +24,7 @@
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/gf/vec2f.h>
+#include <pxr/base/gf/vec4f.h>
 
 #include <DirectXMath.h>
 #include <spdlog/spdlog.h>
@@ -401,6 +402,34 @@ static void LoadGeom(
 		}
 	}
 
+	bool gotTangents = false;
+	InterpolationType tangentInterp = InterpolationType::Vertex;
+	std::vector<float> rawTangents;
+	{
+		UsdGeomPrimvar tangentPrimvar = primvarsAPI.GetPrimvar(TfToken("brnifly:tangents"));
+		if (tangentPrimvar) {
+			VtArray<GfVec4f> usdTangents;
+			if (tangentPrimvar.ComputeFlattened(&usdTangents, geomTimeCode)) {
+				rawTangents.reserve(usdTangents.size() * 4u);
+				for (const GfVec4f& tangent : usdTangents) {
+					rawTangents.push_back(tangent[0]);
+					rawTangents.push_back(tangent[1]);
+					rawTangents.push_back(tangent[2]);
+					rawTangents.push_back(tangent[3]);
+				}
+				tangentInterp = GetInterpolationType(tangentPrimvar.GetInterpolation());
+				gotTangents = true;
+				vertexFlags |= VertexFlags::VERTEX_TANGENTS;
+			}
+			else {
+				spdlog::warn(
+					"Mesh '{}' authored primvars:brnifly:tangents but it could not be flattened at geometry sample time {}; falling back to derivative tangent basis.",
+					primName,
+					geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+			}
+		}
+	}
+
     std::vector<std::string> uvSetNames;
     for (const std::string& requiredUvSetName : requiredUvSetNames) {
         if (!requiredUvSetName.empty()) {
@@ -646,6 +675,7 @@ static void LoadGeom(
 	bool warnedInvalidPositionIndex = false;
 	bool warnedInvalidFaceVertexIndex = false;
 	bool warnedNormalTupleRange = false;
+	bool warnedTangentTupleRange = false;
 	bool warnedUvTupleRange = false;
 	bool warnedColorTupleRange = false;
 	bool warnedJointTupleRange = false;
@@ -710,6 +740,10 @@ static void LoadGeom(
 						copyTupleFloat(outPtr + MeshVertexLayout::NormalOffset, rawNormals, 3, normInterp, f, fvIndex, vertIdx, warnedNormalTupleRange, "normals");
 					else
 						std::memcpy(outPtr + MeshVertexLayout::NormalOffset, &defaultNormal, sizeof(defaultNormal));
+
+					if (gotTangents) {
+						copyTupleFloat(outPtr + MeshVertexLayout::TangentOffset(vertexFlags), rawTangents, 4, tangentInterp, f, fvIndex, vertIdx, warnedTangentTupleRange, "brnifly:tangents");
+					}
 
                     if (primaryUvSetIndex < uvSetBuildData.size()) {
                         DirectX::XMFLOAT2 packedUv = { 0.0f, 0.0f };

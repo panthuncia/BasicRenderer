@@ -181,6 +181,7 @@ struct MeshletResolveData {
     uint pageByteOffset;
     uint positionBitstreamBase;
     uint normalArrayBase;
+    uint tangentFrameArrayBase;
     uint colorArrayBase;
     uint jointArrayBase;
     uint weightArrayBase;
@@ -654,6 +655,35 @@ float3 DecodeCompressedNormal(uint meshletLocalVertex, MeshletResolveData d)
     return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
+void CLodBuildTangentAngleBasis(float3 normal, out float3 tangent, out float3 bitangent)
+{
+    normal = normalize(normal);
+    float3 helper = abs(normal.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
+    tangent = normalize(cross(helper, normal));
+    bitangent = normalize(cross(tangent, normal));
+}
+
+float4 DecodeCompressedTangentFrame(uint meshletLocalVertex, float3 normalOS, MeshletResolveData d)
+{
+    if ((d.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME) == 0u)
+    {
+        return float4(1.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    uint addr = d.tangentFrameArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 4u;
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(d.pagePoolSlabDescriptorIndex)];
+    uint packed = slab.Load(addr);
+    float angle = (float(packed & 0xFFFFu) / 65535.0f) * 6.28318530718f;
+    float handedness = ((packed & (1u << 16u)) != 0u) ? -1.0f : 1.0f;
+    float s;
+    float c;
+    sincos(angle, s, c);
+    float3 basisT;
+    float3 basisB;
+    CLodBuildTangentAngleBasis(normalOS, basisT, basisB);
+    return float4(normalize(basisT * c + basisB * s), handedness);
+}
+
 float3 DecodeCompressedColor(uint meshletLocalVertex, MeshletResolveData d)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
@@ -766,6 +796,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
         d.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
         d.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+        d.tangentFrameArrayBase = pageSlabOff + hdr.tangentFrameArrayOffset;
         d.colorArrayBase = pageSlabOff + hdr.colorArrayOffset;
         d.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
         d.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
@@ -797,6 +828,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.pageByteOffset = WaveReadLaneAt(d.pageByteOffset, leader);
     d.positionBitstreamBase = WaveReadLaneAt(d.positionBitstreamBase, leader);
     d.normalArrayBase = WaveReadLaneAt(d.normalArrayBase, leader);
+    d.tangentFrameArrayBase = WaveReadLaneAt(d.tangentFrameArrayBase, leader);
     d.colorArrayBase = WaveReadLaneAt(d.colorArrayBase, leader);
     d.jointArrayBase = WaveReadLaneAt(d.jointArrayBase, leader);
     d.weightArrayBase = WaveReadLaneAt(d.weightArrayBase, leader);
@@ -1518,6 +1550,9 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
     float3 n0 = DecodeCompressedNormal(triIdx.x, md);
     float3 n1 = DecodeCompressedNormal(triIdx.y, md);
     float3 n2 = DecodeCompressedNormal(triIdx.z, md);
+    float4 t0 = DecodeCompressedTangentFrame(triIdx.x, n0, md);
+    float4 t1 = DecodeCompressedTangentFrame(triIdx.y, n1, md);
+    float4 t2 = DecodeCompressedTangentFrame(triIdx.z, n2, md);
     const bool hasVertexColor = (md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u;
     float3 c0 = 1.0f.xxx;
     float3 c1 = 1.0f.xxx;
@@ -1650,6 +1685,15 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
     float3x3 normalMatrix = (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex];
     float3 worldNormal = normalize(mul(normalOS, normalMatrix));
+    float4 tangentWS = float4(1.0f, 0.0f, 0.0f, 0.0f);
+    if ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME) != 0u)
+    {
+        float interpTX = InterpolateWithDeriv(bary, t0.x, t1.x, t2.x).x;
+        float interpTY = InterpolateWithDeriv(bary, t0.y, t1.y, t2.y).x;
+        float interpTZ = InterpolateWithDeriv(bary, t0.z, t1.z, t2.z).x;
+        float interpTW = InterpolateWithDeriv(bary, t0.w, t1.w, t2.w).x;
+        tangentWS = float4(normalize(mul(float3(interpTX, interpTY, interpTZ), normalMatrix)), interpTW < 0.0f ? -1.0f : 1.0f);
+    }
 
     MaterialUvCache uvCache;
     MaterialUvBindings uvBindings;
@@ -1669,10 +1713,11 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
         dpdy,
         materialInputs);
 #else
-    SampleMaterialFromUvCacheRuntime(
+    SampleMaterialFromUvCacheRuntimeWithVertexTangent(
         uvCache,
         uvBindings,
         worldNormal,
+        tangentWS,
         worldPosition,
         vertexColor,
         materialInfo,
