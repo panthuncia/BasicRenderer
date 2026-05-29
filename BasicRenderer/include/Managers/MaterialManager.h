@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include <chrono>
 
 #include "Materials/Material.h"
 #include "Interfaces/IResourceProvider.h"
@@ -85,7 +86,8 @@ private:
 	void TrackMaterialTextureAssets(const Material& material, int delta);
 	void UpdateTextureStreamingMetadata(const Material& material);
 	void UpdateTextureStreamingMetadata(const std::shared_ptr<TextureAsset>& texture);
-	void MarkTextureStreamingMetadataDirty(const std::shared_ptr<TextureAsset>& texture, bool needsUploadAdvance = false);
+	void MarkTextureStreamingMetadataDirty(const std::shared_ptr<TextureAsset>& texture, bool needsUploadAdvance = false, const char* reason = "unknown");
+	void RecordTextureDirtyReason(const char* reason);
 	void FlushDirtyMaterial(Material& material, TextureFactory* textureFactory = nullptr);
 	void FlushDirtyTextureMetadata(const std::shared_ptr<TextureAsset>& texture);
 	void EnsureTextureUploadAdvanced(const std::shared_ptr<TextureAsset>& texture, TextureFactory& textureFactory);
@@ -156,5 +158,12 @@ private:
 	std::unordered_set<uint32_t> m_dirtyTextureStreamingIDSet;
 	std::vector<uint32_t> m_texturesNeedingUploadAdvance;
 	std::unordered_set<uint32_t> m_texturesNeedingUploadAdvanceSet;
+	std::chrono::steady_clock::time_point m_lastMaterialUpdateStatsLog = {};
+	uint64_t m_textureDirtyReasonFeedback = 0;
+	uint64_t m_textureDirtyReasonIdleCoarsen = 0;
+	uint64_t m_textureDirtyReasonTrackMaterial = 0;
+	uint64_t m_textureDirtyReasonUploadStateRevision = 0;
+	uint64_t m_textureDirtyReasonUploadPending = 0;
+	uint64_t m_textureDirtyReasonOther = 0;
 	uint32_t m_textureStreamingMetadataCapacity = 1u;
 };

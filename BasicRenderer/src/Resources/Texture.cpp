@@ -83,6 +83,59 @@ const char* ToString(TextureUploadPathTelemetry path) {
 	}
 }
 
+const char* ToString(TextureProcessingJobState state) {
+	switch (state) {
+	case TextureProcessingJobState::Queued:
+		return "Queued";
+	case TextureProcessingJobState::CpuPreparing:
+		return "CpuPreparing";
+	case TextureProcessingJobState::GpuReadyToSubmit:
+		return "GpuReadyToSubmit";
+	case TextureProcessingJobState::GpuSubmitted:
+		return "GpuSubmitted";
+	case TextureProcessingJobState::ReadbackPending:
+		return "ReadbackPending";
+	case TextureProcessingJobState::Ready:
+		return "Ready";
+	case TextureProcessingJobState::Failed:
+		return "Failed";
+	default:
+		return "Unknown";
+	}
+}
+
+const char* ToString(TextureReloadJobState state) {
+	switch (state) {
+	case TextureReloadJobState::Queued:
+		return "Queued";
+	case TextureReloadJobState::BuildingSourceData:
+		return "BuildingSourceData";
+	case TextureReloadJobState::Ready:
+		return "Ready";
+	case TextureReloadJobState::Failed:
+		return "Failed";
+	default:
+		return "Unknown";
+	}
+}
+
+const char* ToString(TextureDirectStorageReloadJobState state) {
+	switch (state) {
+	case TextureDirectStorageReloadJobState::Queued:
+		return "Queued";
+	case TextureDirectStorageReloadJobState::CreatingResource:
+		return "CreatingResource";
+	case TextureDirectStorageReloadJobState::Uploading:
+		return "Uploading";
+	case TextureDirectStorageReloadJobState::Ready:
+		return "Ready";
+	case TextureDirectStorageReloadJobState::Failed:
+		return "Failed";
+	default:
+		return "Unknown";
+	}
+}
+
 std::string TextureTelemetryLabel(const TextureAsset& texture) {
 	if (!texture.Meta().filePath.empty()) {
 		return texture.Meta().filePath;
@@ -771,9 +824,14 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirec
 	}
 
 	auto handle = std::make_shared<TextureDirectStorageReloadJobHandle>();
+	handle->targetTopMip.store(topMip, std::memory_order_release);
 	handle->state.store(TextureDirectStorageReloadJobState::Queued, std::memory_order_release);
 
-	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureAsset::BeginUploadDDSFilePathDirectToVRAMAsync", [handle, path, preferSRGB, topMip, allowRTV, allowUAV]() mutable {
+	TaskSchedulerManager::GetInstance().QueueIoTask("TextureAsset::BeginUploadDDSFilePathDirectToVRAMAsync", [handle, path, preferSRGB, topMip, allowRTV, allowUAV]() mutable {
+		if (handle->cancelRequested.load(std::memory_order_acquire)) {
+			handle->state.store(TextureDirectStorageReloadJobState::Failed, std::memory_order_release);
+			return;
+		}
 		handle->state.store(TextureDirectStorageReloadJobState::CreatingResource, std::memory_order_release);
 
 		try {
@@ -826,6 +884,9 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirec
 			if (images == nullptr || imageCount != static_cast<size_t>(arraySlices) * fullMipCount) {
 				throw std::runtime_error("DDS image layout did not match expected subresource count for DirectStorage GPU-direct texture upload");
 			}
+			if (handle->cancelRequested.load(std::memory_order_acquire)) {
+				throw std::runtime_error("DirectStorage texture upload was canceled before resource creation");
+			}
 
 			const uint32_t residentMipCount = fullMipCount - clampedTopMip;
 			desc.imageDimensions.reserve(static_cast<size_t>(arraySlices) * residentMipCount);
@@ -874,6 +935,9 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirec
 			if (!uploadedImage) {
 				throw std::runtime_error("failed to create resident PixelBuffer for DirectStorage GPU-direct texture upload");
 			}
+			if (handle->cancelRequested.load(std::memory_order_acquire)) {
+				throw std::runtime_error("DirectStorage texture upload was canceled before enqueue");
+			}
 
 			std::string directStorageMessage;
 			DirectStorageAsyncRequestHandle requestHandle = DirectStorageManager::GetInstance().EnqueueUploadTextureRegionsFromFile(
@@ -889,7 +953,7 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadDDSFilePathDirec
 
 			{
 				std::scoped_lock lock(handle->mutex);
-				handle->targetTopMip = clampedTopMip;
+				handle->targetTopMip.store(clampedTopMip, std::memory_order_release);
 				handle->uploadedImage = std::move(uploadedImage);
 				handle->requestHandle = std::move(requestHandle);
 				handle->error.clear();
@@ -920,9 +984,14 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadConditionedCache
 	}
 
 	auto handle = std::make_shared<TextureDirectStorageReloadJobHandle>();
+	handle->targetTopMip.store(topMip, std::memory_order_release);
 	handle->state.store(TextureDirectStorageReloadJobState::Queued, std::memory_order_release);
 
-	TaskSchedulerManager::GetInstance().RunBackgroundTask("TextureAsset::BeginUploadConditionedCacheFilePathDirectToVRAMAsync", [handle, path, topMip, allowRTV, allowUAV]() mutable {
+	TaskSchedulerManager::GetInstance().QueueIoTask("TextureAsset::BeginUploadConditionedCacheFilePathDirectToVRAMAsync", [handle, path, topMip, allowRTV, allowUAV]() mutable {
+		if (handle->cancelRequested.load(std::memory_order_acquire)) {
+			handle->state.store(TextureDirectStorageReloadJobState::Failed, std::memory_order_release);
+			return;
+		}
 		handle->state.store(TextureDirectStorageReloadJobState::CreatingResource, std::memory_order_release);
 
 		try {
@@ -933,10 +1002,16 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadConditionedCache
 			if (!TryBuildConditionedCacheResidentUpload(path, topMip, allowRTV, allowUAV, desc, range, clampedTopMip, error)) {
 				throw std::runtime_error(error.empty() ? "failed to build conditioned texture cache resident upload" : error);
 			}
+			if (handle->cancelRequested.load(std::memory_order_acquire)) {
+				throw std::runtime_error("conditioned texture cache DirectStorage upload was canceled before resource creation");
+			}
 
 			auto uploadedImage = PixelBuffer::CreateShared(desc);
 			if (!uploadedImage) {
 				throw std::runtime_error("failed to create resident PixelBuffer for conditioned texture cache DirectStorage upload");
+			}
+			if (handle->cancelRequested.load(std::memory_order_acquire)) {
+				throw std::runtime_error("conditioned texture cache DirectStorage upload was canceled before enqueue");
 			}
 
 			std::string directStorageMessage;
@@ -953,7 +1028,7 @@ std::shared_ptr<TextureDirectStorageReloadJobHandle> BeginUploadConditionedCache
 
 			{
 				std::scoped_lock lock(handle->mutex);
-				handle->targetTopMip = clampedTopMip;
+				handle->targetTopMip.store(clampedTopMip, std::memory_order_release);
 				handle->uploadedImage = std::move(uploadedImage);
 				handle->requestHandle = std::move(requestHandle);
 				handle->error.clear();
@@ -1233,21 +1308,93 @@ void TextureAsset::SetProcessingSettings(TextureProcessingSettings settings) {
 	InvalidateResidentImageForStreamingRequest();
 }
 
-void TextureAsset::ApplyStreamingSystemRequest(uint32_t topMip, uint64_t frameIndex) {
+TexturePendingDebugInfo TextureAsset::GetPendingDebugInfo() const {
+	TexturePendingDebugInfo info{};
+	info.hasUsableImage = HasUsableImage();
+	info.hasFinalImage = m_hasUploadedFinalImage;
+	info.hasPlaceholder = m_hasUploadedPlaceholder;
+	info.needsStreamingReload =
+		m_hasUploadedFinalImage &&
+		m_streamingState.enabled &&
+		HasStreamingSourceData() &&
+		m_streamingState.pendingTopMip != m_streamingState.residency.residentTopMip;
+	info.hasProcessingHandle = m_processingHandle != nullptr;
+	info.hasReloadHandle = m_reloadHandle != nullptr;
+	info.hasDirectStorageHandle = m_directStorageReloadHandle != nullptr;
+	info.streamingTextureID = m_streamingState.streamingTextureID;
+	info.requestedTopMip = m_streamingState.requestedTopMip;
+	info.pendingTopMip = m_streamingState.pendingTopMip;
+	info.residentTopMip = m_streamingState.residency.residentTopMip;
+	info.residentMipCount = m_streamingState.residency.residentMipCount;
+	info.totalMipCount = m_streamingState.residency.totalMipCount;
+	info.stateRevision = m_streamingState.stateRevision;
+	info.bindingRevision = m_streamingState.bindingRevision;
+	if (m_processingHandle) {
+		info.processingState = ToString(m_processingHandle->state.load(std::memory_order_acquire));
+	}
+	if (m_reloadHandle) {
+		info.reloadState = ToString(m_reloadHandle->state.load(std::memory_order_acquire));
+	}
+	if (m_directStorageReloadHandle) {
+		info.directStorageState = ToString(m_directStorageReloadHandle->state.load(std::memory_order_acquire));
+		info.directStorageTargetTopMip = m_directStorageReloadHandle->targetTopMip.load(std::memory_order_acquire);
+	}
+	return info;
+}
+
+bool TextureAsset::ApplyStreamingSystemRequest(uint32_t topMip, uint64_t frameIndex, bool forceResidencyChange) {
 	const uint32_t clampedTopMip = (std::min)(topMip, m_streamingState.residency.totalMipCount - 1u);
 	const bool requestChanged = m_streamingState.requestedTopMip != clampedTopMip;
-	const bool pendingChanged = m_streamingState.pendingTopMip != clampedTopMip;
 	const bool frameChanged = frameIndex != 0u && m_streamingState.lastSeenFrame != frameIndex;
-	if (!requestChanged && !pendingChanged && !frameChanged) {
-		return;
+	const bool requestIsResident = clampedTopMip >= m_streamingState.residency.residentTopMip;
+	bool uploadInProgress =
+		m_processingHandle != nullptr ||
+		m_reloadHandle != nullptr ||
+		m_directStorageReloadHandle != nullptr;
+	if (!requestIsResident && m_directStorageReloadHandle) {
+		const TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
+		const uint32_t targetTopMip = m_directStorageReloadHandle->targetTopMip.load(std::memory_order_acquire);
+		if (targetTopMip > clampedTopMip &&
+			(state == TextureDirectStorageReloadJobState::Queued ||
+			 state == TextureDirectStorageReloadJobState::CreatingResource)) {
+			m_directStorageReloadHandle->cancelRequested.store(true, std::memory_order_release);
+			spdlog::info(
+				"TextureAsset: canceled stale DirectStorage residency upload texture='{}' requestedTopMip={} staleTargetTopMip={} residentTopMip={} pendingTopMip={} state={}",
+				TextureTelemetryLabel(*this),
+				clampedTopMip,
+				targetTopMip,
+				m_streamingState.residency.residentTopMip,
+				m_streamingState.pendingTopMip,
+				ToString(state));
+			m_directStorageReloadHandle.reset();
+			uploadInProgress =
+				m_processingHandle != nullptr ||
+				m_reloadHandle != nullptr ||
+				m_directStorageReloadHandle != nullptr;
+		}
+	}
+	const bool shouldChangeResidency =
+		(forceResidencyChange && !uploadInProgress && m_streamingState.pendingTopMip != clampedTopMip) ||
+		(!requestIsResident && !uploadInProgress && m_streamingState.pendingTopMip != clampedTopMip);
+
+	if (!requestChanged && !shouldChangeResidency && !frameChanged) {
+		return false;
 	}
 
-	m_streamingState.requestedTopMip = clampedTopMip;
-	m_streamingState.pendingTopMip = clampedTopMip;
 	if (frameIndex != 0u) {
 		m_streamingState.lastSeenFrame = frameIndex;
 	}
-	BumpStreamingStateRevision();
+	if (requestChanged) {
+		m_streamingState.requestedTopMip = clampedTopMip;
+	}
+	if (shouldChangeResidency) {
+		m_streamingState.pendingTopMip = clampedTopMip;
+	}
+
+	if (requestChanged || shouldChangeResidency) {
+		BumpStreamingStateRevision();
+	}
+	return shouldChangeResidency;
 }
 
 void TextureAsset::EnableMipStreaming(bool enabled) {
@@ -1303,7 +1450,6 @@ void TextureAsset::NoteTextureSeen(uint64_t frameIndex) {
 		return;
 	}
 	m_streamingState.lastSeenFrame = frameIndex;
-	BumpStreamingStateRevision();
 }
 
 void TextureAsset::AdoptUploadedImage(std::shared_ptr<PixelBuffer> image) {
@@ -1334,7 +1480,8 @@ DirectStorageAsyncRequestHandle TextureAsset::QueueInitialDirectStorageUploadIfN
 	const uint32_t desiredResidentTopMip = GetDesiredResidentTopMip();
 	if (m_directStorageReloadHandle) {
 		const TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
-		if (m_directStorageReloadHandle->targetTopMip == desiredResidentTopMip &&
+		const uint32_t targetTopMip = m_directStorageReloadHandle->targetTopMip.load(std::memory_order_acquire);
+		if (targetTopMip == desiredResidentTopMip &&
 			(state == TextureDirectStorageReloadJobState::Queued ||
 			 state == TextureDirectStorageReloadJobState::CreatingResource ||
 			 state == TextureDirectStorageReloadJobState::Uploading ||
@@ -1348,6 +1495,7 @@ DirectStorageAsyncRequestHandle TextureAsset::QueueInitialDirectStorageUploadIfN
 			return {};
 		}
 
+		m_directStorageReloadHandle->cancelRequested.store(true, std::memory_order_release);
 		m_directStorageReloadHandle.reset();
 	}
 
@@ -1423,6 +1571,26 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 
 		if (m_directStorageReloadHandle) {
 			TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
+			const uint32_t handleTargetTopMip = m_directStorageReloadHandle->targetTopMip.load(std::memory_order_acquire);
+			if (handleTargetTopMip != desiredResidentTopMip &&
+				(state == TextureDirectStorageReloadJobState::Queued ||
+				 state == TextureDirectStorageReloadJobState::CreatingResource)) {
+				m_directStorageReloadHandle->cancelRequested.store(true, std::memory_order_release);
+				spdlog::info(
+					"TextureAsset: canceled obsolete DirectStorage upload before submit texture='{}' desiredTopMip={} staleTargetTopMip={} residentTopMip={} pendingTopMip={} state={} detail='{}'",
+					TextureTelemetryLabel(*this),
+					desiredResidentTopMip,
+					handleTargetTopMip,
+					m_streamingState.residency.residentTopMip,
+					m_streamingState.pendingTopMip,
+					ToString(state),
+					detail);
+				m_directStorageReloadHandle.reset();
+			}
+		}
+
+		if (m_directStorageReloadHandle) {
+			TextureDirectStorageReloadJobState state = m_directStorageReloadHandle->state.load(std::memory_order_acquire);
 			if (state == TextureDirectStorageReloadJobState::Uploading) {
 				const DirectStorageAsyncRequestStatus requestStatus = DirectStorageManager::GetInstance().PollRequest(m_directStorageReloadHandle->requestHandle);
 				if (requestStatus.state == DirectStorageAsyncRequestState::Ready) {
@@ -1442,7 +1610,8 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				return true;
 			}
 
-			if (m_directStorageReloadHandle->targetTopMip != desiredResidentTopMip) {
+			const uint32_t handleTargetTopMip = m_directStorageReloadHandle->targetTopMip.load(std::memory_order_acquire);
+			if (handleTargetTopMip != desiredResidentTopMip) {
 				if (state == TextureDirectStorageReloadJobState::Ready || state == TextureDirectStorageReloadJobState::Failed) {
 					m_directStorageReloadHandle.reset();
 				}
@@ -1462,6 +1631,12 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				}
 
 				AdoptUploadedImage(std::move(uploadedImage));
+				if (m_processingHandle) {
+					const TextureProcessingJobState processingState = m_processingHandle->state.load(std::memory_order_acquire);
+					if (processingState == TextureProcessingJobState::Ready || processingState == TextureProcessingJobState::Failed) {
+						m_processingHandle.reset();
+					}
+				}
 				RecordUploadPath(TextureUploadPathTelemetry::DirectStorageGpuDirect, detail);
 				if (!m_initialDataString.empty()) {
 					m_initialStorage = m_initialDataString;
@@ -1673,6 +1848,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 						promoteStreamingSourceToProcessedCache();
 					}
 					AdoptUploadedImage(std::move(uploadedImage));
+					m_processingHandle.reset();
 					RecordUploadPath(
 						loadedFromCache ? TextureUploadPathTelemetry::ProcessingCacheUpload : TextureUploadPathTelemetry::AsyncProcessingReadyUpload,
 						completedOnGpu
@@ -1732,6 +1908,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 					m_hasUploadedFinalImage = true;
 					m_hasUploadedPlaceholder = false;
 					BumpBindingRevision();
+					m_processingHandle.reset();
 					if (!m_initialDataString.empty()) {
 						m_initialStorage = m_initialDataString;
 					}
@@ -1762,6 +1939,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 						processingError.empty()
 							? "async processing failed; keeping placeholder texture"
 							: "async processing failed ('" + processingError + "'); keeping placeholder texture");
+					m_processingHandle.reset();
 					return;
 				}
 				const auto fallbackSourceData = BuildSourceData();
@@ -1784,6 +1962,7 @@ void TextureAsset::EnsureUploaded(const TextureFactory& factory) {
 				m_hasUploadedFinalImage = true;
 				m_hasUploadedPlaceholder = false;
 				BumpBindingRevision();
+				m_processingHandle.reset();
 				return;
 			}
 		}

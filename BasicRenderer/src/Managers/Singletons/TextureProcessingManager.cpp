@@ -804,10 +804,7 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 		std::scoped_lock lock(m_mutex);
 		auto existing = m_jobsByKey.find(key);
 		if (existing != m_jobsByKey.end()) {
-			if (auto handle = existing->second.lock()) {
-				return handle;
-			}
-			m_jobsByKey.erase(existing);
+			return existing->second;
 		}
 	}
 

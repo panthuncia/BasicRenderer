@@ -359,9 +359,9 @@ void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
 		}
 
 		const uint64_t previousRevision = texture->GetStreamingStateRevision();
-		texture->ApplyStreamingSystemRequest(requestedTopMip, frameIndex);
+		const bool needsUploadAdvance = texture->ApplyStreamingSystemRequest(requestedTopMip, frameIndex);
 		if (texture->GetStreamingStateRevision() != previousRevision) {
-			MarkTextureStreamingMetadataDirty(texture, true);
+			MarkTextureStreamingMetadataDirty(texture, needsUploadAdvance, "feedback");
 		}
 	}
 
@@ -392,9 +392,9 @@ void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
 			(std::max)(state.requestedTopMip, state.residency.residentTopMip + 1u));
 		if (coarsenedTopMip != state.requestedTopMip) {
 			const uint64_t previousRevision = texture->GetStreamingStateRevision();
-			texture->ApplyStreamingSystemRequest(coarsenedTopMip, frameIndex);
+			const bool needsUploadAdvance = texture->ApplyStreamingSystemRequest(coarsenedTopMip, frameIndex, true);
 			if (texture->GetStreamingStateRevision() != previousRevision) {
-				MarkTextureStreamingMetadataDirty(texture, true);
+				MarkTextureStreamingMetadataDirty(texture, needsUploadAdvance, "idle_coarsen");
 			}
 		}
 
@@ -531,7 +531,7 @@ void MaterialManager::MarkMaterialDirty(Material& material) {
 	}
 }
 
-void MaterialManager::MarkTextureStreamingMetadataDirty(const std::shared_ptr<TextureAsset>& texture, bool needsUploadAdvance) {
+void MaterialManager::MarkTextureStreamingMetadataDirty(const std::shared_ptr<TextureAsset>& texture, bool needsUploadAdvance, const char* reason) {
 	if (!texture) {
 		return;
 	}
@@ -548,15 +548,66 @@ void MaterialManager::MarkTextureStreamingMetadataDirty(const std::shared_ptr<Te
 	if (needsUploadAdvance && m_texturesNeedingUploadAdvanceSet.insert(streamingTextureID).second) {
 		m_texturesNeedingUploadAdvance.push_back(streamingTextureID);
 	}
+
+	RecordTextureDirtyReason(reason);
+}
+
+void MaterialManager::RecordTextureDirtyReason(const char* reason) {
+	if (std::strcmp(reason, "feedback") == 0) {
+		++m_textureDirtyReasonFeedback;
+	} else if (std::strcmp(reason, "idle_coarsen") == 0) {
+		++m_textureDirtyReasonIdleCoarsen;
+	} else if (std::strcmp(reason, "track_material") == 0) {
+		++m_textureDirtyReasonTrackMaterial;
+	} else if (std::strcmp(reason, "upload_state_revision") == 0) {
+		++m_textureDirtyReasonUploadStateRevision;
+	} else if (std::strcmp(reason, "upload_pending") == 0) {
+		++m_textureDirtyReasonUploadPending;
+	} else {
+		++m_textureDirtyReasonOther;
+	}
 }
 
 void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, TextureFactory& textureFactory) {
+	const auto updateStart = std::chrono::steady_clock::now();
+	const auto feedbackStart = std::chrono::steady_clock::now();
 	BeginTextureStreamingFeedbackFrame(frameIndex);
+	const auto feedbackEnd = std::chrono::steady_clock::now();
 
 	std::vector<uint32_t> texturesToAdvance;
 	texturesToAdvance.swap(m_texturesNeedingUploadAdvance);
 	m_texturesNeedingUploadAdvanceSet.clear();
+	const auto uploadStart = std::chrono::steady_clock::now();
+	std::size_t uploadAdvanceVisited = 0;
+	std::size_t uploadAdvanceAlive = 0;
+	std::size_t uploadAdvanceStillPending = 0;
+	std::size_t uploadAdvanceBindingChanged = 0;
+	std::size_t uploadAdvanceStateChanged = 0;
+	std::size_t pendingNoUsableImage = 0;
+	std::size_t pendingPlaceholder = 0;
+	std::size_t pendingStreamingReload = 0;
+	std::size_t pendingProcessingHandle = 0;
+	std::size_t pendingReloadHandle = 0;
+	std::size_t pendingDirectStorageHandle = 0;
+	struct PendingTextureSample {
+		uint32_t id = 0;
+		uint32_t requestedTopMip = 0;
+		uint32_t pendingTopMip = 0;
+		uint32_t residentTopMip = 0;
+		uint32_t directStorageTargetTopMip = 0;
+		uint32_t residentMipCount = 0;
+		uint32_t totalMipCount = 0;
+		uint64_t stateRevision = 0;
+		uint64_t bindingRevision = 0;
+		const char* processingState = "None";
+		const char* reloadState = "None";
+		const char* directStorageState = "None";
+		std::string name;
+	};
+	std::vector<PendingTextureSample> pendingSamples;
+	pendingSamples.reserve(8);
 	for (const uint32_t streamingTextureID : texturesToAdvance) {
+		++uploadAdvanceVisited;
 		auto it = m_streamingTexturesByID.find(streamingTextureID);
 		if (it == m_streamingTexturesByID.end()) {
 			continue;
@@ -568,25 +619,85 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, Texture
 			continue;
 		}
 
+		++uploadAdvanceAlive;
+		const uint64_t previousBindingRevision = texture->GetBindingRevision();
+		const uint64_t previousStreamingRevision = texture->GetStreamingStateRevision();
 		EnsureTextureUploadAdvanced(texture, textureFactory);
+		if (texture->GetBindingRevision() != previousBindingRevision) {
+			++uploadAdvanceBindingChanged;
+		}
+		if (texture->GetStreamingStateRevision() != previousStreamingRevision) {
+			++uploadAdvanceStateChanged;
+		}
+		if (texture->HasPendingUploadWork()) {
+			++uploadAdvanceStillPending;
+			const auto pending = texture->GetPendingDebugInfo();
+			if (!pending.hasUsableImage) {
+				++pendingNoUsableImage;
+			}
+			if (pending.hasPlaceholder) {
+				++pendingPlaceholder;
+			}
+			if (pending.needsStreamingReload) {
+				++pendingStreamingReload;
+			}
+			if (pending.hasProcessingHandle) {
+				++pendingProcessingHandle;
+			}
+			if (pending.hasReloadHandle) {
+				++pendingReloadHandle;
+			}
+			if (pending.hasDirectStorageHandle) {
+				++pendingDirectStorageHandle;
+			}
+			if (pendingSamples.size() < 8) {
+				pendingSamples.push_back(PendingTextureSample{
+					.id = pending.streamingTextureID,
+					.requestedTopMip = pending.requestedTopMip,
+					.pendingTopMip = pending.pendingTopMip,
+					.residentTopMip = pending.residentTopMip,
+					.directStorageTargetTopMip = pending.directStorageTargetTopMip,
+					.residentMipCount = pending.residentMipCount,
+					.totalMipCount = pending.totalMipCount,
+					.stateRevision = pending.stateRevision,
+					.bindingRevision = pending.bindingRevision,
+					.processingState = pending.processingState,
+					.reloadState = pending.reloadState,
+					.directStorageState = pending.directStorageState,
+					.name = texture->DebugName()
+				});
+			}
+		}
 	}
+	const auto uploadEnd = std::chrono::steady_clock::now();
 
 	std::vector<uint32_t> dirtyMaterialIDs;
 	dirtyMaterialIDs.swap(m_dirtyMaterialIDs);
 	m_dirtyMaterialIDSet.clear();
+	const auto dirtyMaterialStart = std::chrono::steady_clock::now();
+	std::size_t dirtyMaterialsVisited = 0;
+	std::size_t dirtyMaterialsFlushed = 0;
 	for (const uint32_t materialID : dirtyMaterialIDs) {
+		++dirtyMaterialsVisited;
 		auto materialIt = m_activeMaterialsByID.find(materialID);
 		if (materialIt == m_activeMaterialsByID.end() || materialIt->second == nullptr) {
 			continue;
 		}
 
 		FlushDirtyMaterial(*materialIt->second, &textureFactory);
+		++dirtyMaterialsFlushed;
 	}
+	const auto dirtyMaterialEnd = std::chrono::steady_clock::now();
 
 	std::vector<uint32_t> dirtyTextureIDs;
 	dirtyTextureIDs.swap(m_dirtyTextureStreamingIDs);
 	m_dirtyTextureStreamingIDSet.clear();
+	const auto dirtyTextureStart = std::chrono::steady_clock::now();
+	std::size_t dirtyTextureMetadataVisited = 0;
+	std::size_t dirtyTextureMetadataAlive = 0;
+	std::size_t dirtyTextureMetadataUpdated = 0;
 	for (const uint32_t streamingTextureID : dirtyTextureIDs) {
+		++dirtyTextureMetadataVisited;
 		auto it = m_streamingTexturesByID.find(streamingTextureID);
 		if (it == m_streamingTexturesByID.end()) {
 			continue;
@@ -599,7 +710,80 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, Texture
 			continue;
 		}
 
+		++dirtyTextureMetadataAlive;
+		const auto previousUploadedRevision = m_textureStreamingMetadataRevisions.find(streamingTextureID);
+		const uint64_t previousRevision = previousUploadedRevision != m_textureStreamingMetadataRevisions.end()
+			? previousUploadedRevision->second
+			: std::numeric_limits<uint64_t>::max();
 		FlushDirtyTextureMetadata(texture);
+		if (m_textureStreamingMetadataRevisions[streamingTextureID] != previousRevision) {
+			++dirtyTextureMetadataUpdated;
+		}
+	}
+	const auto dirtyTextureEnd = std::chrono::steady_clock::now();
+
+	const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+		std::chrono::steady_clock::now() - updateStart).count();
+	const auto feedbackUs = std::chrono::duration_cast<std::chrono::microseconds>(feedbackEnd - feedbackStart).count();
+	const auto uploadUs = std::chrono::duration_cast<std::chrono::microseconds>(uploadEnd - uploadStart).count();
+	const auto dirtyMaterialUs = std::chrono::duration_cast<std::chrono::microseconds>(dirtyMaterialEnd - dirtyMaterialStart).count();
+	const auto dirtyTextureUs = std::chrono::duration_cast<std::chrono::microseconds>(dirtyTextureEnd - dirtyTextureStart).count();
+	const auto now = std::chrono::steady_clock::now();
+	const bool hadWork =
+		uploadAdvanceVisited != 0 ||
+		dirtyMaterialsVisited != 0 ||
+		dirtyTextureMetadataVisited != 0 ||
+		elapsedUs >= 2000;
+	if (hadWork && now - m_lastMaterialUpdateStatsLog >= std::chrono::seconds(1)) {
+		m_lastMaterialUpdateStatsLog = now;
+		spdlog::info(
+			"MaterialManager::ProcessPendingMaterialUpdates stats: elapsed_us={} feedback_us={} upload_us={} dirtyMaterial_us={} dirtyTexture_us={} uploadAdvance visited={} alive={} stillPending={} bindingChanged={} stateChanged={} pending(noImage={} placeholder={} streamingReload={} processing={} reload={} directStorage={}) dirtyMaterials visited={} flushed={} dirtyTextureMetadata visited={} alive={} updated={} activeMaterials={} activeStreamingTextures={} dirtyReasons(feedback={} idle={} track={} uploadState={} uploadPending={} other={})",
+			elapsedUs,
+			feedbackUs,
+			uploadUs,
+			dirtyMaterialUs,
+			dirtyTextureUs,
+			uploadAdvanceVisited,
+			uploadAdvanceAlive,
+			uploadAdvanceStillPending,
+			uploadAdvanceBindingChanged,
+			uploadAdvanceStateChanged,
+			pendingNoUsableImage,
+			pendingPlaceholder,
+			pendingStreamingReload,
+			pendingProcessingHandle,
+			pendingReloadHandle,
+			pendingDirectStorageHandle,
+			dirtyMaterialsVisited,
+			dirtyMaterialsFlushed,
+			dirtyTextureMetadataVisited,
+			dirtyTextureMetadataAlive,
+			dirtyTextureMetadataUpdated,
+			m_activeMaterialsByID.size(),
+			m_streamingTexturesByID.size(),
+			m_textureDirtyReasonFeedback,
+			m_textureDirtyReasonIdleCoarsen,
+			m_textureDirtyReasonTrackMaterial,
+			m_textureDirtyReasonUploadStateRevision,
+			m_textureDirtyReasonUploadPending,
+			m_textureDirtyReasonOther);
+		for (const auto& sample : pendingSamples) {
+			spdlog::info(
+				"MaterialManager::ProcessPendingMaterialUpdates pendingTexture: id={} name='{}' requestedTopMip={} pendingTopMip={} residentTopMip={} directStorageTargetTopMip={} residentMipCount={} totalMipCount={} stateRevision={} bindingRevision={} processing={} reload={} directStorage={}",
+				sample.id,
+				sample.name,
+				sample.requestedTopMip,
+				sample.pendingTopMip,
+				sample.residentTopMip,
+				sample.directStorageTargetTopMip,
+				sample.residentMipCount,
+				sample.totalMipCount,
+				sample.stateRevision,
+				sample.bindingRevision,
+				sample.processingState,
+				sample.reloadState,
+				sample.directStorageState);
+		}
 	}
 }
 
@@ -675,10 +859,13 @@ void MaterialManager::EnsureTextureUploadAdvanced(const std::shared_ptr<TextureA
 
 	const uint32_t streamingTextureID = texture->GetStreamingTextureID();
 	if (texture->GetStreamingStateRevision() != previousStreamingRevision) {
-		MarkTextureStreamingMetadataDirty(texture, false);
+		MarkTextureStreamingMetadataDirty(texture, false, "upload_state_revision");
 	}
 	if (texture->HasPendingUploadWork()) {
-		MarkTextureStreamingMetadataDirty(texture, true);
+		if (m_texturesNeedingUploadAdvanceSet.insert(streamingTextureID).second) {
+			m_texturesNeedingUploadAdvance.push_back(streamingTextureID);
+		}
+		RecordTextureDirtyReason("upload_pending");
 	}
 	if (texture->GetBindingRevision() != previousBindingRevision) {
 		auto materialIdsIt = m_streamingTextureMaterialIDs.find(streamingTextureID);
@@ -824,7 +1011,7 @@ void MaterialManager::TrackMaterialTextureAssets(const Material& material, int d
 			streamingTextureIDs.push_back(streamingTextureID);
 			m_streamingTexturesByID[streamingTextureID] = texture;
 			m_streamingTextureMaterialIDs[streamingTextureID].insert(materialID);
-			MarkTextureStreamingMetadataDirty(texture, true);
+			MarkTextureStreamingMetadataDirty(texture, true, "track_material");
 		}
 		m_materialStreamingTextureIDs[materialID] = std::move(streamingTextureIDs);
 		return;

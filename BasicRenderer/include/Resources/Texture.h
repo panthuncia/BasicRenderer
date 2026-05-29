@@ -15,6 +15,7 @@
 
 struct RenderContext;
 struct TextureProcessingJobHandle;
+enum class TextureProcessingJobState : uint8_t;
 
 enum class TextureSemantic : uint8_t {
     Unknown = 0,
@@ -147,6 +148,28 @@ struct TextureStreamingState {
     uint64_t bindingRevision = 0;
 };
 
+struct TexturePendingDebugInfo {
+    bool hasUsableImage = false;
+    bool hasFinalImage = false;
+    bool hasPlaceholder = false;
+    bool needsStreamingReload = false;
+    bool hasProcessingHandle = false;
+    bool hasReloadHandle = false;
+    bool hasDirectStorageHandle = false;
+    uint32_t streamingTextureID = 0;
+    uint32_t requestedTopMip = 0;
+    uint32_t pendingTopMip = 0;
+    uint32_t residentTopMip = 0;
+    uint32_t directStorageTargetTopMip = 0;
+    uint32_t residentMipCount = 0;
+    uint32_t totalMipCount = 0;
+    uint64_t stateRevision = 0;
+    uint64_t bindingRevision = 0;
+    const char* processingState = "None";
+    const char* reloadState = "None";
+    const char* directStorageState = "None";
+};
+
 enum class TextureReloadJobState : uint8_t {
     Queued = 0,
     BuildingSourceData,
@@ -175,8 +198,9 @@ enum class TextureDirectStorageReloadJobState : uint8_t {
 
 struct TextureDirectStorageReloadJobHandle {
     std::atomic<TextureDirectStorageReloadJobState> state = TextureDirectStorageReloadJobState::Queued;
+    std::atomic_bool cancelRequested = false;
     std::mutex mutex;
-    uint32_t targetTopMip = 0;
+    std::atomic<uint32_t> targetTopMip = 0;
     std::shared_ptr<PixelBuffer> uploadedImage;
     DirectStorageAsyncRequestHandle requestHandle;
     std::string error;
@@ -264,16 +288,19 @@ public:
             m_streamingState.enabled &&
             HasStreamingSourceData() &&
             m_streamingState.pendingTopMip != m_streamingState.residency.residentTopMip;
-        return !HasUsableImage() ||
-            needsStreamingReload ||
-            m_hasUploadedPlaceholder ||
+        const bool hasAsyncHandle =
             m_processingHandle != nullptr ||
             m_reloadHandle != nullptr ||
             m_directStorageReloadHandle != nullptr;
+        return !HasUsableImage() ||
+            needsStreamingReload ||
+            hasAsyncHandle;
     }
+    TexturePendingDebugInfo GetPendingDebugInfo() const;
+    const std::string& DebugName() const { return m_name; }
     uint32_t GetFullMip0Width() const { return m_sourceFullWidth != 0u ? m_sourceFullWidth : GetWidth(); }
     uint32_t GetFullMip0Height() const { return m_sourceFullHeight != 0u ? m_sourceFullHeight : GetHeight(); }
-    void ApplyStreamingSystemRequest(uint32_t topMip, uint64_t frameIndex = 0);
+    bool ApplyStreamingSystemRequest(uint32_t topMip, uint64_t frameIndex = 0, bool forceResidencyChange = false);
     void EnableMipStreaming(bool enabled);
 
     void AdoptUploadedImage(std::shared_ptr<PixelBuffer> image);

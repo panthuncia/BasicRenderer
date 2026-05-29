@@ -64,5 +64,5 @@ private:
 		const TextureFileMeta& meta) const;
 
 	std::mutex m_mutex;
-	std::unordered_map<std::string, std::weak_ptr<TextureProcessingJobHandle>> m_jobsByKey;
+	std::unordered_map<std::string, std::shared_ptr<TextureProcessingJobHandle>> m_jobsByKey;
 };
