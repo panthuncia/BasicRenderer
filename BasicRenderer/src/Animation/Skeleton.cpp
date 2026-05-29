@@ -9,6 +9,22 @@
 
 #include "Scene/Components.h"
 
+namespace {
+    bool MatrixNearlyEqual(DirectX::XMMATRIX lhs, DirectX::XMMATRIX rhs, float tolerance = 1.0e-5f)
+    {
+        for (uint32_t row = 0; row < 4; ++row) {
+            const auto diff = DirectX::XMVectorAbs(DirectX::XMVectorSubtract(lhs.r[row], rhs.r[row]));
+            if (DirectX::XMVectorGetX(diff) > tolerance ||
+                DirectX::XMVectorGetY(diff) > tolerance ||
+                DirectX::XMVectorGetZ(diff) > tolerance ||
+                DirectX::XMVectorGetW(diff) > tolerance) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
 Skeleton::Matrix Skeleton::ComposeTRS_(const Components::Position& p,
     const Components::Rotation& r,
     const Components::Scale& s)
@@ -625,6 +641,34 @@ void Skeleton::SetExternalPose(std::span<const Matrix> boneMatrices, float conse
 
     EnsureInstanceBuffersSized_();
     const auto copyCount = (std::min)(m_boneMatrices.size(), boneMatrices.size());
+    bool changed = !m_externalPose ||
+        std::abs(m_currentAnimationConservativeBoundsScale - conservativeBoundsScale) > 1.0e-5f ||
+        boneMatrices.size() != m_boneMatrices.size();
+
+    if (!changed) {
+        for (size_t i = 0; i < copyCount; ++i) {
+            if (!MatrixNearlyEqual(m_boneMatrices[i], boneMatrices[i])) {
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    if (!changed && copyCount < m_boneMatrices.size()) {
+        const auto identity = DirectX::XMMatrixIdentity();
+        for (size_t i = copyCount; i < m_boneMatrices.size(); ++i) {
+            if (!MatrixNearlyEqual(m_boneMatrices[i], identity)) {
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    m_externalPose = true;
+    if (!changed) {
+        return;
+    }
+
     for (size_t i = 0; i < copyCount; ++i) {
         m_boneMatrices[i] = boneMatrices[i];
     }
@@ -632,7 +676,6 @@ void Skeleton::SetExternalPose(std::span<const Matrix> boneMatrices, float conse
         m_boneMatrices[i] = DirectX::XMMatrixIdentity();
     }
 
-    m_externalPose = true;
     m_currentAnimationConservativeBoundsScale = conservativeBoundsScale;
     m_poseDirty = true;
 }

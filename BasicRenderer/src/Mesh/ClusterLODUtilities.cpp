@@ -5616,7 +5616,12 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.recomputeGroupNormals = recomputeGroupNormals;
 		clodBuildParallelConfig parallelConfig{};
 		parallelConfig.iteration_callback = &ClodBuildCallbacks::Iterate;
-		const clodBuildParallelConfig* parallelConfigPtr = TaskSchedulerManager::GetInstance().GetNumTaskThreads() > 1u ? &parallelConfig : nullptr;
+		const bool hasSkinningStream =
+			skinningVertices != nullptr &&
+			skinningVertexSize >= sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(PackedSkinningInfluences) &&
+			!skinningVertices->empty();
+		const clodBuildParallelConfig* parallelConfigPtr =
+			(!hasSkinningStream && TaskSchedulerManager::GetInstance().GetNumTaskThreads() > 1u) ? &parallelConfig : nullptr;
 
 		clodBuildEx(config, mesh, &captureContext, &ClodBuildCallbacks::Output, parallelConfigPtr);
 

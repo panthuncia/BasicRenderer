@@ -530,6 +530,16 @@ void Renderer::RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapsh
                 continue;
             }
 
+            const auto instanceKey = reinterpret_cast<uint64_t>(meshInstance.get());
+            const bool newExternalInstance = m_externalRegisteredMeshInstances.insert(instanceKey).second;
+            if (newExternalInstance && meshInstance->HasSkin() && m_pSkeletonManager) {
+                meshInstance->SetCurrentSkeletonManager(m_pSkeletonManager.get());
+                auto skinInst = meshInstance->GetSkin();
+                m_pSkeletonManager->AcquireSkinningInstance(skinInst);
+                meshInstance->SetSkinningInstanceSlot(skinInst->GetSkinningInstanceSlot());
+                meshInstance->SyncSkinningStateFromSkeleton();
+            }
+
             if (m_externalRegisteredMeshes.insert(mesh->GetGlobalID()).second) {
                 m_pMaterialManager->IncrementMaterialUsageCount(*mesh->material);
                 const auto materialDataIndex = m_pMaterialManager->GetMaterialSlot(mesh->material->GetMaterialID());
@@ -553,8 +563,7 @@ void Renderer::RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapsh
                 }
             }
 
-            const auto instanceKey = reinterpret_cast<uint64_t>(meshInstance.get());
-            if (m_externalRegisteredMeshInstances.insert(instanceKey).second) {
+            if (newExternalInstance) {
                 m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
             }
         }
@@ -1898,7 +1907,9 @@ void Renderer::Update(float elapsedSeconds) {
     }
 
     runCapturedStage("AnimationUpdate", [&]() {
-        if (!m_externalSceneMode) {
+        if (m_externalSceneMode) {
+            m_pSkeletonManager->UpdateAllDirtyInstances();
+        } else {
             RunAnimationUpdateStage(elapsedSeconds);
         }
     });

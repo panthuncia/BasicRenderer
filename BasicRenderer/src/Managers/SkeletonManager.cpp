@@ -8,7 +8,68 @@
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 
+#include <algorithm>
 #include <DirectXMath.h>
+#include <vector>
+
+namespace {
+
+struct MatrixUploadSpan {
+    size_t offsetBytes = 0;
+    const DirectX::XMMATRIX* data = nullptr;
+    uint32_t matrixCount = 0;
+};
+
+void UploadMatrixSpans(const std::shared_ptr<DynamicBuffer>& target, std::vector<MatrixUploadSpan>& spans) {
+    std::erase_if(spans, [](const MatrixUploadSpan& span) {
+        return span.data == nullptr || span.matrixCount == 0;
+    });
+    if (spans.empty()) {
+        return;
+    }
+
+    std::sort(spans.begin(), spans.end(), [](const MatrixUploadSpan& a, const MatrixUploadSpan& b) {
+        return a.offsetBytes < b.offsetBytes;
+    });
+
+    std::vector<DirectX::XMMATRIX> staging;
+    for (size_t groupStart = 0; groupStart < spans.size();) {
+        size_t groupEnd = groupStart + 1;
+        size_t groupEndOffset = spans[groupStart].offsetBytes +
+            static_cast<size_t>(spans[groupStart].matrixCount) * sizeof(DirectX::XMMATRIX);
+
+        while (groupEnd < spans.size() && spans[groupEnd].offsetBytes == groupEndOffset) {
+            groupEndOffset += static_cast<size_t>(spans[groupEnd].matrixCount) * sizeof(DirectX::XMMATRIX);
+            ++groupEnd;
+        }
+
+        const auto& first = spans[groupStart];
+        if (groupEnd == groupStart + 1) {
+            BUFFER_UPLOAD(first.data,
+                static_cast<size_t>(first.matrixCount) * sizeof(DirectX::XMMATRIX),
+                rg::runtime::UploadTarget::FromShared(target),
+                first.offsetBytes);
+        }
+        else {
+            const size_t matrixCount = (groupEndOffset - first.offsetBytes) / sizeof(DirectX::XMMATRIX);
+            staging.clear();
+            staging.reserve(matrixCount);
+            for (size_t i = groupStart; i < groupEnd; ++i) {
+                const auto& span = spans[i];
+                staging.insert(staging.end(), span.data, span.data + span.matrixCount);
+            }
+
+            BUFFER_UPLOAD(staging.data(),
+                staging.size() * sizeof(DirectX::XMMATRIX),
+                rg::runtime::UploadTarget::FromShared(target),
+                first.offsetBytes);
+        }
+
+        groupStart = groupEnd;
+    }
+}
+
+} // namespace
 
 static uint32_t BytesToMatrixIndex(size_t byteOffset) {
     return static_cast<uint32_t>(byteOffset / sizeof(DirectX::XMMATRIX));
@@ -189,7 +250,8 @@ void SkeletonManager::UpdateInstanceTransforms(Skeleton& inst) {
         rg::runtime::UploadTarget::FromShared(m_inverseSkinMatrices),
         rec.inverseSkinView->GetOffset());
 
-    //rec.dirty = false;
+    rec.dirty = false;
+    inst.ClearPoseDirty();
 }
 
 void SkeletonManager::RebuildIterationList() {
@@ -219,13 +281,68 @@ void SkeletonManager::UpdateAllDirtyInstances() {
         RebuildIterationList();
     }
 
-    TaskSchedulerManager::GetInstance().ParallelFor("SkeletonUpload", m_iterationList.size(),
-        [this](size_t i) {
-            auto& entry = m_iterationList[i];
-            if (entry.record->dirty) {
-                UpdateInstanceTransforms(*entry.skeleton);
+    struct PendingSkeletonUpload {
+        Skeleton* skeleton = nullptr;
+        InstanceRecord* record = nullptr;
+        std::vector<DirectX::XMMATRIX> inverseSkinMatrices;
+    };
+
+    std::vector<PendingSkeletonUpload> pending;
+    pending.reserve(m_iterationList.size());
+    for (auto& entry : m_iterationList) {
+        if (!entry.record->transformsView) {
+            continue;
+        }
+        if (entry.record->dirty || entry.skeleton->IsPoseDirty()) {
+            pending.push_back({ entry.skeleton, entry.record, {} });
+        }
+    }
+
+    if (pending.empty()) {
+        return;
+    }
+
+    TaskSchedulerManager::GetInstance().ParallelFor("SkeletonUpload", pending.size(),
+        [&pending](size_t i) {
+            auto& upload = pending[i];
+            auto& rec = *upload.record;
+            upload.inverseSkinMatrices.resize(rec.boneCount);
+
+            const auto boneMatrices = upload.skeleton->GetBoneMatrices();
+            const auto inverseBindMatrices = rec.base->GetInverseBindMatrices();
+            for (uint32_t boneIndex = 0; boneIndex < rec.boneCount; ++boneIndex) {
+                upload.inverseSkinMatrices[boneIndex] = DirectX::XMMatrixInverse(
+                    nullptr,
+                    DirectX::XMMatrixMultiply(boneMatrices[boneIndex], inverseBindMatrices[boneIndex]));
             }
         });
+
+    std::vector<MatrixUploadSpan> boneMatrixSpans;
+    std::vector<MatrixUploadSpan> inverseSkinSpans;
+    boneMatrixSpans.reserve(pending.size());
+    inverseSkinSpans.reserve(pending.size());
+
+    for (auto& upload : pending) {
+        auto& rec = *upload.record;
+        boneMatrixSpans.push_back({
+            rec.transformsView->GetOffset(),
+            upload.skeleton->GetBoneMatrices().data(),
+            rec.boneCount
+        });
+        inverseSkinSpans.push_back({
+            rec.inverseSkinView->GetOffset(),
+            upload.inverseSkinMatrices.data(),
+            rec.boneCount
+        });
+    }
+
+    UploadMatrixSpans(m_boneTransforms, boneMatrixSpans);
+    UploadMatrixSpans(m_inverseSkinMatrices, inverseSkinSpans);
+
+    for (auto& upload : pending) {
+        upload.record->dirty = false;
+        upload.skeleton->ClearPoseDirty();
+    }
 }
 
 std::shared_ptr<Resource> SkeletonManager::ProvideResource(ResourceIdentifier const& key) {

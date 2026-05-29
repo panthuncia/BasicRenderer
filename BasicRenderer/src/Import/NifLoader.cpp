@@ -891,7 +891,7 @@ bool WritePayloadCache(
     }
 
     const std::uint32_t magic = 0x50524153u; // SARP
-    const std::uint32_t version = 1u;
+    const std::uint32_t version = 2u;
     writer.Pod(magic);
     writer.Pod(version);
     writer.String(normalizedCacheKey);
@@ -911,6 +911,10 @@ bool WritePayloadCache(
         }
         WriteMaterialDescription(writer, mesh->material->ToCacheDescription());
         WritePrebuilt(writer, mesh->GetClusterLODPrebuiltData());
+        const auto& meshCB = mesh->GetPerMeshCBData();
+        writer.Pod(meshCB.vertexFlags);
+        writer.Pod(meshCB.vertexByteSize);
+        writer.Pod(meshCB.skinningVertexByteSize);
         WriteStringVector(writer, mesh->GetSkinJointNames());
         writer.PodVector(mesh->GetSkinJointSourceIndices());
         const auto& inverseBinds = mesh->GetSkinInverseBindMatrices();
@@ -974,7 +978,7 @@ std::optional<USDLoader::ImportedAssetPayload> TryLoadPayloadCache(
     std::string filePathHash;
     std::string fileContentHash;
     if (!reader.Pod(magic) || !reader.Pod(version) ||
-        magic != 0x50524153u || version != 1u ||
+        magic != 0x50524153u || version != 2u ||
         !reader.String(fileKey) || !reader.String(filePathHash) || !reader.String(fileContentHash) ||
         fileKey != normalizedCacheKey || filePathHash != pathHash || fileContentHash != contentHash) {
         return std::nullopt;
@@ -992,19 +996,25 @@ std::optional<USDLoader::ImportedAssetPayload> TryLoadPayloadCache(
         if (!ReadMaterialDescription(reader, desc) || !ReadPrebuilt(reader, prebuilt)) {
             return std::nullopt;
         }
+        std::uint32_t vertexFlags = 0;
+        std::uint32_t vertexByteSize = 0;
+        std::uint32_t skinningVertexByteSize = 0;
+        if (!reader.Pod(vertexFlags) || !reader.Pod(vertexByteSize) || !reader.Pod(skinningVertexByteSize)) {
+            return std::nullopt;
+        }
         auto material = Material::CreateShared(desc);
         auto vertices = std::make_unique<std::vector<std::byte>>();
         std::vector<UINT32> indices;
         std::vector<MeshUvSetData> uvSets;
         auto mesh = Mesh::CreateSharedFromIngest(
             std::move(vertices),
-            0,
+            vertexByteSize,
             std::nullopt,
-            0,
+            skinningVertexByteSize,
             std::move(indices),
             std::move(uvSets),
             material,
-            0,
+            vertexFlags,
             std::move(prebuilt),
             MeshCpuDataPolicy::ReleaseAfterUpload);
         if (!mesh) {

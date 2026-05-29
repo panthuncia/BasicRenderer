@@ -802,20 +802,22 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
                 entityState.meshGeneration = renderable.meshInstances.generation;
             }
 
-            if (renderable.skinned) {
-                dst.add<Components::Skinned>();
-            } else {
-                dst.remove<Components::Skinned>();
-            }
-            if (HasSkinningPassEligibleMeshes(&renderable.meshInstances)) {
-                dst.add<Components::SkinningPassEligible>();
-            } else {
-                dst.remove<Components::SkinningPassEligible>();
-            }
-            if (renderable.skipShadowPass) {
-                dst.add<Components::SkipShadowPass>();
-            } else {
-                dst.remove<Components::SkipShadowPass>();
+            if (isNew || meshChanged) {
+                if (renderable.skinned) {
+                    dst.add<Components::Skinned>();
+                } else {
+                    dst.remove<Components::Skinned>();
+                }
+                if (HasSkinningPassEligibleMeshes(&renderable.meshInstances)) {
+                    dst.add<Components::SkinningPassEligible>();
+                } else {
+                    dst.remove<Components::SkinningPassEligible>();
+                }
+                if (renderable.skipShadowPass) {
+                    dst.add<Components::SkipShadowPass>();
+                } else {
+                    dst.remove<Components::SkipShadowPass>();
+                }
             }
         }
     }
