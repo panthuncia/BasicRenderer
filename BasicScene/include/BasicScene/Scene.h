@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <ctime>
+#include <cstddef>
 #include <functional>
 #include <flecs.h>
 #include <atomic>
@@ -14,6 +15,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 
 class DynamicGloballyIndexedResource;
+class Material;
 
 class Scene {
 public:
@@ -37,6 +39,7 @@ public:
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
     void Activate(ManagerInterface managerInterface);
     void Deactivate();
+    bool SetMeshInstanceMaterialOverride(flecs::entity entity, std::size_t meshInstanceIndex, std::shared_ptr<Material> material);
 
     void ProcessEntitySkins(bool overrideExistingSkins = false);
     std::shared_ptr<Scene> Clone() const;

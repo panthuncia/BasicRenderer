@@ -523,8 +523,10 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	uint32_t bitsToAllocate = mesh->GetMesh()->GetCLodMeshletCount();
 	m_activeMeshletCount += bitsToAllocate;
 
-	uint32_t perMeshIndex = static_cast<uint32_t>(
-		mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+	auto& overridePerMeshView = mesh->GetPerMeshOverrideBufferView();
+	uint32_t perMeshIndex = overridePerMeshView
+		? static_cast<uint32_t>(overridePerMeshView->GetOffset() / sizeof(PerMeshCB))
+		: static_cast<uint32_t>(mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferIndex(perMeshIndex);
 
 	auto meshPtr = mesh->GetMesh().get();
@@ -2085,6 +2087,17 @@ void MeshManager::GetCLodRayTracingResidencySnapshot(CLodRayTracingResidencySnap
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {
 	view->GetBuffer()->UpdateView(view.get(), &data);
+}
+
+std::unique_ptr<BufferView> MeshManager::AllocatePerMeshOverrideBuffer(const PerMeshCB& data) {
+	return m_perMeshBuffers->AddData(&data, sizeof(PerMeshCB), sizeof(PerMeshCB));
+}
+
+void MeshManager::ReleasePerMeshOverrideBuffer(std::unique_ptr<BufferView>& view) {
+	if (view != nullptr) {
+		m_perMeshBuffers->Deallocate(view.get());
+		view.reset();
+	}
 }
 
 void MeshManager::UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data) {

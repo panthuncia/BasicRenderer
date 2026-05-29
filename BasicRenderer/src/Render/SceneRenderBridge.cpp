@@ -54,10 +54,12 @@ bool operator==(const LightResourceSignature& lhs, const LightResourceSignature&
 
 uint64_t BuildMeshInstanceKey(const std::shared_ptr<MeshInstance>& meshInstance) {
     const auto mesh = meshInstance->GetMesh();
+    const auto material = meshInstance->GetEffectiveMaterial();
     const auto instanceKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(meshInstance.get()));
     const auto meshKey = mesh ? mesh->GetGlobalID() : 0ull;
-    const auto materialKey = mesh ? static_cast<uint64_t>(mesh->material->Technique().compileFlags) : 0ull;
-    return instanceKey ^ (meshKey << 1) ^ (materialKey << 33);
+    const auto materialKey = material ? static_cast<uint64_t>(material->GetMaterialID()) : 0ull;
+    const auto perMeshKey = static_cast<uint64_t>(meshInstance->GetPerMeshBufferIndex());
+    return instanceKey ^ (meshKey << 1) ^ (materialKey << 33) ^ (perMeshKey << 49);
 }
 
 RenderableSignature BuildRenderableSignature(const Components::MeshInstances* meshInstances) {
@@ -100,7 +102,8 @@ Components::PerPassMeshes BuildPerPassMeshes(const Components::MeshInstances* me
 
     for (const auto& meshInstance : meshInstances->meshInstances) {
         const auto mesh = meshInstance->GetMesh();
-        ForEachMeshRenderPhase(*mesh, [&](const RenderPhase& pass) {
+        const auto material = meshInstance->GetEffectiveMaterial();
+        ForEachMeshRenderPhase(*mesh, *(material ? material : mesh->material), [&](const RenderPhase& pass) {
             perPassMeshes.meshesByPass[pass.hash].push_back(meshInstance);
         });
     }
@@ -170,7 +173,9 @@ void SyncPassMembership(flecs::entity dst, const Components::MeshInstances* mesh
     const auto& renderPhaseEntities = RendererECSManager::GetInstance().GetRenderPhaseEntities();
     std::unordered_set<uint64_t> passHashes;
     for (const auto& meshInstance : meshInstances->meshInstances) {
-        ForEachMeshRenderPhase(*meshInstance->GetMesh(), [&](const RenderPhase& pass) {
+        const auto mesh = meshInstance->GetMesh();
+        const auto material = meshInstance->GetEffectiveMaterial();
+        ForEachMeshRenderPhase(*mesh, *(material ? material : mesh->material), [&](const RenderPhase& pass) {
             passHashes.insert(pass.hash);
         });
     }

@@ -526,7 +526,8 @@ void Renderer::RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapsh
             }
 
             auto mesh = meshInstance->GetMesh();
-            if (!mesh || !mesh->material) {
+            auto material = meshInstance->GetEffectiveMaterial();
+            if (!mesh || !material) {
                 continue;
             }
 
@@ -541,11 +542,11 @@ void Renderer::RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapsh
             }
 
             if (m_externalRegisteredMeshes.insert(mesh->GetGlobalID()).second) {
-                m_pMaterialManager->IncrementMaterialUsageCount(*mesh->material);
-                const auto materialDataIndex = m_pMaterialManager->GetMaterialSlot(mesh->material->GetMaterialID());
+                m_pMaterialManager->IncrementMaterialUsageCount(*material);
+                const auto materialDataIndex = m_pMaterialManager->GetMaterialSlot(material->GetMaterialID());
                 mesh->SetMaterialDataIndex(materialDataIndex);
 
-                auto rasterFlags = mesh->material->Technique().rasterFlags;
+                auto rasterFlags = material->Technique().rasterFlags;
                 if ((mesh->GetPerMeshCBData().vertexFlags & VERTEX_SKINNED) != 0u) {
                     rasterFlags |= MaterialRasterFlagsSkinned;
                 }
@@ -554,13 +555,9 @@ void Renderer::RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapsh
 
                 m_pMeshManager->AddMesh(mesh, useMeshletReorderedVertices);
 
-                for (const auto& pass : mesh->material->Technique().passes) {
-                    m_pIndirectCommandBufferManager->RegisterWorkload({
-                        mesh->material->Technique().compileFlags,
-                        pass,
-                        false
-                    });
-                }
+                ForEachMeshDrawWorkload(*mesh, *material, [&](const DrawWorkloadKey& workload) {
+                    m_pIndirectCommandBufferManager->RegisterWorkload(workload);
+                });
             }
 
             if (newExternalInstance) {

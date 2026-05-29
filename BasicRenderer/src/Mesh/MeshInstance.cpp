@@ -1,6 +1,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/MeshManager.h"
 #include "Managers/SkeletonManager.h"
+#include "Materials/Material.h"
 
 MeshInstance::~MeshInstance() {
     ReleaseSkinningInstance_();
@@ -40,6 +41,17 @@ void MeshInstance::SetCurrentSkeletonManager(SkeletonManager* manager) {
     else {
         m_skeletonManagerLifetime.reset();
     }
+}
+
+std::shared_ptr<Material> MeshInstance::GetEffectiveMaterial() const {
+    if (m_materialOverride) {
+        return m_materialOverride;
+    }
+    return m_mesh ? m_mesh->material : nullptr;
+}
+
+void MeshInstance::SetMaterialOverride(std::shared_ptr<Material> material) {
+    m_materialOverride = std::move(material);
 }
 
 void MeshInstance::SyncSkinningStateFromSkeleton() {

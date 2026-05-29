@@ -20,6 +20,7 @@
 #include "Managers/MaterialManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Mesh/VertexFlags.h"
+#include "Render/RendererComponents.h"
 #include "Animation/AnimationController.h"
 #include "Utilities/MathUtils.h"
 #include "Resources/Sampler.h"
@@ -138,12 +139,16 @@ namespace {
 		return { globalStableSceneId.fetch_add(1, std::memory_order_relaxed) + 1 };
 	}
 
-	MaterialRasterFlags ComposeRuntimeRasterFlags(Mesh& mesh) {
-		MaterialRasterFlags rasterFlags = mesh.material->Technique().rasterFlags;
+	MaterialRasterFlags ComposeRuntimeRasterFlags(Mesh& mesh, const Material& material) {
+		MaterialRasterFlags rasterFlags = material.Technique().rasterFlags;
 		if ((mesh.GetPerMeshCBData().vertexFlags & VERTEX_SKINNED) != 0u) {
 			rasterFlags |= MaterialRasterFlagsSkinned;
 		}
 		return rasterFlags;
+	}
+
+	MaterialRasterFlags ComposeRuntimeRasterFlags(Mesh& mesh) {
+		return ComposeRuntimeRasterFlags(mesh, *mesh.material);
 	}
 
 	void AssignStableSceneID(flecs::entity entity) {
@@ -337,14 +342,27 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 				meshInstance->SyncSkinningStateFromSkeleton();
 			}
 
+			auto effectiveMaterial = meshInstance->GetEffectiveMaterial();
+			if (!effectiveMaterial) {
+				effectiveMaterial = Material::GetDefaultMaterial();
+				meshInstance->SetMaterialOverride(effectiveMaterial);
+			}
+
 			// Register material residency. MaterialManager drains texture/material GPU updates from dirty queues.
-			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
-			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
-			meshInstance->GetMesh()->SetMaterialDataIndex(materialDataIndex);
-			const MaterialRasterFlags runtimeRasterFlags = ComposeRuntimeRasterFlags(*meshInstance->GetMesh());
+			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*effectiveMaterial);
+			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(effectiveMaterial->GetMaterialID());
+			const MaterialRasterFlags runtimeRasterFlags = ComposeRuntimeRasterFlags(*meshInstance->GetMesh(), *effectiveMaterial);
 			const unsigned int rasterBucketIndex =
 				m_managerInterface.GetMaterialManager()->AcquireRasterBucket(runtimeRasterFlags);
-			meshInstance->GetMesh()->SetRasterBucketIndex(rasterBucketIndex);
+			if (meshInstance->HasMaterialOverride()) {
+				auto meshData = meshInstance->GetMesh()->GetPerMeshCBData();
+				meshData.materialDataIndex = materialDataIndex;
+				meshData.rasterBucketIndex = rasterBucketIndex;
+				meshInstance->SetPerMeshOverrideBufferView(m_managerInterface.GetMeshManager()->AllocatePerMeshOverrideBuffer(meshData));
+			} else {
+				meshInstance->GetMesh()->SetMaterialDataIndex(materialDataIndex);
+				meshInstance->GetMesh()->SetRasterBucketIndex(rasterBucketIndex);
+			}
 
 			// Register mesh if not already present
 			if (!globalMeshLibrary.meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
@@ -356,7 +374,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 
 			// Update draw stats and indirect workload counts
             auto& mesh = *meshInstance->GetMesh();
-            ForEachMeshDrawWorkload(mesh, [&](const DrawWorkloadKey& workloadKey) {
+            ForEachMeshDrawWorkload(mesh, *effectiveMaterial, [&](const DrawWorkloadKey& workloadKey) {
                 if (drawStats.numDrawsPerTechnique.find(workloadKey) == drawStats.numDrawsPerTechnique.end()) {
                     drawStats.numDrawsPerTechnique[workloadKey] = 0;
                 }
@@ -475,6 +493,96 @@ flecs::entity Scene::CreateNodeECS(std::wstring name) {
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
 		entity.add<Components::Active>();
 	}
+}
+
+bool Scene::SetMeshInstanceMaterialOverride(flecs::entity entity, std::size_t meshInstanceIndex, std::shared_ptr<Material> material) {
+	if (!entity.is_alive() || !material) {
+		return false;
+	}
+
+	auto* meshInstances = entity.try_get_mut<Components::MeshInstances>();
+	if (!meshInstances || meshInstanceIndex >= meshInstances->meshInstances.size()) {
+		return false;
+	}
+
+	auto& meshInstance = meshInstances->meshInstances[meshInstanceIndex];
+	if (!meshInstance || !meshInstance->GetMesh()) {
+		return false;
+	}
+
+	auto mesh = meshInstance->GetMesh();
+	auto oldMaterial = meshInstance->GetEffectiveMaterial();
+	if (oldMaterial == material) {
+		return true;
+	}
+
+	const bool active = IsActive()
+		&& m_managerInterface.GetMeshManager() != nullptr
+		&& m_managerInterface.GetMaterialManager() != nullptr;
+
+	if (active && oldMaterial) {
+		m_managerInterface.GetMaterialManager()->ReleaseRasterBucket(ComposeRuntimeRasterFlags(*mesh, *oldMaterial));
+		m_managerInterface.GetMaterialManager()->DecrementMaterialUsageCount(*oldMaterial);
+	}
+
+	if (active && oldMaterial) {
+		auto& drawStats = GetSceneWorld().get_mut<Components::DrawStats>();
+		ForEachMeshDrawWorkload(*mesh, *oldMaterial, [&](const DrawWorkloadKey& workloadKey) {
+			auto it = drawStats.numDrawsPerTechnique.find(workloadKey);
+			if (it != drawStats.numDrawsPerTechnique.end() && it->second > 0) {
+				--it->second;
+			}
+			if (m_managerInterface.GetIndirectCommandBufferManager()) {
+				m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForWorkload(
+					workloadKey,
+					it != drawStats.numDrawsPerTechnique.end() ? it->second : 0u);
+			}
+		});
+	}
+
+	meshInstance->SetMaterialOverride(material == mesh->material ? nullptr : material);
+
+	if (active) {
+		auto& overrideView = meshInstance->GetPerMeshOverrideBufferView();
+		m_managerInterface.GetMeshManager()->ReleasePerMeshOverrideBuffer(overrideView);
+
+		m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*material);
+		auto meshData = mesh->GetPerMeshCBData();
+		meshData.materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(material->GetMaterialID());
+		meshData.rasterBucketIndex = m_managerInterface.GetMaterialManager()->AcquireRasterBucket(ComposeRuntimeRasterFlags(*mesh, *material));
+
+		if (material != mesh->material) {
+			meshInstance->SetPerMeshOverrideBufferView(m_managerInterface.GetMeshManager()->AllocatePerMeshOverrideBuffer(meshData));
+			meshInstance->SetPerMeshBufferIndex(static_cast<uint32_t>(
+				meshInstance->GetPerMeshOverrideBufferView()->GetOffset() / sizeof(PerMeshCB)));
+		} else if (mesh->GetPerMeshBufferView()) {
+			meshInstance->SetPerMeshBufferIndex(static_cast<uint32_t>(
+				mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB)));
+		}
+
+		if (auto* indirectCommandBufferManager = m_managerInterface.GetIndirectCommandBufferManager()) {
+			ForEachMeshDrawWorkload(*mesh, *material, [&](const DrawWorkloadKey& workloadKey) {
+				indirectCommandBufferManager->RegisterWorkload(workloadKey);
+				auto& drawStats = GetSceneWorld().get_mut<Components::DrawStats>();
+				auto& count = drawStats.numDrawsPerTechnique[workloadKey];
+				++count;
+				indirectCommandBufferManager->UpdateBuffersForWorkload(workloadKey, count);
+			});
+		}
+
+		spdlog::debug(
+			"Scene::SetMeshInstanceMaterialOverride: entity={} meshInstance={} mesh={} oldMaterial={} newMaterial={} perMeshBufferIndex={}",
+			entity.id(),
+			meshInstanceIndex,
+			mesh->GetGlobalID(),
+			oldMaterial ? oldMaterial->GetMaterialID() : 0u,
+			material->GetMaterialID(),
+			meshInstance->GetPerMeshBufferIndex());
+	}
+
+	meshInstances->BumpGeneration();
+	entity.add<Components::RenderBridgeContentDirty>();
+	return true;
 }
 
 flecs::entity Scene::GetRoot() const {
@@ -701,8 +809,15 @@ void Scene::MakeNonResident() {
 			}
 
 			m_managerInterface.GetMeshManager()->RemoveMeshInstance(meshInstance.get());
-			m_managerInterface.GetMaterialManager()->ReleaseRasterBucket(ComposeRuntimeRasterFlags(*mesh));
-			m_managerInterface.GetMaterialManager()->DecrementMaterialUsageCount(*mesh->material);
+			auto material = meshInstance->GetEffectiveMaterial();
+			if (!material) {
+				material = mesh->material;
+			}
+			if (material) {
+				m_managerInterface.GetMaterialManager()->ReleaseRasterBucket(ComposeRuntimeRasterFlags(*mesh, *material));
+				m_managerInterface.GetMaterialManager()->DecrementMaterialUsageCount(*material);
+			}
+			m_managerInterface.GetMeshManager()->ReleasePerMeshOverrideBuffer(meshInstance->GetPerMeshOverrideBufferView());
 		}
 	}
 }

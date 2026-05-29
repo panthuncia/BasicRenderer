@@ -216,6 +216,8 @@ public:
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
+	std::unique_ptr<BufferView> AllocatePerMeshOverrideBuffer(const PerMeshCB& data);
+	void ReleasePerMeshOverrideBuffer(std::unique_ptr<BufferView>& view);
 	void SetViewManager(ViewManager* viewManager) { m_pViewManager = viewManager; }
 
 	// Access the CLod page pool (may be null if no CLod meshes loaded).

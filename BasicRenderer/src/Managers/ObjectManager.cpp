@@ -17,6 +17,8 @@
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
+#include <spdlog/spdlog.h>
+
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 10000, "perObjectBuffers<PerObjectCB>");
@@ -57,7 +59,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			const uint32_t perMeshInstanceBufferIndex = static_cast<uint32_t>(meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = static_cast<uint32_t>(perObjectCBview->GetOffset() / sizeof(PerObjectCB));
-			command.perMeshBufferIndex = static_cast<uint32_t>(mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+			command.perMeshBufferIndex = meshInstance->GetPerMeshBufferIndex();
 			command.perMeshInstanceBufferIndex = perMeshInstanceBufferIndex;
 			command.dispatchMeshArguments.ThreadGroupCountX = 0; //DivRoundUp(mesh->GetMeshletCount(), AS_GROUP_SIZE);
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
@@ -68,7 +70,11 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			indices.push_back(index);
 			drawInfo.perMeshInstanceBufferIndices.push_back(perMeshInstanceBufferIndex);
             std::vector<DrawWorkloadKey> workloadKeysForDraw;
-            ForEachMeshDrawWorkload(*mesh, [&](const DrawWorkloadKey& workloadKey) {
+			auto material = meshInstance->GetEffectiveMaterial();
+			if (!material) {
+				material = mesh->material;
+			}
+            ForEachMeshDrawWorkload(*mesh, *material, [&](const DrawWorkloadKey& workloadKey) {
                 if (!m_activeDrawSetIndices.contains(workloadKey)) {
                     auto debugName =
                         "activeDrawSetIndices(flags=" + std::to_string(static_cast<uint64_t>(workloadKey.compileFlags))
@@ -124,11 +130,21 @@ void ObjectManager::RemoveObject(const Components::ObjectDrawInfo* drawInfo) {
 	auto& views = drawInfo;
 	unsigned int i = 0;
 	for (auto view : views->drawInfo.views) {
-		m_masterIndirectCommandsBuffer->Deallocate(view.get());
 		unsigned int index = static_cast<uint32_t>(view->GetOffset() / sizeof(DispatchMeshIndirectCommand));
         for (const auto& workloadKey : views->drawInfo.drawWorkloadKeysPerDraw[i]) {
-		    m_activeDrawSetIndices[workloadKey]->Remove(index);
+            auto activeDrawSetIt = m_activeDrawSetIndices.find(workloadKey);
+            if (activeDrawSetIt == m_activeDrawSetIndices.end() || !activeDrawSetIt->second) {
+                spdlog::warn(
+                    "ObjectManager::RemoveObject: missing active draw set while removing indirect index={} flags={} phase={} clodOnly={}",
+                    index,
+                    static_cast<std::uint64_t>(workloadKey.compileFlags),
+                    workloadKey.renderPhase.hash,
+                    workloadKey.clodOnly);
+                continue;
+            }
+		    activeDrawSetIt->second->Remove(index);
         }
+		m_masterIndirectCommandsBuffer->Deallocate(view.get());
 		++i;
 	}
 

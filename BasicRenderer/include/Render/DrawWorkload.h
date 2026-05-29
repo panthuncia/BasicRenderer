@@ -26,8 +26,8 @@ inline bool ShouldAddSupplementalCLodShadowWorkload(const Mesh& mesh, const Rend
 }
 
 template<class F>
-void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
-    const auto& technique = mesh.material->Technique();
+void ForEachMeshDrawWorkload(const Mesh& mesh, const Material& material, F&& callback) {
+    const auto& technique = material.Technique();
     const bool isClodMesh = mesh.IsCLodMesh();
     const bool alphaBlend = IsAlphaBlendTechnique(technique);
     const bool alphaTest = IsAlphaTestTechnique(technique);
@@ -70,11 +70,21 @@ void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
 }
 
 template<class F>
-void ForEachMeshRenderPhase(const Mesh& mesh, F&& callback) {
+void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
+    ForEachMeshDrawWorkload(mesh, *mesh.material, std::forward<F>(callback));
+}
+
+template<class F>
+void ForEachMeshRenderPhase(const Mesh& mesh, const Material& material, F&& callback) {
     std::unordered_set<RenderPhase, RenderPhase::Hasher> uniquePhases;
-    ForEachMeshDrawWorkload(mesh, [&](const DrawWorkloadKey& workloadKey) {
+    ForEachMeshDrawWorkload(mesh, material, [&](const DrawWorkloadKey& workloadKey) {
         if (uniquePhases.insert(workloadKey.renderPhase).second) {
             callback(workloadKey.renderPhase);
         }
     });
+}
+
+template<class F>
+void ForEachMeshRenderPhase(const Mesh& mesh, F&& callback) {
+    ForEachMeshRenderPhase(mesh, *mesh.material, std::forward<F>(callback));
 }
