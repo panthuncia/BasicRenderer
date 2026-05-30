@@ -490,7 +490,26 @@ void RecordMaterialSelectedMipDebug(
     AccumulateMaterialSelectedMipDebug(materialInputs, selectedMipLevel, totalMipCount - 1u);
 }
 
-float4 SampleMaterialTexture2DGrad(
+float4 SampleResidentMaterialTexture2DGrad(
+    Texture2D<float4> tex,
+    SamplerState samp,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    inout MaterialInputs materialInputs)
+{
+    if (ShouldTrackMaterialSelectedMipDebug())
+    {
+        uint width;
+        uint height;
+        tex.GetDimensions(width, height);
+        RecordMaterialSelectedMipDebug(materialInputs, (TextureStreamingGPUInfo)0, false, width, height, dUVdx, dUVdy);
+    }
+
+    return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
+}
+
+float4 SampleStreamingMaterialTexture2DGrad(
     Texture2D<float4> tex,
     SamplerState samp,
     uint streamingTextureID,
@@ -522,6 +541,22 @@ float4 SampleMaterialTexture2DGrad(
     return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
 }
 
+float4 SampleMaterialTexture2DGrad(
+    Texture2D<float4> tex,
+    SamplerState samp,
+    uint streamingTextureID,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    inout MaterialInputs materialInputs)
+{
+#if defined(PSO_TEXTURE_STREAMING)
+    return SampleStreamingMaterialTexture2DGrad(tex, samp, streamingTextureID, uv, dUVdx, dUVdy, materialInputs);
+#else
+    return SampleResidentMaterialTexture2DGrad(tex, samp, uv, dUVdx, dUVdy, materialInputs);
+#endif
+}
+
 float4 SampleMaterialTexture2DGrad(Texture2D<float4> tex, SamplerState samp, uint streamingTextureID, float2 uv, float2 dUVdx, float2 dUVdy)
 {
     MaterialInputs unusedMaterialInputs = (MaterialInputs)0;
@@ -529,7 +564,26 @@ float4 SampleMaterialTexture2DGrad(Texture2D<float4> tex, SamplerState samp, uin
     return SampleMaterialTexture2DGrad(tex, samp, streamingTextureID, uv, dUVdx, dUVdy, unusedMaterialInputs);
 }
 
-float SampleMaterialTexture2DGrad(
+float SampleResidentMaterialTexture2DGrad(
+    Texture2D<float> tex,
+    SamplerState samp,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    inout MaterialInputs materialInputs)
+{
+    if (ShouldTrackMaterialSelectedMipDebug())
+    {
+        uint width;
+        uint height;
+        tex.GetDimensions(width, height);
+        RecordMaterialSelectedMipDebug(materialInputs, (TextureStreamingGPUInfo)0, false, width, height, dUVdx, dUVdy);
+    }
+
+    return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
+}
+
+float SampleStreamingMaterialTexture2DGrad(
     Texture2D<float> tex,
     SamplerState samp,
     uint streamingTextureID,
@@ -559,6 +613,22 @@ float SampleMaterialTexture2DGrad(
     }
 
     return Sample2DGrad(tex, samp, uv, dUVdx, dUVdy);
+}
+
+float SampleMaterialTexture2DGrad(
+    Texture2D<float> tex,
+    SamplerState samp,
+    uint streamingTextureID,
+    float2 uv,
+    float2 dUVdx,
+    float2 dUVdy,
+    inout MaterialInputs materialInputs)
+{
+#if defined(PSO_TEXTURE_STREAMING)
+    return SampleStreamingMaterialTexture2DGrad(tex, samp, streamingTextureID, uv, dUVdx, dUVdy, materialInputs);
+#else
+    return SampleResidentMaterialTexture2DGrad(tex, samp, uv, dUVdx, dUVdy, materialInputs);
+#endif
 }
 
 float SampleMaterialTexture2DGrad(Texture2D<float> tex, SamplerState samp, uint streamingTextureID, float2 uv, float2 dUVdx, float2 dUVdy)

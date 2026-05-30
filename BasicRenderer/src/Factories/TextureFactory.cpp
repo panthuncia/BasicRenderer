@@ -99,6 +99,15 @@ namespace {
                 }
 #endif
 
+                const bool blockCompressed = rhi::helpers::IsBlockCompressed(desc.format);
+
+                if (blockCompressed) {
+                    out.pData = imageData;
+                    out.rowPitch = static_cast<uint32_t>(storedRowPitch);
+                    out.slicePitch = static_cast<uint32_t>(storedSlicePitch);
+                    continue;
+                }
+
                 uint32_t channels = desc.channels;
 
                 // Pick a width/height that makes "raw tightly packed" match the stored pitches, if possible.
@@ -685,7 +694,6 @@ std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
 
     const uint32_t baseW = desc.imageDimensions[0].width;
     const uint32_t baseH = desc.imageDimensions[0].height;
-
     const bool doMipmapping = desc.generateMipMaps && !rhi::helpers::IsBlockCompressed(desc.format); // TODO: BC mip gen
     preserveAlphaCoverage = preserveAlphaCoverage
         && doMipmapping

@@ -40,6 +40,7 @@ std::string GetDebugNameForTechnique(TechniqueDescriptor technique) {
     if (technique.compileFlags & MaterialCompileBlend) result += "Blend|";
     if (technique.compileFlags & MaterialCompileAlphaTest) result += "AlphaTest|";
     if (technique.compileFlags & MaterialCompileDoubleSided) result += "DoubleSided|";
+    if (technique.compileFlags & MaterialCompileTextureStreaming) result += "TextureStreaming|";
     if (result.empty()) result = "None";
     else result.pop_back(); // remove trailing '|'
     return result;

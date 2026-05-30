@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "Import/Filetypes.h"
+#include "Materials/MaterialTextureStreaming.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Factories/TextureFactory.h"
 #include "Managers/Singletons/DirectStorageManager.h"
@@ -149,6 +150,11 @@ struct TextureStreamingState {
 };
 
 struct TexturePendingDebugInfo {
+    std::string label;
+    std::string debugName;
+    std::string sourceIdentity;
+    std::string filePath;
+    std::string initialData;
     bool hasUsableImage = false;
     bool hasFinalImage = false;
     bool hasPlaceholder = false;
@@ -156,6 +162,7 @@ struct TexturePendingDebugInfo {
     bool hasProcessingHandle = false;
     bool hasReloadHandle = false;
     bool hasDirectStorageHandle = false;
+    bool isProcessingCacheArtifact = false;
     uint32_t streamingTextureID = 0;
     uint32_t requestedTopMip = 0;
     uint32_t pendingTopMip = 0;
@@ -168,6 +175,8 @@ struct TexturePendingDebugInfo {
     const char* processingState = "None";
     const char* reloadState = "None";
     const char* directStorageState = "None";
+    const char* loadPath = "unknown";
+    const char* uploadPath = "unknown";
 };
 
 enum class TextureReloadJobState : uint8_t {
@@ -285,9 +294,10 @@ public:
     bool HasPendingUploadWork() const {
         const bool needsStreamingReload =
             m_hasUploadedFinalImage &&
-            m_streamingState.enabled &&
             HasStreamingSourceData() &&
-            m_streamingState.pendingTopMip != m_streamingState.residency.residentTopMip;
+            ((m_streamingState.enabled &&
+              m_streamingState.pendingTopMip != m_streamingState.residency.residentTopMip) ||
+             (!m_streamingState.enabled && m_streamingState.residency.residentTopMip != 0u));
         const bool hasAsyncHandle =
             m_processingHandle != nullptr ||
             m_reloadHandle != nullptr ||
@@ -354,7 +364,7 @@ private:
             m_originalSourceBytes = std::get<BytesList>(m_initialStorage);
         }
         RefreshStreamingStateFromDescription();
-        if (m_streamingState.eligible) {
+        if (m_streamingState.eligible && IsMaterialTextureStreamingEnabledSetting()) {
             m_streamingState.enabled = true;
 			ApplyStreamingBootstrapTopMip();
             InvalidateResidentImageForStreamingRequest();

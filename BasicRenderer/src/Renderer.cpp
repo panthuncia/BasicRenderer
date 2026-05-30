@@ -30,6 +30,7 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Materials/MaterialTextureStreaming.h"
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
@@ -1305,6 +1306,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<float>("rayTracedReflectionLodBias", 0.0f);
     settingsManager.registerSetting<bool>("useAsyncCompute", false);
     settingsManager.registerSetting<bool>("enableSceneRenderOverlap", m_sceneRenderOverlapEnabled);
+	settingsManager.registerSetting<bool>(MaterialTextureStreamingSettingName, false);
 	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphVramDumpEnabled", false);
     settingsManager.registerSetting<bool>("renderGraphDisableCaching", false);

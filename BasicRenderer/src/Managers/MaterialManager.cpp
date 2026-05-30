@@ -1,6 +1,7 @@
 #include "Managers/MaterialManager.h"
 #include "../generated/BuiltinResources.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
+#include "Materials/MaterialTextureStreaming.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RasterBucketFlags.h"
@@ -110,7 +111,7 @@ namespace {
 
 			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
 			samplerIndex = binding.texture->SamplerDescriptorIndex();
-			streamingTextureID = binding.texture->GetStreamingTextureID();
+			streamingTextureID = IsMaterialTextureStreamingEnabledSetting() ? binding.texture->GetStreamingTextureID() : kInvalidStreamingTextureID;
 			if (binding.channels.size() > 0u) channels.x = binding.channels[0];
 			if (binding.channels.size() > 1u) channels.y = binding.channels[1];
 			if (binding.channels.size() > 2u) channels.z = binding.channels[2];
@@ -135,7 +136,7 @@ namespace {
 
 			textureIndex = binding.texture->Image().GetSRVInfo(0).slot.index;
 			samplerIndex = binding.texture->SamplerDescriptorIndex();
-			streamingTextureID = binding.texture->GetStreamingTextureID();
+			streamingTextureID = IsMaterialTextureStreamingEnabledSetting() ? binding.texture->GetStreamingTextureID() : kInvalidStreamingTextureID;
 			if (!binding.channels.empty()) {
 				channel = binding.channels[0];
 			}
@@ -335,6 +336,10 @@ MaterialManager::MaterialManager() {
 }
 
 void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
+	if (!IsMaterialTextureStreamingEnabledSetting()) {
+		return;
+	}
+
 	std::vector<std::pair<uint32_t, uint32_t>> pendingFeedback;
 	{
 		std::lock_guard lock(m_textureStreamingFeedbackMutex);
@@ -408,7 +413,10 @@ void MaterialManager::BeginTextureStreamingFeedbackFrame(uint64_t frameIndex) {
 	}
 }
 void MaterialManager::RequestTextureStreamingFeedbackReadback(rg::runtime::IReadbackService* readbackService) {
-	if (!readbackService || !m_textureStreamingFeedbackBuffer || m_activeTextureStreamingFeedbackIDs.empty()) {
+	if (!IsMaterialTextureStreamingEnabledSetting() ||
+		!readbackService ||
+		!m_textureStreamingFeedbackBuffer ||
+		m_activeTextureStreamingFeedbackIDs.empty()) {
 		return;
 	}
 
@@ -542,11 +550,11 @@ void MaterialManager::MarkTextureStreamingMetadataDirty(const std::shared_ptr<Te
 	}
 
 	m_streamingTexturesByID[streamingTextureID] = texture;
-	if (m_dirtyTextureStreamingIDSet.insert(streamingTextureID).second) {
-		m_dirtyTextureStreamingIDs.push_back(streamingTextureID);
-	}
 	if (needsUploadAdvance && m_texturesNeedingUploadAdvanceSet.insert(streamingTextureID).second) {
 		m_texturesNeedingUploadAdvance.push_back(streamingTextureID);
+	}
+	if (IsMaterialTextureStreamingEnabledSetting() && m_dirtyTextureStreamingIDSet.insert(streamingTextureID).second) {
+		m_dirtyTextureStreamingIDs.push_back(streamingTextureID);
 	}
 
 	RecordTextureDirtyReason(reason);
@@ -602,7 +610,14 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, Texture
 		const char* processingState = "None";
 		const char* reloadState = "None";
 		const char* directStorageState = "None";
+		const char* loadPath = "unknown";
+		const char* uploadPath = "unknown";
+		bool cacheArtifact = false;
+		std::string label;
 		std::string name;
+		std::string sourceIdentity;
+		std::string filePath;
+		std::string initialData;
 	};
 	std::vector<PendingTextureSample> pendingSamples;
 	pendingSamples.reserve(8);
@@ -664,7 +679,14 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, Texture
 					.processingState = pending.processingState,
 					.reloadState = pending.reloadState,
 					.directStorageState = pending.directStorageState,
-					.name = texture->DebugName()
+					.loadPath = pending.loadPath,
+					.uploadPath = pending.uploadPath,
+					.cacheArtifact = pending.isProcessingCacheArtifact,
+					.label = pending.label,
+					.name = pending.debugName,
+					.sourceIdentity = pending.sourceIdentity,
+					.filePath = pending.filePath,
+					.initialData = pending.initialData
 				});
 			}
 		}
@@ -769,9 +791,16 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, Texture
 			m_textureDirtyReasonOther);
 		for (const auto& sample : pendingSamples) {
 			spdlog::info(
-				"MaterialManager::ProcessPendingMaterialUpdates pendingTexture: id={} name='{}' requestedTopMip={} pendingTopMip={} residentTopMip={} directStorageTargetTopMip={} residentMipCount={} totalMipCount={} stateRevision={} bindingRevision={} processing={} reload={} directStorage={}",
+				"MaterialManager::ProcessPendingMaterialUpdates pendingTexture: id={} label='{}' name='{}' source='{}' file='{}' initial='{}' cacheArtifact={} loadPath={} uploadPath={} requestedTopMip={} pendingTopMip={} residentTopMip={} directStorageTargetTopMip={} residentMipCount={} totalMipCount={} stateRevision={} bindingRevision={} processing={} reload={} directStorage={}",
 				sample.id,
+				sample.label,
 				sample.name,
+				sample.sourceIdentity,
+				sample.filePath,
+				sample.initialData,
+				sample.cacheArtifact,
+				sample.loadPath,
+				sample.uploadPath,
 				sample.requestedTopMip,
 				sample.pendingTopMip,
 				sample.residentTopMip,
@@ -813,8 +842,11 @@ void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
 void MaterialManager::FlushDirtyMaterial(Material& material, TextureFactory* textureFactory) {
 	const unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
 	material.SetOpenPBRMaterialDataIndex(materialSlot);
+	const bool refreshedTextures = textureFactory != nullptr;
 	if (textureFactory) {
 		material.EnsureTexturesUploaded(*textureFactory);
+		TrackMaterialTextureAssets(material, -1);
+		TrackMaterialTextureAssets(material, 1);
 	}
 
 	const PerMaterialCB materialData = material.GetData();
@@ -840,10 +872,8 @@ void MaterialManager::FlushDirtyMaterial(Material& material, TextureFactory* tex
 		signature.valid = true;
 	}
 
-	if (dataChanged) {
+	if (dataChanged || refreshedTextures) {
 		RefreshMaterialTextureUsage(material);
-		TrackMaterialTextureAssets(material, -1);
-		TrackMaterialTextureAssets(material, 1);
 	}
 }
 

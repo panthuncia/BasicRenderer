@@ -12,6 +12,7 @@
 #include "Render/RenderPhase.h"
 #include "Materials/MaterialFlags.h"
 #include "Materials/MaterialDescription.h"
+#include "Materials/MaterialTextureStreaming.h"
 #include "../generated/BuiltinRenderPasses.h"
 #include "Materials/TechniqueDescriptor.h"
 #include "Factories/TextureFactory.h"
@@ -109,6 +110,23 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
     }
     if (d.openPBRTextures.fuzzRoughness.texture) {
         tech.compileFlags |= MaterialCompileFlags::MaterialCompileOpenPBRFuzzRoughnessTexture;
+    }
+    if (IsMaterialTextureStreamingEnabledSetting() &&
+        (d.baseColor.texture ||
+         d.normal.texture ||
+         d.aoMap.texture ||
+         d.heightMap.texture ||
+         d.metallic.texture ||
+         d.roughness.texture ||
+         d.emissive.texture ||
+         d.opacity.texture ||
+         d.openPBRTextures.coatColor.texture ||
+         d.openPBRTextures.coatWeight.texture ||
+         d.openPBRTextures.coatRoughness.texture ||
+         d.openPBRTextures.fuzzColor.texture ||
+         d.openPBRTextures.fuzzWeight.texture ||
+         d.openPBRTextures.fuzzRoughness.texture)) {
+        tech.compileFlags |= MaterialCompileFlags::MaterialCompileTextureStreaming;
     }
 
     return tech;
