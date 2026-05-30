@@ -762,7 +762,7 @@ std::string TextureProcessingManager::BuildProcessingCacheKey(
 	boost::hash_combine(seed, meta.processing.preservePackedChannels);
 	boost::hash_combine(seed, static_cast<uint32_t>(meta.processing.normalConvention));
 	boost::hash_combine(seed, meta.alphaIsAllOpaque);
-	boost::hash_combine(seed, 2u); // texture processing algorithm/cache version
+	boost::hash_combine(seed, 4u); // texture processing algorithm/cache version
 	return normalizedIdentity + "#" + TextureSemanticToString(meta.processing.semantic) + "#" + std::to_string(seed);
 }
 
@@ -847,7 +847,7 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 			}
 
 			spdlog::info(
-				"TextureProcessingManager: begin processing '{}' semantic={} srcFormat={} blockCompressed={} fullMipChain={} subresources={} dims={}x{}",
+				"TextureProcessingManager: begin processing '{}' semantic={} srcFormat={} blockCompressed={} fullMipChain={} subresources={} dims={}x{} preservePackedChannels={}",
 				key,
 				TextureSemanticToString(meta.processing.semantic),
 				sourceData ? static_cast<uint32_t>(sourceData->desc.format) : 0u,
@@ -855,7 +855,8 @@ std::shared_ptr<TextureProcessingJobHandle> TextureProcessingManager::RequestPro
 				sourceData ? sourceData->hasFullMipChain : false,
 				sourceData ? sourceData->subresources.size() : 0u,
 				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].width : 0u,
-				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].height : 0u);
+				(sourceData && !sourceData->desc.imageDimensions.empty()) ? sourceData->desc.imageDimensions[0].height : 0u,
+				meta.processing.preservePackedChannels);
 
 			if (auto cachedResult = TryLoadTextureSourceDataFromCache(cacheKey)) {
 				const std::wstring backfilledConditionedCachePath = TryWriteTextureSourceDataToCache(cacheKey, *cachedResult);
