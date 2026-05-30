@@ -364,6 +364,7 @@ void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inou
     float4x4 skinMatrix = BuildSkinMatrix(setup.meshInstanceBuffer.skinningInstanceSlot, skinning);
     vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
     vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
+    vertex.tangent.xyz = mul(vertex.tangent.xyz, (float3x3)skinMatrix);
     vertex.skinning = skinning;
 #else
     if ((setup.meshBuffer.vertexFlags & VERTEX_SKINNED) == 0u)
@@ -376,6 +377,7 @@ void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inou
     float4x4 skinMatrix = BuildSkinMatrix(setup.meshInstanceBuffer.skinningInstanceSlot, skinning);
     vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
     vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
+    vertex.tangent.xyz = mul(vertex.tangent.xyz, (float3x3)skinMatrix);
     vertex.skinning = skinning;
 #endif
 }
@@ -434,8 +436,8 @@ VisBufferPSInput BuildVisBufferVertexAttributesForView(
     result.viewID = viewID;
     result.shadowClipmapIndex = shadowClipmapIndex;
 #if defined(CLOD_AVBOIT_FORWARD_TRANSPARENT)
-    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
-    float3x3 normalMatrix = (float3x3)normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
+    StructuredBuffer<SingleMatrix> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    float3x3 normalMatrix = (float3x3)normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex].value;
     result.positionWorldSpace = worldPosition.xyz;
     result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
     result.color = vertex.color;
@@ -526,20 +528,12 @@ PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint
     prevPosition = mul(prevPosition, mainCamera.prevView);
     result.prevClipPosition = mul(prevPosition, mainCamera.prevUnjitteredProjection);
     
-    if (flags & VERTEX_SKINNED) {
-        result.normalWorldSpace = normalize(vertex.normal);
-        result.tangentWorldSpace = (flags & VERTEX_TANGENTS)
-            ? float4(normalize(vertex.tangent.xyz), vertex.tangent.w)
-            : float4(1.0f, 0.0f, 0.0f, 0.0f);
-    }
-    else {
-        StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
-        float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
-        result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
-        result.tangentWorldSpace = (flags & VERTEX_TANGENTS)
-            ? float4(normalize(mul(vertex.tangent.xyz, normalMatrix)), vertex.tangent.w)
-            : float4(1.0f, 0.0f, 0.0f, 0.0f);
-    }
+    StructuredBuffer<SingleMatrix> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex].value;
+    result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
+    result.tangentWorldSpace = (flags & VERTEX_TANGENTS)
+        ? float4(normalize(mul(vertex.tangent.xyz, normalMatrix)), vertex.tangent.w)
+        : float4(1.0f, 0.0f, 0.0f, 0.0f);
     
     result.color = vertex.color;
     

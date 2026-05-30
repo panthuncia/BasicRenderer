@@ -729,7 +729,7 @@ SkinningInfluences DecodePackedWeights(uint meshletLocalVertex, MeshletResolveDa
     return skinning;
 }
 
-void ApplyClodSkinning(uint meshletLocalVertex, MeshletResolveData d, inout float3 positionOS, inout float3 normalOS)
+void ApplyClodSkinningToFrame(uint meshletLocalVertex, MeshletResolveData d, inout float3 positionOS, inout float3 normalOS, inout float4 tangentOS)
 {
     if ((d.meshInfo.y & VERTEX_SKINNED) == 0u)
     {
@@ -741,6 +741,13 @@ void ApplyClodSkinning(uint meshletLocalVertex, MeshletResolveData d, inout floa
     float4x4 skinMatrix = BuildSkinMatrix(d.skinningInstanceSlot, skinning);
     positionOS = mul(float4(positionOS, 1.0f), skinMatrix).xyz;
     normalOS = mul(normalOS, (float3x3)skinMatrix);
+    tangentOS.xyz = mul(tangentOS.xyz, (float3x3)skinMatrix);
+}
+
+void ApplyClodSkinning(uint meshletLocalVertex, MeshletResolveData d, inout float3 positionOS, inout float3 normalOS)
+{
+    float4 unusedTangent = float4(1.0f, 0.0f, 0.0f, 0.0f);
+    ApplyClodSkinningToFrame(meshletLocalVertex, d, positionOS, normalOS, unusedTangent);
 }
 
 MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
@@ -1315,8 +1322,8 @@ bool ResolveClodVoxelCommonSampleFromPackedCluster(
         CLodVoxelHashToUnitFloat(sampleSeed ^ 0xD1B54A35u));
     normalOS = dot(normalOS, -rayDirObject) >= 0.0f ? normalOS : -normalOS;
     normalOS = normalize(mul(normalOS, (float3x3)skinMatrix));
-    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
-    const float3 normalWS = normalize(mul(normalOS, (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex]));
+    StructuredBuffer<SingleMatrix> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    const float3 normalWS = normalize(mul(normalOS, (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex].value));
 
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     MaterialInfo materialInfo = materialDataBuffer[mesh.materialDataIndex];
@@ -1563,9 +1570,9 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
         c1 = DecodeCompressedColor(triIdx.y, md);
         c2 = DecodeCompressedColor(triIdx.z, md);
     }
-    ApplyClodSkinning(triIdx.x, md, p0, n0);
-    ApplyClodSkinning(triIdx.y, md, p1, n1);
-    ApplyClodSkinning(triIdx.z, md, p2, n2);
+    ApplyClodSkinningToFrame(triIdx.x, md, p0, n0, t0);
+    ApplyClodSkinningToFrame(triIdx.y, md, p1, n1, t1);
+    ApplyClodSkinningToFrame(triIdx.z, md, p2, n2, t2);
 
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer obj = perObjectBuffer[md.objAndMesh.x];
@@ -1682,8 +1689,8 @@ bool ResolveClodCommonSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool i
             InterpolateWithDeriv(bary, c0.z, c1.z, c2.z).x);
     }
 
-    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
-    float3x3 normalMatrix = (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex];
+    StructuredBuffer<SingleMatrix> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    float3x3 normalMatrix = (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex].value;
     float3 worldNormal = normalize(mul(normalOS, normalMatrix));
     float4 tangentWS = float4(1.0f, 0.0f, 0.0f, 0.0f);
     if ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_TANGENT_FRAME) != 0u)

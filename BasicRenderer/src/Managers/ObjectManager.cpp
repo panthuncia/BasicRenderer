@@ -28,7 +28,7 @@ DirectX::XMFLOAT4X4 ComputeNormalMatrixStorage(const DirectX::XMMATRIX& modelMat
 		DirectX::XMVectorGetX(modelMatrix.r[2]), DirectX::XMVectorGetY(modelMatrix.r[2]), DirectX::XMVectorGetZ(modelMatrix.r[2]), 0.0f,
 		0.0f, 0.0f, 0.0f, 1.0f);
 	DirectX::XMFLOAT4X4 stored{};
-	DirectX::XMStoreFloat4x4(&stored, DirectX::XMMatrixInverse(nullptr, upperLeft3x3));
+	DirectX::XMStoreFloat4x4(&stored, DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(nullptr, upperLeft3x3)));
 	return stored;
 }
 

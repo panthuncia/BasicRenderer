@@ -914,7 +914,7 @@ void Renderer::RunRenderResourceSyncStage() {
                 const XMVECTOR det = XMMatrixDeterminant(worldMatrix->matrix);
                 object->perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
 
-                // Write per-object data directly into the scratch buffer (lock-free).
+                // Write per-object data into the scratch buffer
                 {
                     const size_t offset = drawInfo->perObjectCBView->GetOffset();
                     const size_t sz = sizeof(PerObjectCB);
@@ -927,9 +927,8 @@ void Renderer::RunRenderResourceSyncStage() {
                     XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
                     XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
                     0.0f, 0.0f, 0.0f, 1.0f);
-                XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
+                XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
 
-                // Write normal matrix directly into the scratch buffer (lock-free).
                 {
                     const size_t offset = drawInfo->normalMatrixView->GetOffset();
                     const size_t sz = sizeof(DirectX::XMFLOAT4X4);
@@ -942,7 +941,7 @@ void Renderer::RunRenderResourceSyncStage() {
 
     // Register dirty ranges single-threaded.
     // Upload only the range actually written this frame. Uploading the entire
-    // grown backing every frame scales badly on large scenes and can starve the frame.
+    // grown backing every frame scales badly
     {
         ZoneScopedN("Renderer::Update::RenderResourceSync::CommitObjectBulkWrites");
         const auto commitRanges = [](auto& ranges, auto&& commit) {

@@ -341,7 +341,7 @@ static DecodedTexture DecodedFromDXT(
 
 namespace detail {
 
-    constexpr bool kForceCpuTextureLoadPath = true;
+    constexpr bool kForceCpuTextureLoadPath = false;
 
     struct ReadFileBytesResult {
         std::vector<std::byte> data;
