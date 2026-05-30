@@ -1610,7 +1610,7 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
         .build();
 
     world.defer_begin();
-    query.each([&](flecs::entity entity, const Components::RenderableObject& object, const Components::ObjectDrawInfo& drawInfo) {
+    query.each([&](flecs::entity entity, Components::RenderableObject& object, const Components::ObjectDrawInfo& drawInfo) {
         auto meshInstances = entity.try_get<Components::MeshInstances>();
 
         if (meshInstances) {
@@ -1623,7 +1623,9 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 		// Remove and re-add all objects from the object manager to rebuild indirect draw info
 		m_pObjectManager->RemoveObject(&drawInfo);
 		auto newDrawInfo = m_pObjectManager->AddObject(object.perObjectCB, meshInstances);
+		object.perObjectCB.normalMatrixBufferIndex = newDrawInfo.normalMatrixIndex;
 		entity.set<Components::ObjectDrawInfo>(newDrawInfo);
+		entity.add<Components::RenderTransformUpdated>();
             });
     world.defer_end();
 }

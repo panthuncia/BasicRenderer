@@ -349,7 +349,9 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			}
 
 			// Register material residency. MaterialManager drains texture/material GPU updates from dirty queues.
-			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*effectiveMaterial);
+			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(
+				*effectiveMaterial,
+				m_managerInterface.GetTextureFactory());
 			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(effectiveMaterial->GetMaterialID());
 			const MaterialRasterFlags runtimeRasterFlags = ComposeRuntimeRasterFlags(*meshInstance->GetMesh(), *effectiveMaterial);
 			const unsigned int rasterBucketIndex =
@@ -546,7 +548,9 @@ bool Scene::SetMeshInstanceMaterialOverride(flecs::entity entity, std::size_t me
 		auto& overrideView = meshInstance->GetPerMeshOverrideBufferView();
 		m_managerInterface.GetMeshManager()->ReleasePerMeshOverrideBuffer(overrideView);
 
-		m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*material);
+		m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(
+			*material,
+			m_managerInterface.GetTextureFactory());
 		auto meshData = mesh->GetPerMeshCBData();
 		meshData.materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(material->GetMaterialID());
 		meshData.rasterBucketIndex = m_managerInterface.GetMaterialManager()->AcquireRasterBucket(ComposeRuntimeRasterFlags(*mesh, *material));

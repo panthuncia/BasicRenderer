@@ -19,6 +19,21 @@
 
 #include <spdlog/spdlog.h>
 
+namespace {
+
+DirectX::XMFLOAT4X4 ComputeNormalMatrixStorage(const DirectX::XMMATRIX& modelMatrix) {
+	const DirectX::XMMATRIX upperLeft3x3 = DirectX::XMMatrixSet(
+		DirectX::XMVectorGetX(modelMatrix.r[0]), DirectX::XMVectorGetY(modelMatrix.r[0]), DirectX::XMVectorGetZ(modelMatrix.r[0]), 0.0f,
+		DirectX::XMVectorGetX(modelMatrix.r[1]), DirectX::XMVectorGetY(modelMatrix.r[1]), DirectX::XMVectorGetZ(modelMatrix.r[1]), 0.0f,
+		DirectX::XMVectorGetX(modelMatrix.r[2]), DirectX::XMVectorGetY(modelMatrix.r[2]), DirectX::XMVectorGetZ(modelMatrix.r[2]), 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f);
+	DirectX::XMFLOAT4X4 stored{};
+	DirectX::XMStoreFloat4x4(&stored, DirectX::XMMatrixInverse(nullptr, upperLeft3x3));
+	return stored;
+}
+
+}
+
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 10000, "perObjectBuffers<PerObjectCB>");
@@ -108,7 +123,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 		drawInfo.drawInfo = info;
 	}
 
-	auto normalMatrixView = m_normalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
+	auto normalMatrixView = m_normalMatrixBuffer->Add(ComputeNormalMatrixStorage(perObjectCB.modelMatrix));
 	drawInfo.normalMatrixView = normalMatrixView;
 	drawInfo.perObjectCBView = perObjectCBview;
 	drawInfo.normalMatrixIndex = static_cast<uint32_t>(normalMatrixView->GetOffset() / sizeof(DirectX::XMFLOAT4X4));

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <vector>
 #include <cwctype>
@@ -83,6 +84,12 @@ namespace CLodCache {
 		std::wstring GetCacheFilePathBySource(const std::wstring& fileName, const std::string& sourceIdentifier)
 		{
 			return GetCacheFilePath(fileName, BuildSceneCacheSubdirectory(sourceIdentifier));
+		}
+
+		std::mutex& GetUsdStageIoMutex()
+		{
+			static std::mutex mutex;
+			return mutex;
 		}
 
 		template<typename T>
@@ -443,6 +450,7 @@ namespace CLodCache {
 			const std::wstring groupFileName = BuildGroupPayloadFileName(key, buildConfigHash, groupIndex);
 			const std::wstring groupCachePath = GetCacheFilePathBySource(groupFileName, key.sourceIdentifier);
 
+			std::lock_guard<std::mutex> usdStageLock(GetUsdStageIoMutex());
 			auto groupStage = pxr::UsdStage::CreateNew(ws2s(groupCachePath), pxr::UsdStage::LoadNone);
 			if (!groupStage) {
 				return false;
@@ -511,8 +519,7 @@ namespace CLodCache {
 	namespace {
 		bool SaveImpl(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload, ClusterLODPrebuiltData* outSavedPrebuiltData)
 		{
-			static std::mutex usdCacheWriteMutex;
-			std::lock_guard<std::mutex> usdCacheWriteLock(usdCacheWriteMutex);
+			std::lock_guard<std::mutex> usdStageLock(GetUsdStageIoMutex());
 
 			const std::wstring fileName = BuildCacheFileName(key, buildConfigHash);
 			const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
@@ -655,6 +662,7 @@ namespace CLodCache {
 			return std::nullopt;
 		}
 
+		std::lock_guard<std::mutex> usdStageLock(GetUsdStageIoMutex());
 		auto stage = pxr::UsdStage::Open(ws2s(cachePath), pxr::UsdStage::LoadNone);
 		if (!stage) {
 			spdlog::warn("CLod cache exists but failed to open: {}", ws2s(cachePath));

@@ -816,22 +816,29 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex, Texture
 	}
 }
 
-void MaterialManager::IncrementMaterialUsageCount(Material& material) {
+void MaterialManager::IncrementMaterialUsageCount(Material& material, TextureFactory* textureFactory) {
 	//std::lock_guard<std::mutex> lock(m_materialSlotMappingMutex);
 	auto& flags = material.Technique().compileFlags;
 	unsigned int flagsSlot = GetCompileFlagsSlot(flags);
 	m_compileFlagsUsageCounts[flagsSlot]++;
+	if (textureFactory) {
+		material.EnsureTexturesUploaded(*textureFactory);
+	}
 	uint32_t materialID = material.GetMaterialID();
 	material.SetCompileFlagsID(flagsSlot);
-	unsigned int materialSlot = GetMaterialSlot(materialID);
+	unsigned int materialSlot = GetMaterialSlot(materialID, textureFactory ? std::optional<PerMaterialCB>{ material.GetData() } : std::nullopt);
 	material.SetOpenPBRMaterialDataIndex(materialSlot);
 	m_activeMaterialsByID[materialID] = &material;
 
 	m_materialUsageCounts[materialSlot]++;
 	if (m_materialUsageCounts[materialSlot] == 1u) {
-		UpdateMaterialTextureUsage(material, 1);
-		TrackMaterialTextureAssets(material, 1);
-		MarkMaterialDirty(material);
+		if (textureFactory) {
+			FlushDirtyMaterial(material, textureFactory);
+		} else {
+			UpdateMaterialTextureUsage(material, 1);
+			TrackMaterialTextureAssets(material, 1);
+			MarkMaterialDirty(material);
+		}
 	}
 }
 

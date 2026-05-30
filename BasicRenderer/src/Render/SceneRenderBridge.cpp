@@ -789,14 +789,14 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
         for (const auto& renderable : snapshot.changedRenderables) {
             auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, renderable.stableID, m_currentIngestionFrame, sceneRoot);
 
+            const bool isNew = !dst.has<BridgedSceneEntity>();
             auto& entityState = m_bridgedEntities[renderable.stableID];
             const bool meshChanged = entityState.meshGeneration != renderable.meshInstances.generation;
-            const bool isNew = !dst.has<BridgedSceneEntity>();
 
             // Entity is in the changed list, so always update common components
             CopyCommonComponents(dst, renderable.stableID, renderable.name, renderable.matrix);
             entityState.lastMatrix = renderable.matrix.matrix;
-            if (renderable.transformChanged || isNew) {
+            if (renderable.transformChanged || isNew || meshChanged) {
                 dst.add<Components::RenderTransformUpdated>();
             } else {
                 dst.remove<Components::RenderTransformUpdated>();

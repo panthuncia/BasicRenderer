@@ -237,8 +237,6 @@ std::shared_ptr<Material> Material::GetDefaultMaterial() {
 }
 
 void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
-	const uint32_t negateNormalsFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_NEGATE_NORMALS);
-	const uint32_t invertNormalGreenFlag = static_cast<uint32_t>(MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN);
     const bool textureStreamingEnabled = IsMaterialTextureStreamingEnabledSetting();
     m_materialData.baseColorStreamingTextureID = 0u;
     m_materialData.normalStreamingTextureID = 0u;
@@ -256,18 +254,6 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
     if (m_normalTexture) {
         m_normalTexture->SetGenerateMipmaps(true);
         m_normalTexture->EnsureUploaded(factory);
-        const auto uploadPath = m_normalTexture->Meta().uploadPath;
-        const bool hasExplicitNormalPolicy =
-            (m_materialData.materialFlags & (negateNormalsFlag | invertNormalGreenFlag)) != 0u;
-        const bool useCanonicalProcessedNormalFormat =
-            m_normalTexture->Meta().processing.semantic == TextureSemantic::Normal &&
-            (m_normalTexture->Meta().isProcessingCacheArtifact ||
-             uploadPath == TextureUploadPathTelemetry::AsyncProcessingReadyUpload ||
-             uploadPath == TextureUploadPathTelemetry::ProcessingCacheUpload);
-        if (useCanonicalProcessedNormalFormat && !hasExplicitNormalPolicy) {
-            m_materialData.materialFlags |= negateNormalsFlag;
-            m_materialData.materialFlags &= ~invertNormalGreenFlag;
-        }
 	}
     if (m_aoMap) {
         m_aoMap->SetGenerateMipmaps(true);

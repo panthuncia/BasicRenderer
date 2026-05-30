@@ -40,7 +40,7 @@ public:
 	unsigned int AcquireRasterBucket(MaterialRasterFlags rasterFlags);
 	void ReleaseRasterBucket(MaterialRasterFlags rasterFlags);
 
-	void IncrementMaterialUsageCount(Material& material);
+	void IncrementMaterialUsageCount(Material& material, TextureFactory* textureFactory = nullptr);
 	void DecrementMaterialUsageCount(const Material& material);
 	void BeginTextureStreamingFeedbackFrame(uint64_t frameIndex);
 	void ProcessPendingMaterialUpdates(uint64_t frameIndex, TextureFactory& textureFactory);
