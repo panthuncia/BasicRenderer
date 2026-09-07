@@ -11,6 +11,7 @@
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
 #include "Materials/colorspaces.h"
+#include "RenderPasses/PreparedFullscreenDraw.h"
 
 #include "../shaders/FidelityFX/ffx_a.h"
 A_STATIC AF1 fs2S;
@@ -96,7 +97,7 @@ public:
 
 		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
-		commandList.BindPipeline(m_pso->GetHandle());
+		commandList.BindPipeline((*m_pso)->GetHandle());
 
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
@@ -118,13 +119,32 @@ public:
 		return {};
 	}
 
+	PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+		const auto* context = preparation.preparationData->Get<UpdateContext>();
+		br::render::PreparedFullscreenDraw data{};
+		data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+		data.renderTarget = {context->rtvHeap, context->frameIndex}; data.loadOp = rhi::LoadOp::Clear;
+		data.clear.rgba[3] = 1.0f; data.width = context->outputResolution.x; data.height = context->outputResolution.y;
+		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = (*m_pso)->GetHandle();
+		data.pipelineOwner = m_pso; data.descriptorIndices = CaptureResourceDescriptorIndices(m_resourceDescriptorBindings);
+		data.constants[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
+		data.constants[TONEMAP_TYPE] = getTonemapType(); data.constants[TONEMAP_BLOOM_ENABLED] = m_bloomEnabled ? 1u : 0u;
+		if (m_bloomEnabled) {
+			data.constants[TONEMAP_BLOOM_MIP1_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(1).slot.index;
+			data.constants[TONEMAP_BLOOM_MIP2_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(2).slot.index;
+			data.constants[TONEMAP_BLOOM_FILTER_RADIUS] = as_uint(0.001f);
+			data.constants[TONEMAP_BLOOM_ASPECT_RATIO] = as_uint(context->outputResolution.x / static_cast<float>(context->outputResolution.y));
+		}
+		return PreparedPass::Make(std::move(data), &br::render::RecordPreparedFullscreenDraw);
+	}
+
     void Cleanup() override {
         // Cleanup the render pass
 	}
 
 private:
 
-    rhi::PipelinePtr m_pso;
+    std::shared_ptr<rhi::PipelinePtr> m_pso;
     PipelineResources m_resourceDescriptorBindings;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<LPMConstants>> m_pLPMConstants;
@@ -204,10 +224,12 @@ private:
 			rhi::Make(soTopo)
         };
 
-        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        rhi::PipelinePtr pipeline;
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pipeline);
         if (Failed(result)) {
             throw std::runtime_error("Failed to create tonemapping PSO (RHI)");
         }
-        m_pso->SetName("Tonemapping.PSO");
+        pipeline->SetName("Tonemapping.PSO");
+        m_pso = std::make_shared<rhi::PipelinePtr>(std::move(pipeline));
     }
 };

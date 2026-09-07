@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -132,6 +133,53 @@ public:
 		m_pending.clear();
 
 		return {};
+	}
+
+	PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+		if (m_pending.empty()) return PreparedPass::NoOp();
+		const auto* context = preparation.preparationData->Get<UpdateContext>();
+		struct PreparedData {
+			rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+			rhi::PipelineLayoutHandle layout{};
+			rhi::PipelineHandle pipeline{};
+			std::shared_ptr<const PipelineStatePayload> pipelineOwner;
+			std::vector<unsigned int> descriptorIndices;
+			uint32_t samplerIndex = 0;
+			std::vector<Job> jobs;
+		};
+		auto payload = m_PSO.GetPayload();
+		auto descriptorIndices = CaptureResourceDescriptorIndices(payload->pipelineResources);
+		PreparedData data{
+			.resourceHeap = context->textureDescriptorHeap.GetHandle(),
+			.samplerHeap = context->samplerDescriptorHeap.GetHandle(),
+			.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+			.pipeline = payload->pso.Get().GetHandle(),
+			.pipelineOwner = std::move(payload),
+			.descriptorIndices = std::move(descriptorIndices),
+			.samplerIndex = m_samplerIndex,
+			.jobs = m_pending,
+		};
+		m_pending.clear();
+		m_declaredResourcesChanged = true;
+		return PreparedPass::Make(std::move(data), +[](const PreparedData& data, RecordingContext& recording) {
+			auto& commands = recording.Commands();
+			commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+			commands.BindLayout(data.layout);
+			commands.BindPipeline(data.pipeline);
+			if (!data.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
+				org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+				static_cast<uint32_t>(data.descriptorIndices.size()), data.descriptorIndices.data());
+			std::array<unsigned int, NumMiscUintRootConstants> constants{};
+			constants[UintRootConstant1] = data.samplerIndex;
+			for (const auto& job : data.jobs) {
+				constants[UintRootConstant0] = job.cubemapResolution;
+				constants[UintRootConstant2] = job.environmentIndex;
+				commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
+					NumMiscUintRootConstants, constants.data());
+				commands.Dispatch((job.cubemapResolution + 15) / 16,
+					(job.cubemapResolution + 15) / 16, 6);
+			}
+		});
 	}
 
 	bool DeclaredResourcesChanged() const override {

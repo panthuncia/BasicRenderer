@@ -1,15 +1,30 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include <rhi.h>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 
-class RasterBucketCompactAndArgsPass : public ComputePass {
+struct RasterBucketCompactAndArgsPreparedData {
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    rhi::PipelineLayoutHandle layout{};
+    rhi::PipelineHandle clearPipeline{}, compactPipeline{};
+    std::shared_ptr<const PipelineStatePayload> clearOwner, compactOwner;
+    std::shared_ptr<const rhi::CommandSignaturePtr> commandSignatureOwner;
+    rhi::CommandSignatureHandle commandSignature{};
+    rhi::ResourceHandle indirectCommand{}, cursorResource{};
+    std::vector<unsigned int> clearDescriptorIndices, compactDescriptorIndices;
+    std::vector<uint32_t> clearConstants, compactConstants;
+    uint32_t clearGroups = 0;
+    bool enabled = false;
+};
+
+class RasterBucketCompactAndArgsPass : public org::TypedRenderGraphPass<RasterBucketCompactAndArgsPass, RasterBucketCompactAndArgsPreparedData> {
 public:
     RasterBucketCompactAndArgsPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -33,16 +48,16 @@ public:
         bool buildSoftwareRasterDispatch = false,
         bool runWhenComputeSWRasterEnabledOnly = false);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Declare(org::PassBuilder& builder);
+    RasterBucketCompactAndArgsPreparedData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const RasterBucketCompactAndArgsPreparedData&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
 
 private:
+    using PreparedData = RasterBucketCompactAndArgsPreparedData;
     PipelineState m_pso;
     PipelineState m_clearPipeline;
-    rhi::CommandSignaturePtr m_compactionCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_compactionCommandSignature;
 
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClusterTransformIndicesBuffer;

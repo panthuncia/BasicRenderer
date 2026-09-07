@@ -41,9 +41,11 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
     };
 
     auto device = DeviceManager::GetInstance().GetDevice();
+    rhi::CommandSignaturePtr histogramCommandSignature;
     device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(rasterizeClustersArgs, 2), sizeof(RasterBucketsHistogramIndirectCommand) },
-        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), m_histogramCommandSignature);
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), histogramCommandSignature);
+    m_histogramCommandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(histogramCommandSignature));
 
     m_visibleClustersBuffer = std::move(visibleClustersBuffer);
     m_visibleClustersCounterBuffer = std::move(visibleClustersCounterBuffer);
@@ -59,8 +61,8 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
 
 RasterBucketHistogramPass::~RasterBucketHistogramPass() = default;
 
-void RasterBucketHistogramPass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithShaderResource(
+void RasterBucketHistogramPass::Declare(org::PassBuilder& builder) {
+    builder.WithShaderResource(
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
             Builtin::PerMeshBuffer,
@@ -72,21 +74,19 @@ void RasterBucketHistogramPass::DeclareResourceUsages(ComputePassBuilder* builde
         .WithIndirectArguments(m_histogramIndirectCommand)
     		.WithUnorderedAccess(m_histogramBuffer, Builtin::Material::TextureStreamingFeedbackBuffer);
     if (m_reyesOwnershipBitsetBuffer) {
-        builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
+        builder.WithShaderResource(m_reyesOwnershipBitsetBuffer);
     }
     if (m_telemetryBuffer) {
-        builder->WithUnorderedAccess(m_telemetryBuffer);
+        builder.WithUnorderedAccess(m_telemetryBuffer);
     }
     if (m_readBaseCounterBuffer) {
-        builder->WithShaderResource(m_readBaseCounterBuffer);
+        builder.WithShaderResource(m_readBaseCounterBuffer);
     }
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void RasterBucketHistogramPass::Setup() {
-}
-
+#if 0 // Removed legacy recording path; typed Record below is used in all modes.
 PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionContext) {
     if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return {};
@@ -162,9 +162,75 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
         NumMiscUintRootConstants,
         uintRootConstants);
 
-    commandList.ExecuteIndirect(m_histogramCommandSignature->GetHandle(), m_histogramIndirectCommand->GetAPIResource().GetHandle(), 0, {}, 0, 1);
+    commandList.ExecuteIndirect((*m_histogramCommandSignature)->GetHandle(), m_histogramIndirectCommand->GetAPIResource().GetHandle(), 0, {}, 0, 1);
 
     return {};
+}
+#endif
+
+RasterBucketHistogramPreparedData RasterBucketHistogramPass::Prepare(const org::PassPrepareContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    PreparedData data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.clearOwner = m_clearPipeline.GetPayload();
+    data.histogramOwner = m_histogramPipeline.GetPayload();
+    data.clearPipeline = data.clearOwner->pso.Get().GetHandle();
+    data.histogramPipeline = data.histogramOwner->pso.Get().GetHandle();
+    data.commandSignatureOwner = m_histogramCommandSignature;
+    data.commandSignature = (*m_histogramCommandSignature)->GetHandle();
+    data.indirectArguments = m_histogramIndirectCommand->GetAPIResource().GetHandle();
+    data.histogramResource = m_histogramBuffer->GetAPIResource().GetHandle();
+    data.clearDescriptorIndices = CaptureResourceDescriptorIndices(data.clearOwner->pipelineResources);
+    data.histogramDescriptorIndices = CaptureResourceDescriptorIndices(data.histogramOwner->pipelineResources);
+    data.clearConstants.resize(NumMiscUintRootConstants);
+    data.histogramConstants.resize(NumMiscUintRootConstants);
+    const uint32_t numBuckets = context->materialManager->GetRasterBucketCount();
+    data.enabled = numBuckets != 0u && (!m_runWhenComputeSWRasterEnabledOnly
+        || CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)()));
+    data.clearGroups = (numBuckets + 63u) / 64u;
+    data.clearConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.clearConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = numBuckets;
+    auto& c = data.histogramConstants;
+    c[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer ? m_readBaseCounterBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    c[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+    c[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    c[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled() ? m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    c[CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer ? m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    c[CLOD_HISTOGRAM_NUM_RASTER_BUCKETS] = numBuckets;
+    c[CLOD_HISTOGRAM_READ_MODE_FLAGS] = (m_readReverse ? CLOD_HISTOGRAM_READ_FLAG_REVERSED : 0u)
+        | (m_reyesOwnershipBitsetBuffer ? CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED : 0u);
+    c[CLOD_HISTOGRAM_READ_CAPACITY] = m_visibleClustersCapacity;
+    return data;
+}
+
+void RasterBucketHistogramPass::Record(const PreparedData& data, org::PassRecordContext& recording) {
+    if (!data.enabled) return;
+    auto& commands = recording.Commands();
+    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    commands.BindLayout(data.layout);
+    auto bindIndices = [&](const std::vector<unsigned int>& indices) {
+        if (!indices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
+            org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+            static_cast<uint32_t>(indices.size()), indices.data());
+    };
+    commands.BindPipeline(data.clearPipeline);
+    bindIndices(data.clearDescriptorIndices);
+    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
+        NumMiscUintRootConstants, data.clearConstants.data());
+    commands.Dispatch(data.clearGroups, 1, 1);
+    rhi::BufferBarrier barrier{};
+    barrier.buffer = data.histogramResource;
+    barrier.beforeAccess = barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    barrier.beforeSync = barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+    rhi::BarrierBatch barriers{}; barriers.buffers = {&barrier}; commands.Barriers(barriers);
+    commands.BindPipeline(data.histogramPipeline);
+    bindIndices(data.histogramDescriptorIndices);
+    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
+        NumMiscUintRootConstants, data.histogramConstants.data());
+    commands.ExecuteIndirect(data.commandSignature, data.indirectArguments, 0, {}, 0, 1);
 }
 
 void RasterBucketHistogramPass::Update(const UpdateExecutionContext& executionContext) {
@@ -181,9 +247,6 @@ void RasterBucketHistogramPass::Update(const UpdateExecutionContext& executionCo
         m_histogramBuffer->ResizeStructured(numRasterBuckets);
     }
 
-}
-
-void RasterBucketHistogramPass::Cleanup() {
 }
 
 void RasterBucketHistogramPass::CreatePipelines(

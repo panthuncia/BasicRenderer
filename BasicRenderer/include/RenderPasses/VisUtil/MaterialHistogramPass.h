@@ -1,13 +1,14 @@
 #pragma once
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Materials/TechniqueDescriptor.h"
 #include "../shaders/PerPassRootConstants/visUtilRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
-class MaterialHistogramPass : public ComputePass {
+class MaterialHistogramPass : public org::TypedRenderGraphPass<MaterialHistogramPass, br::render::PreparedComputeDispatch> {
 public:
     MaterialHistogramPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -35,21 +36,22 @@ public:
             .with<CLodReyesDiceQueueTag>()
             .build();
     }
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& b) {
 
-        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery)); 
-    	b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
-        b->WithShaderResource(Builtin::PrimaryCamera::VisibilityTexture,
+        b.WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
+        b.WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
+	    b.WithShaderResource(Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
                               Builtin::InstanceDrawRecordBuffer,
                               Builtin::PerMeshBuffer,
                               Builtin::PerMaterialDataBuffer)
          .WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer");
-		b->WithConstantBuffer(Builtin::PerFrameBuffer);
+		b.WithConstantBuffer(Builtin::PerFrameBuffer)
+         .PreferQueue(org::QueueKind::Compute);
     }
 
-    void Setup() override {
+    void Initialize() {
         RefreshResourcePointers();
         RefreshDescriptorIndices();
     }
@@ -96,36 +98,37 @@ public:
             : 0xFFFFFFFFu;
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& pm = PSOManager::GetInstance();
-        auto& cl = executionContext.commandList;
-
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+        const auto* update = preparation.preparationData->Get<UpdateContext>();
+        const auto* render = preparation.preparationData->Get<RenderContext>();
+        if (!update && !render) throw std::logic_error("MaterialHistogramPass requires frame context");
         RefreshDescriptorIndices();
-
-        // Set per-pass root constants
-        unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-        miscRootConstants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
-        miscRootConstants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
-        miscRootConstants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
-        unsigned int voxelMaterialBin = 0xFFFFFFFFu;
-        ctx.materialManager->TryGetCompileFlagsSlot(MaterialCompileFlags::MaterialCompileVoxel, voxelMaterialBin);
-        miscRootConstants[VISBUF_VOXEL_MATERIAL_BIN_INDEX] = voxelMaterialBin;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
-
-        const uint32_t groupSizeX = 8, groupSizeY = 8;
-        uint32_t x = (ctx.renderResolution.x + groupSizeX - 1) / groupSizeX;
-        uint32_t y = (ctx.renderResolution.y + groupSizeY - 1) / groupSizeY;
-        cl.Dispatch(x, y, 1);
-        return {};
+        auto payload = m_pso.GetPayload();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+        data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+        data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
+        data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+        uint32_t voxelMaterialBin = 0xFFFFFFFFu;
+        auto* materialManager = update ? update->materialManager : render->materialManager;
+        materialManager->TryGetCompileFlagsSlot(MaterialCompileFlags::MaterialCompileVoxel, voxelMaterialBin);
+        data.constants[VISBUF_VOXEL_MATERIAL_BIN_INDEX] = voxelMaterialBin;
+        const auto resolution = update ? update->renderResolution : render->renderResolution;
+        data.groupsX = (resolution.x + 7u) / 8u;
+        data.groupsY = (resolution.y + 7u) / 8u;
+        return data;
     }
 
-    void Cleanup() override {
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
+
+    void ShutdownPass() {
         m_visibleClustersQuery = {};
         m_reyesDiceQueueQuery = {};
     }

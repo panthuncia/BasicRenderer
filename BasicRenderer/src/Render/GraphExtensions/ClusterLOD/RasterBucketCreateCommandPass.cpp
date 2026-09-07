@@ -7,6 +7,7 @@
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
 #include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
@@ -31,18 +32,17 @@ RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
         "CLod_RasterBucketsCreateCommandPSO");
 }
 
-void RasterBucketCreateCommandPass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithShaderResource(m_visibleClustersCounterBuffer)
+void RasterBucketCreateCommandPass::Declare(org::PassBuilder& builder) {
+    builder.WithShaderResource(m_visibleClustersCounterBuffer)
         .WithUnorderedAccess(m_histogramIndirectCommand);
     if (m_patchReplayNodeInputs) {
-        builder->WithShaderResource(m_occlusionReplayStateBuffer)
+        builder.WithShaderResource(m_occlusionReplayStateBuffer)
             .WithUnorderedAccess(m_occlusionNodeGpuInputsBuffer);
     }
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void RasterBucketCreateCommandPass::Setup() {}
-
+#if 0 // Removed legacy recording path.
 PassReturn RasterBucketCreateCommandPass::Execute(PassExecutionContext& executionContext) {
     if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return {};
@@ -76,9 +76,30 @@ PassReturn RasterBucketCreateCommandPass::Execute(PassExecutionContext& executio
     commandList.Dispatch(1, 1, 1);
     return {};
 }
+#endif
+
+br::render::PreparedComputeDispatch RasterBucketCreateCommandPass::Prepare(const org::PassPrepareContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_pso.GetPayload();
+    br::render::PreparedComputeDispatch data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.constants[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context->materialManager->GetRasterBucketCount();
+    data.constants[CLOD_CREATE_VISIBLE_CLUSTERS_CAPACITY] = m_visibleClustersCapacity;
+    data.groupsX = (!m_runWhenComputeSWRasterEnabledOnly
+        || CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) ? 1u : 0u;
+    return data;
+}
 
 void RasterBucketCreateCommandPass::Update(const UpdateExecutionContext& executionContext) {
     (void)executionContext;
 }
 
-void RasterBucketCreateCommandPass::Cleanup() {}

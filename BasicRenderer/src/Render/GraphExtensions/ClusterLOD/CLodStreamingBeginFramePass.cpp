@@ -12,6 +12,7 @@
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     std::function<UploadInstance*()> getUploadInstance,
@@ -97,6 +98,32 @@ PassReturn CLodStreamingBeginFramePass::Execute(PassExecutionContext& executionC
         clearUintBuffer(m_loadRequestKeys, 0xffffffffu, CLodStreamingRequestCapacity);
     }
     return {};
+}
+
+PreparedPass CLodStreamingBeginFramePass::PrepareFrame(FramePreparationContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_clearUintPipeline.GetPayload();
+    br::render::PreparedComputeDispatchSequence data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    auto appendClear = [&](const std::shared_ptr<Buffer>& buffer, uint32_t value, uint32_t count) {
+        if (!buffer || count == 0u) return;
+        br::render::PreparedComputeDispatchSequence::Step step{};
+        step.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = buffer->GetUAVShaderVisibleInfo(0).slot.index;
+        step.constants[CLOD_CLEAR_UINT_BUFFER_VALUE] = value;
+        step.constants[CLOD_CLEAR_UINT_BUFFER_COUNT] = count;
+        step.groupsX = (count + 63u) / 64u;
+        data.steps.push_back(step);
+    };
+    appendClear(m_loadCounter, 0u, 1u);
+    appendClear(m_usedGroupsCounter, 0u, 1u);
+    appendClear(m_sourceGroupMismatchCounter, 0u, 1u);
+    appendClear(m_loadRequestKeys, 0xffffffffu, CLodStreamingRequestCapacity);
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
 }
 
 void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& executionContext) {

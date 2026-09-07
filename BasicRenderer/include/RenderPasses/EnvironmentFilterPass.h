@@ -3,6 +3,7 @@
 #include <filesystem>
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Render/PreparedPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -131,6 +132,46 @@ public:
         m_pending.clear();
 
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        if (m_pending.empty()) return PreparedPass::NoOp();
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        struct PreparedData {
+            rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+            rhi::PipelineLayoutHandle layout{};
+            rhi::PipelineHandle pipeline{};
+            std::vector<Job> jobs;
+        };
+        PreparedData data{
+            .resourceHeap = context->textureDescriptorHeap.GetHandle(),
+            .samplerHeap = context->samplerDescriptorHeap.GetHandle(),
+            .layout = m_layout->GetHandle(),
+            .pipeline = m_pso->GetHandle(),
+            .jobs = m_pending,
+        };
+        m_pending.clear();
+        m_declaredResourcesChanged = true;
+        return PreparedPass::Make(std::move(data), +[](const PreparedData& data, RecordingContext& recording) {
+            auto& commands = recording.Commands();
+            commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+            commands.BindLayout(data.layout);
+            commands.BindPipeline(data.pipeline);
+            for (const auto& job : data.jobs) {
+                const uint32_t src = job.srcCubemap->GetSRVInfo(0).slot.index;
+                const uint32_t mipCount = job.dstPrefilteredCubemap->GetNumUAVMipLevels();
+                for (uint32_t mip = 0; mip < mipCount; ++mip) {
+                    const uint32_t size = std::max(1u, job.baseResolution >> mip);
+                    for (uint32_t face = 0; face < 6; ++face) {
+                        const uint32_t values[5] = { src,
+                            job.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, face).slot.index,
+                            face, size, as_uint(mipCount > 1 ? float(mip) / float(mipCount - 1) : 0.0f) };
+                        commands.PushConstants(rhi::ShaderStage::Compute, 0, 0, 0, 5, values);
+                        commands.Dispatch((size + 7) / 8, (size + 7) / 8, 1);
+                    }
+                }
+            }
+        });
     }
 
     bool DeclaredResourcesChanged() const override {

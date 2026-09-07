@@ -22,6 +22,47 @@
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
 #include "boost/container_hash/hash.hpp"
 
+namespace br::render {
+struct PreparedForwardIndirect {
+    struct Draw {
+        rhi::PipelineHandle pipeline{};
+        std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
+        std::vector<unsigned int> descriptorIndices;
+        rhi::ResourceHandle arguments{};
+        std::shared_ptr<const void> argumentsOwner;
+        uint64_t countOffset = 0;
+        uint32_t maximumCount = 0;
+    };
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    rhi::PipelineLayoutHandle layout{};
+    rhi::CommandSignatureHandle commandSignature{};
+    rhi::DescriptorSlot color{}, depth{};
+    DirectX::XMUINT2 resolution{};
+    std::array<unsigned int, 3> settings{};
+    std::vector<Draw> draws;
+};
+
+inline void RecordPreparedForwardIndirect(const PreparedForwardIndirect& data, org::RecordingContext& recording) {
+    auto& commands = recording.Commands();
+    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    rhi::ColorAttachment color{}; color.rtv = data.color; color.loadOp = rhi::LoadOp::Load; color.storeOp = rhi::StoreOp::Store;
+    rhi::DepthAttachment depth{}; depth.dsv = data.depth; depth.depthLoad = rhi::LoadOp::Load; depth.depthStore = rhi::StoreOp::Store;
+    depth.stencilLoad = rhi::LoadOp::DontCare; depth.stencilStore = rhi::StoreOp::DontCare;
+    rhi::PassBeginInfo pass{}; pass.colors = {&color, 1}; pass.depth = &depth;
+    pass.width = data.resolution.x; pass.height = data.resolution.y; pass.debugName = "Forward Render Pass";
+    commands.BeginPass(pass); commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList); commands.BindLayout(data.layout);
+    commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscEnableShadows, 3, data.settings.data());
+    for (const auto& draw : data.draws) {
+        commands.BindPipeline(draw.pipeline);
+        if (!draw.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
+            org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+            static_cast<uint32_t>(draw.descriptorIndices.size()), draw.descriptorIndices.data());
+        commands.ExecuteIndirect(data.commandSignature, draw.arguments, 0, draw.arguments,
+            draw.countOffset, draw.maximumCount);
+    }
+}
+}
+
 struct ForwardRenderPassInputs {
     bool wireframe;
     bool meshShaders;
@@ -153,6 +194,41 @@ public:
             ExecuteRegular(context, commandList);
         }
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        const auto published = context->publishedRendererState
+            ? context->publishedRendererState->indirectWorkloads.payload.Get<br::render::PublishedIndirectState>() : nullptr;
+        if (!published) return PreparedPass::NoOp();
+        br::render::PreparedForwardIndirect data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+        data.commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature().GetHandle();
+        data.color = m_pHDRTarget->GetRTVInfo(0).slot; data.depth = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
+        data.resolution = context->renderResolution;
+        data.settings = {getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled};
+        if (!m_meshShaders || !m_indirect)
+            return PreparedPass::Make(std::move(data), &br::render::RecordPreparedForwardIndirect);
+        const auto workloads = published->Find(context->primaryViewID, Engine::Primary::ForwardPass, false);
+        data.draws.reserve(workloads.size());
+        for (const auto* workload : workloads) {
+            if (!workload || !workload->indirectArguments || workload->count == 0u) continue;
+            if (const auto backing = std::dynamic_pointer_cast<Buffer>(workload->indirectArguments)) {
+                const auto requiredBytes = static_cast<uint64_t>(workload->count) * sizeof(DispatchMeshIndirectCommand);
+                if (backing->GetSize() < requiredBytes) continue;
+            }
+            auto payload = PSOManager::GetInstance().GetMeshPSO(
+                context->globalPSOFlags, workload->key.compileFlags, m_wireframe).GetPayload();
+            br::render::PreparedForwardIndirect::Draw draw{};
+            draw.pipeline = payload->pso.Get().GetHandle(); draw.pipelineOwner = std::move(payload);
+            draw.descriptorIndices = CaptureResourceDescriptorIndices(draw.pipelineOwner->pipelineResources);
+            draw.arguments = workload->indirectArguments->GetAPIResource().GetHandle();
+            draw.argumentsOwner = workload->indirectArguments;
+            draw.countOffset = workload->indirectArguments->GetUAVCounterOffset(); draw.maximumCount = workload->count;
+            data.draws.push_back(std::move(draw));
+        }
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedForwardIndirect);
     }
 
     void Cleanup() override {

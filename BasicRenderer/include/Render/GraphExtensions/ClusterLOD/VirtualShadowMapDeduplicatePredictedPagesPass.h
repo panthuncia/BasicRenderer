@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "Render/PipelineState.h"
 #include "RenderPasses/Base/ComputePass.h"
@@ -27,9 +28,20 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Cleanup() override;
 
 private:
+    struct PreparedData {
+        rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+        rhi::PipelineLayoutHandle layout{};
+        rhi::PipelineHandle clearPipeline{}, deduplicatePipeline{};
+        std::shared_ptr<const PipelineStatePayload> clearOwner, deduplicateOwner;
+        std::vector<unsigned int> clearDescriptorIndices, deduplicateDescriptorIndices;
+        std::vector<unsigned int> constants;
+        uint32_t clearGroups = 0, deduplicateGroups = 0;
+    };
+    static void RecordPrepared(const PreparedData&, RecordingContext&);
     PipelineState m_clearStatePso;
     PipelineState m_deduplicatePso;
     std::shared_ptr<Buffer> m_predictiveRawPagesBuffer;

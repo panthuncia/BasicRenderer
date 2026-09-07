@@ -7,6 +7,7 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Texture.h"
 #include "../shaders/PerPassRootConstants/clodVirtualShadowBuildActiveBlocksRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 VirtualShadowMapBuildActiveBlocksPass::VirtualShadowMapBuildActiveBlocksPass(
     std::shared_ptr<PixelBuffer> pageTableTexture,
@@ -58,4 +59,23 @@ PassReturn VirtualShadowMapBuildActiveBlocksPass::Execute(PassExecutionContext& 
         NumMiscUintRootConstants, constants);
     commandList.Dispatch((CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u, 1u, 1u);
     return {};
+}
+
+PreparedPass VirtualShadowMapBuildActiveBlocksPass::PrepareFrame(FramePreparationContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_pso.GetPayload();
+    br::render::PreparedComputeDispatch data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index;
+    data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_OUTPUT_DESCRIPTOR_INDEX] = m_activeBlockMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_COUNT] = CLodVirtualShadowMaxMarkedBlockCount;
+    data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_DYNAMIC] = m_dynamicPages ? 1u : 0u;
+    data.groupsX = (CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u;
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }

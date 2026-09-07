@@ -361,7 +361,8 @@ void SyncOpenRenderGraphSettings(uint8_t numFramesInFlight) {
     orgSettings.collectPassStatistics = sm.getSettingGetter<bool>("collectPassStatistics")();
     orgSettings.collectPipelineStatistics = sm.getSettingGetter<bool>("collectPipelineStatistics")();
     orgSettings.useAsyncCompute = sm.getSettingGetter<bool>("useAsyncCompute")();
-    orgSettings.experimentalAsyncCompileShadow = sm.getSettingGetter<bool>("experimentalAsyncCompileShadow")();
+    orgSettings.experimentalAsyncCompileMode = static_cast<org::runtime::AsyncCompileMode>(std::clamp(
+        sm.getSettingGetter<int>("experimentalAsyncCompileMode")(), 0, 2));
     orgSettings.experimentalCompileConcurrency = static_cast<uint8_t>(std::clamp(
         sm.getSettingGetter<int>("experimentalCompileConcurrency")(), 1, 4));
     orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
@@ -567,10 +568,14 @@ void Renderer::Initialize(
         "renderGraphBatchTraceEnabled",
         ReadTruthyEnvironmentFlag("BASICRENDERER_RENDER_GRAPH_BATCH_TRACE"));
     settingsManager.registerSetting<bool>("renderGraphLightweightCompileSummaryEnabled", false);
-    settingsManager.registerSetting<bool>("experimentalAsyncCompileShadow", false);
+    settingsManager.registerSetting<int>("experimentalAsyncCompileMode", 0);
     settingsManager.registerSetting<int>("experimentalCompileConcurrency", 2);
-    if (const auto* enabled = std::getenv("SARP_ASYNC_COMPILE_SHADOW"); enabled && std::string_view(enabled) == "1")
-        settingsManager.getSettingSetter<bool>("experimentalAsyncCompileShadow")(true);
+    if (const auto* mode = std::getenv("SARP_ASYNC_COMPILE_MODE")) {
+        const std::string_view value(mode);
+        const int parsed = value == "Shadow" || value == "shadow" || value == "1" ? 1
+            : value == "Async" || value == "async" || value == "2" ? 2 : 0;
+        settingsManager.getSettingSetter<int>("experimentalAsyncCompileMode")(parsed);
+    }
     LoadPipeline(hwnd, x_res, y_res);
     DirectStorageManager::GetInstance().Initialize();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after LoadPipeline");
@@ -3266,29 +3271,75 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
     updateData.skeletonManager = m_pSkeletonManager.get();
+    updateData.textureDescriptorHeap = m_context.textureDescriptorHeap;
+    updateData.samplerDescriptorHeap = m_context.samplerDescriptorHeap;
+    updateData.rtvHeap = rtvHeap->GetHandle();
     updateData.currentScene = m_sceneRenderOverlapEnabled ? nullptr : currentScene.get();
     updateData.primaryCamera = camera.get<Components::Camera>();
+    updateData.primaryViewID = m_context.primaryViewID;
     updateData.hasPrimaryCamera = true;
     updateData.frameIndex = m_frameIndex;
     updateData.frameFenceValue = m_currentFrameFenceValue;
     updateData.frameNumber = m_totalFramesRendered;
     updateData.renderResolution = renderRes;
     updateData.outputResolution = outputRes;
+    if (m_imageBasedLighting) updateData.globalPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
+    if (m_clusteredLighting) updateData.globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
+    if (m_screenSpaceReflections || (m_rayTracedReflections && DeviceManager::GetInstance().GetCLodRayTracingSupported()))
+        updateData.globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
     updateData.deltaTime = elapsedSeconds;
 
     struct RendererUpdateHostData : IHostExecutionData {
-        const UpdateContext* data = nullptr;
+        std::shared_ptr<const UpdateContext> data;
+        std::shared_ptr<const RenderContext> renderData;
 
         const void* TryGet(std::type_index t) const noexcept override {
             if (t == std::type_index(typeid(UpdateContext))) {
-                return data;
+                return data.get();
+            }
+            if (t == std::type_index(typeid(RenderContext))) {
+                return renderData.get();
             }
             return nullptr;
         }
     };
 
-    RendererUpdateHostData updateHostData;
-    updateHostData.data = &updateData;
+    auto updateHostData = std::make_shared<RendererUpdateHostData>();
+    updateHostData->data = std::make_shared<const UpdateContext>(updateData);
+    // The executable-frame request owns the logical render snapshot used by
+    // transitional packets. It must never reinterpret UpdateContext as the
+    // differently-laid-out RenderContext during delayed recording.
+    auto renderSnapshot = m_context;
+    renderSnapshot.publishedRendererState = updateData.publishedRendererState;
+    renderSnapshot.publishedManifestLease = updateData.publishedManifestLease;
+    renderSnapshot.primaryCamera = updateData.primaryCamera;
+    renderSnapshot.primaryViewID = updateData.primaryViewID;
+    renderSnapshot.hasPrimaryCamera = updateData.hasPrimaryCamera;
+    renderSnapshot.frameIndex = updateData.frameIndex;
+    renderSnapshot.frameFenceValue = updateData.frameFenceValue;
+    renderSnapshot.frameNumber = updateData.frameNumber;
+    renderSnapshot.renderResolution = updateData.renderResolution;
+    renderSnapshot.outputResolution = updateData.outputResolution;
+    renderSnapshot.globalPSOFlags = updateData.globalPSOFlags;
+    renderSnapshot.deltaTime = updateData.deltaTime;
+    renderSnapshot.preparedViews.clear();
+    if (updateData.viewManager) {
+        updateData.viewManager->ForEachView([&](uint64_t viewID) {
+            const auto* view = updateData.viewManager->Get(viewID);
+            if (!view) return;
+            renderSnapshot.preparedViews.push_back({
+                .id = view->id,
+                .cameraBufferIndex = view->gpu.cameraBufferIndex,
+                .primary = view->flags.primaryCamera,
+                .shadow = view->flags.shadow,
+                .cascade = view->flags.cascaded,
+                .lightType = view->lightType,
+            });
+        });
+    }
+    renderSnapshot.preparedRasterBucketCount = updateData.materialManager
+        ? updateData.materialManager->GetRasterBucketCount() : 0;
+    updateHostData->renderData = std::make_shared<const RenderContext>(std::move(renderSnapshot));
 
     runCapturedStage("PublishDeferredBackingResizesLate", []() {
         BT_ZONE_SCOPE("Renderer::Update::PublishDeferredBackingResizesLate");
@@ -3319,11 +3370,113 @@ void Renderer::Update(float elapsedSeconds) {
     context.frameIndex = m_frameIndex;
     context.frameFenceValue = m_currentFrameFenceValue;
     context.deltaTime = elapsedSeconds;
-    context.hostData = &updateHostData;
+    context.hostData = updateHostData.get();
+    context.ownedHostData = updateHostData;
     context.beforeCompileFrame = [this]() {
         BT_ZONE_SCOPE("Renderer::Update::TerrainRvtTelemetry");
         MaybeRequestTerrainRvtTelemetry();
         MaybeRequestObjectReyesAtlasTelemetry();
+        static bool colorOutputReadbackRequested = false;
+        if (!colorOutputReadbackRequested && m_totalFramesRendered >= 120u &&
+            currentRenderGraph && m_dynamicBackbuffer) {
+            wchar_t* outputPath = nullptr;
+            size_t outputPathLength = 0;
+            if (_wdupenv_s(
+                    &outputPath,
+                    &outputPathLength,
+                    L"SARP_COLOR_OUTPUT_READBACK_PATH") == 0 &&
+                outputPath != nullptr && outputPath[0] != L'\0') {
+                const std::filesystem::path path(outputPath);
+                std::free(outputPath);
+                outputPath = nullptr;
+                if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
+                    colorOutputReadbackRequested = true;
+                    readbackService->RequestReadbackCapture(
+                        "PresentPass",
+                        m_dynamicBackbuffer.get(),
+                        RangeSpec{},
+                        [path](ReadbackCaptureResult&& result) {
+                            BT_ZONE_SCOPE("Renderer::ColorOutputReadback::Analyze");
+                            std::ofstream output(path, std::ios::binary | std::ios::trunc);
+                            if (output && !result.data.empty()) {
+                                output.write(
+                                    reinterpret_cast<const char*>(result.data.data()),
+                                    static_cast<std::streamsize>(result.data.size()));
+                            }
+
+                            std::uint64_t whitePixels = 0;
+                            std::uint64_t opaquePixels = 0;
+                            std::uint64_t allWhiteTiles = 0;
+                            constexpr std::uint32_t tileSize = 16;
+                            if (!result.layouts.empty() && result.width && result.height) {
+                                const auto& layout = result.layouts.front();
+                                const auto rowPitch = static_cast<std::size_t>(layout.rowPitch);
+                                const auto baseOffset = static_cast<std::size_t>(layout.offset);
+                                if (rowPitch >= static_cast<std::size_t>(result.width) * 4u &&
+                                    baseOffset + rowPitch * result.height <= result.data.size()) {
+                                    for (std::uint32_t y = 0; y < result.height; ++y) {
+                                        const auto* row = result.data.data() + baseOffset + rowPitch * y;
+                                        for (std::uint32_t x = 0; x < result.width; ++x) {
+                                            const auto* pixel = row + static_cast<std::size_t>(x) * 4u;
+                                            const bool white = std::to_integer<std::uint8_t>(pixel[0]) >= 250u &&
+                                                std::to_integer<std::uint8_t>(pixel[1]) >= 250u &&
+                                                std::to_integer<std::uint8_t>(pixel[2]) >= 250u;
+                                            whitePixels += white ? 1u : 0u;
+                                            opaquePixels += std::to_integer<std::uint8_t>(pixel[3]) >= 250u ? 1u : 0u;
+                                        }
+                                    }
+                                    for (std::uint32_t y = 0; y + tileSize <= result.height; y += tileSize) {
+                                        for (std::uint32_t x = 0; x + tileSize <= result.width; x += tileSize) {
+                                            bool allWhite = true;
+                                            for (std::uint32_t tileY = 0; tileY < tileSize && allWhite; ++tileY) {
+                                                const auto* row = result.data.data() + baseOffset +
+                                                    rowPitch * (y + tileY) + static_cast<std::size_t>(x) * 4u;
+                                                for (std::uint32_t tileX = 0; tileX < tileSize; ++tileX) {
+                                                    const auto* pixel = row + static_cast<std::size_t>(tileX) * 4u;
+                                                    if (std::to_integer<std::uint8_t>(pixel[0]) < 250u ||
+                                                        std::to_integer<std::uint8_t>(pixel[1]) < 250u ||
+                                                        std::to_integer<std::uint8_t>(pixel[2]) < 250u) {
+                                                        allWhite = false;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            allWhiteTiles += allWhite ? 1u : 0u;
+                                        }
+                                    }
+                                }
+                            }
+                            BT_PLOT("Renderer.ColorOutputReadback.WhitePixels", static_cast<int64_t>(whitePixels));
+                            BT_PLOT("Renderer.ColorOutputReadback.AllWhite16x16Tiles", static_cast<int64_t>(allWhiteTiles));
+                            BT_PLOT("Renderer.ColorOutputReadback.Bytes", static_cast<int64_t>(result.data.size()));
+
+                            auto metadataPath = path;
+                            metadataPath += L".meta.txt";
+                            std::ofstream metadata(metadataPath, std::ios::trunc);
+                            if (metadata) {
+                                metadata << "format=" << static_cast<std::uint32_t>(result.format) << '\n';
+                                metadata << "width=" << result.width << '\n';
+                                metadata << "height=" << result.height << '\n';
+                                metadata << "bytes=" << result.data.size() << '\n';
+                                metadata << "white_pixels=" << whitePixels << '\n';
+                                metadata << "opaque_pixels=" << opaquePixels << '\n';
+                                metadata << "all_white_16x16_tiles=" << allWhiteTiles << '\n';
+                                if (!result.layouts.empty()) {
+                                    metadata << "offset=" << result.layouts.front().offset << '\n';
+                                    metadata << "row_pitch=" << result.layouts.front().rowPitch << '\n';
+                                }
+                            }
+                            spdlog::info(
+                                "Color output readback: bytes={} dimensions={}x{} white_pixels={} all_white_16x16_tiles={} output='{}'.",
+                                result.data.size(), result.width, result.height, whitePixels, allWhiteTiles,
+                                path.string());
+                        });
+                }
+            }
+            if (outputPath) {
+                std::free(outputPath);
+            }
+        }
         static bool materialBufferReadbackRequested = false;
         if (!materialBufferReadbackRequested && m_totalFramesRendered >= 120u &&
             currentRenderGraph && m_pMaterialManager) {
@@ -5065,6 +5218,8 @@ void Renderer::Render() {
     } else {
         const auto backbufferHandle = currentBackbufferResource->GetHandle();
         const auto backbufferRtv = currentBackbufferResource->GetRTVSlot();
+        passExecutionContext.externalDescriptorBindings.push_back({
+            org::ExternalBindingKey::SwapchainColor, backbufferRtv});
         if (renderGraphBatchTraceEnabled) {
             spdlog::info(
                 "Renderer: frame {} begin backbuffer diagnostics slot={} dynamicID={} backingID={} handle=({}, {}) rtv=({}, {})",

@@ -152,6 +152,65 @@ PassReturn ReyesQueueResetPass::Execute(PassExecutionContext& executionContext)
     return {};
 }
 
+PreparedPass ReyesQueueResetPass::PrepareFrame(FramePreparationContext& preparation)
+{
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    PreparedData data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.countersOwner = m_clearCountersPso.GetPayload();
+    data.countersPipeline = data.countersOwner->pso.Get().GetHandle();
+    data.countersDescriptorIndices = CaptureResourceDescriptorIndices(data.countersOwner->pipelineResources);
+    data.constants.resize(NumMiscUintRootConstants);
+    auto& c = data.constants;
+    c[CLOD_REYES_RESET_FULL_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_fullClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_OWNED_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_ownedClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_A_DESCRIPTOR_INDEX] = m_splitQueueCounters[0]->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_A_DESCRIPTOR_INDEX] = m_splitQueueOverflowCounters[0]->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_B_DESCRIPTOR_INDEX] = m_splitQueueCounters[1]->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_B_DESCRIPTOR_INDEX] = m_splitQueueOverflowCounters[1]->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_diceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_REYES_RESET_CLEAR_DICE_QUEUE_COUNTER] = m_clearDiceQueueCounter ? 1u : 0u;
+    c[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replaySplitQueueCounter ? m_replaySplitQueueCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    c[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replaySplitQueueOverflowCounter ? m_replaySplitQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replayDiceQueueCounter ? m_replayDiceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replayDiceQueueOverflowCounter ? m_replayDiceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    if (m_ownershipBitsetBuffer && m_ownershipBitsetWordCount) {
+        data.bitsetOwner = m_clearOwnershipBitsetPso.GetPayload();
+        data.bitsetPipeline = data.bitsetOwner->pso.Get().GetHandle();
+        data.bitsetDescriptorIndices = CaptureResourceDescriptorIndices(data.bitsetOwner->pipelineResources);
+        c[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        c[CLOD_REYES_RESET_OWNERSHIP_BITSET_WORD_COUNT] = m_ownershipBitsetWordCount;
+        data.bitsetGroups = (m_ownershipBitsetWordCount + 63u) / 64u;
+    }
+    return PreparedPass::Make(std::move(data), &RecordPrepared);
+}
+
+void ReyesQueueResetPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)
+{
+    auto& commands = recording.Commands();
+    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    commands.BindLayout(data.layout);
+    auto bindIndices = [&](const std::vector<unsigned int>& indices) {
+        if (!indices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
+            org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+            static_cast<uint32_t>(indices.size()), indices.data());
+    };
+    commands.BindPipeline(data.countersPipeline);
+    bindIndices(data.countersDescriptorIndices);
+    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
+        NumMiscUintRootConstants, data.constants.data());
+    commands.Dispatch(1, 1, 1);
+    if (!data.bitsetGroups) return;
+    commands.BindPipeline(data.bitsetPipeline);
+    bindIndices(data.bitsetDescriptorIndices);
+    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
+        NumMiscUintRootConstants, data.constants.data());
+    commands.Dispatch(data.bitsetGroups, 1, 1);
+}
+
 void ReyesQueueResetPass::Update(const UpdateExecutionContext& executionContext)
 {
     (void)executionContext;

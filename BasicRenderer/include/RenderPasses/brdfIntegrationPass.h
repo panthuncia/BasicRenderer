@@ -4,6 +4,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "RenderPasses/PreparedFullscreenDraw.h"
 
 #include <string>
 
@@ -41,7 +42,7 @@ public:
 		commandList.BeginPass(passInfo);
 
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-		commandList.BindPipeline(PSO->GetHandle());
+		commandList.BindPipeline((*PSO)->GetHandle());
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
         commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
@@ -52,6 +53,18 @@ public:
         return { };
     }
 
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedFullscreenDraw data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.renderTarget = m_lutTexture->GetRTVInfo(0).slot; data.loadOp = rhi::LoadOp::Clear;
+        data.clear = m_lutTexture->GetClearColor(); data.width = 512; data.height = 512;
+        data.debugName = "BRDF Integration Pass"; data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+        data.pipeline = (*PSO)->GetHandle(); data.pipelineOwner = PSO;
+        data.descriptorIndices = CaptureResourceDescriptorIndices(m_resourceDescriptorBindings);
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedFullscreenDraw);
+    }
+
     void Cleanup() override {
         // Cleanup if necessary
     }
@@ -59,7 +72,7 @@ public:
 private:
     PixelBuffer* m_lutTexture = nullptr;
 
-    rhi::PipelinePtr PSO;
+    std::shared_ptr<rhi::PipelinePtr> PSO;
     PipelineResources m_resourceDescriptorBindings;
 
     void CreatePSO() {
@@ -120,7 +133,8 @@ private:
             rhi::Make(soSmp),
         };
 
-        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), PSO);
+        rhi::PipelinePtr pipeline;
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pipeline);
         if (Failed(result)) {
             throw std::runtime_error(
                 std::string("Failed to create BRDF integration PSO (RHI): ") +
@@ -129,6 +143,7 @@ private:
                 std::to_string(static_cast<uint32_t>(result)) +
                 ")");
         }
-        PSO->SetName("BRDFIntegration.PSO");
+        pipeline->SetName("BRDFIntegration.PSO");
+        PSO = std::make_shared<rhi::PipelinePtr>(std::move(pipeline));
     }
 };

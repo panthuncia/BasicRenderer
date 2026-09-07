@@ -1,14 +1,15 @@
 #pragma once
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Render/RenderContext.h"
 #include "Render/MaterialStateArtifacts.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 // Runs after histogram + prefix sum + pixel list build.
 // Fills a single indirect arguments buffer with one entry per material.
 // Each entry encodes 4 root constants and a 2D dispatch sized to process all pixels of that material.
-class BuildMaterialIndirectCommandBufferPass : public ComputePass {
+class BuildMaterialIndirectCommandBufferPass : public org::TypedRenderGraphPass<BuildMaterialIndirectCommandBufferPass, br::render::PreparedComputeDispatch> {
 public:
     BuildMaterialIndirectCommandBufferPass() {
         // Build PSO for the args builder kernel
@@ -20,47 +21,40 @@ public:
             "VisUtil_BuildEvaluateIndirectArgsPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
-        b->WithShaderResource(
+    void Declare(org::PassBuilder& b) {
+        b.WithShaderResource(
             "Builtin::VisUtil::MaterialPixelCountBuffer",
             "Builtin::VisUtil::MaterialOffsetBuffer")
             .WithUnorderedAccess(
                 "Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
-		b->WithConstantBuffer(Builtin::PerFrameBuffer);
+		b.WithConstantBuffer(Builtin::PerFrameBuffer)
+            .PreferQueue(org::QueueKind::Compute);
     }
 
-    void Setup() override {
-    }
-
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& pm = PSOManager::GetInstance();
-        auto& cl = executionContext.commandList;
-
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-
-        // Push constants:
-        // UintRootConstant0 = NumMaterials
-        unsigned int rc[NumMiscUintRootConstants] = {};
-        const auto materialState = ctx.publishedRendererState
-            ? ctx.publishedRendererState->materials.payload.Get<br::render::PublishedMaterialState>()
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+        const auto* update = preparation.preparationData->Get<UpdateContext>();
+        const auto* render = preparation.preparationData->Get<RenderContext>();
+        if (!update && !render) throw std::logic_error("BuildMaterialIndirectCommandBufferPass requires frame context");
+        auto payload = m_pso.GetPayload();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+        data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        const auto& published = update ? update->publishedRendererState : render->publishedRendererState;
+        const auto materialState = published
+            ? published->materials.payload.Get<br::render::PublishedMaterialState>()
             : nullptr;
-        rc[0] = materialState ? materialState->compileFlagSlotsUsed : 0u;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-
-        // Dispatch: one thread per material, rounded up by 64
-        const uint32_t kThreads = 64;
-        const uint32_t groups = (rc[0] + kThreads - 1u) / kThreads;
-        cl.Dispatch(groups, 1, 1);
-
-        return {};
+        data.constants[0] = materialState ? materialState->compileFlagSlotsUsed : 0u;
+        data.groupsX = (data.constants[0] + 63u) / 64u;
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
 
 private:
     PipelineState m_pso;

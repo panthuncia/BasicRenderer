@@ -15,6 +15,7 @@
 #include "Resources/PixelBuffer.h"
 #include "Render/GraphExtensions/VirtualShadowCasterProvider.h"
 #include "../shaders/PerPassRootConstants/clodVirtualShadowInvalidateRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 VirtualShadowMapInvalidatePagesPass::VirtualShadowMapInvalidatePagesPass(
     std::shared_ptr<Buffer> invalidationInputsBuffer,
@@ -238,6 +239,47 @@ PassReturn VirtualShadowMapInvalidatePagesPass::Execute(PassExecutionContext& ex
     }
 
     return {};
+}
+
+PreparedPass VirtualShadowMapInvalidatePagesPass::PrepareFrame(FramePreparationContext& preparation)
+{
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
+    br::render::PreparedComputePipelineSequence data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    std::array<unsigned int, NumMiscUintRootConstants> constants{};
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_INPUTS_DESCRIPTOR_INDEX] = m_invalidationInputsBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_INPUT_COUNT_DESCRIPTOR_INDEX] = m_invalidationCountBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_BOUNDS_DESCRIPTOR_INDEX] = m_boundsInvalidationBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_BOUNDS_COUNT] = m_pendingBoundsCount;
+    constants[CLOD_VIRTUAL_SHADOW_INVALIDATE_ALL_ACTIVE_CLIPMAPS] = m_invalidateAllActiveClipmaps ? 1u : 0u;
+    const auto append = [&](const PipelineState& pso, uint32_t groups) {
+        br::render::PreparedComputePipelineSequence::Step step{};
+        step.pipelineOwner = pso.GetPayload();
+        step.pipeline = step.pipelineOwner->pso.Get().GetHandle();
+        step.descriptorIndices = CaptureResourceDescriptorIndices(step.pipelineOwner->pipelineResources);
+        step.constants = constants;
+        step.groupsX = groups;
+        data.steps.push_back(std::move(step));
+    };
+    if (m_pendingInputCount != 0u) append(m_pso, (m_pendingInputCount + 63u) / 64u);
+    if (m_pendingBoundsCount != 0u || m_invalidateAllActiveClipmaps) {
+        const uint32_t workCount = m_invalidateAllActiveClipmaps
+            ? config.pageTableResolution * config.pageTableResolution * CLodVirtualShadowMaxSupportedClipmapCount
+            : m_pendingBoundsCount;
+        append(m_boundsPso, (workCount + 63u) / 64u);
+    }
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
 }
 
 void VirtualShadowMapInvalidatePagesPass::Cleanup() {}

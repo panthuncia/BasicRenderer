@@ -43,6 +43,7 @@ public:
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Cleanup() override;
 
 private:
@@ -51,7 +52,7 @@ private:
     PipelineState m_skinnedRasterPso;
     PipelineState m_rigidTelemetryRasterPso;
     PipelineState m_skinnedTelemetryRasterPso;
-    rhi::CommandSignaturePtr m_dispatchCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_dispatchCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClusterTransformIndicesBuffer;
     std::array<std::shared_ptr<Buffer>, 2> m_voxelWorkRecordsBuffers;

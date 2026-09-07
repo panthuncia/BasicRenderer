@@ -2,12 +2,13 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 
-class RasterBucketBlockScanPass : public ComputePass {
+class RasterBucketBlockScanPass : public org::TypedRenderGraphPass<RasterBucketBlockScanPass, br::render::PreparedComputeDispatch> {
 public:
     RasterBucketBlockScanPass(
         std::shared_ptr<Buffer> histogramBuffer,
@@ -15,11 +16,12 @@ public:
         std::shared_ptr<Buffer> blockSumsBuffer,
         bool runWhenComputeSWRasterEnabledOnly = false);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& context) {
+        br::render::RecordPreparedComputeDispatch(data, context);
+    }
     void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
 
 private:
     PipelineState m_pso;

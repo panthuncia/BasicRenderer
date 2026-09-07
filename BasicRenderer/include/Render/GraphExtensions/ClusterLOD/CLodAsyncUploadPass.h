@@ -54,6 +54,7 @@ public:
     }
 
     PassReturn Execute(PassExecutionContext&) override { return {}; }
+	bool ImmediateCommandsAreCompleteExecution() const noexcept override { return true; }
 
     void Cleanup() override {}
 };

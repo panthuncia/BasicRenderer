@@ -9,6 +9,7 @@
 #include "Resources/Texture.h"
 
 #include "../shaders/PerPassRootConstants/clodVirtualShadowClearRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(
     std::shared_ptr<PixelBuffer> staticPagesTexture,
@@ -103,6 +104,34 @@ PassReturn VirtualShadowMapClearPagesPass::Execute(PassExecutionContext& executi
 
     commandList.Dispatch(virtualShadowConfig.maxPhysicalPages, 1u, 1u);
     return {};
+}
+
+PreparedPass VirtualShadowMapClearPagesPass::PrepareFrame(FramePreparationContext& preparation)
+{
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
+    auto payload = m_pso.GetPayload();
+    br::render::PreparedComputeDispatch data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_STATIC_PAGES_DESCRIPTOR_INDEX] = m_staticPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = m_dynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGE_COUNT] = config.maxPhysicalPages;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_ATLAS_PAGES_WIDE] = config.physicalAtlasPagesWide;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_pageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DYNAMIC_CONTENT_FILTER_ENABLED] = SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowDynamicContentFilterSettingName)() ? 1u : 0u;
+    data.groupsX = config.maxPhysicalPages;
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }
 
 void VirtualShadowMapClearPagesPass::Cleanup()

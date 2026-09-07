@@ -1,4 +1,6 @@
 #include "Render/GraphExtensions/ClusterLOD/HierarchicalDispatchCullingPass.h"
+#include "Render/GraphExtensions/ClusterLOD/PreparedCullingWorkloads.h"
+#include "RenderPasses/PreparedLegacyAdmission.h"
 
 #include <algorithm>
 #include <cstring>
@@ -116,18 +118,6 @@ std::vector<uint64_t> CollectDeclaredDrawSetResourceIds(RenderPhase renderPhase,
 constexpr uint32_t kReplaySourceNodes = 0u;
 constexpr uint32_t kReplaySourceClusters = 1u;
 
-ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
-{
-    if (!useShadowCascadeViews) {
-        return ViewFilter::PrimaryCameras();
-    }
-
-    ViewFilter filter = ViewFilter::Shadows();
-    filter.requireCascade = true;
-    filter.requireLightType = true;
-    filter.lightType = Components::LightType::Directional;
-    return filter;
-}
 }
 
 HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
@@ -1200,51 +1190,24 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     });
 
     if (m_isFirstPass) {
+        const auto preparedWorkloads = br::render::PrepareCullingWorkloads(
+            context.preparedViews, context.publishedRendererState, m_renderPhase,
+            m_clodOnlyWorkloads, m_useShadowCascadeViews, m_rasterOutputKind,
+            kPureComputeObjectCullThreadsPerGroup, "HierarchicalDispatchCullingPass");
         std::vector<ObjectCullRecord> cullRecords;
-        ViewFilter filter = GetCullViewFilter(m_useShadowCascadeViews);
-        context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
-            auto viewInfo = context.viewManager->Get(view);
-            auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
-            const auto published = context.publishedRendererState
-                ? context.publishedRendererState->indirectWorkloads.payload.Get<br::render::PublishedIndirectState>()
-                : nullptr;
-            const auto workloads = published ? published->Find(view, m_renderPhase, m_clodOnlyWorkloads)
-                                             : std::vector<const br::render::PublishedIndirectWorkload*>{};
-			if (!workloads.empty() && !published->visibilityGenerations) {
-				spdlog::error("HierarchicalDispatchCullingPass: skipping indirect snapshot without its exact visibility-generation resource");
-				return;
-			}
-			for (const auto* wl : workloads) {
-				const auto activeDrawSetIndices = wl ? wl->activeDrawList : nullptr;
-				if (!activeDrawSetIndices) {
-					spdlog::warn(
-						"HierarchicalDispatchCullingPass: skipping stale workload without active draw set indices flags={} phase={} clodOnly={} count={}",
-						static_cast<std::uint64_t>(wl ? wl->key.compileFlags : 0u),
-						wl ? wl->key.renderPhase.hash : 0u,
-						wl ? wl->key.clodOnly : false,
-						wl ? wl->count : 0u);
-					continue;
-				}
-				const auto count = wl->count;
-				if (count == 0) {
-					continue;
-				}
-
-				ObjectCullRecord record{};
-                record.viewDataIndex = cameraBufferIndex;
-                record.activeDrawSetIndicesSRVIndex = activeDrawSetIndices->GetSRVInfo(0).slot.index;
-                record.drawRecordVisibilityGenerationSRVIndex =
-					published->visibilityGenerations->GetSRVInfo(0).slot.index;
-                record.activeDrawCount = count;
-                record.shadowCasterClass = UsesVirtualShadowOutput(m_rasterOutputKind)
-                    ? (wl->key.skinnedShadowCaster ? 2u : 1u)
-                    : 0u;
-                record.dispatchGridX = static_cast<uint>((count + kPureComputeObjectCullThreadsPerGroup - 1u) / kPureComputeObjectCullThreadsPerGroup);
-                record.dispatchGridY = 1;
-                record.dispatchGridZ = 1;
-                cullRecords.push_back(record);
-            }
-        });
+        cullRecords.reserve(preparedWorkloads.size());
+        for (const auto& workload : preparedWorkloads) {
+            cullRecords.push_back({
+                workload.viewDataIndex,
+                workload.activeDrawSetIndicesSRVIndex,
+                workload.activeDrawCount,
+                workload.drawRecordVisibilityGenerationSRVIndex,
+                workload.shadowCasterClass,
+                workload.dispatchGridX,
+                workload.dispatchGridY,
+                workload.dispatchGridZ,
+            });
+        }
 		basic_telemetry::SetGauge("SARP.Culling.GraphWorkloadRecords.Dispatch",
 			static_cast<std::int64_t>(cullRecords.size()));
 
@@ -1493,7 +1456,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     // Pure-compute replay seeds descriptor-backed frontiers directly; it does
     // not consume D3D12 work-graph node-input records.
     createRootConstants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
-    createRootConstants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+    createRootConstants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.preparedRasterBucketCount;
     createRootConstants[CLOD_CREATE_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -1505,6 +1468,12 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     commandList.Dispatch(1u, 1u, 1u);
 
     return {};
+}
+
+PreparedPass HierarchicalDispatchCullingPass::PrepareFrame(FramePreparationContext& preparation)
+{
+    return br::render::PrepareLegacyAdmission(
+        this, preparation, DeviceManager::GetInstance().GetDevice());
 }
 
 void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& executionContext)

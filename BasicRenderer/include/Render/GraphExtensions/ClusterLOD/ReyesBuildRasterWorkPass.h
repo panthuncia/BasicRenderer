@@ -38,6 +38,7 @@ public:
     void Setup() override;
     void Update(const UpdateExecutionContext& executionContext) override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Cleanup() override;
 
 private:
@@ -60,5 +61,5 @@ private:
     uint32_t m_phaseIndex = 0u;
     uint32_t m_replayDiceQueueCapacity = 0u;
     PipelineState m_pso;
-    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
 };

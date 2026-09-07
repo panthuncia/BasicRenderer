@@ -5,6 +5,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 class GTAODenoisePass : public ComputePass {
 public:
@@ -53,6 +54,28 @@ public:
         commandList.Dispatch((context.renderResolution.x + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.renderResolution.y + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
     
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        const auto workingAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
+        const auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
+        const auto outputAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm);
+        auto payload = DenoiseLastPassPSO.GetPayload();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+        data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.constants[UintRootConstant0] = workingAO->GetSRVInfo(0).slot.index;
+        data.constants[UintRootConstant1] = workingEdges->GetSRVInfo(0).slot.index;
+        data.constants[UintRootConstant2] = m_samplerIndex;
+        data.constants[UintRootConstant3] = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
+        data.groupsX = (context->renderResolution.x + XE_GTAO_NUMTHREADS_X * 2u - 1u) / (XE_GTAO_NUMTHREADS_X * 2u);
+        data.groupsY = (context->renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1u) / XE_GTAO_NUMTHREADS_Y;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

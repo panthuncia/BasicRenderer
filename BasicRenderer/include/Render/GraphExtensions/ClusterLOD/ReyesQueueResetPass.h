@@ -30,10 +30,22 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Update(const UpdateExecutionContext& executionContext) override;
     void Cleanup() override;
 
 private:
+    struct PreparedData {
+        rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+        rhi::PipelineLayoutHandle layout{};
+        rhi::PipelineHandle countersPipeline{}, bitsetPipeline{};
+        std::shared_ptr<const PipelineStatePayload> countersOwner, bitsetOwner;
+        std::vector<unsigned int> countersDescriptorIndices, bitsetDescriptorIndices;
+        std::vector<uint32_t> constants;
+        uint32_t bitsetGroups = 0;
+    };
+    static void RecordPrepared(const PreparedData&, RecordingContext&);
+
     std::shared_ptr<Buffer> m_fullClusterCounter;
     std::shared_ptr<Buffer> m_ownedClusterCounter;
     std::vector<std::shared_ptr<Buffer>> m_splitQueueCounters;

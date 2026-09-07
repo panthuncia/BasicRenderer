@@ -135,6 +135,13 @@ private:
 
         PassReturn Execute(PassExecutionContext& context) override;
 
+        PreparedPass PrepareFrame(FramePreparationContext&) override {
+            // An empty dynamic pass is a complete execution, not a legacy
+            // callback. Pending jobs remain on the synchronous path until
+            // they have an owned reservation/recording packet.
+            return m_pending.empty() ? PreparedPass::NoOp() : PreparedPass{};
+        }
+
         void Cleanup() override {
         }
 
@@ -233,6 +240,11 @@ private:
 
         PassReturn Execute(PassExecutionContext& context) override;
 
+        PreparedPass PrepareFrame(FramePreparationContext&) override {
+            std::scoped_lock lock(m_pendingMutex);
+            return m_pending.empty() ? PreparedPass::NoOp() : PreparedPass{};
+        }
+
         void Cleanup() override;
 
         bool DeclaredResourcesChanged() const override {
@@ -261,6 +273,7 @@ private:
         void DeclareResourceUsages(RenderPassBuilder* builder) override;
 
         void RecordImmediateCommands(ImmediateExecutionContext& context) override;
+		bool ImmediateCommandsAreCompleteExecution() const noexcept override { return true; }
 
         void Cleanup() override;
 
@@ -289,6 +302,13 @@ private:
         void RecordImmediateCommands(ImmediateExecutionContext& context) override;
 
         PassReturn Execute(PassExecutionContext& context) override;
+
+        PreparedPass PrepareFrame(FramePreparationContext&) override {
+            std::scoped_lock lock(m_pendingMutex);
+            return m_pending.empty() && m_pendingCaptureIds.empty()
+                ? PreparedPass::NoOp()
+                : PreparedPass{};
+        }
 
         void Cleanup() override;
 

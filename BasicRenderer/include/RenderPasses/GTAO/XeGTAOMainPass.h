@@ -6,6 +6,7 @@
 #include "Resources/PixelBuffer.h"
 #include "ThirdParty/XeGTAO.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 class GTAOMainPass : public ComputePass {
 public:
@@ -55,6 +56,27 @@ public:
 
         commandList.Dispatch((context.renderResolution.x + XE_GTAO_NUMTHREADS_X - 1) / XE_GTAO_NUMTHREADS_X, (context.renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1) / XE_GTAO_NUMTHREADS_Y, 1);
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        const auto workingDepths = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingDepths);
+        const auto workingAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
+        const auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
+        const auto normals = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Surface::NormalRoughness);
+        auto payload = GTAOHighPSO.GetPayload(); br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.constants[UintRootConstant0] = (++frameIndex) % 64;
+        data.constants[UintRootConstant1] = m_samplerIndex;
+        data.constants[UintRootConstant2] = workingDepths->GetSRVInfo(0).slot.index;
+        data.constants[UintRootConstant3] = normals->GetSRVInfo(0).slot.index;
+        data.constants[UintRootConstant4] = workingAO->GetUAVShaderVisibleInfo(0).slot.index;
+        data.constants[UintRootConstant5] = workingEdges->GetUAVShaderVisibleInfo(0).slot.index;
+        data.groupsX = (context->renderResolution.x + XE_GTAO_NUMTHREADS_X - 1u) / XE_GTAO_NUMTHREADS_X;
+        data.groupsY = (context->renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1u) / XE_GTAO_NUMTHREADS_Y;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

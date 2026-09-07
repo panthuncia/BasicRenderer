@@ -1,15 +1,30 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include <rhi.h>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 
-class RasterBucketHistogramPass : public ComputePass {
+struct RasterBucketHistogramPreparedData {
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    rhi::PipelineLayoutHandle layout{};
+    rhi::PipelineHandle clearPipeline{}, histogramPipeline{};
+    std::shared_ptr<const PipelineStatePayload> clearOwner, histogramOwner;
+    std::shared_ptr<const rhi::CommandSignaturePtr> commandSignatureOwner;
+    rhi::CommandSignatureHandle commandSignature{};
+    rhi::ResourceHandle indirectArguments{}, histogramResource{};
+    std::vector<unsigned int> clearDescriptorIndices, histogramDescriptorIndices;
+    std::vector<uint32_t> clearConstants, histogramConstants;
+    uint32_t clearGroups = 0;
+    bool enabled = false;
+};
+
+class RasterBucketHistogramPass : public org::TypedRenderGraphPass<RasterBucketHistogramPass, RasterBucketHistogramPreparedData> {
 public:
     RasterBucketHistogramPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -24,13 +39,13 @@ public:
         bool runWhenComputeSWRasterEnabledOnly = false);
     ~RasterBucketHistogramPass();
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Declare(org::PassBuilder& builder);
+    RasterBucketHistogramPreparedData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const RasterBucketHistogramPreparedData&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
 
 private:
+    using PreparedData = RasterBucketHistogramPreparedData;
     void CreatePipelines(
         rhi::Device device,
         rhi::PipelineLayoutHandle globalRootSignature,
@@ -39,14 +54,14 @@ private:
 
     PipelineState m_histogramPipeline;
     PipelineState m_clearPipeline;
-    rhi::CommandSignaturePtr m_histogramCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_histogramCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_histogramBuffer;
     std::shared_ptr<Buffer> m_reyesOwnershipBitsetBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;
-    std::shared_ptr<Buffer> m_readBaseCounterBuffer; // Phase 2 only: Phase 1's HW counter for read offset
+    std::shared_ptr<Buffer> m_readBaseCounterBuffer;
     bool m_readReverse = false;
     uint32_t m_visibleClustersCapacity = 0u;
     bool m_runWhenComputeSWRasterEnabledOnly = false;

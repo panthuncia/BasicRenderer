@@ -58,4 +58,10 @@ PassReturn ReyesTessellationTableUploadPass::Execute(PassExecutionContext& execu
     return {};
 }
 
+PreparedPass ReyesTessellationTableUploadPass::PrepareFrame(FramePreparationContext& preparation)
+{
+    (void)preparation;
+    return PreparedPass::NoOp();
+}
+
 void ReyesTessellationTableUploadPass::Cleanup() {}

@@ -1,15 +1,16 @@
 #pragma once
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Render/PassBuilders.h"
 #include "BuiltinResources.h"
 
-class PresentPass : public RenderPass {
-public:
-	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithPresent(Builtin::Backbuffer);
-	}
+struct PresentFrameData {};
 
-	void Setup() override {}
-	void Cleanup() override {}
+class PresentPass : public org::TypedRenderGraphPass<PresentPass, PresentFrameData> {
+public:
+	void Declare(org::PassBuilder& builder) {
+		builder.WithPresent(Builtin::Backbuffer);
+	}
+	PresentFrameData Prepare(const org::PassPrepareContext&) { return {}; }
+	static void Record(const PresentFrameData&, org::PassRecordContext&) {}
 };

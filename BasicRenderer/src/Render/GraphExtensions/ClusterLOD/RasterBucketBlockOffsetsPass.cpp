@@ -7,6 +7,7 @@
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
 #include "../shaders/PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 RasterBucketBlockOffsetsPass::RasterBucketBlockOffsetsPass(
     std::shared_ptr<Buffer> offsetsBuffer,
@@ -27,14 +28,13 @@ RasterBucketBlockOffsetsPass::RasterBucketBlockOffsetsPass(
         "CLod_RasterBucketsBlockOffsetsPSO");
 }
 
-void RasterBucketBlockOffsetsPass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithShaderResource(m_blockSumsBuffer)
+void RasterBucketBlockOffsetsPass::Declare(org::PassBuilder& builder) {
+    builder.WithShaderResource(m_blockSumsBuffer)
         .WithUnorderedAccess(m_offsetsBuffer, m_scannedBlockSumsBuffer, m_totalCountBuffer);
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void RasterBucketBlockOffsetsPass::Setup() {}
-
+#if 0 // Removed legacy recording path.
 PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& executionContext) {
     if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return {};
@@ -73,6 +73,29 @@ PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& execution
     commandList.Dispatch(1, 1, 1);
     return {};
 }
+#endif
+
+br::render::PreparedComputeDispatch RasterBucketBlockOffsetsPass::Prepare(const org::PassPrepareContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_pso.GetPayload();
+    br::render::PreparedComputeDispatch data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    const auto numBuckets = context->materialManager->GetRasterBucketCount();
+    data.constants[CLOD_PREFIX_OFFSETS_NUM_BUCKETS] = numBuckets;
+    data.constants[CLOD_PREFIX_OFFSETS_NUM_BLOCKS] = (numBuckets + m_blockSize - 1u) / m_blockSize;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_blockSumsBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_scannedBlockSumsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX] = m_totalCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.groupsX = (!m_runWhenComputeSWRasterEnabledOnly
+        || CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) ? 1u : 0u;
+    return data;
+}
 
 void RasterBucketBlockOffsetsPass::Update(const UpdateExecutionContext& executionContext) {
     if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
@@ -89,4 +112,3 @@ void RasterBucketBlockOffsetsPass::Update(const UpdateExecutionContext& executio
     }
 }
 
-void RasterBucketBlockOffsetsPass::Cleanup() {}

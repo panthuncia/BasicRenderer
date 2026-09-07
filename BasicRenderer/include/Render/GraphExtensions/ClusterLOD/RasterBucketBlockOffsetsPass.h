@@ -2,12 +2,13 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 
-class RasterBucketBlockOffsetsPass : public ComputePass {
+class RasterBucketBlockOffsetsPass : public org::TypedRenderGraphPass<RasterBucketBlockOffsetsPass, br::render::PreparedComputeDispatch> {
 public:
     RasterBucketBlockOffsetsPass(
         std::shared_ptr<Buffer> offsetsBuffer,
@@ -16,11 +17,12 @@ public:
         std::shared_ptr<Buffer> totalCountBuffer,
         bool runWhenComputeSWRasterEnabledOnly = false);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& context) {
+        br::render::RecordPreparedComputeDispatch(data, context);
+    }
     void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
 
 private:
     PipelineState m_pso;

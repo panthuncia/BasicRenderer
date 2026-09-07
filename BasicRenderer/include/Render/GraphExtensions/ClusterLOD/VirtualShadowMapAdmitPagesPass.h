@@ -3,9 +3,11 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <mutex>
 
 #include "Render/PipelineState.h"
 #include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
@@ -34,9 +36,29 @@ public:
     void Setup() override;
     void Update(const UpdateExecutionContext& executionContext) override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Cleanup() override;
 
 private:
+    struct UpgradeSubmissionState {
+        std::mutex mutex;
+        AcquireUpgradeUploadFn acquire;
+        ReleaseUpgradeUploadFn release;
+        std::vector<uint32_t> inFlightSlotByFrame;
+        uint32_t pendingSlot = UINT32_MAX;
+        uint32_t pendingCount = 0;
+        uint64_t pendingGeneration = 0;
+    };
+    struct PreparedData {
+        br::render::PreparedComputePipelineSequence commands;
+        std::shared_ptr<UpgradeSubmissionState> state;
+        uint32_t pendingSlot = UINT32_MAX;
+        uint32_t pendingCount = 0;
+        uint32_t frameSlot = 0;
+        uint64_t pendingGeneration = 0;
+    };
+    static void RecordPrepared(const PreparedData&, RecordingContext&);
+    static void CommitPrepared(const PreparedData&);
     PipelineState m_pso;
     PipelineState m_applyUpgradesPso;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
@@ -46,9 +68,5 @@ private:
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<Buffer> m_compactShadowCamerasBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
-    AcquireUpgradeUploadFn m_acquireUpgradeUpload;
-    ReleaseUpgradeUploadFn m_releaseUpgradeUpload;
-    std::vector<uint32_t> m_inFlightSlotByFrame;
-    uint32_t m_pendingUpgradeSlot = UINT32_MAX;
-    uint32_t m_pendingUpgradeInputCount = 0u;
+    std::shared_ptr<UpgradeSubmissionState> m_upgradeState;
 };

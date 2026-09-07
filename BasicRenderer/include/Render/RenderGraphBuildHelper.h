@@ -644,17 +644,17 @@ inline void RegisterVisUtilResources(
 
 inline void BuildVisibilityMaterialBinningPipeline(RenderGraph* graph)
 {
-    graph->BuildComputePass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");
+    graph->BuildPass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");
     TagPassTechnique(graph, "MaterialPixelCounterResetPass", "Primary Visibility::GBuffer Construction::Material Groups");
-    graph->BuildComputePass<MaterialHistogramPass>("MaterialHistogramPass");
+    graph->BuildPass<MaterialHistogramPass>("MaterialHistogramPass");
     TagPassTechnique(graph, "MaterialHistogramPass", "Primary Visibility::GBuffer Construction::Material Groups");
-    graph->BuildComputePass<MaterialBlockScanPass>("MaterialBlockScanPass");
+    graph->BuildPass<MaterialBlockScanPass>("MaterialBlockScanPass");
     TagPassTechnique(graph, "MaterialBlockScanPass", "Primary Visibility::GBuffer Construction::Material Groups");
-    graph->BuildComputePass<MaterialBlockOffsetsPass>("MaterialBlockOffsetsPass");
+    graph->BuildPass<MaterialBlockOffsetsPass>("MaterialBlockOffsetsPass");
     TagPassTechnique(graph, "MaterialBlockOffsetsPass", "Primary Visibility::GBuffer Construction::Material Groups");
-    graph->BuildComputePass<BuildPixelListPass>("BuildPixelListPass");
+    graph->BuildPass<BuildPixelListPass>("BuildPixelListPass");
     TagPassTechnique(graph, "BuildPixelListPass", "Primary Visibility::GBuffer Construction::VisUtil");
-    graph->BuildComputePass<BuildMaterialIndirectCommandBufferPass>("BuildMaterialIndirectCommandBufferPass");
+    graph->BuildPass<BuildMaterialIndirectCommandBufferPass>("BuildMaterialIndirectCommandBufferPass");
     TagPassTechnique(graph, "BuildMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Material Groups");
 }
 
@@ -728,26 +728,26 @@ void BuildCanonicalSurfacePipeline(
     }
     if (needsVisibilityMaterialEvaluation) {
         // Reset material counters
-        graph->BuildComputePass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");
+        graph->BuildPass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");
         TagPassTechnique(graph, "MaterialPixelCounterResetPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // Build material histogram
-        graph->BuildComputePass<MaterialHistogramPass>("MaterialHistogramPass");
+        graph->BuildPass<MaterialHistogramPass>("MaterialHistogramPass");
         TagPassTechnique(graph, "MaterialHistogramPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // Prefix sum material histogram
-        graph->BuildComputePass<MaterialBlockScanPass>("MaterialBlockScanPass");
+        graph->BuildPass<MaterialBlockScanPass>("MaterialBlockScanPass");
         TagPassTechnique(graph, "MaterialBlockScanPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
-        graph->BuildComputePass<MaterialBlockOffsetsPass>("MaterialBlockOffsetsPass");
+        graph->BuildPass<MaterialBlockOffsetsPass>("MaterialBlockOffsetsPass");
         TagPassTechnique(graph, "MaterialBlockOffsetsPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         // Build pixel list
-        graph->BuildComputePass<BuildPixelListPass>("BuildPixelListPass");
+        graph->BuildPass<BuildPixelListPass>("BuildPixelListPass");
         TagPassTechnique(graph, "BuildPixelListPass", "Primary Visibility::GBuffer Construction::VisUtil");
 
         // Build indirect command buffer for material passes
-        graph->BuildComputePass<BuildMaterialIndirectCommandBufferPass>("BuildMaterialIndirectCommandBufferPass");
+        graph->BuildPass<BuildMaterialIndirectCommandBufferPass>("BuildMaterialIndirectCommandBufferPass");
         TagPassTechnique(graph, "BuildMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         if (terrainRvt) {
@@ -898,10 +898,10 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
     lightPagesCounter->SetName("Light Pages Counter");
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
-    graph->BuildComputePass<ClusterGenerationPass>("ClusterGenerationPass");
+    graph->BuildPass<ClusterGenerationPass>("ClusterGenerationPass");
     TagPassTechnique(graph, "ClusterGenerationPass", "Lighting::Clustered Lighting");
 
-    graph->BuildComputePass<LightCullingPass>("LightCullingPass");
+    graph->BuildPass<LightCullingPass>("LightCullingPass");
     TagPassTechnique(graph, "LightCullingPass", "Lighting::Clustered Lighting");
 }
 
@@ -935,7 +935,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment, bool 
 
 	// Uses existing GBuffer resources
     const bool renderSkybox = currentEnvironment != nullptr || hasBoundEnvironment;
-    graph->BuildComputePass<DeferredShadingPass>("DeferredShadingPass", renderSkybox);
+    graph->BuildPass<DeferredShadingPass>("DeferredShadingPass", renderSkybox);
     TagPassTechnique(graph, "DeferredShadingPass", "Lighting::Primary Shading");
 
     // DeferredShading's background branch renders the skybox using the same

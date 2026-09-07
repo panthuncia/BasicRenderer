@@ -17,6 +17,7 @@
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Resources/PixelBuffer.h"
 #include "Render/Runtime/IReadbackService.h"
@@ -772,6 +773,7 @@ public:
     void Setup() override {}
     void Update(const UpdateExecutionContext&) override { m_resources->UpdateFieldPair(); }
     PassReturn Execute(PassExecutionContext&) override { return {}; }
+    PreparedPass PrepareFrame(FramePreparationContext&) override { return PreparedPass::NoOp(); }
     void Cleanup() override {}
 private:
     std::shared_ptr<WindSharedResources> m_resources;
@@ -877,6 +879,27 @@ void SetActivationPhaseAndDepth(
     constants.phaseAndDepthDescriptor |= depthMap->GetSRVInfo(0, slice).slot.index & kDepthDescriptorMask;
 }
 
+void SetActivationPhaseAndDepth(
+    WindTransientConstants& constants,
+    const UpdateContext* context,
+    bool latePhase)
+{
+    constants.phaseAndDepthDescriptor = latePhase ? kLatePhaseBit : 0u;
+    if (!context || !context->viewManager ||
+        !SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")())
+        return;
+    const auto* view = context->viewManager->Get(context->primaryViewID);
+    if (!view) return;
+    const auto depthMap = latePhase
+        ? view->gpu.linearDepthMap
+        : (view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr);
+    if (!depthMap || depthMap->GetNumSRVSlices() == 0u) return;
+    std::uint32_t slice = view->cameraInfo.depthBufferArrayIndex >= 0
+        ? static_cast<std::uint32_t>(view->cameraInfo.depthBufferArrayIndex) : 0u;
+    slice = (std::min)(slice, depthMap->GetNumSRVSlices() - 1u);
+    constants.phaseAndDepthDescriptor |= depthMap->GetSRVInfo(0, slice).slot.index & kDepthDescriptorMask;
+}
+
 class WindResetPass final : public ComputePass {
 public:
     explicit WindResetPass(std::shared_ptr<WindSharedResources> resources) : m_resources(std::move(resources))
@@ -918,6 +941,29 @@ public:
         BindResourceDescriptorIndices(context.commandList, m_pso.GetResourceDescriptorSlots());
         context.commandList.Dispatch(((std::max)({ m_resources->residentTransformCount, c.typeCount, 64u }) + 63u) / 64u, 1u, 1u);
         return {};
+    }
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override
+    {
+        if (!m_resources->transientRegion.valid) return PreparedPass::NoOp();
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        auto constants = MakeTransientConstants(*m_resources,
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::SkinningInstanceInfo),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseSkinMatrices),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
+        constants.bones = m_resources->diagnostics->GetUAVShaderVisibleInfo(0).slot.index;
+        constants.placementCount = m_resources->residentTransformCount;
+        constants.allocationRecords = m_resources->processedTypeCounts->GetUAVShaderVisibleInfo(0).slot.index;
+        SetVisibleSkeletonConstants(constants, *m_resources);
+        auto payload = m_pso.GetPayload();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        static_assert(sizeof(constants) <= sizeof(data.constants));
+        std::memcpy(data.constants.data(), &constants, sizeof(constants));
+        data.groupsX = ((std::max)({m_resources->residentTransformCount, constants.typeCount, 64u}) + 63u) / 64u;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
     void Cleanup() override {}
 private:
@@ -983,6 +1029,37 @@ public:
         context.commandList.Dispatch((c.placementCount + 63u) / 64u, 1u, 1u);
         return {};
     }
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override
+    {
+        if (!m_resources->residentPlacementCount) return PreparedPass::NoOp();
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        auto constants = MakeTransientConstants(*m_resources,
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::SkinningInstanceInfo),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseSkinMatrices),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
+        if (context && context->viewManager) {
+            if (const auto* view = context->viewManager->Get(context->primaryViewID)) constants.cameraIndex = view->gpu.cameraBufferIndex;
+        }
+        constants.capacityTarget = (std::max)(0.0f,
+            SettingsManager::GetInstance().getSettingGetter<float>(ProceduralWindInnerRadiusSettingName)());
+        constants.lateReserve = (std::max)(constants.capacityTarget,
+            SettingsManager::GetInstance().getSettingGetter<float>(ProceduralWindOuterRadiusSettingName)());
+        SetActivationPhaseAndDepth(constants, context, m_latePhase);
+        constants.bones = m_resources->diagnostics->GetUAVShaderVisibleInfo(0).slot.index;
+        constants.fieldSlice0 = m_resources->activeSkinnedPlacements
+            ? m_resources->activeSkinnedPlacements->GetSRVInfo(0).slot.index : 0u;
+        constants.fieldSlice1 = m_resources->deferredEntries->GetUAVShaderVisibleInfo(0).slot.index;
+        constants.fieldDimensions = m_resources->baseTypeLookup->GetSRVInfo(0).slot.index;
+        constants.allocationRecords = m_resources->baseTypeLookup->Size();
+        auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        static_assert(sizeof(constants) <= sizeof(data.constants)); std::memcpy(data.constants.data(), &constants, sizeof(constants));
+        data.groupsX = (constants.placementCount + 63u) / 64u;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    }
     void Cleanup() override {}
 private:
     std::shared_ptr<WindSharedResources> m_resources;
@@ -1012,6 +1089,25 @@ public:
         PrepareTransient(context, m_pso, c);
         BindResourceDescriptorIndices(context.commandList, m_pso.GetResourceDescriptorSlots());
         context.commandList.Dispatch(1u, 1u, 1u); return {};
+    }
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        if (!m_resources->typeCount) return PreparedPass::NoOp();
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        auto constants = MakeTransientConstants(*m_resources,
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::SkinningInstanceInfo),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseSkinMatrices),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
+        constants.phaseAndDepthDescriptor = m_latePhase ? kLatePhaseBit : 0u;
+        constants.bones = m_resources->diagnostics->GetUAVShaderVisibleInfo(0).slot.index;
+        constants.fieldSlice0 = m_resources->processedTypeCounts->GetUAVShaderVisibleInfo(0).slot.index;
+        auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        static_assert(sizeof(constants) <= sizeof(data.constants)); std::memcpy(data.constants.data(), &constants, sizeof(constants));
+        data.groupsX = 1u;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
     void Cleanup() override {}
 private: std::shared_ptr<WindSharedResources> m_resources; PipelineState m_pso; bool m_latePhase = false;
@@ -1056,6 +1152,25 @@ public:
 			1u);
 		return {};
 	}
+	PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+		if (!m_resources->typeCount || !m_resources->residentPlacementCount) return PreparedPass::NoOp();
+		const auto* context = preparation.preparationData->Get<UpdateContext>();
+		auto constants = MakeTransientConstants(*m_resources,
+			m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::SkinningInstanceInfo),
+			m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms),
+			m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseSkinMatrices),
+			m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
+		constants.bones = m_resources->diagnostics->GetUAVShaderVisibleInfo(0).slot.index;
+		constants.fieldSlice0 = m_resources->boneRemaps->GetSRVInfo(0).slot.index;
+		SetVisibleSkeletonConstants(constants, *m_resources);
+		auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
+		data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+		data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+		static_assert(sizeof(constants) <= sizeof(data.constants)); std::memcpy(data.constants.data(), &constants, sizeof(constants));
+		data.groupsX = (m_resources->residentPlacementCount + kThreadsPerGroup - 1u) / kThreadsPerGroup;
+		return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+	}
 	void Cleanup() override {}
 private:
 	std::shared_ptr<WindSharedResources> m_resources;
@@ -1068,7 +1183,8 @@ public:
         : m_resources(std::move(r)), m_latePhase(latePhase) {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), L"SARPShaders/ProceduralWind.hlsl", L"SimulateWindInstancesCS", {}, "ProceduralWind.SimulateIndirect");
         rhi::IndirectArg args[] = {{.kind=rhi::IndirectArgKind::Constant,.u={.rootConstants={IndirectCommandSignatureRootSignatureIndex,0,3}}},{.kind=rhi::IndirectArgKind::Dispatch}};
-        DeviceManager::GetInstance().GetDevice().CreateCommandSignature({rhi::Span<rhi::IndirectArg>(args,2),sizeof(WindIndirectCommand)}, PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), m_signature);
+        m_signature = std::make_shared<rhi::CommandSignaturePtr>();
+        DeviceManager::GetInstance().GetDevice().CreateCommandSignature({rhi::Span<rhi::IndirectArg>(args,2),sizeof(WindIndirectCommand)}, PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), *m_signature);
     }
     void DeclareResourceUsages(ComputePassBuilder* b) override { b->WithShaderResource(m_resources->windTypes,m_resources->boneEntries,m_resources->fieldSlices[0],m_resources->fieldSlices[1],Builtin::InstanceDrawRecordBuffer,Builtin::PerInstanceTransformBuffer,Builtin::SkeletonResources::InverseBindMatrices).WithUnorderedAccess(m_resources->activeInstances,m_resources->diagnostics,Builtin::SkeletonResources::SkinningInstanceInfo,Builtin::SkeletonResources::BoneTransforms,Builtin::SkeletonResources::InverseSkinMatrices).WithIndirectArguments(m_resources->indirectCommands,m_resources->allocationCounters); }
     void Setup() override {} void Update(const UpdateExecutionContext&) override {}
@@ -1077,10 +1193,32 @@ public:
         auto c=MakeTransientConstants(*m_resources,m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::SkinningInstanceInfo),m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms),m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseSkinMatrices),m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
         c.phaseAndDepthDescriptor = m_latePhase ? kLatePhaseBit : 0u;
         c.allocationRecords = m_resources->diagnostics->GetUAVShaderVisibleInfo(0).slot.index;
-        auto* rc=context.hostData->Get<RenderContext>(); auto& cmd=context.commandList; cmd.SetDescriptorHeaps(rc->textureDescriptorHeap.GetHandle(),rc->samplerDescriptorHeap.GetHandle()); cmd.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle()); cmd.BindPipeline(m_pso.GetAPIPipelineState().GetHandle()); BindResourceDescriptorIndices(cmd, m_pso.GetResourceDescriptorSlots()); cmd.PushConstants(rhi::ShaderStage::Compute,0,MiscUintRootSignatureIndex,0,sizeof(c)/4,reinterpret_cast<const uint32_t*>(&c)); cmd.ExecuteIndirect(m_signature->GetHandle(),m_resources->indirectCommands->GetAPIResource().GetHandle(),0,m_resources->allocationCounters->GetAPIResource().GetHandle(),sizeof(uint32_t),m_resources->typeCount); return {};
+        auto* rc=context.hostData->Get<RenderContext>(); auto& cmd=context.commandList; cmd.SetDescriptorHeaps(rc->textureDescriptorHeap.GetHandle(),rc->samplerDescriptorHeap.GetHandle()); cmd.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle()); cmd.BindPipeline(m_pso.GetAPIPipelineState().GetHandle()); BindResourceDescriptorIndices(cmd, m_pso.GetResourceDescriptorSlots()); cmd.PushConstants(rhi::ShaderStage::Compute,0,MiscUintRootSignatureIndex,0,sizeof(c)/4,reinterpret_cast<const uint32_t*>(&c)); cmd.ExecuteIndirect((*m_signature)->GetHandle(),m_resources->indirectCommands->GetAPIResource().GetHandle(),0,m_resources->allocationCounters->GetAPIResource().GetHandle(),sizeof(uint32_t),m_resources->typeCount); return {};
     }
-    void Cleanup() override { m_signature.Reset(); }
-private: std::shared_ptr<WindSharedResources> m_resources; PipelineState m_pso; rhi::CommandSignaturePtr m_signature; bool m_latePhase = false;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        br::render::PreparedComputeIndirect data{};
+        if (!m_resources->typeCount) { data.enabled = false; return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect); }
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        auto constants = MakeTransientConstants(*m_resources,
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::SkinningInstanceInfo),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseSkinMatrices),
+            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
+        constants.phaseAndDepthDescriptor = m_latePhase ? kLatePhaseBit : 0u;
+        constants.allocationRecords = m_resources->diagnostics->GetUAVShaderVisibleInfo(0).slot.index;
+        auto payload = m_pso.GetPayload();
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_signature; data.commandSignature = (*m_signature)->GetHandle();
+        data.arguments = m_resources->indirectCommands->GetAPIResource().GetHandle();
+        data.countBuffer = m_resources->allocationCounters->GetAPIResource().GetHandle(); data.countOffset = sizeof(uint32_t);
+        data.maximumCount = m_resources->typeCount;
+        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        static_assert(sizeof(constants) <= sizeof(data.constants)); std::memcpy(data.constants.data(), &constants, sizeof(constants));
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    }
+    void Cleanup() override {}
+private: std::shared_ptr<WindSharedResources> m_resources; PipelineState m_pso; std::shared_ptr<rhi::CommandSignaturePtr> m_signature; bool m_latePhase = false;
 };
 
 class WindSkeletonDebugPass final : public RenderPass {
@@ -1189,6 +1327,17 @@ public:
             cmd.DispatchMesh(m_resources->residentPlacementCount, 1u, 1u);
         }
         return {};
+    }
+    PreparedPass PrepareFrame(FramePreparationContext&) override
+    {
+        const auto outputType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("outputType")();
+        const bool drawSkeletons = outputType == static_cast<unsigned int>(OutputType::SKELETONS);
+        const bool drawBoundingSpheres = outputType == static_cast<unsigned int>(OutputType::SKELETON_BOUNDING_SPHERES);
+        // Normal scene rendering has no commands for this diagnostic pass. Keep
+        // the debug modes on the explicitly reported legacy route until their
+        // ImGui/debug drawing packet is migrated.
+        return (!drawSkeletons && !drawBoundingSpheres) || !m_resources->typeCount
+            ? PreparedPass::NoOp() : PreparedPass{};
     }
     void Cleanup() override { m_signature.Reset(); m_spherePso.Reset(); m_pso.Reset(); }
 private:

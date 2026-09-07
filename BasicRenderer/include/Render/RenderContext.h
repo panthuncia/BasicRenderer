@@ -2,6 +2,7 @@
 
 #include <rhi.h>
 #include <OpenRenderGraph/OpenRenderGraph.h>
+#include <vector>
 
 #include "Scene/Components.h"
 #include "Render/SceneFrameSnapshot.h"
@@ -23,6 +24,15 @@ namespace br::render {
 class CLodRayTracingSystem;
 }
 
+struct PreparedViewFrameData {
+	uint64_t id = 0;
+	uint32_t cameraBufferIndex = 0;
+	bool primary = false;
+	bool shadow = false;
+	bool cascade = false;
+	Components::LightType lightType = Components::LightType::Directional;
+};
+
 struct RenderContext {
 	std::shared_ptr<const br::render::PublishedRendererState> publishedRendererState;
 	std::shared_ptr<const br::render::PublishedManifestLease> publishedManifestLease;
@@ -35,6 +45,10 @@ struct RenderContext {
 	EnvironmentManager* environmentManager;
 	MaterialManager* materialManager;
 	br::render::CLodRayTracingSystem* clodRayTracingSystem = nullptr;
+	// Owner-thread snapshot used by delayed typed/transitioning packets. A
+	// recording worker must not enumerate the live ViewManager container.
+	std::vector<PreparedViewFrameData> preparedViews;
+	uint32_t preparedRasterBucketCount = 0;
 
     Scene* currentScene;
 	Components::Camera primaryCamera;
@@ -70,14 +84,19 @@ struct UpdateContext {
 	EnvironmentManager* environmentManager = nullptr;
 	MaterialManager* materialManager = nullptr;
 	SkeletonManager* skeletonManager = nullptr;
+	rhi::DescriptorHeap textureDescriptorHeap;
+	rhi::DescriptorHeap samplerDescriptorHeap;
+	rhi::DescriptorHeapHandle rtvHeap{};
 
 	Scene* currentScene = nullptr;
 	Components::Camera primaryCamera;
+	uint64_t primaryViewID = 0;
 	bool hasPrimaryCamera = false;
 	UINT frameIndex = 0;
 	UINT64 frameFenceValue = 0;
 	uint64_t frameNumber = 0;
 	DirectX::XMUINT2 renderResolution{};
 	DirectX::XMUINT2 outputResolution{};
+	unsigned int globalPSOFlags = 0;
 	float deltaTime = 0.0f;
 };

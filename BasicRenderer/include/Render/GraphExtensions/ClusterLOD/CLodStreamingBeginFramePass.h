@@ -30,6 +30,7 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Update(const UpdateExecutionContext& executionContext) override;
     void Cleanup() override;
 

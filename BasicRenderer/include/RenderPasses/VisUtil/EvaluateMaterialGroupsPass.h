@@ -23,6 +23,7 @@
 #include "Resources/Buffers/PagePool.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 class EvaluateMaterialGroupsPass : public ComputePass {
 public:
@@ -365,6 +366,52 @@ public:
         return {};
     }
 
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        const auto materialState = context->publishedRendererState
+            ? context->publishedRendererState->materials.payload.Get<br::render::PublishedMaterialState>() : nullptr;
+        if (!materialState) return PreparedPass::NoOp();
+        RefreshDescriptorIndices();
+        br::render::PreparedComputeIndirectSequence data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = m_services.pipelines->GetComputeRootSignature().GetHandle();
+        data.commandSignature = m_services.commandSignatures->GetMaterialEvaluationCommandSignature().GetHandle();
+        data.arguments = m_materialEvalCmds->GetAPIResource().GetHandle();
+        const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);
+        const bool terrainEvaluation = m_services.settings->getSettingGetter<bool>("enableTerrainRegionMaterialEvaluation")();
+        const auto outputType = m_services.settings->getSettingGetter<unsigned int>("outputType")();
+        for (std::size_t activeIndex = 0; activeIndex < materialState->activeCompileFlags.size(); ++activeIndex) {
+            const auto flags = materialState->activeCompileFlags[activeIndex];
+            if (terrainEvaluation && (flags & MaterialCompileFlags::MaterialCompileTerrain) != 0) continue;
+            if (activeIndex >= materialState->activeCompileFlagSlots.size()) continue;
+            const unsigned int slot = materialState->activeCompileFlagSlots[activeIndex];
+            if (slot >= materialState->compileFlagSlotsUsed) continue;
+            auto shaderKey = GetMaterialEvaluationShaderKey(flags);
+            if (outputType == OutputType::COLOR) shaderKey |= MaterialCompileFlags::MaterialCompileMaterialEvalColorOnly;
+            const PipelineState* pso = m_services.pipelines->TryGetMaterialEvalPSO(shaderKey);
+            if (!pso) continue;
+            const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
+            if (auto* buffer = dynamic_cast<BufferBase*>(m_materialEvalCmds);
+                buffer && argOffset + stride > buffer->GetBufferSize()) continue;
+            auto payload = pso->GetPayload(); br::render::PreparedComputeIndirectSequence::Step step{};
+            step.pipeline = payload->pso.Get().GetHandle(); step.pipelineOwner = std::move(payload);
+            step.descriptorIndices = CaptureMaterialResourceDescriptorIndices(step.pipelineOwner->pipelineResources);
+            step.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+            step.constants[VISBUF_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBufferSRVIndex;
+            step.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
+            step.constants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+            step.constants[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBufferSRVIndex;
+            step.constants[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBufferSRVIndex;
+            step.constants[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBufferSRVIndex;
+            step.constants[VISBUF_REYES_USE_NORMAL_MAPS] = CLodReyesUseNormalMaps() ? 1u : 0u;
+            step.constants[VISBUF_REYES_TERRAIN_NORMAL_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesTerrainNormalBlend());
+            step.constants[VISBUF_REYES_TERRAIN_NORMAL_MIP_BIAS] = CLodReyesTerrainNormalMipBias();
+            step.constants[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
+            step.argumentsOffset = argOffset; data.steps.push_back(std::move(step));
+        }
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirectSequence);
+    }
+
     void Cleanup() override {
         m_visibleClustersQuery = {};
         m_visibleClusterTransformIndicesQuery = {};
@@ -402,6 +449,18 @@ private:
                 indexCount,
                 indices);
         }
+    }
+
+    std::vector<unsigned int> CaptureMaterialResourceDescriptorIndices(const PipelineResources& resources) const {
+        std::vector<unsigned int> indices;
+        indices.reserve(resources.mandatoryResourceDescriptorSlots.size() + resources.optionalResourceDescriptorSlots.size());
+        for (const auto& binding : resources.mandatoryResourceDescriptorSlots) {
+            const bool allowMissing = !m_terrainRvtEnabled && binding.name.starts_with("Builtin::Terrain::Rvt");
+            indices.push_back(m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding, allowMissing));
+        }
+        for (const auto& binding : resources.optionalResourceDescriptorSlots)
+            indices.push_back(m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding, true));
+        return indices;
     }
 
     bool m_terrainRvtEnabled = false;

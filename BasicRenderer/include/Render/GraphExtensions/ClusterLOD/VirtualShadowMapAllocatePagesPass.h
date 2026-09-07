@@ -30,11 +30,12 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Cleanup() override;
 
 private:
     PipelineState m_pso;
-    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
     std::shared_ptr<Buffer> m_allocationRequestsBuffer;
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;

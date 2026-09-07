@@ -6,6 +6,7 @@
 #include "Scene/Scene.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
+#include "Render/PreparedPass.h"
 
 class UpscalingPass : public RenderPass {
 public:
@@ -93,6 +94,31 @@ public:
         auto& context = *renderContext;
         UpscalingManager::GetInstance().Evaluate(executionContext.commandList, &context.primaryCamera, context.frameNumber, context.deltaTime, m_pHDRTarget, m_pUpscaledHDRTarget, m_pDepthTexture, m_pMotionVectors);
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        struct PreparedData {
+            Components::Camera camera;
+            uint64_t frameNumber = 0;
+            double deltaTime = 0;
+            PixelBuffer* hdr = nullptr;
+            PixelBuffer* output = nullptr;
+            PixelBuffer* depth = nullptr;
+            PixelBuffer* motion = nullptr;
+        };
+        return PreparedPass::Make(PreparedData{
+            .camera = context->primaryCamera,
+            .frameNumber = preparation.frameNumber,
+            .deltaTime = preparation.deltaTime,
+            .hdr = m_pHDRTarget,
+            .output = m_pUpscaledHDRTarget,
+            .depth = m_pDepthTexture,
+            .motion = m_pMotionVectors,
+        }, +[](const PreparedData& data, RecordingContext& recording) {
+            UpscalingManager::GetInstance().Evaluate(recording.Commands(), &data.camera,
+                data.frameNumber, data.deltaTime, data.hdr, data.output, data.depth, data.motion);
+        });
     }
 
     void Cleanup() override {

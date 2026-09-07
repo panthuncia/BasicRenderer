@@ -12,6 +12,7 @@
 struct CLodDirectStorageLaunchInputs {
 	std::unique_ptr<IResourceResolver> targetSlabResolver;
 	std::function<PassReturn()> launchCallback;
+	std::function<bool()> hasPendingCallback;
 };
 
 class CLodDirectStorageLaunchPass : public CopyPass {
@@ -25,6 +26,16 @@ public:
 	PassReturn Execute(PassExecutionContext&) override {
 		ZoneScopedN("CLodDirectStorageLaunchPass::Execute");
 		return m_inputs.launchCallback ? m_inputs.launchCallback() : PassReturn{};
+	}
+
+	PreparedPass PrepareFrame(FramePreparationContext&) override {
+		if (!m_inputs.hasPendingCallback || !m_inputs.hasPendingCallback())
+			return PreparedPass::NoOp();
+		if (!m_inputs.launchCallback) return {};
+		auto result = m_inputs.launchCallback();
+		if (result.fence || result.fenceValue) return {};
+		return PreparedPass::NoOpWithExternalSignals(
+			std::move(result.externalSignalsAfterCompletion));
 	}
 
 private:

@@ -15,6 +15,7 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "RenderPasses/PreparedRenderIndirect.h"
 #include "../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
 #include "../shaders/PerPassRootConstants/visUtilRootConstants.h"
 
@@ -585,6 +586,86 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     }
 
     return {};
+}
+
+PreparedPass ClusterRasterizationPass::PrepareFrame(FramePreparationContext& preparation) {
+    if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer &&
+        SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableNonVoxelVisibilitySettingName)())
+        return PreparedPass::NoOp();
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    br::render::PreparedRenderIndirectSequence data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+    data.commandSignature = m_rasterizationCommandSignature->GetHandle();
+    data.arguments = m_rasterBucketsIndirectArgsBuffer->GetAPIResource().GetHandle();
+    data.argumentsOwner = m_rasterBucketsIndirectArgsBuffer;
+    data.width = m_passWidth; data.height = m_passHeight; data.debugName = "CLod raster pass";
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading && m_AVBOITAccumulationTexture
+        && m_AVBOITNormalizationTexture && m_AVBOITShadingExtinctionTexture) {
+        const std::shared_ptr<PixelBuffer> targets[] = {m_AVBOITAccumulationTexture, m_AVBOITNormalizationTexture, m_AVBOITShadingExtinctionTexture};
+        data.colorCount = 3;
+        for (uint32_t i = 0; i < 3; ++i) {
+            data.colors[i].rtv = targets[i]->GetRTVInfo(0).slot; data.colors[i].loadOp = rhi::LoadOp::Load;
+            data.colors[i].storeOp = rhi::StoreOp::Store; data.colors[i].clear = targets[i]->GetClearColor();
+        }
+        if (m_AVBOITEarlyDepthTexture) {
+            data.hasDepth = true; data.depth.dsv = m_AVBOITEarlyDepthTexture->GetDSVInfo(0).slot;
+            data.depth.depthLoad = rhi::LoadOp::Load; data.depth.depthStore = rhi::StoreOp::Store;
+            data.depth.stencilLoad = rhi::LoadOp::DontCare; data.depth.stencilStore = rhi::StoreOp::DontCare;
+            data.depth.clear = m_AVBOITEarlyDepthTexture->GetClearColor(); data.depth.readOnly = true;
+        }
+    }
+    auto& misc = data.constants;
+    if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
+        misc[MiscEnableShadows] = m_getShadowsEnabled ? m_getShadowsEnabled() : 0u;
+        misc[MiscEnablePunctualLights] = m_getPunctualLightingEnabled ? m_getPunctualLightingEnabled() : 0u;
+        misc[MiscEnableGTAO] = m_gtaoEnabled;
+    }
+    misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_compactedVisibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    misc[CLOD_RASTER_SINGLE_VIEW_VISIBILITY_UAV_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+    if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer && m_visibilityBuffers.size() == 1u)
+        misc[CLOD_RASTER_SINGLE_VIEW_VISIBILITY_UAV_DESCRIPTOR_INDEX] = m_visibilityBuffers.front()->GetUAVShaderVisibleInfo(0).slot.index;
+    if (m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled()) misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    if (m_sourceGroupMismatchCounterBuffer && m_sourceGroupMismatchDetailsBuffer) {
+        misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX] = m_sourceGroupMismatchCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX] = m_sourceGroupMismatchDetailsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    }
+    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowDynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = config.virtualResolution;
+    }
+    const auto numBuckets = context->materialManager->GetRasterBucketCount();
+    data.steps.reserve(numBuckets);
+    for (uint32_t i = 0; i < numBuckets; ++i) {
+        const auto flags = context->materialManager->GetRasterFlagsForBucket(i);
+        const PipelineState* pso = m_outputKind == CLodRasterOutputKind::VisibilityBuffer
+            ? PSOManager::GetInstance().TryGetClusterLODRasterPSO(flags, m_wireframe, m_visibilityBuffers.size() == 1u)
+            : m_outputKind == CLodRasterOutputKind::VirtualShadow
+                ? PSOManager::GetInstance().TryGetClusterLODVirtualShadowRasterPSO(flags, m_wireframe) : nullptr;
+        if (!pso) continue;
+        auto payload = pso->GetPayload(); br::render::PreparedRenderIndirectSequence::Step step{};
+        step.pipeline = payload->pso.Get().GetHandle(); step.pipelineOwner = std::move(payload);
+        step.descriptorIndices = CaptureResourceDescriptorIndices(step.pipelineOwner->pipelineResources);
+        step.argumentsOffset = static_cast<uint64_t>(i) * sizeof(RasterizeClustersCommand);
+        data.steps.push_back(std::move(step));
+    }
+    // Non-target transparency variants retain their explicit legacy fallback.
+    if (numBuckets && data.steps.empty() && m_outputKind != CLodRasterOutputKind::VisibilityBuffer
+        && m_outputKind != CLodRasterOutputKind::VirtualShadow) return {};
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedRenderIndirectSequence);
 }
 
 void ClusterRasterizationPass::Cleanup() {

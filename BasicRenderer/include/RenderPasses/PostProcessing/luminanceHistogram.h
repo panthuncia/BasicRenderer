@@ -5,6 +5,7 @@
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
 #include "../shaders/PerPassRootConstants/luminanceHistogramRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 class LuminanceHistogramPass : public ComputePass {
 public:
@@ -51,6 +52,25 @@ public:
         commandList.Dispatch(x, y, 1);
 
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        auto payload = m_pso.GetPayload();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+        data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.constants[MIN_LOG_LUMINANCE] = as_uint(0.001f);
+        data.constants[INVERSE_LOG_LUM_RANGE] = as_uint(1.0f / (log2(10.0f) - log2(0.1f)));
+        const auto sampledWidth = (context->renderResolution.x + 3u) / 4u;
+        const auto sampledHeight = (context->renderResolution.y + 3u) / 4u;
+        data.groupsX = (sampledWidth + 15u) / 16u;
+        data.groupsY = (sampledHeight + 15u) / 16u;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

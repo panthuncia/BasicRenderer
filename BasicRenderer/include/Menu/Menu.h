@@ -33,6 +33,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <queue>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "Render/RenderContext.h"
@@ -58,6 +59,39 @@
 #include "Managers/Singletons/RendererECSManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+struct PreparedImGuiDrawData {
+    ImDrawData drawData{};
+    std::vector<std::unique_ptr<ImDrawList>> lists;
+    rhi::Backend backend = rhi::Backend::Null;
+    rhi::DescriptorHeapHandle resourceHeap{};
+
+    PreparedImGuiDrawData(const ImDrawData& source, rhi::Backend selectedBackend,
+        rhi::DescriptorHeapHandle heap) : backend(selectedBackend), resourceHeap(heap) {
+        drawData.Valid = source.Valid;
+        drawData.DisplayPos = source.DisplayPos;
+        drawData.DisplaySize = source.DisplaySize;
+        drawData.FramebufferScale = source.FramebufferScale;
+        drawData.TotalIdxCount = source.TotalIdxCount;
+        drawData.TotalVtxCount = source.TotalVtxCount;
+        lists.reserve(source.CmdListsCount);
+        for (const auto* list : source.CmdLists) {
+            if (!list) continue;
+            lists.emplace_back(list->CloneOutput());
+            for (const auto& command : lists.back()->CmdBuffer) {
+                if (command.UserCallback
+                    && command.UserCallback != ImDrawCallback_ResetRenderState) {
+                    throw std::invalid_argument(
+                        "ImGui draw data contains a borrowed user callback; convert it to an owned menu command");
+                }
+            }
+            drawData.CmdLists.push_back(lists.back().get());
+        }
+        drawData.CmdListsCount = drawData.CmdLists.Size;
+    }
+    PreparedImGuiDrawData(const PreparedImGuiDrawData&) = delete;
+    PreparedImGuiDrawData& operator=(const PreparedImGuiDrawData&) = delete;
+};
 
 static inline const char* MajorCategory(rhi::ResourceType t) {
     using RT = rhi::ResourceType;
@@ -168,6 +202,10 @@ public:
 
     void Initialize(HWND hwnd, rhi::Swapchain swapChain);
     void Render(const RenderContext& context, rhi::CommandList commandList);
+    std::shared_ptr<const PreparedImGuiDrawData> PrepareDrawData(const RenderContext& context);
+    static void RecordPreparedDrawData(const PreparedImGuiDrawData& data,
+        rhi::CommandList commandList, rhi::DescriptorSlot rtv,
+        DirectX::XMUINT2 outputResolution);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
@@ -1893,6 +1931,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui::End();
 
 		ImGui::Render();
+		if (!commandList) return;
 
         if (m_imguiBackend == rhi::Backend::Null) {
             return;
@@ -2892,6 +2931,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
 	// Rendering
 	ImGui::Render();
+	if (!commandList) return;
 
     if (m_imguiBackend == rhi::Backend::Null) {
         return;
@@ -2923,6 +2963,42 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     }
 #endif
 
+}
+
+inline std::shared_ptr<const PreparedImGuiDrawData> Menu::PrepareDrawData(
+    const RenderContext& context) {
+    if (m_imguiBackend == rhi::Backend::Null) return {};
+    Render(context, {});
+    const auto* source = ImGui::GetDrawData();
+    if (!source || !source->Valid || source->CmdListsCount == 0) return {};
+    return std::make_shared<const PreparedImGuiDrawData>(*source, m_imguiBackend,
+        g_pd3dSrvDescHeap ? g_pd3dSrvDescHeap->GetHandle() : rhi::DescriptorHeapHandle{});
+}
+
+inline void Menu::RecordPreparedDrawData(const PreparedImGuiDrawData& data,
+    rhi::CommandList commandList, rhi::DescriptorSlot rtv,
+    DirectX::XMUINT2 outputResolution) {
+    if (!commandList || !rtv.heap.valid() || data.drawData.CmdListsCount == 0) return;
+    if (data.backend == rhi::Backend::D3D12) {
+        if (!data.resourceHeap.valid()) return;
+        commandList.SetDescriptorHeaps(data.resourceHeap, std::nullopt);
+    }
+    rhi::ColorAttachment attachment{};
+    attachment.loadOp = rhi::LoadOp::Load;
+    attachment.rtv = rtv;
+    rhi::PassBeginInfo beginInfo{};
+    beginInfo.colors = {&attachment};
+    beginInfo.width = outputResolution.x;
+    beginInfo.height = outputResolution.y;
+    commandList.BeginPass(beginInfo);
+    if (data.backend == rhi::Backend::D3D12)
+        ImGui_ImplDX12_RenderDrawData(const_cast<ImDrawData*>(&data.drawData),
+            rhi::dx12::get_cmd_list(commandList));
+#if BASICRENDERER_HAS_IMGUI_VULKAN
+    else if (data.backend == rhi::Backend::Vulkan)
+        ImGui_ImplVulkan_RenderDrawData(const_cast<ImDrawData*>(&data.drawData),
+            rhi::vulkan::get_cmd_list(commandList));
+#endif
 }
 
 inline int Menu::FindFileIndex(const std::vector<std::string>& inputHdrFiles, const std::string& existingFile) {

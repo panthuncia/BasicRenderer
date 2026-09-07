@@ -8,6 +8,7 @@
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodReyesSeedRootConstants.h"
 #include "Resources/Buffers/Buffer.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 ReyesSeedPatchesPass::ReyesSeedPatchesPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -42,10 +43,12 @@ ReyesSeedPatchesPass::ReyesSeedPatchesPass(
     };
 
     auto device = DeviceManager::GetInstance().GetDevice();
+    rhi::CommandSignaturePtr commandSignature;
     device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(dispatchArgs, 1), sizeof(CLodReyesDispatchIndirectCommand) },
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-        m_commandSignature);
+        commandSignature);
+    m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
 void ReyesSeedPatchesPass::DeclareResourceUsages(ComputePassBuilder* builder)
@@ -89,9 +92,27 @@ PassReturn ReyesSeedPatchesPass::Execute(PassExecutionContext& executionContext)
         NumMiscUintRootConstants,
         uintRootConstants);
 
-    commandList.ExecuteIndirect(m_commandSignature->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
+    commandList.ExecuteIndirect((*m_commandSignature)->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
 
     return {};
+}
+
+PreparedPass ReyesSeedPatchesPass::PrepareFrame(FramePreparationContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_pso.GetPayload(); br::render::PreparedComputeIndirect data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
+    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.constants[CLOD_REYES_SEED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_SEED_OWNED_CLUSTERS_DESCRIPTOR_INDEX] = m_ownedClustersBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_SEED_OWNED_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_ownedClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_DESCRIPTOR_INDEX] = m_splitQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_splitQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_splitQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_SEED_QUEUE_CAPACITY] = m_maxSplitQueueEntries; data.constants[CLOD_REYES_SEED_PHASE_INDEX] = m_phaseIndex;
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesSeedPatchesPass::Update(const UpdateExecutionContext& executionContext)

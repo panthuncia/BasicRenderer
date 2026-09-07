@@ -1,12 +1,13 @@
 #pragma once
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
-class ClusterGenerationPass : public ComputePass {
+class ClusterGenerationPass : public org::TypedRenderGraphPass<ClusterGenerationPass, br::render::PreparedComputeDispatch> {
 public:
 	ClusterGenerationPass() {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
@@ -16,35 +17,27 @@ public:
 	~ClusterGenerationPass() {
 	}
 
-	void DeclareResourceUsages(ComputePassBuilder* builder) override {
-		builder->WithShaderResource(Builtin::CameraBuffer)
+	void Declare(org::PassBuilder& builder) {
+		builder.WithShaderResource(Builtin::CameraBuffer)
 			.WithUnorderedAccess(Builtin::Light::ClusterBuffer);
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer)
+			.PreferQueue(org::QueueKind::Compute);
 	}
 
-	void Setup() override {
+	br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+		const auto* update = preparation.preparationData->Get<UpdateContext>();
+		const auto* render = preparation.preparationData->Get<RenderContext>();
+		if (!update && !render) throw std::logic_error("ClusterGenerationPass requires frame context");
+		auto payload = m_PSO.GetPayload(); br::render::PreparedComputeDispatch data{};
+		data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
+		data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
+		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+		data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+		const auto size = getClusterSize(); data.groupsX = size.x; data.groupsY = size.y; data.groupsZ = size.z;
+		return data;
 	}
-
-	PassReturn Execute(PassExecutionContext& executionContext) override {
-	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-	    auto& context = *renderContext;
-		auto& commandList = executionContext.commandList;
-
-		// Set the descriptor heaps
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
-
-		BindResourceDescriptorIndices(commandList, m_PSO.GetResourceDescriptorSlots());
-
-		auto clusterSize = getClusterSize();
-		commandList.Dispatch(clusterSize.x, clusterSize.y, clusterSize.z);
-		return {};
-	}
-
-	void Cleanup() override {
-
+	static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+		br::render::RecordPreparedComputeDispatch(data, recording);
 	}
 
 private:

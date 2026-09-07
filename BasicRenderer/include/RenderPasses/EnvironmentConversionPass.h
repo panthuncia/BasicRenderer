@@ -118,6 +118,13 @@ public:
         return {};
     }
 
+    PreparedPass PrepareFrame(FramePreparationContext&) override {
+        // Conversion jobs still use the legacy immediate mutable queue. Once
+        // drained, this structural pass is genuinely command-free and must not
+        // prevent selection of an otherwise complete async scene bundle.
+        return m_pending.empty() ? PreparedPass::NoOp() : PreparedPass{};
+    }
+
     bool DeclaredResourcesChanged() const override {
         return m_declaredResourcesChanged;
     }

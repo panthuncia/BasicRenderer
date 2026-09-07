@@ -9,6 +9,7 @@
 #include <Resources/Buffers/Buffer.h>
 #include "Render/Runtime/DescriptorServiceAccess.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 class GTAOFilterPass : public ComputePass {
 public:
@@ -87,6 +88,25 @@ public:
 		commandList.Dispatch(x, y, 1);
 
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        const auto depth = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);
+        const auto workingDepths = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
+        auto payload = PrefilterDepths16x16PSO.GetPayload(); br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.constants[UintRootConstant0] = m_samplerIndex;
+        data.constants[UintRootConstant1] = depth->GetSRVInfo(0).slot.index;
+        data.constants[UintRootConstant2] = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
+        data.constants[UintRootConstant3] = workingDepths->GetUAVShaderVisibleInfo(1).slot.index;
+        data.constants[UintRootConstant4] = workingDepths->GetUAVShaderVisibleInfo(2).slot.index;
+        data.constants[UintRootConstant5] = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
+        data.constants[UintRootConstant6] = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
+        data.groupsX = (context->renderResolution.x + 15u) / 16u; data.groupsY = (context->renderResolution.y + 15u) / 16u;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

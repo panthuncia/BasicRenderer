@@ -8,6 +8,7 @@
 #include "Resources/Buffers/Buffer.h"
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodReyesReplayMergeRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 ReyesReplayMergePass::ReyesReplayMergePass(
     ReyesReplayMergeKind kind,
@@ -41,10 +42,12 @@ ReyesReplayMergePass::ReyesReplayMergePass(
     };
 
     auto device = DeviceManager::GetInstance().GetDevice();
+    rhi::CommandSignaturePtr commandSignature;
     device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(dispatchArgs, 1), sizeof(CLodReyesDispatchIndirectCommand) },
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-        m_commandSignature);
+        commandSignature);
+    m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
 void ReyesReplayMergePass::DeclareResourceUsages(ComputePassBuilder* builder)
@@ -90,8 +93,26 @@ PassReturn ReyesReplayMergePass::Execute(PassExecutionContext& executionContext)
         NumMiscUintRootConstants,
         uintRootConstants);
 
-    commandList.ExecuteIndirect(m_commandSignature->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
+    commandList.ExecuteIndirect((*m_commandSignature)->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
     return {};
+}
+
+PreparedPass ReyesReplayMergePass::PrepareFrame(FramePreparationContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_pso.GetPayload(); br::render::PreparedComputeIndirect data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
+    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.constants[CLOD_REYES_REPLAY_MERGE_SOURCE_DESCRIPTOR_INDEX] = m_sourceQueueBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_REPLAY_MERGE_SOURCE_COUNTER_DESCRIPTOR_INDEX] = m_sourceQueueCounterBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_REPLAY_MERGE_DEST_DESCRIPTOR_INDEX] = m_destQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_REPLAY_MERGE_DEST_COUNTER_DESCRIPTOR_INDEX] = m_destQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_REPLAY_MERGE_DEST_OVERFLOW_DESCRIPTOR_INDEX] = m_destQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_REPLAY_MERGE_CAPACITY] = m_destQueueCapacity;
+    data.constants[CLOD_REYES_REPLAY_MERGE_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesReplayMergePass::Cleanup() {}

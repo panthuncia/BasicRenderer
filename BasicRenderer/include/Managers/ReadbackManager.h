@@ -57,6 +57,13 @@ private:
 
         PassReturn Execute(PassExecutionContext& context) override;
 
+        PreparedPass PrepareFrame(FramePreparationContext&) override {
+            std::scoped_lock lock(m_owner.m_mutex);
+            return m_owner.m_queuedReadbacks.empty() && !m_hasWork
+                ? PreparedPass::NoOp()
+                : PreparedPass{};
+        }
+
         void Cleanup() override {
         }
 

@@ -38,6 +38,7 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Update(const UpdateExecutionContext& executionContext) override;
     void Cleanup() override;
 
@@ -57,5 +58,5 @@ private:
     uint32_t m_phaseIndex = 0u;
     ReyesClassifyMode m_classifyMode = ReyesClassifyMode::Default;
     PipelineState m_pso;
-    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
 };

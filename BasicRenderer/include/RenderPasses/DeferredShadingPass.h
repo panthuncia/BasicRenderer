@@ -2,13 +2,14 @@
 
 #include <functional>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
-class DeferredShadingPass : public ComputePass {
+class DeferredShadingPass : public org::TypedRenderGraphPass<DeferredShadingPass, br::render::PreparedComputeDispatch> {
 public:
 	explicit DeferredShadingPass(bool skyboxEnabled = false)
 		: m_skyboxEnabled(skyboxEnabled) {
@@ -20,8 +21,8 @@ public:
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
 	}
 
-	void DeclareResourceUsages(ComputePassBuilder* builder) override {
-		builder->WithShaderResource(Builtin::CameraBuffer,
+	void Declare(org::PassBuilder& builder) {
+		builder.WithShaderResource(Builtin::CameraBuffer,
 			Builtin::Environment::PrefilteredCubemapsGroup,
 			Builtin::Light::ActiveLightIndices,
 			Builtin::Light::InfoBuffer,
@@ -51,7 +52,7 @@ public:
 				Builtin::Surface::Motion);
 
 			if (getShadowsEnabled()) {
-				builder->WithShaderResource(Builtin::Shadows::CLodClipmapInfo,
+				builder.WithShaderResource(Builtin::Shadows::CLodClipmapInfo,
 					Builtin::Shadows::CLodCompactMainCamera,
 					Builtin::Shadows::CLodCompactShadowCameras,
 					Builtin::Shadows::CLodDirectionalPageViewInfo,
@@ -62,62 +63,45 @@ public:
 			}
 
 		if (m_clusteredLightingEnabled) {
-			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
+			builder.WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
 		}
 
 		if (m_gtaoEnabled) {
-			builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
+			builder.WithShaderResource(Builtin::GTAO::OutputAOTerm);
 		}
 
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer)
+			.PreferQueue(org::QueueKind::Compute);
 	}
 
-	void Setup() override {
+	void Initialize() {
 		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
 		if (getShadowsEnabled()) {
 			RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
 		}
 	}
 
-	PassReturn Execute(PassExecutionContext& executionContext) override {
-	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-	    auto& context = *renderContext;
-		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = executionContext.commandList;
-
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
-			context.samplerDescriptorHeap.GetHandle());
-
-		commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
-
-		auto& pso = psoManager.GetDeferredPSO(context.globalPSOFlags);
-		commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-
-		unsigned int settings[] = {
-			getShadowsEnabled(),
-			getPunctualLightingEnabled(),
-			m_gtaoEnabled,
-			m_skyboxEnabled
-		};
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0,
-			MiscUintRootSignatureIndex, MiscEnableShadows,
-			4, settings);
-
-		uint32_t w = context.renderResolution.x;
-		uint32_t h = context.renderResolution.y;
-		const uint32_t groupSizeX = 8;
-		const uint32_t groupSizeY = 8;
-		uint32_t groupsX = (w + groupSizeX - 1) / groupSizeX;
-		uint32_t groupsY = (h + groupSizeY - 1) / groupSizeY;
-
-		commandList.Dispatch(groupsX, groupsY, 1);
-		return {};
+	br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+		const auto* update = preparation.preparationData->Get<UpdateContext>();
+		const auto* render = preparation.preparationData->Get<RenderContext>();
+		if (!update && !render) throw std::logic_error("DeferredShadingPass requires frame context");
+		const auto globalFlags = update ? update->globalPSOFlags : render->globalPSOFlags;
+		const auto resolution = update ? update->renderResolution : render->renderResolution;
+		auto& pso = PSOManager::GetInstance().GetDeferredPSO(globalFlags);
+		auto payload = pso.GetPayload(); br::render::PreparedComputeDispatch data{};
+		data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
+		data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
+		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+		data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+		data.constants[MiscEnableShadows] = getShadowsEnabled();
+		data.constants[MiscEnableShadows + 1] = getPunctualLightingEnabled();
+		data.constants[MiscEnableShadows + 2] = m_gtaoEnabled;
+		data.constants[MiscEnableShadows + 3] = m_skyboxEnabled;
+		data.groupsX = (resolution.x + 7u) / 8u; data.groupsY = (resolution.y + 7u) / 8u;
+		return data;
 	}
-
-	void Cleanup() override {
-		// Cleanup the render pass
+	static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+		br::render::RecordPreparedComputeDispatch(data, recording);
 	}
 
 private:

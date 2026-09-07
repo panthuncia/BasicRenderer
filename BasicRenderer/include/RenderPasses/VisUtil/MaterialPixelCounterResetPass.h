@@ -1,11 +1,12 @@
 #pragma once
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Render/MaterialStateArtifacts.h"
 #include "Materials/TechniqueDescriptor.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
-class MaterialUAVResetPass : public ComputePass {
+class MaterialUAVResetPass : public org::TypedRenderGraphPass<MaterialUAVResetPass, br::render::PreparedComputeDispatch> {
 public:
     MaterialUAVResetPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -16,46 +17,37 @@ public:
             "ClearMaterialCountersPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer",
+    void Declare(org::PassBuilder& builder) {
+        builder.WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer",
             "Builtin::VisUtil::MaterialWriteCursorBuffer");
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer)
+            .PreferQueue(org::QueueKind::Compute);
     }
 
-    void Setup() override {
-    }
-
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        auto& psoManager = PSOManager::GetInstance();
-        auto& cl = executionContext.commandList;
-
-        cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
-                              context.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-
-        const auto materialState = context.publishedRendererState
-            ? context.publishedRendererState->materials.payload.Get<br::render::PublishedMaterialState>()
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+        const auto* update = preparation.preparationData->Get<UpdateContext>();
+        const auto* render = preparation.preparationData->Get<RenderContext>();
+        if (!update && !render) throw std::logic_error("MaterialUAVResetPass requires frame context");
+        auto payload = m_pso.GetPayload();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+        data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        const auto& published = update ? update->publishedRendererState : render->publishedRendererState;
+        const auto materialState = published
+            ? published->materials.payload.Get<br::render::PublishedMaterialState>()
             : nullptr;
-        const auto numMaterials = materialState ? materialState->compileFlagSlotsUsed : 0u;
-        if (numMaterials == 0u) {
-            return {};
-        }
-        // Push: UintRootConstant0 = MaterialCount SRV descriptor index, UintRootConstant1 = MaterialPixelCountBuffer UAV index
-        unsigned int rc[NumMiscUintRootConstants] = {};
-        rc[0] = numMaterials;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-        
-		unsigned int threadGroupCount = (numMaterials + 63) / 64;
-		cl.Dispatch(threadGroupCount, 1, 1);
-
-        return {};
+        data.constants[0] = materialState ? materialState->compileFlagSlotsUsed : 0u;
+        data.groupsX = (data.constants[0] + 63u) / 64u;
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
 
 private:
     PipelineState m_pso;

@@ -1,22 +1,33 @@
 #pragma once
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Render/RenderContext.h"
 #include "Menu/Menu.h"
 
-class MenuRenderPass : public RenderPass {
+struct MenuFrameData {
+	std::shared_ptr<const PreparedImGuiDrawData> drawData;
+	DirectX::XMUINT2 outputResolution{};
+};
+
+class MenuRenderPass final : public org::TypedRenderGraphPass<MenuRenderPass, MenuFrameData> {
 public:
-	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithRenderTarget(Builtin::Backbuffer);
+	void Declare(org::PassBuilder& builder) {
+		builder.WithRenderTarget(Builtin::Backbuffer);
 	}
 
-	void Setup() override {}
-
-	PassReturn Execute(PassExecutionContext& executionContext) override {
-		auto* renderContext = executionContext.hostData->Get<RenderContext>();
-		Menu::GetInstance().Render(*renderContext, executionContext.commandList);
-		return {};
+	MenuFrameData Prepare(const org::PassPrepareContext& preparation) {
+		const auto* context = preparation.preparationData
+			? preparation.preparationData->Get<RenderContext>() : nullptr;
+		if (!context) return {};
+		return {
+			.drawData = Menu::GetInstance().PrepareDrawData(*context),
+			.outputResolution = context->outputResolution,
+		};
 	}
 
-	void Cleanup() override {}
+	static void Record(const MenuFrameData& data, org::PassRecordContext& recording) {
+		if (data.drawData) Menu::RecordPreparedDrawData(
+			*data.drawData, recording.Commands(),
+			recording.Resolve(org::ExternalBindingKey::SwapchainColor), data.outputResolution);
+	}
 };

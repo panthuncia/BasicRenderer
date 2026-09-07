@@ -3,6 +3,7 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "Render/RenderContext.h"
 #include "Managers/ViewManager.h"
+#include <vector>
 
 class LinearDepthHistoryCopyPass : public RenderPass {
 public:
@@ -34,9 +35,31 @@ public:
         return {};
     }
 
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        (void)preparation;
+        SubmissionEffect effect{};
+        effect.viewManager = m_viewManager;
+        if (m_viewManager) {
+            m_viewManager->ForEachView([&](uint64_t viewID) {
+                const auto* view = m_viewManager->Get(viewID);
+                if (view && view->gpu.linearDepthMap) effect.viewIDs.push_back(viewID);
+            });
+        }
+        return PreparedPass::Make(std::move(effect), &RecordNoOp, &CommitSubmitted);
+    }
+
     void Cleanup() override {
     }
 
 private:
+    struct SubmissionEffect {
+        ViewManager* viewManager = nullptr;
+        std::vector<uint64_t> viewIDs;
+    };
+    static void RecordNoOp(const SubmissionEffect&, RecordingContext&) {}
+    static void CommitSubmitted(const SubmissionEffect& effect) {
+        if (!effect.viewManager) return;
+        for (const auto viewID : effect.viewIDs) effect.viewManager->MarkDepthHistoryValid(viewID);
+    }
     ViewManager* m_viewManager = nullptr;
 };

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <array>
 
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "RenderPasses/Base/ComputePass.h"
@@ -121,11 +122,65 @@ public:
         return {};
     }
 
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        PreparedData data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+        data.standardOwner = downsamplePassPSO.GetPayload();
+        data.arrayOwner = downsampleArrayPSO.GetPayload();
+        data.standardPipeline = data.standardOwner->pso.Get().GetHandle();
+        data.arrayPipeline = data.arrayOwner->pso.Get().GetHandle();
+        data.maps.reserve(m_perMapInfo.size());
+        for (const auto& [resourceID, map] : m_perMapInfo) {
+            (void)resourceID;
+            if (!map.pConstantsBufferView || !map.sourceMap) continue;
+            PreparedMap item{};
+            item.pipeline = map.isArrayLike ? data.arrayPipeline : data.standardPipeline;
+            item.constants[UintRootConstant0] = map.pCounterResource->GetUAVShaderVisibleInfo(0).slot.index;
+            item.constants[UintRootConstant1] = map.isArrayLike
+                ? map.sourceMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index
+                : map.sourceMap->GetSRVInfo(0).slot.index;
+            item.constants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).slot.index;
+            item.constants[UintRootConstant3] = map.constantsIndex;
+            item.groupsX = map.dispatchThreadGroupCountXY[0];
+            item.groupsY = map.dispatchThreadGroupCountXY[1];
+            item.groupsZ = map.dispatchThreadGroupCountZ;
+            data.maps.push_back(std::move(item));
+        }
+        return PreparedPass::Make(std::move(data), &RecordPrepared);
+    }
+
     void Cleanup() override {
         // Cleanup if necessary
     }
 
 private:
+    struct PreparedMap {
+        rhi::PipelineHandle pipeline{};
+        std::array<unsigned int, NumMiscUintRootConstants> constants{};
+        uint32_t groupsX = 0, groupsY = 0, groupsZ = 0;
+    };
+    struct PreparedData {
+        rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+        rhi::PipelineLayoutHandle layout{};
+        rhi::PipelineHandle standardPipeline{}, arrayPipeline{};
+        std::shared_ptr<const PipelineStatePayload> standardOwner, arrayOwner;
+        std::vector<PreparedMap> maps;
+    };
+    static void RecordPrepared(const PreparedData& data, RecordingContext& recording) {
+        auto& commands = recording.Commands();
+        commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+        commands.BindLayout(data.layout);
+        for (const auto& map : data.maps) {
+            commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
+                NumMiscUintRootConstants, map.constants.data());
+            commands.BindPipeline(map.pipeline);
+            commands.Dispatch(map.groupsX, map.groupsY, map.groupsZ);
+        }
+    }
+
     struct spdConstants
     {
         uint srcSize[2];

@@ -5,6 +5,7 @@
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
 #include "../shaders/PerPassRootConstants/luminanceHistogramAverageRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 class LuminanceHistogramAveragePass : public ComputePass {
 public:
@@ -47,6 +48,25 @@ public:
         commandList.Dispatch(1, 1, 1);
 
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        auto payload = m_pso.GetPayload();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+        data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.constants[MIN_LOG_LUMINANCE] = as_uint(0.001f);
+        data.constants[LOG_LUMINANCE_RANGE] = as_uint(log2(10.0f) - log2(0.1f));
+        data.constants[TIME_COEFFICIENT] = as_uint(context->deltaTime);
+        data.constants[NUM_PIXELS] = as_uint(static_cast<float>(
+            context->renderResolution.x * context->renderResolution.y));
+        data.groupsX = 1;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

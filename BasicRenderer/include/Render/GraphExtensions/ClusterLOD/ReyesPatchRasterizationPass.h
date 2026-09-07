@@ -40,6 +40,7 @@ public:
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Cleanup() override;
 
 private:
@@ -62,5 +63,5 @@ private:
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
     bool m_declaredResourcesChanged = true;
     PipelineState m_pso;
-    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
 };

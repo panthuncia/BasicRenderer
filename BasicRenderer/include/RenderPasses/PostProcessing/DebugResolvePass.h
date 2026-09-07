@@ -4,6 +4,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "RenderPasses/PreparedFullscreenDraw.h"
 
 class DebugResolvePass : public RenderPass {
 public:
@@ -40,7 +41,7 @@ public:
 		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
 
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-		commandList.BindPipeline(m_pso->GetHandle());
+		commandList.BindPipeline((*m_pso)->GetHandle());
 
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
@@ -48,10 +49,21 @@ public:
 		return {};
 	}
 
+	PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+		const auto* context = preparation.preparationData->Get<UpdateContext>();
+		br::render::PreparedFullscreenDraw data{};
+		data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+		data.renderTarget = {context->rtvHeap, context->frameIndex}; data.loadOp = rhi::LoadOp::Load;
+		data.width = context->outputResolution.x; data.height = context->outputResolution.y;
+		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = (*m_pso)->GetHandle();
+		data.pipelineOwner = m_pso; data.descriptorIndices = CaptureResourceDescriptorIndices(m_resourceDescriptorBindings);
+		return PreparedPass::Make(std::move(data), &br::render::RecordPreparedFullscreenDraw);
+	}
+
 	void Cleanup() override {}
 
 private:
-	rhi::PipelinePtr m_pso;
+	std::shared_ptr<rhi::PipelinePtr> m_pso;
 	PipelineResources m_resourceDescriptorBindings;
 
 	void CreatePSO() {
@@ -119,10 +131,12 @@ private:
 			rhi::Make(soTopo)
 		};
 
-		auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+		rhi::PipelinePtr pipeline;
+		auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pipeline);
 		if (Failed(result)) {
 			throw std::runtime_error("Failed to create DebugResolve PSO");
 		}
-		m_pso->SetName("DebugResolve.PSO");
+		pipeline->SetName("DebugResolve.PSO");
+		m_pso = std::make_shared<rhi::PipelinePtr>(std::move(pipeline));
 	}
 };

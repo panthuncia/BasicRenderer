@@ -11,6 +11,7 @@
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodReyesBuildRasterWorkRootConstants.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 ReyesBuildRasterWorkPass::ReyesBuildRasterWorkPass(
     std::shared_ptr<Buffer> diceQueueBuffer,
@@ -61,10 +62,12 @@ ReyesBuildRasterWorkPass::ReyesBuildRasterWorkPass(
     };
 
     auto device = DeviceManager::GetInstance().GetDevice();
+    rhi::CommandSignaturePtr commandSignature;
     device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(dispatchArgs, 1), sizeof(CLodReyesDispatchIndirectCommand) },
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-        m_commandSignature);
+        commandSignature);
+    m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
 void ReyesBuildRasterWorkPass::DeclareResourceUsages(ComputePassBuilder* builder)
@@ -189,8 +192,38 @@ PassReturn ReyesBuildRasterWorkPass::Execute(PassExecutionContext& executionCont
         NumMiscUintRootConstants,
         uintRootConstants);
 
-    commandList.ExecuteIndirect(m_commandSignature->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
+    commandList.ExecuteIndirect((*m_commandSignature)->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
     return {};
+}
+
+PreparedPass ReyesBuildRasterWorkPass::PrepareFrame(FramePreparationContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_pso.GetPayload(); br::render::PreparedComputeIndirect data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
+    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX] = m_diceQueueReadOffsetBuffer ? m_diceQueueReadOffsetBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_OUTPUT_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_OUTPUT_COUNTER_DESCRIPTOR_INDEX] = m_rasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_CAPACITY] = m_rasterWorkCapacity;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer ? m_visibleClustersBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBuffer ? m_visibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer ? m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_REPLAY_DICE_QUEUE_DESCRIPTOR_INDEX] = m_replayDiceQueueBuffer ? m_replayDiceQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_REPLAY_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replayDiceQueueCounterBuffer ? m_replayDiceQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_REPLAY_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replayDiceQueueOverflowBuffer ? m_replayDiceQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_ENABLE_PATCH_OCCLUSION] = (m_visibleClustersBuffer && m_viewDepthSrvIndicesBuffer && m_replayDiceQueueBuffer && m_replayDiceQueueCounterBuffer && m_replayDiceQueueOverflowBuffer) ? 1u : 0u;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_PHASE_INDEX] = m_phaseIndex;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_REPLAY_DICE_QUEUE_CAPACITY] = m_replayDiceQueueCapacity;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_USE_AABB_OCCLUSION] = SettingsManager::GetInstance().getSettingGetter<bool>(CLodReyesUseAabbOcclusionSettingName)() ? 1u : 0u;
+    data.constants[CLOD_REYES_BUILD_RASTER_WORK_TERRAIN_RVT_ENABLED] = 0u;
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesBuildRasterWorkPass::Cleanup() {}

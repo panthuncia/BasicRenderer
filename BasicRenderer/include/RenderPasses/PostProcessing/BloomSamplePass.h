@@ -7,6 +7,7 @@
 #include "Scene/Scene.h"
 #include "Utilities/Utilities.h"
 #include "../shaders/PerPassRootConstants/bloomSampleRootConstants.h"
+#include <array>
 
 struct BloomSamplePassInputs {
     unsigned int mipIndex;
@@ -106,11 +107,79 @@ public:
         return {};
     }
 
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        const unsigned int mipOffset = m_isUpsample ? 0u : 1u;
+        const bool readsUpscaledHDR = !m_isUpsample && m_mipIndex == 0;
+        PixelBuffer* source = readsUpscaledHDR ? m_pUpscaledHDRTarget : m_pBloomTarget;
+        const unsigned int sourceMip = readsUpscaledHDR ? 0u : m_mipIndex + (m_isUpsample ? 1u : 0u);
+        auto payload = (m_isUpsample ? m_upsamplePso : m_downsamplePso).GetPayload();
+        PreparedData data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+        data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.descriptorIndices = CaptureResourceDescriptorIndices(m_resourceDescriptorBindings);
+        data.targetResource = m_pBloomTarget->GetAPIResource().GetHandle();
+        data.rtv = m_pBloomTarget->GetRTVInfo(m_mipIndex + mipOffset).slot;
+        data.targetMip = m_mipIndex + mipOffset;
+        data.width = m_pBloomTarget->GetWidth() >> data.targetMip;
+        data.height = m_pBloomTarget->GetHeight() >> data.targetMip;
+        data.load = m_isUpsample;
+        data.constants[SOURCE_TEXTURE_DESCRIPTOR_INDEX] = source->GetSRVInfo(sourceMip).slot.index;
+        data.constants[MIP_WIDTH] = source->GetWidth() >> sourceMip;
+        data.constants[MIP_HEIGHT] = source->GetHeight() >> sourceMip;
+        if (m_isUpsample) {
+            data.constants[BLOOM_SAMPLE_FILTER_RADIUS] = as_uint(0.001f);
+            data.constants[BLOOM_SAMPLE_ASPECT_RATIO] = as_uint(
+                data.constants[MIP_WIDTH] / static_cast<float>(data.constants[MIP_HEIGHT]));
+        } else {
+            data.constants[SRC_TEXEL_SIZE_X] = as_uint(1.0f / data.constants[MIP_WIDTH]);
+            data.constants[SRC_TEXEL_SIZE_Y] = as_uint(1.0f / data.constants[MIP_HEIGHT]);
+        }
+        return PreparedPass::Make(std::move(data), &RecordPrepared);
+    }
+
     void Cleanup() override {
         // Cleanup the render pass
     }
 
 private:
+	struct PreparedData {
+		rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+		rhi::PipelineLayoutHandle layout{};
+		rhi::PipelineHandle pipeline{};
+		std::shared_ptr<const PipelineStatePayload> pipelineOwner;
+		std::vector<unsigned int> descriptorIndices;
+		rhi::ResourceHandle targetResource{};
+		rhi::DescriptorSlot rtv{};
+		std::array<unsigned int, NumMiscUintRootConstants> constants{};
+		uint32_t targetMip = 0, width = 0, height = 0;
+		bool load = false;
+	};
+	static void RecordPrepared(const PreparedData& data, RecordingContext& recording) {
+		auto& commands = recording.Commands();
+		commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+		rhi::ColorAttachment color{};
+		color.rtv = data.rtv;
+		color.loadOp = data.load ? rhi::LoadOp::Load : rhi::LoadOp::DontCare;
+		color.mipSlice = data.targetMip;
+		color.storeOp = rhi::StoreOp::Store;
+		color.resource = data.targetResource;
+		rhi::PassBeginInfo begin{}; begin.colors = {&color}; begin.width = data.width; begin.height = data.height;
+		commands.BeginPass(begin);
+		commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
+		commands.BindPipeline(data.pipeline);
+		commands.BindLayout(data.layout);
+		if (!data.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::All, 0,
+			org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+			static_cast<uint32_t>(data.descriptorIndices.size()), data.descriptorIndices.data());
+		commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0,
+			NumMiscUintRootConstants, data.constants.data());
+		commands.Draw(3, 1, 0, 0);
+		commands.EndPass();
+	}
 
     unsigned int m_mipIndex;
     bool m_isUpsample = false;

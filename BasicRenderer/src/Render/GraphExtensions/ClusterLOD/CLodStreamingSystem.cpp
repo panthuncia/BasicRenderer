@@ -33,6 +33,7 @@
 #include "RenderPasses/StreamingUploadPass.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Resources/Buffers/DynamicBuffer.h"
+#include "Resources/BackedResource.h"
 #include "Telemetry/NvPerfIntegration.h"
 #include <BasicTelemetry/Telemetry.h>
 #include "Mesh/ClusterLODShaderTypes.h"
@@ -364,6 +365,44 @@ namespace {
             }
             m_armed = false;
             return m_submitSnapshot(m_snapshot);
+        }
+
+        PreparedPass PrepareFrame(FramePreparationContext&) override {
+            if (!m_armed) return PreparedPass::NoOp();
+            struct Copy {
+                BackingAllocationSnapshot destination, source;
+                uint64_t destinationOffset = 0, sourceOffset = 0, size = 0;
+            };
+            struct Data { std::vector<Copy> copies; };
+            Data data;
+            for (const auto& batch : m_snapshot.batches) {
+                if (!batch) continue;
+                for (const auto& copy : batch->copies) {
+                    if (!copy.destination || !copy.staging || !copy.size) continue;
+                    auto* destinationResource = dynamic_cast<BackedResource*>(copy.destination.get());
+                    auto* sourceResource = dynamic_cast<BackedResource*>(copy.staging.get());
+                    auto destination = destinationResource
+                        ? destinationResource->CaptureBackingAllocation() : BackingAllocationSnapshot{};
+                    auto source = sourceResource
+                        ? sourceResource->CaptureBackingAllocation() : BackingAllocationSnapshot{};
+                    if (!destination || !source) return {};
+                    data.copies.push_back({std::move(destination), std::move(source),
+                        copy.destinationOffset, copy.stagingOffset, copy.size});
+                }
+            }
+            if (data.copies.empty() || !m_submitSnapshot) return {};
+            auto submission = m_submitSnapshot(m_snapshot);
+            if (submission.fence || submission.fenceValue) return {};
+            m_armed = false;
+            auto record = +[](const Data& value, RecordingContext& recording) {
+                for (const auto& copy : value.copies) {
+                    recording.Commands().CopyBufferRegion(
+                        copy.destination.resource.GetHandle(), copy.destinationOffset,
+                        copy.source.resource.GetHandle(), copy.sourceOffset, copy.size);
+                }
+            };
+            return PreparedPass::MakeWithExternalSignals(std::move(data), record,
+                std::move(submission.externalSignalsAfterCompletion));
         }
         void Cleanup() override { CancelClaimedSnapshot(); }
 
@@ -1930,6 +1969,11 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
             result.externalSignalsAfterCompletion.push_back({ m_directStorageLaunchFenceHandle, fenceValue });
             return result;
         }
+    };
+    launchInputs.hasPendingCallback = [this]() {
+        return m_directStorageLaunchFenceHandle.IsValid()
+            && m_directStorageArmedLaunchFenceValue.load(std::memory_order_acquire) == 0u
+            && m_directStorageLaunchRequested.load(std::memory_order_acquire);
     };
 
     outPasses.push_back(

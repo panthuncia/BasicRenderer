@@ -7,6 +7,7 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Resources/Buffers/Buffer.h"
 #include "../shaders/PerPassRootConstants/clodVirtualShadowBuildMarkTilesRootConstants.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 VirtualShadowMapBuildMarkTilesPass::VirtualShadowMapBuildMarkTilesPass(
     std::shared_ptr<Buffer> tileWorkBuffer,
@@ -68,6 +69,26 @@ PassReturn VirtualShadowMapBuildMarkTilesPass::Execute(PassExecutionContext& exe
     commandList.Dispatch(groupCountX, groupCountY, 1u);
 
     return {};
+}
+
+PreparedPass VirtualShadowMapBuildMarkTilesPass::PrepareFrame(FramePreparationContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    auto payload = m_pso.GetPayload();
+    br::render::PreparedComputeDispatch data{};
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+    data.pipeline = payload->pso.Get().GetHandle();
+    data.pipelineOwner = std::move(payload);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_TILE_WORK_DESCRIPTOR_INDEX] = m_tileWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_TILE_COUNT_DESCRIPTOR_INDEX] = m_tileCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_SCREEN_WIDTH] = context->renderResolution.x;
+    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_SCREEN_HEIGHT] = context->renderResolution.y;
+    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_MAX_TILE_COUNT] = CLodVirtualShadowMaxMarkTileCount;
+    data.groupsX = (context->renderResolution.x + CLodVirtualShadowMarkTileSize - 1u) / CLodVirtualShadowMarkTileSize;
+    data.groupsY = (context->renderResolution.y + CLodVirtualShadowMarkTileSize - 1u) / CLodVirtualShadowMarkTileSize;
+    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }
 
 void VirtualShadowMapBuildMarkTilesPass::Cleanup() {}

@@ -28,6 +28,7 @@ public:
     void Setup() override;
     void Update(const UpdateExecutionContext& executionContext) override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
     void Cleanup() override;
 
 private:

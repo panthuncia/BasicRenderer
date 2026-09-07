@@ -3,6 +3,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 class DilateMotionVectorsPass : public ComputePass {
 public:
@@ -58,6 +59,19 @@ public:
             (m_destination->GetHeight() + groupSize - 1) / groupSize,
             1);
         return {};
+    }
+
+    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
+        data.pipelineOwner = std::move(payload);
+        data.constants[0] = m_source->GetSRVInfo(0).slot.index; data.constants[1] = m_depth->GetSRVInfo(0).slot.index;
+        data.constants[2] = m_destination->GetUAVShaderVisibleInfo(0).slot.index;
+        data.constants[3] = m_destination->GetWidth(); data.constants[4] = m_destination->GetHeight();
+        data.groupsX = (m_destination->GetWidth() + 7u) / 8u; data.groupsY = (m_destination->GetHeight() + 7u) / 8u;
+        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {}
