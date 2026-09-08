@@ -123,7 +123,7 @@ PreparedPass CLodStreamingBeginFramePass::PrepareFrame(FramePreparationContext& 
     appendClear(m_usedGroupsCounter, 0u, 1u);
     appendClear(m_sourceGroupMismatchCounter, 0u, 1u);
     appendClear(m_loadRequestKeys, 0xffffffffu, CLodStreamingRequestCapacity);
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
 }
 
 void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& executionContext) {

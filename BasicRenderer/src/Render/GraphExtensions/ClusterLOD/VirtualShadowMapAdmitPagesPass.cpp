@@ -257,7 +257,7 @@ PreparedPass VirtualShadowMapAdmitPagesPass::PrepareFrame(FramePreparationContex
             append(m_pso, c, pageGroups, true);
         }
     }
-    return PreparedPass::Make(std::move(data), &RecordPrepared, &CommitPrepared);
+    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared, &CommitPrepared);
 }
 
 void VirtualShadowMapAdmitPagesPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)

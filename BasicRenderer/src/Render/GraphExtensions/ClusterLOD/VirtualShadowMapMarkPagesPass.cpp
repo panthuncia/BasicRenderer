@@ -263,7 +263,7 @@ PreparedPass VirtualShadowMapMarkPagesPass::PrepareFrame(FramePreparationContext
     c[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_COUNT_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     c[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_RECEIVER_MASK_DESCRIPTOR_INDEX] = m_receiverSubpageMaskBuffer ? m_receiverSubpageMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0u;
     c[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_RECEIVER_MASK_ENABLED] = m_receiverSubpageMode;
-    return PreparedPass::Make(std::move(data), &RecordPrepared);
+    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
 }
 
 void VirtualShadowMapMarkPagesPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)

@@ -126,7 +126,7 @@ PreparedPass VirtualShadowMapResolveMarkedBlocksPass::PrepareFrame(FramePreparat
     data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_MAX_REQUEST_COUNT] = config.maxAllocationRequests;
     data.groupsX = (CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }
 
 void VirtualShadowMapResolveMarkedBlocksPass::Cleanup() {}

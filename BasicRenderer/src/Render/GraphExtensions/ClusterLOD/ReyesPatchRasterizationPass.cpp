@@ -122,9 +122,9 @@ void ReyesPatchRasterizationPass::DeclareResourceUsages(ComputePassBuilder* buil
             Builtin::Terrain::RvtRequestList,
             Builtin::Terrain::RvtCounters,
             Builtin::Terrain::RvtStats)
-        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_telemetryBuffer)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
+    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
 
     for (const auto& visibilityBuffer : m_visibilityBuffers) {
         builder->WithUnorderedAccess(visibilityBuffer);
@@ -210,7 +210,8 @@ PreparedPass ReyesPatchRasterizationPass::PrepareFrame(FramePreparationContext& 
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
     data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
     data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
@@ -225,7 +226,7 @@ PreparedPass ReyesPatchRasterizationPass::PrepareFrame(FramePreparationContext& 
     data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesPatchRasterizationPass::Cleanup() {}

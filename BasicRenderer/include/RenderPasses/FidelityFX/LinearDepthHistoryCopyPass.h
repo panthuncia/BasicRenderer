@@ -45,7 +45,7 @@ public:
                 if (view && view->gpu.linearDepthMap) effect.viewIDs.push_back(viewID);
             });
         }
-        return PreparedPass::Make(std::move(effect), &RecordNoOp, &CommitSubmitted);
+        return PreparedPass::MakeOwned(std::move(effect), &RecordNoOp, &CommitSubmitted);
     }
 
     void Cleanup() override {

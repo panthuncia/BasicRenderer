@@ -1735,8 +1735,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         const std::shared_ptr<Buffer> previousSwVisibleClustersCounterBuffer =
             isPhase1 ? std::shared_ptr<Buffer>{} : m_swVisibleClustersCounterBuffer;
 
-        std::shared_ptr<ComputePass> cullPass = useDispatchCullingPass
-            ? std::static_pointer_cast<ComputePass>(
+        std::shared_ptr<org::RenderGraphPass> cullPass = useDispatchCullingPass
+            ? std::static_pointer_cast<org::RenderGraphPass>(
                 std::make_shared<HierarchicalDispatchCullingPass>(
                     cullPassName,
                     cullPassInputs,
@@ -1773,7 +1773,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     traits.type == CLodExtensionType::Shadow ? m_shadowReceiverSubpageMaskBuffer : nullptr,
                     traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr,
                     traits.type == CLodExtensionType::Shadow ? m_shadowDynamicActiveBlockMetadataBuffer : nullptr))
-            : std::static_pointer_cast<ComputePass>(
+            : std::static_pointer_cast<org::RenderGraphPass>(
                 std::make_shared<HierarchicalCullingPass>(
                     cullPassName,
                     cullPassInputs,
@@ -1819,7 +1819,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         : nullptr,
                     useWorkGraphReyesVisibility ? m_reyesDiceQueueCapacity : 0u));
 
-        auto cullPassDesc = RenderGraph::ExternalPassDesc::Compute(cullPassName, cullPass);
+        auto cullPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            cullPassName, std::static_pointer_cast<RenderPass>(cullPass));
         cullPassDesc.At(RenderGraph::ExternalInsertPoint::After(afterPassName));
         outPasses.push_back(std::move(cullPassDesc));
     };

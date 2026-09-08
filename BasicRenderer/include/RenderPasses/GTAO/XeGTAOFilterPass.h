@@ -106,7 +106,7 @@ public:
         data.constants[UintRootConstant5] = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
         data.constants[UintRootConstant6] = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
         data.groupsX = (context->renderResolution.x + 15u) / 16u; data.groupsY = (context->renderResolution.y + 15u) / 16u;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

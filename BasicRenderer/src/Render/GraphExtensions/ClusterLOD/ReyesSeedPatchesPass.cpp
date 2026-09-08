@@ -54,8 +54,8 @@ ReyesSeedPatchesPass::ReyesSeedPatchesPass(
 void ReyesSeedPatchesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(m_visibleClustersBuffer, m_ownedClustersBuffer, m_ownedClustersCounterBuffer)
-        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_splitQueueBuffer, m_splitQueueCounterBuffer, m_splitQueueOverflowBuffer);
+    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
     if (m_slabResourceGroup) {
         builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
@@ -103,7 +103,8 @@ PreparedPass ReyesSeedPatchesPass::PrepareFrame(FramePreparationContext& prepara
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
     data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
     data.constants[CLOD_REYES_SEED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_SEED_OWNED_CLUSTERS_DESCRIPTOR_INDEX] = m_ownedClustersBuffer->GetSRVInfo(0).slot.index;
@@ -112,7 +113,7 @@ PreparedPass ReyesSeedPatchesPass::PrepareFrame(FramePreparationContext& prepara
     data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_splitQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_splitQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_REYES_SEED_QUEUE_CAPACITY] = m_maxSplitQueueEntries; data.constants[CLOD_REYES_SEED_PHASE_INDEX] = m_phaseIndex;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesSeedPatchesPass::Update(const UpdateExecutionContext& executionContext)

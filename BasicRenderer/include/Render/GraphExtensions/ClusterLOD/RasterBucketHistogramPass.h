@@ -13,11 +13,9 @@ using org::Buffer;
 struct RasterBucketHistogramPreparedData {
     rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
     rhi::PipelineLayoutHandle layout{};
-    rhi::PipelineHandle clearPipeline{}, histogramPipeline{};
-    std::shared_ptr<const PipelineStatePayload> clearOwner, histogramOwner;
-    std::shared_ptr<const rhi::CommandSignaturePtr> commandSignatureOwner;
+    org::PreparedProgramReference clearProgram{}, histogramProgram{};
     rhi::CommandSignatureHandle commandSignature{};
-    rhi::ResourceHandle indirectArguments{}, histogramResource{};
+    org::PreparedResourceReference indirectArguments{}, histogramResource{};
     std::vector<unsigned int> clearDescriptorIndices, histogramDescriptorIndices;
     std::vector<uint32_t> clearConstants, histogramConstants;
     uint32_t clearGroups = 0;

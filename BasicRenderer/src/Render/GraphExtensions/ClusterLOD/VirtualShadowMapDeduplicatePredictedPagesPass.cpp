@@ -155,7 +155,7 @@ PreparedPass VirtualShadowMapDeduplicatePredictedPagesPass::PrepareFrame(FramePr
     c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PHYSICAL_PAGE_COUNT] = m_physicalPageCount;
     data.clearGroups = (CLodVirtualShadowFallbackDependencyHashCapacity + 63u) / 64u;
     data.deduplicateGroups = (CLodVirtualShadowPredictiveRawPageCapacity + 63u) / 64u;
-    return PreparedPass::Make(std::move(data), &RecordPrepared);
+    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
 }
 
 void VirtualShadowMapDeduplicatePredictedPagesPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)

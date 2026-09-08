@@ -131,7 +131,7 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     auto& commandList = executionContext.commandList;
     auto& pm = PSOManager::GetInstance();
 
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
     if (numBuckets == 0u) {
         return {};
     }
@@ -228,16 +228,14 @@ RasterBucketCompactAndArgsPreparedData RasterBucketCompactAndArgsPass::Prepare(c
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.clearOwner = m_clearPipeline.GetPayload();
-    data.compactOwner = m_pso.GetPayload();
-    data.clearPipeline = data.clearOwner->pso.Get().GetHandle();
-    data.compactPipeline = data.compactOwner->pso.Get().GetHandle();
-    data.commandSignatureOwner = m_compactionCommandSignature;
+    data.clearProgram = preparation.CaptureProgram(m_clearPipeline);
+    data.compactProgram = preparation.CaptureProgram(m_pso);
+    preparation.Retain(m_compactionCommandSignature);
     data.commandSignature = (*m_compactionCommandSignature)->GetHandle();
-    data.indirectCommand = m_indirectCommand->GetAPIResource().GetHandle();
-    data.cursorResource = m_writeCursorBuffer->GetAPIResource().GetHandle();
-    data.clearDescriptorIndices = CaptureResourceDescriptorIndices(data.clearOwner->pipelineResources);
-    data.compactDescriptorIndices = CaptureResourceDescriptorIndices(data.compactOwner->pipelineResources);
+    data.indirectCommand = preparation.CaptureResource(m_indirectCommand->GetGlobalResourceID());
+    data.cursorResource = preparation.CaptureResource(m_writeCursorBuffer->GetGlobalResourceID());
+    data.clearDescriptorIndices = CaptureResourceDescriptorIndices(m_clearPipeline.GetResourceDescriptorSlots());
+    data.compactDescriptorIndices = CaptureResourceDescriptorIndices(m_pso.GetResourceDescriptorSlots());
     data.clearConstants.resize(NumMiscUintRootConstants);
     data.compactConstants.resize(NumMiscUintRootConstants);
     const uint32_t numBuckets = context->materialManager->GetRasterBucketCount();
@@ -279,21 +277,22 @@ void RasterBucketCompactAndArgsPass::Record(const PreparedData& data, org::PassR
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
             static_cast<uint32_t>(indices.size()), indices.data());
     };
-    commands.BindPipeline(data.clearPipeline);
+    commands.BindPipeline(recording.Resolve(data.clearProgram));
     bindIndices(data.clearDescriptorIndices);
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
         NumMiscUintRootConstants, data.clearConstants.data());
     commands.Dispatch(data.clearGroups, 1, 1);
     rhi::BufferBarrier barrier{};
-    barrier.buffer = data.cursorResource;
+    barrier.buffer = recording.Resolve(data.cursorResource).GetHandle();
     barrier.beforeAccess = barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
     barrier.beforeSync = barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
     rhi::BarrierBatch barriers{}; barriers.buffers = {&barrier}; commands.Barriers(barriers);
-    commands.BindPipeline(data.compactPipeline);
+    commands.BindPipeline(recording.Resolve(data.compactProgram));
     bindIndices(data.compactDescriptorIndices);
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
         NumMiscUintRootConstants, data.compactConstants.data());
-    commands.ExecuteIndirect(data.commandSignature, data.indirectCommand, 0, {}, 0, 1);
+    commands.ExecuteIndirect(data.commandSignature,
+        recording.Resolve(data.indirectCommand).GetHandle(), 0, {}, 0, 1);
 }
 
 void RasterBucketCompactAndArgsPass::Update(const UpdateExecutionContext& executionContext) {
@@ -303,7 +302,7 @@ void RasterBucketCompactAndArgsPass::Update(const UpdateExecutionContext& execut
 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
 
     if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
         m_writeCursorBuffer->ResizeStructured(numBuckets);
@@ -311,6 +310,8 @@ void RasterBucketCompactAndArgsPass::Update(const UpdateExecutionContext& execut
     if (m_indirectArgsBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(RasterizeClustersCommand)) {
         m_indirectArgsBuffer->ResizeStructured(numBuckets);
     }
+    BT_PLOT("CLod.RasterArgs.UpdateBucketCount", static_cast<int64_t>(numBuckets));
+    BT_PLOT("CLod.RasterArgs.UpdateBackingBytes", static_cast<int64_t>(m_indirectArgsBuffer->GetSize()));
 
 }
 

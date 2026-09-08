@@ -44,6 +44,7 @@ private:
     std::shared_ptr<Buffer> m_destQueueCounterBuffer;
     std::shared_ptr<Buffer> m_destQueueOverflowBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_destQueueCapacity = 0u;
     PipelineState m_pso;

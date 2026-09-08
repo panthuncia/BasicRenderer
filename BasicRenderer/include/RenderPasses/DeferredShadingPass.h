@@ -88,11 +88,11 @@ public:
 		const auto globalFlags = update ? update->globalPSOFlags : render->globalPSOFlags;
 		const auto resolution = update ? update->renderResolution : render->renderResolution;
 		auto& pso = PSOManager::GetInstance().GetDeferredPSO(globalFlags);
-		auto payload = pso.GetPayload(); br::render::PreparedComputeDispatch data{};
-		data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
-		data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
-		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
-		data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+		br::render::PreparedComputeDispatch data{};
+		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+		auto program = CaptureProgramBinding(preparation, pso);
+		data.program = program.program;
+		data.descriptorIndices = std::move(program.descriptorIndices);
 		data.constants[MiscEnableShadows] = getShadowsEnabled();
 		data.constants[MiscEnableShadows + 1] = getPunctualLightingEnabled();
 		data.constants[MiscEnableShadows + 2] = m_gtaoEnabled;

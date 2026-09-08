@@ -46,7 +46,7 @@ PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& execution
     auto& commandList = executionContext.commandList;
     auto& pm = PSOManager::GetInstance();
 
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
     const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
@@ -77,14 +77,12 @@ PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& execution
 
 br::render::PreparedComputeDispatch RasterBucketBlockOffsetsPass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    auto payload = m_pso.GetPayload();
     br::render::PreparedComputeDispatch data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.program = preparation.CaptureProgram(m_pso);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(m_pso.GetResourceDescriptorSlots());
     const auto numBuckets = context->materialManager->GetRasterBucketCount();
     data.constants[CLOD_PREFIX_OFFSETS_NUM_BUCKETS] = numBuckets;
     data.constants[CLOD_PREFIX_OFFSETS_NUM_BLOCKS] = (numBuckets + m_blockSize - 1u) / m_blockSize;
@@ -104,7 +102,7 @@ void RasterBucketBlockOffsetsPass::Update(const UpdateExecutionContext& executio
 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
     const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
     if (m_scannedBlockSumsBuffer->GetSize() < static_cast<size_t>(numBlocks) * sizeof(uint32_t)) {

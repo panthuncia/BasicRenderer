@@ -70,7 +70,7 @@ public:
         const auto sampledHeight = (context->renderResolution.y + 3u) / 4u;
         data.groupsX = (sampledWidth + 15u) / 16u;
         data.groupsY = (sampledHeight + 15u) / 16u;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

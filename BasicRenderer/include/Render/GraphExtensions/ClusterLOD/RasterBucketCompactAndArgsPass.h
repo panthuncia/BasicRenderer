@@ -13,11 +13,9 @@ using org::Buffer;
 struct RasterBucketCompactAndArgsPreparedData {
     rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
     rhi::PipelineLayoutHandle layout{};
-    rhi::PipelineHandle clearPipeline{}, compactPipeline{};
-    std::shared_ptr<const PipelineStatePayload> clearOwner, compactOwner;
-    std::shared_ptr<const rhi::CommandSignaturePtr> commandSignatureOwner;
+    org::PreparedProgramReference clearProgram{}, compactProgram{};
     rhi::CommandSignatureHandle commandSignature{};
-    rhi::ResourceHandle indirectCommand{}, cursorResource{};
+    org::PreparedResourceReference indirectCommand{}, cursorResource{};
     std::vector<unsigned int> clearDescriptorIndices, compactDescriptorIndices;
     std::vector<uint32_t> clearConstants, compactConstants;
     uint32_t clearGroups = 0;

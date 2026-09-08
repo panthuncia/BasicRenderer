@@ -88,7 +88,7 @@ PreparedPass VirtualShadowMapBuildMarkTilesPass::PrepareFrame(FramePreparationCo
     data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_MAX_TILE_COUNT] = CLodVirtualShadowMaxMarkTileCount;
     data.groupsX = (context->renderResolution.x + CLodVirtualShadowMarkTileSize - 1u) / CLodVirtualShadowMarkTileSize;
     data.groupsY = (context->renderResolution.y + CLodVirtualShadowMarkTileSize - 1u) / CLodVirtualShadowMarkTileSize;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }
 
 void VirtualShadowMapBuildMarkTilesPass::Cleanup() {}

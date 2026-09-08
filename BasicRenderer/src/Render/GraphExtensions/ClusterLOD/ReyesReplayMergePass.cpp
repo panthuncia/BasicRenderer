@@ -54,8 +54,8 @@ void ReyesReplayMergePass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(m_sourceQueueBuffer, m_sourceQueueCounterBuffer)
         .WithUnorderedAccess(m_destQueueBuffer, m_destQueueCounterBuffer, m_destQueueOverflowBuffer, m_telemetryBuffer)
-        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
+    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
 }
 
 void ReyesReplayMergePass::Setup() {}
@@ -103,7 +103,8 @@ PreparedPass ReyesReplayMergePass::PrepareFrame(FramePreparationContext& prepara
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
     data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
     data.constants[CLOD_REYES_REPLAY_MERGE_SOURCE_DESCRIPTOR_INDEX] = m_sourceQueueBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_REPLAY_MERGE_SOURCE_COUNTER_DESCRIPTOR_INDEX] = m_sourceQueueCounterBuffer->GetSRVInfo(0).slot.index;
@@ -112,7 +113,7 @@ PreparedPass ReyesReplayMergePass::PrepareFrame(FramePreparationContext& prepara
     data.constants[CLOD_REYES_REPLAY_MERGE_DEST_OVERFLOW_DESCRIPTOR_INDEX] = m_destQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_REYES_REPLAY_MERGE_CAPACITY] = m_destQueueCapacity;
     data.constants[CLOD_REYES_REPLAY_MERGE_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesReplayMergePass::Cleanup() {}

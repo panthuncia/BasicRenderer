@@ -65,8 +65,8 @@ void VirtualShadowMapAllocatePagesPass::DeclareResourceUsages(ComputePassBuilder
             m_freePhysicalPagesBuffer,
             m_reusablePhysicalPagesBuffer,
             m_pageListHeaderBuffer)
-        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_pageTableTexture, m_pageMetadataBuffer, m_dirtyPageFlagsBuffer, m_statsBuffer);
+    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
@@ -122,7 +122,8 @@ PreparedPass VirtualShadowMapAllocatePagesPass::PrepareFrame(FramePreparationCon
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
     data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
     data.constants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetSRVInfo(0).slot.index;
@@ -138,7 +139,7 @@ PreparedPass VirtualShadowMapAllocatePagesPass::PrepareFrame(FramePreparationCon
     data.constants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PHYSICAL_PAGE_COUNT] = config.maxPhysicalPages;
     data.constants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_RENDER_BUDGET] = SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowPageRenderBudgetSettingName)();
     data.constants[CLOD_VIRTUAL_SHADOW_ALLOCATE_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void VirtualShadowMapAllocatePagesPass::Cleanup() {}

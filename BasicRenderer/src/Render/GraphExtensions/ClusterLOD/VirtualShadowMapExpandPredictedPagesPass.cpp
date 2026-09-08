@@ -194,7 +194,7 @@ PreparedPass VirtualShadowMapExpandPredictedPagesPass::PrepareFrame(FramePrepara
     append(m_stampContentGenerationPso, (m_physicalPageCount + 63u) / 64u, false);
     append(m_pso, (CLodVirtualShadowPredictiveCandidateCapacity + 63u) / 64u, true);
     append(m_resetCandidateCountPso, 1u, true);
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
 }
 
 void VirtualShadowMapExpandPredictedPagesPass::Cleanup() {}

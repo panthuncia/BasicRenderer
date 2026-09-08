@@ -205,7 +205,7 @@ namespace TerrainRvt
         data.pipelineOwner = std::move(payload);
         data.descriptorIndices = std::move(descriptorIndices);
         data.groupsX = groupsX; data.groupsY = groupsY; data.groupsZ = groupsZ;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 }
 
@@ -287,7 +287,7 @@ public:
         const auto dispatch = TerrainRvt::Dispatch2DForItems(TerrainRvt::MaxPageTableEntries(), 64u);
         data.groupsX = dispatch.first;
         data.groupsY = dispatch.second;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {}
@@ -394,7 +394,7 @@ public:
         data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterSRVIndex;
         data.constants[VISBUF_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClusterCounterSRVIndex;
         data.groupsX = (std::max(m_visibleClusterCapacity, 1u) + 63u) / 64u;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override
@@ -523,7 +523,7 @@ public:
         append(m_clearPso, 1u, 1u);
         const auto dispatch = TerrainRvt::Dispatch2DForItems(TerrainRvt::MaxGeneratedPagesPerFrame(), 64u);
         append(m_resolvePso, dispatch.first, dispatch.second);
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
     }
 
     void Cleanup() override {}
@@ -755,7 +755,7 @@ public:
         data.commandSignature = CommandSignatureManager::GetInstance().GetRawDispatchCommandSignature().GetHandle();
         if (m_argsBuffer) data.arguments = m_argsBuffer->GetAPIResource().GetHandle();
         data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
     }
 
     void Cleanup() override
@@ -830,7 +830,7 @@ public:
         data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
         const auto dispatch = TerrainRvt::Dispatch2DForItems(TerrainRvt::MaxPhysicalPages(), 64u);
         data.steps.push_back({.groupsX = dispatch.first, .groupsY = dispatch.second, .groupsZ = 1u, .uavBarrierAfter = true});
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
     }
 
     void Cleanup() override {}

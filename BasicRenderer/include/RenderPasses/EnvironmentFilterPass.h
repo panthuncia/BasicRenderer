@@ -152,7 +152,7 @@ public:
         };
         m_pending.clear();
         m_declaredResourcesChanged = true;
-        return PreparedPass::Make(std::move(data), +[](const PreparedData& data, RecordingContext& recording) {
+        return PreparedPass::MakeOwned(std::move(data), +[](const PreparedData& data, RecordingContext& recording) {
             auto& commands = recording.Commands();
             commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
             commands.BindLayout(data.layout);

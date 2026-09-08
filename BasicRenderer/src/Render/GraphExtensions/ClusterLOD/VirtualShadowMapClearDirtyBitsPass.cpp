@@ -108,7 +108,7 @@ PreparedPass VirtualShadowMapClearDirtyBitsPass::PrepareFrame(FramePreparationCo
         SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)()) ? 1u : 0u;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.groupsX = (config.pageTableResolution + 7u) / 8u; data.groupsY = data.groupsX; data.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }
 
 void VirtualShadowMapClearDirtyBitsPass::Cleanup()

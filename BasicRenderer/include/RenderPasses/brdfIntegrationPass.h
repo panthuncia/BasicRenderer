@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -8,69 +8,43 @@
 
 #include <string>
 
-class BRDFIntegrationPass : public RenderPass {
+class BRDFIntegrationPass
+    : public org::TypedRenderGraphPass<BRDFIntegrationPass,
+          br::render::PreparedFullscreenDraw> {
 public:
     BRDFIntegrationPass() {
         CreatePSO();
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override {
-        builder->WithRenderTarget(Builtin::BRDFLUT);
+    void Declare(org::PassBuilder& builder) {
+        m_lutBinding = builder.BindRenderTarget(ResourceIdentifier{Builtin::BRDFLUT});
     }
 
-    void Setup() override {
+    void Initialize() {
 		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        auto& commandList = executionContext.commandList;
-        
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-		rhi::PassBeginInfo passInfo{};
-		rhi::ColorAttachment colorAttachment{};
-		colorAttachment.rtv = m_lutTexture->GetRTVInfo(0).slot;
-		colorAttachment.loadOp = rhi::LoadOp::Clear;
-		colorAttachment.storeOp = rhi::StoreOp::Store;
-		colorAttachment.clear = m_lutTexture->GetClearColor();
-		passInfo.colors = { &colorAttachment, 1 };
-		passInfo.width = 512;
-		passInfo.height = 512;
-		passInfo.debugName = "BRDF Integration Pass";
-		commandList.BeginPass(passInfo);
-
-		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-		commandList.BindPipeline((*PSO)->GetHandle());
-        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
-
-        commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
-        commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
-
-        invalidated = false;
-
-        return { };
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
-        const auto* context = preparation.preparationData->Get<UpdateContext>();
+    br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
         br::render::PreparedFullscreenDraw data{};
-        data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.renderTarget = m_lutTexture->GetRTVInfo(0).slot; data.loadOp = rhi::LoadOp::Clear;
+        data.renderTargetReference = preparation.CaptureDescriptor(
+            m_lutBinding, m_lutTexture->GetRTVInfo(0).slot);
+        data.loadOp = rhi::LoadOp::Clear;
         data.clear = m_lutTexture->GetClearColor(); data.width = 512; data.height = 512;
         data.debugName = "BRDF Integration Pass"; data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
-        data.pipeline = (*PSO)->GetHandle(); data.pipelineOwner = PSO;
-        data.descriptorIndices = CaptureResourceDescriptorIndices(m_resourceDescriptorBindings);
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedFullscreenDraw);
+        br::render::BindPreparedProgram(
+            data, preparation, PSO, m_resourceDescriptorBindings);
+        invalidated = false;
+        return data;
     }
 
-    void Cleanup() override {
-        // Cleanup if necessary
+    static void Record(const br::render::PreparedFullscreenDraw& data,
+        org::PassRecordContext& recording) {
+        br::render::RecordPreparedFullscreenDraw(data, recording);
     }
 
 private:
     PixelBuffer* m_lutTexture = nullptr;
+    org::ResourceBindingToken m_lutBinding;
 
     std::shared_ptr<rhi::PipelinePtr> PSO;
     PipelineResources m_resourceDescriptorBindings;

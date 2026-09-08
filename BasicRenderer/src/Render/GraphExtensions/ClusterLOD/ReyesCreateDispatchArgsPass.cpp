@@ -101,5 +101,5 @@ PreparedPass ReyesCreateDispatchArgsPass::PrepareFrame(FramePreparationContext& 
         ? m_sourceBaseCounterBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
     data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_MAX_WORK_ITEM_COUNT] = m_maxWorkItemCount;
     data.groupsX = 1;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }

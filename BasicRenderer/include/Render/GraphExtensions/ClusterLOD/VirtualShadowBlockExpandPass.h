@@ -164,7 +164,7 @@ public:
 
         auto* updateContext = executionContext.hostData->Get<UpdateContext>();
         auto& context = *updateContext;
-        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+        const uint32_t numBuckets = context.preparedRasterBucketCount;
 
         if (m_mode == VirtualShadowBlockExpandMode::Histogram) {
             if (m_expandedHistogramBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
@@ -192,7 +192,7 @@ public:
 
         commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
         commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+        const uint32_t numBuckets = context.preparedRasterBucketCount;
         if (numBuckets == 0u) {
             return {};
         }
@@ -247,7 +247,7 @@ public:
         const auto apiResource = m_sourceIndirectArgsBuffer->GetAPIResource();
         const uint64_t stride = sizeof(RasterizeClustersCommand);
         for (uint32_t bucketIndex = 0u; bucketIndex < numBuckets; ++bucketIndex) {
-            const MaterialRasterFlags flags = context.materialManager->GetRasterFlagsForBucket(bucketIndex);
+            const MaterialRasterFlags flags = context.preparedRasterBucketFlags.at(bucketIndex);
             const bool skinned =
                 (flags & MaterialRasterFlagsSkinned) != 0;
             const PipelineState& pso = skinned ? m_skinnedPso : m_rigidPso;

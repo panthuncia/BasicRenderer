@@ -89,8 +89,7 @@ PerViewLinearDepthCopyPreparedData PerViewLinearDepthCopyPass::Prepare(const org
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipelineOwner = m_pso.GetPayload();
-    data.pipeline = data.pipelineOwner->pso.Get().GetHandle();
+    data.program = preparation.CaptureProgram(m_pso);
     context->viewManager->ForEachView([&](uint64_t viewID) {
         const auto* view = context->viewManager->Get(viewID);
         if (!view || !view->gpu.visibilityBuffer || !view->gpu.linearDepthMap) return;
@@ -120,7 +119,7 @@ void PerViewLinearDepthCopyPass::Record(const PreparedData& data, org::PassRecor
     auto& commands = recording.Commands();
     commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
     commands.BindLayout(data.layout);
-    commands.BindPipeline(data.pipeline);
+    commands.BindPipeline(recording.Resolve(data.program));
     for (const auto& view : data.views) {
         commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
             NumMiscUintRootConstants, view.constants.data());

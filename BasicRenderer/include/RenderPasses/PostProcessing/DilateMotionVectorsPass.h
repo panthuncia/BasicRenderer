@@ -71,7 +71,7 @@ public:
         data.constants[2] = m_destination->GetUAVShaderVisibleInfo(0).slot.index;
         data.constants[3] = m_destination->GetWidth(); data.constants[4] = m_destination->GetHeight();
         data.groupsX = (m_destination->GetWidth() + 7u) / 8u; data.groupsY = (m_destination->GetHeight() + 7u) / 8u;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {}

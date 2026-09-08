@@ -50,7 +50,7 @@ PassReturn ReyesRasterWorkHistogramPass::Execute(PassExecutionContext& execution
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
-    const uint32_t numRasterBuckets = context.materialManager->GetRasterBucketCount();
+    const uint32_t numRasterBuckets = context.preparedRasterBucketCount;
     if (numRasterBuckets == 0u) {
         return {};
     }
@@ -108,7 +108,7 @@ PassReturn ReyesRasterWorkHistogramPass::Execute(PassExecutionContext& execution
 void ReyesRasterWorkHistogramPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    const auto numRasterBuckets = context.materialManager->GetRasterBucketCount();
+    const auto numRasterBuckets = context.preparedRasterBucketCount;
 
     if (m_histogramBuffer->GetSize() < static_cast<size_t>(numRasterBuckets) * sizeof(uint32_t)) {
         m_histogramBuffer->ResizeStructured(numRasterBuckets);

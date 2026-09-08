@@ -586,7 +586,7 @@ PreparedPass VirtualShadowMapSetupPass::PrepareFrame(FramePreparationContext& pr
     data.groupsX = (config.pageTableResolution + 7u) / 8u;
     data.groupsY = data.groupsX;
     data.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }
 
 void VirtualShadowMapSetupPass::Cleanup() {}

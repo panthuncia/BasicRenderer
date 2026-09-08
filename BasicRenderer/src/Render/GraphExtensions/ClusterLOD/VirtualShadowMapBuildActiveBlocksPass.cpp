@@ -77,5 +77,5 @@ PreparedPass VirtualShadowMapBuildActiveBlocksPass::PrepareFrame(FramePreparatio
     data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_COUNT] = CLodVirtualShadowMaxMarkedBlockCount;
     data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_DYNAMIC] = m_dynamicPages ? 1u : 0u;
     data.groupsX = (CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }

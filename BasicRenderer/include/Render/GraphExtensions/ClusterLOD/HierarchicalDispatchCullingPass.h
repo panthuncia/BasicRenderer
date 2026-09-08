@@ -10,8 +10,15 @@
 
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/HierarchicalCullingPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeCommands.h"
 
-class HierarchicalDispatchCullingPass : public ComputePass, public IDynamicDeclaredResources {
+struct RenderContext;
+
+class HierarchicalDispatchCullingPass
+    : public org::TypedRenderGraphPass<HierarchicalDispatchCullingPass,
+          br::render::PreparedComputeCommandSequence>
+    , public IDynamicDeclaredResources {
 public:
     HierarchicalDispatchCullingPass(
         std::string stablePassIdentifier,
@@ -51,17 +58,22 @@ public:
         std::shared_ptr<Buffer> shadowDynamicActiveBlockMetadataBuffer = nullptr);
     ~HierarchicalDispatchCullingPass() override;
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
+    void Declare(org::PassBuilder& builder);
+    void Initialize();
+    br::render::PreparedComputeCommandSequence Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeCommandSequence& data,
+        org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeCommands(data, recording);
+    }
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    void Cleanup() override;
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
+    template<class CommandSink>
+    PassReturn EmitCommands(CommandSink& commandList, const RenderContext& context);
+
     struct PureComputeDispatchCommand
     {
         uint32_t dispatchX;
@@ -94,7 +106,7 @@ private:
     PipelineState m_pureComputeLeafPipelineState;
     PipelineState m_pureComputeClusterPipelineState;
     PipelineState m_pureComputeDenseClusterPipelineState;
-    rhi::CommandSignaturePtr m_pureComputeDispatchCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_pureComputeDispatchCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClusterTransformIndicesBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;

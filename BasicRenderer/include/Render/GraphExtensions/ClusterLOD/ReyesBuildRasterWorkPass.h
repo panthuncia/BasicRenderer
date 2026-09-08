@@ -49,6 +49,7 @@ private:
     std::shared_ptr<Buffer> m_rasterWorkBuffer;
     std::shared_ptr<Buffer> m_rasterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClusterTransformIndicesBuffer;

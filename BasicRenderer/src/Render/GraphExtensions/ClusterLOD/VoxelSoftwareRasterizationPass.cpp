@@ -396,7 +396,7 @@ PreparedPass VoxelSoftwareRasterizationPass::PrepareFrame(FramePreparationContex
         step.rasterDescriptors = CaptureResourceDescriptorIndices(step.rasterOwner->pipelineResources);
         step.arguments = m_voxelIndirectArgsBuffers[i]->GetAPIResource().GetHandle();
     }
-    return PreparedPass::Make(std::move(data), &RecordPreparedVoxelRaster);
+    return PreparedPass::MakeOwned(std::move(data), &RecordPreparedVoxelRaster);
 }
 
 void VoxelSoftwareRasterizationPass::Cleanup() {}

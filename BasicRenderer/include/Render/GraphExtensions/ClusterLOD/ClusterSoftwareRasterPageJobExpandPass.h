@@ -249,7 +249,7 @@ public:
         pageJobFlags |= (maxPages << CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT);
         misc[CLOD_RASTER_PAGE_JOB_FLAGS] = pageJobFlags;
 
-        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+        const uint32_t numBuckets = context.preparedRasterBucketCount;
         if (numBuckets == 0) {
             return {};
         }
@@ -257,7 +257,7 @@ public:
         auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
         const uint64_t stride = sizeof(RasterizeClustersCommand);
         for (uint32_t i = 0; i < numBuckets; ++i) {
-            const MaterialRasterFlags flags = context.materialManager->GetRasterFlagsForBucket(i);
+            const MaterialRasterFlags flags = context.preparedRasterBucketFlags.at(i);
             const uint32_t variantIndex = (flags & MaterialRasterFlagsSkinned) ? 1u : 0u;
             const bool doubleSided =
                 (flags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) != 0;

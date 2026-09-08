@@ -28,14 +28,11 @@ public:
         const auto* update = preparation.preparationData->Get<UpdateContext>();
         const auto* render = preparation.preparationData->Get<RenderContext>();
         if (!update && !render) throw std::logic_error("MaterialUAVResetPass requires frame context");
-        auto payload = m_pso.GetPayload();
         br::render::PreparedComputeDispatch data{};
-        data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
-        data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
         data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-        data.pipeline = payload->pso.Get().GetHandle();
-        data.pipelineOwner = std::move(payload);
-        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        auto program = CaptureProgramBinding(preparation, m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
         const auto& published = update ? update->publishedRendererState : render->publishedRendererState;
         const auto materialState = published
             ? published->materials.payload.Get<br::render::PublishedMaterialState>()

@@ -85,6 +85,7 @@ private:
     std::shared_ptr<Buffer> m_compactedVisibleClusterTransformIndicesBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
+	org::ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;

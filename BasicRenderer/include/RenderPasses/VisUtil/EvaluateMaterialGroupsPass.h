@@ -409,7 +409,7 @@ public:
             step.constants[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
             step.argumentsOffset = argOffset; data.steps.push_back(std::move(step));
         }
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirectSequence);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirectSequence);
     }
 
     void Cleanup() override {

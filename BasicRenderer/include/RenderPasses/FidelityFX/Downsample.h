@@ -149,7 +149,7 @@ public:
             item.groupsZ = map.dispatchThreadGroupCountZ;
             data.maps.push_back(std::move(item));
         }
-        return PreparedPass::Make(std::move(data), &RecordPrepared);
+        return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
     }
 
     void Cleanup() override {

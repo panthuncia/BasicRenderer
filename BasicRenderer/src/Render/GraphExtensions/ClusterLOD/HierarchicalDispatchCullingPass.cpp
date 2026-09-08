@@ -1,11 +1,12 @@
 #include "Render/GraphExtensions/ClusterLOD/HierarchicalDispatchCullingPass.h"
 #include "Render/GraphExtensions/ClusterLOD/PreparedCullingWorkloads.h"
-#include "RenderPasses/PreparedLegacyAdmission.h"
+#include "RenderPasses/PreparedComputeCommands.h"
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -61,6 +62,103 @@ constexpr uint32_t kPureComputeTraverseThreadsPerGroup = 64u;
 constexpr uint32_t kPureComputeClusterThreadsPerGroup = 32u;
 constexpr uint32_t kPureComputeMaxTraversalLevels = 64u;
 constexpr bool kDisableVirtualShadowDirtyPageCulling = false; 
+
+class PreparedComputeCommandSink {
+public:
+    PreparedComputeCommandSink(
+        br::render::PreparedComputeCommandBuilder& builder,
+        const org::FrozenExecutionBindings& bindings)
+        : m_builder(builder)
+    {
+        const auto& resources = bindings.Resources();
+        for (uint32_t slot = 0; slot < resources.size(); ++slot)
+            m_resources.emplace(resources[slot].resource.GetHandle(), builder.ResourceAt(slot));
+    }
+
+    void Register(const PipelineState& pipeline)
+    {
+        const auto payload = pipeline.GetPayload();
+        if (!payload || !payload->pso)
+            throw std::invalid_argument("Cannot register an empty culling pipeline");
+        const auto handle = payload->pso.Get().GetHandle();
+        auto captured = m_builder.CaptureProgramBinding(payload);
+        m_programs.emplace(handle, std::move(captured));
+    }
+
+    void SetDescriptorHeaps(
+        rhi::DescriptorHeapHandle,
+        std::optional<rhi::DescriptorHeapHandle>)
+    {
+        // Admission installs the execution-slot descriptor snapshot.
+    }
+
+    void BindLayout(rhi::PipelineLayoutHandle layout)
+    {
+        m_builder.Sequence().layout = layout;
+    }
+
+    void BindPipeline(rhi::PipelineHandle pipeline)
+    {
+        const auto found = m_programs.find(pipeline);
+        if (found == m_programs.end())
+            throw std::invalid_argument("Unregistered pipeline used by prepared culling commands");
+        m_builder.Commands().emplace_back(br::render::PreparedBindComputeProgram{
+            found->second.program, found->second.descriptorIndices});
+    }
+
+    void PushConstants(rhi::ShaderStage, uint32_t, uint32_t binding,
+        uint32_t destinationOffset, uint32_t count, const uint32_t* values)
+    {
+        m_builder.Constants(values, count, binding, destinationOffset);
+    }
+
+    void PushConstants(rhi::ShaderStage stages, uint32_t set, uint32_t binding,
+        uint32_t destinationOffset, uint32_t count, const float* values)
+    {
+        std::vector<uint32_t> bits(count);
+        if (count) std::memcpy(bits.data(), values, count * sizeof(uint32_t));
+        PushConstants(stages, set, binding, destinationOffset, count, bits.data());
+    }
+
+    void Dispatch(uint32_t x, uint32_t y, uint32_t z)
+    {
+        m_builder.Dispatch(x, y, z);
+    }
+
+    void Barriers(const rhi::BarrierBatch& source)
+    {
+        br::render::PreparedBufferBarrierBatch batch;
+        batch.barriers.reserve(source.buffers.size);
+        for (const auto& barrier : source.buffers) {
+            const auto found = m_resources.find(barrier.buffer);
+            if (found == m_resources.end())
+                throw std::invalid_argument("Undeclared buffer used by prepared culling barrier");
+            batch.barriers.push_back({found->second, barrier.beforeAccess, barrier.afterAccess,
+                barrier.beforeSync, barrier.afterSync});
+        }
+        if (!batch.barriers.empty()) m_builder.Commands().emplace_back(std::move(batch));
+    }
+
+    void ExecuteIndirect(rhi::CommandSignatureHandle signature,
+        rhi::ResourceHandle arguments, uint64_t argumentOffset,
+        rhi::ResourceHandle countBuffer, uint64_t, uint32_t maxCount)
+    {
+        if (countBuffer.valid())
+            throw std::invalid_argument("Prepared culling does not support count-buffer indirect execution");
+        const auto found = m_resources.find(arguments);
+        if (found == m_resources.end())
+            throw std::invalid_argument("Undeclared indirect argument buffer in prepared culling");
+        m_builder.Commands().emplace_back(br::render::PreparedExecuteIndirectCommand{
+            signature, found->second, argumentOffset, maxCount});
+    }
+
+private:
+    br::render::PreparedComputeCommandBuilder& m_builder;
+    std::unordered_map<rhi::ResourceHandle, org::PreparedResourceReference,
+        rhi::HandleHash<rhi::ResourceHandle>, rhi::HandleEqual<rhi::ResourceHandle>> m_resources;
+    std::unordered_map<rhi::PipelineHandle, org::PreparedProgramBinding,
+        rhi::HandleHash<rhi::PipelineHandle>, rhi::HandleEqual<rhi::PipelineHandle>> m_programs;
+};
 
 bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
 {
@@ -431,15 +529,18 @@ HierarchicalDispatchCullingPass::HierarchicalDispatchCullingPass(
     rhi::IndirectArg dispatchArg[] = {
         {.kind = rhi::IndirectArgKind::Dispatch }
     };
+    rhi::CommandSignaturePtr dispatchSignature;
     DeviceManager::GetInstance().GetDevice().CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(dispatchArg, 1), sizeof(PureComputeDispatchCommand) },
         computeLayout,
-        m_pureComputeDispatchCommandSignature);
+        dispatchSignature);
+    m_pureComputeDispatchCommandSignature =
+        std::make_shared<rhi::CommandSignaturePtr>(std::move(dispatchSignature));
 }
 
 HierarchicalDispatchCullingPass::~HierarchicalDispatchCullingPass() = default;
 
-void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void HierarchicalDispatchCullingPass::Declare(org::PassBuilder& builder)
 {
     const ResourceState computeReadState{
         rhi::ResourceAccessType::ShaderResource,
@@ -466,7 +567,7 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
     visibilityGenerationQuery.requiredVariantMask =
         br::render::kObjectVisibilityGenerationVariant;
 
-    builder->WithUnorderedAccess(
+    builder.WithUnorderedAccess(
             m_visibleClustersBuffer,
             m_visibleClusterTransformIndicesBuffer,
             m_visibleClustersCounterBuffer,
@@ -536,7 +637,7 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
         .WithInternalTransition(m_pureComputeCurrentLeafCounterBuffer, computeReadState);
 
     if (m_voxelRasterWorkCapacity != 0u) {
-        builder->WithUnorderedAccess(
+        builder.WithUnorderedAccess(
                 m_voxelRasterWorkBuffer,
                 m_voxelRasterWorkCounterBuffer,
                 m_skinnedVoxelRasterWorkBuffer,
@@ -546,100 +647,100 @@ void HierarchicalDispatchCullingPass::DeclareResourceUsages(ComputePassBuilder* 
 
     const uint32_t traversalLevelCount = std::min(m_activeTraversalDepth, kPureComputeMaxTraversalLevels);
     if (!m_isFirstPass || traversalLevelCount > 0u) {
-        builder->WithInternalTransition(m_pureComputeNodeDispatchArgsBuffer, indirectState)
+        builder.WithInternalTransition(m_pureComputeNodeDispatchArgsBuffer, indirectState)
             .WithInternalTransition(m_pureComputeLeafDispatchArgsBuffer, indirectState)
             .WithInternalTransition(m_pureComputeClusterDispatchArgsBuffer, indirectState);
     }
     if (traversalLevelCount > 0u) {
-        builder->WithInternalTransition(m_pureComputeNextNodeFrontierBuffer, computeReadState)
+        builder.WithInternalTransition(m_pureComputeNextNodeFrontierBuffer, computeReadState)
             .WithInternalTransition(m_pureComputeNextNodeCounterBuffer, computeReadState)
             .WithInternalTransition(m_pureComputeNextLeafFrontierBuffer, computeReadState)
             .WithInternalTransition(m_pureComputeNextLeafCounterBuffer, computeReadState);
     }
 
     if (UsesSWClassification(m_workGraphMode) && m_swVisibleClustersCounterBuffer) {
-        builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
+        builder.WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
     }
 
     if (m_workGraphComputePageJobDescriptorsBuffer) {
-        builder->WithShaderResource(m_workGraphComputePageJobDescriptorResourceId.c_str());
+        builder.WithShaderResource(m_workGraphComputePageJobDescriptorResourceId.c_str());
     }
 
     if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClusterTransformIndicesBuffer && m_pageJobVisibleClustersCounterBuffer) {
-        builder->WithUnorderedAccess(
+        builder.WithUnorderedAccess(
             m_pageJobVisibleClustersBuffer,
             m_pageJobVisibleClusterTransformIndicesBuffer,
             m_pageJobVisibleClustersCounterBuffer);
     }
 
     if (m_slabResourceGroup) {
-        builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
+        builder.WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
 
     if (m_dynamicWindBoundsCacheBuffer) {
-        builder->WithUnorderedAccess(m_dynamicWindBoundsCacheBuffer);
+        builder.WithUnorderedAccess(m_dynamicWindBoundsCacheBuffer);
         // This read both enforces SimulateInstancesPhase2 -> shadow traversal
         // ordering and limits caching to placements accepted by DynamicWind.
-        builder->WithShaderResource("Builtin::DynamicWind::VisibleSkeletonMembership");
+        builder.WithShaderResource("Builtin::DynamicWind::VisibleSkeletonMembership");
     }
 
     if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
-        builder->WithShaderResource(
+        builder.WithShaderResource(
             Builtin::Shadows::CLodClipmapInfo,
             Builtin::Shadows::CLodDirectionalPageViewInfo,
             Builtin::Shadows::CLodCompactShadowCameras);
         if (m_shadowDirtyHierarchyTexture) {
-            builder->WithShaderResource(m_shadowDirtyHierarchyTexture);
+            builder.WithShaderResource(m_shadowDirtyHierarchyTexture);
         }
         if (m_shadowInvalidatedInstancesBitsetBuffer) {
-            builder->WithShaderResource(m_shadowInvalidatedInstancesBitsetBuffer);
+            builder.WithShaderResource(m_shadowInvalidatedInstancesBitsetBuffer);
         }
         if (m_shadowInvalidationCountBuffer) {
-            builder->WithShaderResource(m_shadowInvalidationCountBuffer);
+            builder.WithShaderResource(m_shadowInvalidationCountBuffer);
         }
         if (m_shadowPredictiveInvalidationCandidatesBuffer) {
-            builder->WithUnorderedAccess(m_shadowPredictiveInvalidationCandidatesBuffer);
+            builder.WithUnorderedAccess(m_shadowPredictiveInvalidationCandidatesBuffer);
         }
         if (m_shadowPredictiveInvalidationCandidateCountBuffer) {
-            builder->WithUnorderedAccess(m_shadowPredictiveInvalidationCandidateCountBuffer);
+            builder.WithUnorderedAccess(m_shadowPredictiveInvalidationCandidateCountBuffer);
         }
         if (m_shadowPageTableTexture) {
-            builder->WithUnorderedAccess(m_shadowPageTableTexture);
+            builder.WithUnorderedAccess(m_shadowPageTableTexture);
         }
         if (m_shadowPhysicalPagesTexture) {
-            builder->WithUnorderedAccess(m_shadowPhysicalPagesTexture);
+            builder.WithUnorderedAccess(m_shadowPhysicalPagesTexture);
         }
         if (m_shadowDynamicPhysicalPagesTexture) {
-            builder->WithUnorderedAccess(m_shadowDynamicPhysicalPagesTexture);
+            builder.WithUnorderedAccess(m_shadowDynamicPhysicalPagesTexture);
         }
         if (m_shadowActiveBlockMetadataBuffer) {
-            builder->WithShaderResource(m_shadowActiveBlockMetadataBuffer);
+            builder.WithShaderResource(m_shadowActiveBlockMetadataBuffer);
         }
         if (m_shadowReceiverSubpageMaskBuffer) {
-            builder->WithShaderResource(m_shadowReceiverSubpageMaskBuffer);
+            builder.WithShaderResource(m_shadowReceiverSubpageMaskBuffer);
         }
         if (m_shadowDynamicActiveBlockMetadataBuffer) {
-            builder->WithShaderResource(
+            builder.WithShaderResource(
                 m_shadowDynamicActiveBlockMetadataBuffer);
         }
     }
 
     if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
-        builder->WithUnorderedAccess(m_viewDepthSrvIndicesBuffer)
+        builder.WithUnorderedAccess(m_viewDepthSrvIndicesBuffer)
             .WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
     }
 
     if (m_phase1VisibleClustersCounterBuffer && !m_isFirstPass) {
-        builder->WithShaderResource(m_phase1VisibleClustersCounterBuffer);
+        builder.WithShaderResource(m_phase1VisibleClustersCounterBuffer);
     }
     if (m_swWriteBaseCounterBuffer && !m_isFirstPass) {
-        builder->WithShaderResource(m_swWriteBaseCounterBuffer);
+        builder.WithShaderResource(m_swWriteBaseCounterBuffer);
     }
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void HierarchicalDispatchCullingPass::Setup()
+void HierarchicalDispatchCullingPass::Initialize()
 {
 	// Pure-compute traversal uses the same bindless node-bounds sidecars as the
 	// work graph. Keep explicit registrations in addition to graph declarations.
@@ -647,11 +748,10 @@ void HierarchicalDispatchCullingPass::Setup()
 	RegisterSRV(Builtin::CLod::NodeBoneIndices);
 }
 
-PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& executionContext)
+template<class CommandSink>
+PassReturn HierarchicalDispatchCullingPass::EmitCommands(
+    CommandSink& commandList, const RenderContext& context)
 {
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
@@ -722,13 +822,6 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     const uint32_t phase2RecordsPerGroup = 64u / phase2ExpansionFactor;
 
     uint32_t sharedRootConstants[NumMiscUintRootConstants] = {};
-    if (m_dynamicWindBoundsCacheBuffer) {
-        ++m_dynamicWindBoundsCacheGeneration;
-        if (m_dynamicWindBoundsCacheGeneration == 0u ||
-            m_dynamicWindBoundsCacheGeneration >= 0x7FFFFFFFu) {
-            m_dynamicWindBoundsCacheGeneration = 1u;
-        }
-    }
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     sharedRootConstants[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -1130,7 +1223,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
                 NumMiscUintRootConstants,
                 clusterRootConstants);
             commandList.ExecuteIndirect(
-                m_pureComputeDispatchCommandSignature->GetHandle(),
+                (*m_pureComputeDispatchCommandSignature)->GetHandle(),
                 m_pureComputeClusterDispatchArgsBuffer->GetAPIResource().GetHandle(),
                 0,
                 {},
@@ -1167,7 +1260,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
             NumMiscUintRootConstants,
             denseClusterRootConstants);
         commandList.ExecuteIndirect(
-            m_pureComputeDispatchCommandSignature->GetHandle(),
+            (*m_pureComputeDispatchCommandSignature)->GetHandle(),
             m_pureComputeClusterDispatchArgsBuffer->GetAPIResource().GetHandle(),
             0,
             {},
@@ -1266,7 +1359,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
             NumMiscUintRootConstants,
             replayNodeRootConstants);
         commandList.ExecuteIndirect(
-            m_pureComputeDispatchCommandSignature->GetHandle(),
+            (*m_pureComputeDispatchCommandSignature)->GetHandle(),
             m_pureComputeNodeDispatchArgsBuffer->GetAPIResource().GetHandle(),
             0,
             {},
@@ -1291,7 +1384,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
             NumMiscUintRootConstants,
             replayClusterRootConstants);
         commandList.ExecuteIndirect(
-            m_pureComputeDispatchCommandSignature->GetHandle(),
+            (*m_pureComputeDispatchCommandSignature)->GetHandle(),
             m_pureComputeClusterDispatchArgsBuffer->GetAPIResource().GetHandle(),
             0,
             {},
@@ -1389,7 +1482,7 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
                 NumMiscUintRootConstants,
                 traverseRootConstants);
             commandList.ExecuteIndirect(
-                m_pureComputeDispatchCommandSignature->GetHandle(),
+                (*m_pureComputeDispatchCommandSignature)->GetHandle(),
                 dispatchArgs->GetAPIResource().GetHandle(),
                 0,
                 {},
@@ -1470,10 +1563,34 @@ PassReturn HierarchicalDispatchCullingPass::Execute(PassExecutionContext& execut
     return {};
 }
 
-PreparedPass HierarchicalDispatchCullingPass::PrepareFrame(FramePreparationContext& preparation)
+br::render::PreparedComputeCommandSequence HierarchicalDispatchCullingPass::Prepare(
+    const org::PassPrepareContext& preparation)
 {
-    return br::render::PrepareLegacyAdmission(
-        this, preparation, DeviceManager::GetInstance().GetDevice());
+    auto* renderContext = preparation.preparationData
+        ? preparation.preparationData->Get<RenderContext>() : nullptr;
+    if (!renderContext || !preparation.bindings) return {};
+
+    br::render::PreparedComputeCommandBuilder commands(
+        preparation,
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+    PreparedComputeCommandSink sink(commands, *preparation.bindings);
+    sink.Register(m_clearPipelineState);
+    sink.Register(m_createCommandPipelineState);
+    sink.Register(m_pureComputeBuildDispatchArgsPipelineState);
+    sink.Register(m_pureComputeBuildDualDispatchArgsPipelineState);
+    sink.Register(m_pureComputeClearTraversalCountersPipelineState);
+    sink.Register(m_pureComputeBuildReplayDispatchArgsPipelineState);
+    sink.Register(m_pureComputeObjectCullPipelineState);
+    sink.Register(m_pureComputeReplayNodesPipelineState);
+    sink.Register(m_pureComputeReplayClustersPipelineState);
+    sink.Register(m_pureComputeTraversePipelineState);
+    sink.Register(m_pureComputeLeafPipelineState);
+    sink.Register(m_pureComputeClusterPipelineState);
+    sink.Register(m_pureComputeDenseClusterPipelineState);
+    commands.Retain(m_pureComputeDispatchCommandSignature);
+
+    EmitCommands(sink, *renderContext);
+    return std::move(commands).FinishData();
 }
 
 void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& executionContext)
@@ -1486,6 +1603,16 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     }
 
     auto& context = *updateContext;
+    // This is a logical-frame cache tag, not a recording side effect. Advance
+    // it on the preparation owner so delayed/concurrent recording consumes the
+    // generation captured for that frame and never mutates pass state.
+    if (m_dynamicWindBoundsCacheBuffer) {
+        ++m_dynamicWindBoundsCacheGeneration;
+        if (m_dynamicWindBoundsCacheGeneration == 0u ||
+            m_dynamicWindBoundsCacheGeneration >= 0x7FFFFFFFu) {
+            m_dynamicWindBoundsCacheGeneration = 1u;
+        }
+    }
     m_declaredResourcesChanged = false;
     {
         ZoneScopedN("HierarchicalDispatchCullingPass::CheckDeclaredDrawSetRevision");
@@ -1743,10 +1870,6 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
             org::runtime::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
             0);
     }
-}
-
-void HierarchicalDispatchCullingPass::Cleanup()
-{
 }
 
 bool HierarchicalDispatchCullingPass::DeclaredResourcesChanged() const

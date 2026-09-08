@@ -89,7 +89,7 @@ PassReturn ReyesRasterWorkCompactAndArgsPass::Execute(PassExecutionContext& exec
     auto& commandList = executionContext.commandList;
     auto& pm = PSOManager::GetInstance();
 
-    const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+    const uint32_t numBuckets = context.preparedRasterBucketCount;
     if (numBuckets == 0u) {
         return {};
     }
@@ -207,7 +207,7 @@ PassReturn ReyesRasterWorkCompactAndArgsPass::Execute(PassExecutionContext& exec
 void ReyesRasterWorkCompactAndArgsPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
 
     if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
         m_writeCursorBuffer->ResizeStructured(numBuckets);

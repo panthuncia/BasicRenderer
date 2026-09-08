@@ -138,8 +138,8 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             m_viewRasterInfoBuffer,
             m_sortedToUnsortedMappingBuffer)
         .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
-        .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .IsGeometryPass();
+	m_indirectArgumentsBinding = builder->BindIndirectArguments(m_rasterBucketsIndirectArgsBuffer);
 
     if (m_telemetryBuffer) {
         builder->WithUnorderedAccess(m_telemetryBuffer);
@@ -545,7 +545,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     }
     commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
     if (numBuckets == 0) {
         return {};
     }
@@ -553,7 +553,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
     auto stride = sizeof(RasterizeClustersCommand);
     for (uint32_t i = 0; i < numBuckets; ++i) {
-        auto flags = context.materialManager->GetRasterFlagsForBucket(i);
+        auto flags = context.preparedRasterBucketFlags.at(i);
         const PipelineState* pso = (m_outputKind == CLodRasterOutputKind::VisibilityBuffer)
             ? psoManager.TryGetClusterLODRasterPSO(
                 flags,
@@ -592,13 +592,16 @@ PreparedPass ClusterRasterizationPass::PrepareFrame(FramePreparationContext& pre
     if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer &&
         SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableNonVoxelVisibilitySettingName)())
         return PreparedPass::NoOp();
-    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const auto* context = preparation.frameData
+        ? preparation.frameData->Get<RenderContext>() : nullptr;
+    if (!context) throw std::logic_error("CLod raster preparation requires the owned render snapshot");
     br::render::PreparedRenderIndirectSequence data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
     data.commandSignature = m_rasterizationCommandSignature->GetHandle();
     data.arguments = m_rasterBucketsIndirectArgsBuffer->GetAPIResource().GetHandle();
     data.argumentsOwner = m_rasterBucketsIndirectArgsBuffer;
+	data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.width = m_passWidth; data.height = m_passHeight; data.debugName = "CLod raster pass";
     if (m_outputKind == CLodRasterOutputKind::AVBOITShading && m_AVBOITAccumulationTexture
         && m_AVBOITNormalizationTexture && m_AVBOITShadingExtinctionTexture) {
@@ -647,10 +650,12 @@ PreparedPass ClusterRasterizationPass::PrepareFrame(FramePreparationContext& pre
         misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = config.virtualResolution;
     }
-    const auto numBuckets = context->materialManager->GetRasterBucketCount();
+    const auto numBuckets = context->preparedRasterBucketCount;
+    BT_PLOT("CLod.RasterArgs.PreparedBucketCount", static_cast<int64_t>(numBuckets));
+    BT_PLOT("CLod.RasterArgs.PreparedBackingBytes", static_cast<int64_t>(m_rasterBucketsIndirectArgsBuffer->GetSize()));
     data.steps.reserve(numBuckets);
     for (uint32_t i = 0; i < numBuckets; ++i) {
-        const auto flags = context->materialManager->GetRasterFlagsForBucket(i);
+        const auto flags = context->preparedRasterBucketFlags.at(i);
         const PipelineState* pso = m_outputKind == CLodRasterOutputKind::VisibilityBuffer
             ? PSOManager::GetInstance().TryGetClusterLODRasterPSO(flags, m_wireframe, m_visibilityBuffers.size() == 1u)
             : m_outputKind == CLodRasterOutputKind::VirtualShadow
@@ -665,7 +670,7 @@ PreparedPass ClusterRasterizationPass::PrepareFrame(FramePreparationContext& pre
     // Non-target transparency variants retain their explicit legacy fallback.
     if (numBuckets && data.steps.empty() && m_outputKind != CLodRasterOutputKind::VisibilityBuffer
         && m_outputKind != CLodRasterOutputKind::VirtualShadow) return {};
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedRenderIndirectSequence);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedRenderIndirectSequence);
 }
 
 void ClusterRasterizationPass::Cleanup() {

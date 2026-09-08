@@ -223,6 +223,9 @@ private:
     UINT rtvDescriptorSize;
     UINT dsvDescriptorSize;
     uint8_t m_frameIndex = 0;
+    // Logical-frame preparation advances independently once async queue
+    // prefill is enabled. m_frameIndex remains the acquired swapchain image.
+    uint8_t m_preparationFrameIndex = 0;
     uint64_t m_totalFramesRendered = 0;
 	uint8_t m_numFramesInFlight = 3;
     rhi::TimelinePtr m_frameFence;

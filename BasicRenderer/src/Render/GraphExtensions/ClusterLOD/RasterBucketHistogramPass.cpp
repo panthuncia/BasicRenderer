@@ -95,7 +95,7 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
-    const uint32_t numRasterBuckets = context.materialManager->GetRasterBucketCount();
+    const uint32_t numRasterBuckets = context.preparedRasterBucketCount;
     if (numRasterBuckets == 0u) {
         return {};
     }
@@ -174,16 +174,14 @@ RasterBucketHistogramPreparedData RasterBucketHistogramPass::Prepare(const org::
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.clearOwner = m_clearPipeline.GetPayload();
-    data.histogramOwner = m_histogramPipeline.GetPayload();
-    data.clearPipeline = data.clearOwner->pso.Get().GetHandle();
-    data.histogramPipeline = data.histogramOwner->pso.Get().GetHandle();
-    data.commandSignatureOwner = m_histogramCommandSignature;
+    data.clearProgram = preparation.CaptureProgram(m_clearPipeline);
+    data.histogramProgram = preparation.CaptureProgram(m_histogramPipeline);
+    preparation.Retain(m_histogramCommandSignature);
     data.commandSignature = (*m_histogramCommandSignature)->GetHandle();
-    data.indirectArguments = m_histogramIndirectCommand->GetAPIResource().GetHandle();
-    data.histogramResource = m_histogramBuffer->GetAPIResource().GetHandle();
-    data.clearDescriptorIndices = CaptureResourceDescriptorIndices(data.clearOwner->pipelineResources);
-    data.histogramDescriptorIndices = CaptureResourceDescriptorIndices(data.histogramOwner->pipelineResources);
+    data.indirectArguments = preparation.CaptureResource(m_histogramIndirectCommand->GetGlobalResourceID());
+    data.histogramResource = preparation.CaptureResource(m_histogramBuffer->GetGlobalResourceID());
+    data.clearDescriptorIndices = CaptureResourceDescriptorIndices(m_clearPipeline.GetResourceDescriptorSlots());
+    data.histogramDescriptorIndices = CaptureResourceDescriptorIndices(m_histogramPipeline.GetResourceDescriptorSlots());
     data.clearConstants.resize(NumMiscUintRootConstants);
     data.histogramConstants.resize(NumMiscUintRootConstants);
     const uint32_t numBuckets = context->materialManager->GetRasterBucketCount();
@@ -216,21 +214,22 @@ void RasterBucketHistogramPass::Record(const PreparedData& data, org::PassRecord
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
             static_cast<uint32_t>(indices.size()), indices.data());
     };
-    commands.BindPipeline(data.clearPipeline);
+    commands.BindPipeline(recording.Resolve(data.clearProgram));
     bindIndices(data.clearDescriptorIndices);
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
         NumMiscUintRootConstants, data.clearConstants.data());
     commands.Dispatch(data.clearGroups, 1, 1);
     rhi::BufferBarrier barrier{};
-    barrier.buffer = data.histogramResource;
+    barrier.buffer = recording.Resolve(data.histogramResource).GetHandle();
     barrier.beforeAccess = barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
     barrier.beforeSync = barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
     rhi::BarrierBatch barriers{}; barriers.buffers = {&barrier}; commands.Barriers(barriers);
-    commands.BindPipeline(data.histogramPipeline);
+    commands.BindPipeline(recording.Resolve(data.histogramProgram));
     bindIndices(data.histogramDescriptorIndices);
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
         NumMiscUintRootConstants, data.histogramConstants.data());
-    commands.ExecuteIndirect(data.commandSignature, data.indirectArguments, 0, {}, 0, 1);
+    commands.ExecuteIndirect(data.commandSignature,
+        recording.Resolve(data.indirectArguments).GetHandle(), 0, {}, 0, 1);
 }
 
 void RasterBucketHistogramPass::Update(const UpdateExecutionContext& executionContext) {
@@ -241,7 +240,7 @@ void RasterBucketHistogramPass::Update(const UpdateExecutionContext& executionCo
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
 
-    auto numRasterBuckets = context.materialManager->GetRasterBucketCount();
+    auto numRasterBuckets = context.preparedRasterBucketCount;
 
     if (m_histogramBuffer->GetSize() < static_cast<size_t>(numRasterBuckets) * sizeof(uint32_t)) {
         m_histogramBuffer->ResizeStructured(numRasterBuckets);

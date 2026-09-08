@@ -279,7 +279,7 @@ PreparedPass VirtualShadowMapInvalidatePagesPass::PrepareFrame(FramePreparationC
             : m_pendingBoundsCount;
         append(m_boundsPso, (workCount + 63u) / 64u);
     }
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
 }
 
 void VirtualShadowMapInvalidatePagesPass::Cleanup() {}

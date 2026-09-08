@@ -28,11 +28,11 @@ public:
 		const auto* update = preparation.preparationData->Get<UpdateContext>();
 		const auto* render = preparation.preparationData->Get<RenderContext>();
 		if (!update && !render) throw std::logic_error("ClusterGenerationPass requires frame context");
-		auto payload = m_PSO.GetPayload(); br::render::PreparedComputeDispatch data{};
-		data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
-		data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
-		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
-		data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+		br::render::PreparedComputeDispatch data{};
+		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
+		auto program = CaptureProgramBinding(preparation, m_PSO);
+		data.program = program.program;
+		data.descriptorIndices = std::move(program.descriptorIndices);
 		const auto size = getClusterSize(); data.groupsX = size.x; data.groupsY = size.y; data.groupsZ = size.z;
 		return data;
 	}

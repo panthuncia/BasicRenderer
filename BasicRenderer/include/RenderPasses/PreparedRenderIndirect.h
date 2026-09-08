@@ -23,6 +23,7 @@ struct PreparedRenderIndirectSequence {
     rhi::CommandSignatureHandle commandSignature{};
     rhi::ResourceHandle arguments{};
     std::shared_ptr<const void> argumentsOwner;
+	std::optional<org::PreparedResourceReference> argumentsReference;
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
     std::array<rhi::ColorAttachment, 3> colors{};
     uint32_t colorCount = 0;
@@ -35,13 +36,23 @@ struct PreparedRenderIndirectSequence {
 
 inline void RecordPreparedRenderIndirectSequence(
     const PreparedRenderIndirectSequence& data, org::RecordingContext& recording) {
+    // Preparation may legitimately produce no draws (for example an empty
+    // culling result). Match the synchronous pass contract: graph-owned
+    // barriers still execute around this packet, but the packet itself emits
+    // no render-pass or root-signature commands.
+    if (data.steps.empty()) return;
     auto& commands = recording.Commands();
     rhi::PassBeginInfo pass{};
     pass.colors = {data.colors.data(), data.colorCount};
     pass.depth = data.hasDepth ? &data.depth : nullptr;
     pass.width = data.width; pass.height = data.height; pass.debugName = data.debugName;
     commands.BeginPass(pass);
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    // Admission binds the execution-slot descriptor snapshot. Preparation-time
+    // handles are optional legacy data and must never replace it with an invalid
+    // handle (for example when the frame request was captured before admission).
+    if (data.resourceHeap.valid())
+        commands.SetDescriptorHeaps(data.resourceHeap,
+            data.samplerHeap.valid() ? std::optional{data.samplerHeap} : std::nullopt);
     commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
     commands.BindLayout(data.layout);
     commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0,
@@ -51,8 +62,11 @@ inline void RecordPreparedRenderIndirectSequence(
         if (!step.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
             static_cast<uint32_t>(step.descriptorIndices.size()), step.descriptorIndices.data());
-        commands.ExecuteIndirect(data.commandSignature, data.arguments, step.argumentsOffset, {}, 0, 1);
+		const auto arguments = data.argumentsReference
+			? recording.Resolve(*data.argumentsReference).GetHandle() : data.arguments;
+        commands.ExecuteIndirect(data.commandSignature, arguments, step.argumentsOffset, {}, 0, 1);
     }
+    commands.EndPass();
 }
 
 } // namespace br::render

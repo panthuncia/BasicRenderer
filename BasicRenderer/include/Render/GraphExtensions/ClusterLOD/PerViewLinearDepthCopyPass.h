@@ -13,8 +13,7 @@ struct PerViewLinearDepthCopyPreparedView {
 struct PerViewLinearDepthCopyPreparedData {
     rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
     rhi::PipelineLayoutHandle layout{};
-    rhi::PipelineHandle pipeline{};
-    std::shared_ptr<const PipelineStatePayload> pipelineOwner;
+    org::PreparedProgramReference program{};
     std::vector<PerViewLinearDepthCopyPreparedView> views;
 };
 

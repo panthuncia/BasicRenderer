@@ -274,7 +274,7 @@ PreparedPass ReyesSplitPass::PrepareFrame(FramePreparationContext& preparation)
     c[CLOD_REYES_SPLIT_PHASE_INDEX] = m_phaseIndex;
     c[CLOD_REYES_SPLIT_USE_AABB_OCCLUSION] = SettingsManager::GetInstance().getSettingGetter<bool>(CLodReyesUseAabbOcclusionSettingName)() ? 1u : 0u;
     c[UintRootConstant18] = as_uint(std::max(SettingsManager::GetInstance().getSettingGetter<float>(CLodReyesShadowCoarseTargetPagesPerTriangleSettingName)(), CLodReyesShadowCoarseTargetPagesPerTriangleMin));
-    return PreparedPass::Make(std::move(data), &RecordPrepared);
+    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
 }
 
 void ReyesSplitPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)

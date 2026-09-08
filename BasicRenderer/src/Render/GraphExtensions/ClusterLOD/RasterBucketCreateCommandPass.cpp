@@ -62,7 +62,7 @@ PassReturn RasterBucketCreateCommandPass::Execute(PassExecutionContext& executio
     rc[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
     rc[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    rc[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+    rc[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.preparedRasterBucketCount;
     rc[CLOD_CREATE_VISIBLE_CLUSTERS_CAPACITY] = m_visibleClustersCapacity;
 
     commandList.PushConstants(
@@ -80,14 +80,12 @@ PassReturn RasterBucketCreateCommandPass::Execute(PassExecutionContext& executio
 
 br::render::PreparedComputeDispatch RasterBucketCreateCommandPass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    auto payload = m_pso.GetPayload();
     br::render::PreparedComputeDispatch data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.program = preparation.CaptureProgram(m_pso);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(m_pso.GetResourceDescriptorSlots());
     data.constants[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;

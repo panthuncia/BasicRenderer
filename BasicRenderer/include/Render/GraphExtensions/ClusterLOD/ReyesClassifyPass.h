@@ -54,6 +54,7 @@ private:
     uint32_t m_ownedClusterCapacity = 0u;
     std::shared_ptr<Buffer> m_ownershipBitsetBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_phaseIndex = 0u;
     ReyesClassifyMode m_classifyMode = ReyesClassifyMode::Default;

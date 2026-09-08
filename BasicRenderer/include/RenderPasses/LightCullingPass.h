@@ -35,14 +35,11 @@ public:
 		const auto* update = preparation.preparationData->Get<UpdateContext>();
 		const auto* render = preparation.preparationData->Get<RenderContext>();
 		if (!update && !render) throw std::logic_error("LightCullingPass requires frame context");
-		auto payload = m_PSO.GetPayload();
 		br::render::PreparedComputeDispatch data{};
-		data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
-		data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
 		data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-		data.pipeline = payload->pso.Get().GetHandle();
-		data.pipelineOwner = std::move(payload);
-		data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+		auto program = CaptureProgramBinding(preparation, m_PSO);
+		data.program = program.program;
+		data.descriptorIndices = std::move(program.descriptorIndices);
 		data.constants[LIGHT_PAGES_POOL_SIZE] = (update ? update->lightManager : render->lightManager)->GetLightPagePoolSize();
 		const auto clusterSize = getClusterSize();
 		data.groupsX = (clusterSize.x * clusterSize.y * clusterSize.z + 127u) / 128u;

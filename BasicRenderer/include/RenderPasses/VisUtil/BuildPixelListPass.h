@@ -106,14 +106,11 @@ public:
         const auto* render = preparation.preparationData->Get<RenderContext>();
         if (!update && !render) throw std::logic_error("BuildPixelListPass requires frame context");
         RefreshDescriptorIndices();
-        auto payload = m_pso.GetPayload();
         br::render::PreparedComputeDispatch data{};
-        data.resourceHeap = update ? update->textureDescriptorHeap.GetHandle() : render->textureDescriptorHeap.GetHandle();
-        data.samplerHeap = update ? update->samplerDescriptorHeap.GetHandle() : render->samplerDescriptorHeap.GetHandle();
         data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-        data.pipeline = payload->pso.Get().GetHandle();
-        data.pipelineOwner = std::move(payload);
-        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        auto program = CaptureProgramBinding(preparation, m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
         data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
         data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
         data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;

@@ -5,7 +5,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -25,7 +25,8 @@ A_STATIC void LpmSetupOut(AU1 i, inAU4 v)
 #include "../shaders/FidelityFX/ffx_lpm.h"
 #include "../shaders/PerPassRootConstants/tonemapRootConstants.h"
 
-class TonemappingPass : public RenderPass {
+class TonemappingPass : public org::TypedRenderGraphPass<
+    TonemappingPass, br::render::PreparedFullscreenDraw> {
 public:
 	explicit TonemappingPass(bool bloomEnabled = false)
         : m_bloomEnabled(bloomEnabled) {
@@ -44,16 +45,16 @@ public:
 		return m_providedResources;
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override {
-        builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer, "FFX::LPMConstants")
+    void Declare(org::PassBuilder& builder) {
+        builder.WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer, "FFX::LPMConstants")
             .WithRenderTarget(Builtin::Backbuffer);
         if (m_bloomEnabled) {
-            builder->WithShaderResource(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ 1, 2 }));
+            builder.WithShaderResource(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ 1, 2 }));
         }
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
-	void Setup() override {
+	void Initialize() {
         if (m_bloomEnabled) {
             m_pBloomTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(
                 Builtin::PostProcessing::BloomTexture);
@@ -73,60 +74,16 @@ public:
         BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), org::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
     }
 
-	PassReturn Execute(PassExecutionContext& executionContext) override {
-		auto* renderContext = executionContext.hostData->Get<RenderContext>();
-		auto& context = *renderContext;
-		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = executionContext.commandList;
-
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-		rhi::PassBeginInfo passInfo{};
-		rhi::ColorAttachment colorAttachment{};
-		colorAttachment.rtv = { context.rtvHeap.GetHandle(), context.frameIndex };
-		colorAttachment.loadOp = rhi::LoadOp::Clear;
-		colorAttachment.storeOp = rhi::StoreOp::Store;
-		colorAttachment.clear.rgba[0] = 0.0f;
-		colorAttachment.clear.rgba[1] = 0.0f;
-		colorAttachment.clear.rgba[2] = 0.0f;
-		colorAttachment.clear.rgba[3] = 1.0f;
-		passInfo.colors = { &colorAttachment };
-		passInfo.width = context.outputResolution.x;
-		passInfo.height = context.outputResolution.y;
-		commandList.BeginPass(passInfo);
-
-		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
-		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
-		commandList.BindPipeline((*m_pso)->GetHandle());
-
-        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
-
-		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
-		misc[TONEMAP_TYPE] = getTonemapType();
-        misc[TONEMAP_BLOOM_ENABLED] = m_bloomEnabled ? 1u : 0u;
-        if (m_bloomEnabled) {
-            misc[TONEMAP_BLOOM_MIP1_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(1).slot.index;
-            misc[TONEMAP_BLOOM_MIP2_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(2).slot.index;
-            misc[TONEMAP_BLOOM_FILTER_RADIUS] = as_uint(0.001f);
-            misc[TONEMAP_BLOOM_ASPECT_RATIO] = as_uint(
-                context.outputResolution.x / static_cast<float>(context.outputResolution.y));
-        }
-
-		commandList.PushConstants(rhi::ShaderStage::Pixel, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-
-		commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
-		return {};
-	}
-
-	PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+	br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
 		const auto* context = preparation.preparationData->Get<UpdateContext>();
 		br::render::PreparedFullscreenDraw data{};
 		data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-		data.renderTarget = {context->rtvHeap, context->frameIndex}; data.loadOp = rhi::LoadOp::Clear;
+		data.externalRenderTarget = org::ExternalBindingKey::SwapchainColor;
+		data.loadOp = rhi::LoadOp::Clear;
 		data.clear.rgba[3] = 1.0f; data.width = context->outputResolution.x; data.height = context->outputResolution.y;
-		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = (*m_pso)->GetHandle();
-		data.pipelineOwner = m_pso; data.descriptorIndices = CaptureResourceDescriptorIndices(m_resourceDescriptorBindings);
+		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+        br::render::BindPreparedProgram(
+            data, preparation, m_pso, m_resourceDescriptorBindings);
 		data.constants[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
 		data.constants[TONEMAP_TYPE] = getTonemapType(); data.constants[TONEMAP_BLOOM_ENABLED] = m_bloomEnabled ? 1u : 0u;
 		if (m_bloomEnabled) {
@@ -135,12 +92,13 @@ public:
 			data.constants[TONEMAP_BLOOM_FILTER_RADIUS] = as_uint(0.001f);
 			data.constants[TONEMAP_BLOOM_ASPECT_RATIO] = as_uint(context->outputResolution.x / static_cast<float>(context->outputResolution.y));
 		}
-		return PreparedPass::Make(std::move(data), &br::render::RecordPreparedFullscreenDraw);
+		return data;
 	}
 
-    void Cleanup() override {
-        // Cleanup the render pass
-	}
+    static void Record(const br::render::PreparedFullscreenDraw& data,
+        org::PassRecordContext& recording) {
+        br::render::RecordPreparedFullscreenDraw(data, recording);
+    }
 
 private:
 

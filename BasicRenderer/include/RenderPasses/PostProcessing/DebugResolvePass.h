@@ -1,66 +1,41 @@
 #pragma once
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "RenderPasses/PreparedFullscreenDraw.h"
 
-class DebugResolvePass : public RenderPass {
+class DebugResolvePass
+    : public org::TypedRenderGraphPass<DebugResolvePass,
+          br::render::PreparedFullscreenDraw> {
 public:
 	DebugResolvePass() {
 		CreatePSO();
 	}
 
-	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithShaderResource(Builtin::DebugVisualization, Builtin::CameraBuffer)
+	void Declare(org::PassBuilder& builder) {
+		builder.WithShaderResource(Builtin::DebugVisualization, Builtin::CameraBuffer)
 			.WithRenderTarget(Builtin::Backbuffer);
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
-	void Setup() override {
-	}
-
-	PassReturn Execute(PassExecutionContext& executionContext) override {
-		auto* renderContext = executionContext.hostData->Get<RenderContext>();
-		auto& context = *renderContext;
-		auto& commandList = executionContext.commandList;
-
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-		rhi::PassBeginInfo passInfo{};
-		rhi::ColorAttachment colorAttachment{};
-		colorAttachment.rtv = { context.rtvHeap.GetHandle(), context.frameIndex };
-		colorAttachment.loadOp = rhi::LoadOp::Load;
-		colorAttachment.storeOp = rhi::StoreOp::Store;
-		passInfo.colors = { &colorAttachment };
-		passInfo.width = context.outputResolution.x;
-		passInfo.height = context.outputResolution.y;
-		commandList.BeginPass(passInfo);
-
-		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
-
-		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-		commandList.BindPipeline((*m_pso)->GetHandle());
-
-		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
-
-		commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
-		return {};
-	}
-
-	PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+	br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
 		const auto* context = preparation.preparationData->Get<UpdateContext>();
 		br::render::PreparedFullscreenDraw data{};
-		data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-		data.renderTarget = {context->rtvHeap, context->frameIndex}; data.loadOp = rhi::LoadOp::Load;
+		data.externalRenderTarget = org::ExternalBindingKey::SwapchainColor;
+		data.loadOp = rhi::LoadOp::Load;
 		data.width = context->outputResolution.x; data.height = context->outputResolution.y;
-		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = (*m_pso)->GetHandle();
-		data.pipelineOwner = m_pso; data.descriptorIndices = CaptureResourceDescriptorIndices(m_resourceDescriptorBindings);
-		return PreparedPass::Make(std::move(data), &br::render::RecordPreparedFullscreenDraw);
+		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+		br::render::BindPreparedProgram(
+			data, preparation, m_pso, m_resourceDescriptorBindings);
+		return data;
 	}
 
-	void Cleanup() override {}
+	static void Record(const br::render::PreparedFullscreenDraw& data,
+		org::PassRecordContext& recording) {
+		br::render::RecordPreparedFullscreenDraw(data, recording);
+	}
 
 private:
 	std::shared_ptr<rhi::PipelinePtr> m_pso;

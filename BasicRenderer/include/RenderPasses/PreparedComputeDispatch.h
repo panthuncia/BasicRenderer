@@ -7,9 +7,26 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace br::render {
+
+inline void BindPreparedDescriptorHeaps(
+    rhi::CommandList& commands,
+    rhi::DescriptorHeapHandle resourceHeap,
+    rhi::DescriptorHeapHandle samplerHeap) {
+    // Typed packets normally inherit the execution-slot descriptor snapshots
+    // installed by admission.  Explicit heaps remain supported while legacy
+    // packets are migrated, but an empty handle must not clear the admitted
+    // heaps.
+    if (resourceHeap.valid()) {
+        commands.SetDescriptorHeaps(resourceHeap,
+            samplerHeap.valid()
+                ? std::optional<rhi::DescriptorHeapHandle>{samplerHeap}
+                : std::nullopt);
+    }
+}
 
 // Immutable recording packet for the common one-dispatch compute-pass shape.
 // Passes capture their frame-varying constants during PrepareFrame; the packet
@@ -20,6 +37,10 @@ struct PreparedComputeDispatch {
     rhi::PipelineLayoutHandle layout{};
     rhi::PipelineHandle pipeline{};
     std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
+    // Preferred typed path: the internal PreparedPass envelope owns and
+    // resolves the immutable program generation. Legacy fields above remain
+    // temporarily for source-compatible migration.
+    std::optional<org::PreparedProgramReference> program;
     std::vector<unsigned int> descriptorIndices;
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
     uint32_t groupsX = 0;
@@ -29,10 +50,14 @@ struct PreparedComputeDispatch {
 
 inline void RecordPreparedComputeDispatch(
     const PreparedComputeDispatch& data, org::RecordingContext& recording) {
+    // A zero-sized dispatch is the framework's canonical "no work this frame"
+    // packet.  Do not require passes to capture a program/layout merely to
+    // represent that state, and do not mutate command-list bindings for it.
+    if (data.groupsX == 0 || data.groupsY == 0 || data.groupsZ == 0) return;
     auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
     commands.BindLayout(data.layout);
-    commands.BindPipeline(data.pipeline);
+    commands.BindPipeline(data.program ? recording.Resolve(*data.program) : data.pipeline);
     if (!data.descriptorIndices.empty()) {
         commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
@@ -40,8 +65,7 @@ inline void RecordPreparedComputeDispatch(
     }
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
         NumMiscUintRootConstants, data.constants.data());
-    if (data.groupsX != 0 && data.groupsY != 0 && data.groupsZ != 0)
-        commands.Dispatch(data.groupsX, data.groupsY, data.groupsZ);
+    commands.Dispatch(data.groupsX, data.groupsY, data.groupsZ);
 }
 
 struct PreparedComputeIndirect {
@@ -51,9 +75,12 @@ struct PreparedComputeIndirect {
     rhi::PipelineLayoutHandle layout{};
     rhi::PipelineHandle pipeline{};
     std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
+    std::optional<org::PreparedProgramReference> program;
     std::shared_ptr<const void> commandSignatureOwner;
     rhi::CommandSignatureHandle commandSignature{};
     rhi::ResourceHandle arguments{}, countBuffer{};
+    std::optional<org::PreparedResourceReference> argumentsReference;
+    std::optional<org::PreparedResourceReference> countBufferReference;
     std::vector<unsigned int> descriptorIndices;
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
     uint64_t argumentsOffset = 0, countOffset = 0;
@@ -64,9 +91,9 @@ inline void RecordPreparedComputeIndirect(
     const PreparedComputeIndirect& data, org::RecordingContext& recording) {
     if (!data.enabled) return;
     auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
     commands.BindLayout(data.layout);
-    commands.BindPipeline(data.pipeline);
+    commands.BindPipeline(data.program ? recording.Resolve(*data.program) : data.pipeline);
     if (!data.descriptorIndices.empty()) {
         commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
@@ -74,14 +101,19 @@ inline void RecordPreparedComputeIndirect(
     }
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
         NumMiscUintRootConstants, data.constants.data());
-    commands.ExecuteIndirect(data.commandSignature, data.arguments, data.argumentsOffset,
-        data.countBuffer, data.countOffset, data.maximumCount);
+    const auto arguments = data.argumentsReference
+        ? recording.Resolve(*data.argumentsReference).GetHandle() : data.arguments;
+    const auto countBuffer = data.countBufferReference
+        ? recording.Resolve(*data.countBufferReference).GetHandle() : data.countBuffer;
+    commands.ExecuteIndirect(data.commandSignature, arguments, data.argumentsOffset,
+        countBuffer, data.countOffset, data.maximumCount);
 }
 
 struct PreparedComputeIndirectSequence {
     struct Step {
         rhi::PipelineHandle pipeline{};
         std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
+        std::optional<org::PreparedProgramReference> program;
         std::vector<unsigned int> descriptorIndices;
         std::array<unsigned int, NumMiscUintRootConstants> constants{};
         uint64_t argumentsOffset = 0;
@@ -92,6 +124,8 @@ struct PreparedComputeIndirectSequence {
     rhi::CommandSignatureHandle commandSignature{};
     std::shared_ptr<const void> commandSignatureOwner;
     rhi::ResourceHandle arguments{}, countBuffer{};
+    std::optional<org::PreparedResourceReference> argumentsReference;
+    std::optional<org::PreparedResourceReference> countBufferReference;
     std::shared_ptr<const void> argumentsOwner;
     uint64_t countOffset = 0;
     std::vector<Step> steps;
@@ -100,17 +134,21 @@ struct PreparedComputeIndirectSequence {
 inline void RecordPreparedComputeIndirectSequence(
     const PreparedComputeIndirectSequence& data, org::RecordingContext& recording) {
     auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
     commands.BindLayout(data.layout);
     for (const auto& step : data.steps) {
-        commands.BindPipeline(step.pipeline);
+        commands.BindPipeline(step.program ? recording.Resolve(*step.program) : step.pipeline);
         if (!step.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
             static_cast<uint32_t>(step.descriptorIndices.size()), step.descriptorIndices.data());
         commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
             NumMiscUintRootConstants, step.constants.data());
-        commands.ExecuteIndirect(data.commandSignature, data.arguments, step.argumentsOffset,
-            data.countBuffer, data.countOffset, step.maximumCount);
+        const auto arguments = data.argumentsReference
+            ? recording.Resolve(*data.argumentsReference).GetHandle() : data.arguments;
+        const auto countBuffer = data.countBufferReference
+            ? recording.Resolve(*data.countBufferReference).GetHandle() : data.countBuffer;
+        commands.ExecuteIndirect(data.commandSignature, arguments, step.argumentsOffset,
+            countBuffer, data.countOffset, step.maximumCount);
     }
 }
 
@@ -126,16 +164,18 @@ struct PreparedComputeDispatchSequence {
     rhi::PipelineLayoutHandle layout{};
     rhi::PipelineHandle pipeline{};
     std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
+    std::optional<org::PreparedProgramReference> program;
     std::vector<unsigned int> descriptorIndices;
     std::vector<Step> steps;
 };
 
 inline void RecordPreparedComputeDispatchSequence(
     const PreparedComputeDispatchSequence& data, org::RecordingContext& recording) {
+    if (data.steps.empty()) return;
     auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
     commands.BindLayout(data.layout);
-    commands.BindPipeline(data.pipeline);
+    commands.BindPipeline(data.program ? recording.Resolve(*data.program) : data.pipeline);
     if (!data.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
         org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
         static_cast<uint32_t>(data.descriptorIndices.size()), data.descriptorIndices.data());
@@ -165,6 +205,7 @@ struct PreparedComputePipelineSequence {
     struct Step {
         rhi::PipelineHandle pipeline{};
         std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
+        std::optional<org::PreparedProgramReference> program;
         std::vector<unsigned int> descriptorIndices;
         std::array<unsigned int, NumMiscUintRootConstants> constants{};
         uint32_t groupsX = 0, groupsY = 1, groupsZ = 1;
@@ -180,7 +221,7 @@ struct PreparedComputePipelineSequence {
 inline void RecordPreparedComputePipelineSequence(
     const PreparedComputePipelineSequence& data, org::RecordingContext& recording) {
     auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
     commands.BindLayout(data.layout);
     for (const auto& step : data.steps) {
         if (step.uavBarrierBefore) {
@@ -191,7 +232,7 @@ inline void RecordPreparedComputePipelineSequence(
             barriers.globals = {&barrier, 1};
             commands.Barriers(barriers);
         }
-        commands.BindPipeline(step.pipeline);
+        commands.BindPipeline(step.program ? recording.Resolve(*step.program) : step.pipeline);
         if (!step.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
             static_cast<uint32_t>(step.descriptorIndices.size()), step.descriptorIndices.data());

@@ -7,6 +7,7 @@
 #include "Scene/Components.h"
 #include "Render/SceneFrameSnapshot.h"
 #include "Render/PublishedRendererState.h"
+#include "Render/RasterBucketFlags.h"
 
 class Scene;
 class ObjectManager;
@@ -49,6 +50,7 @@ struct RenderContext {
 	// recording worker must not enumerate the live ViewManager container.
 	std::vector<PreparedViewFrameData> preparedViews;
 	uint32_t preparedRasterBucketCount = 0;
+	std::vector<MaterialRasterFlags> preparedRasterBucketFlags;
 
     Scene* currentScene;
 	Components::Camera primaryCamera;
@@ -83,6 +85,10 @@ struct UpdateContext {
 	LightManager* lightManager = nullptr;
 	EnvironmentManager* environmentManager = nullptr;
 	MaterialManager* materialManager = nullptr;
+	// Immutable logical-frame material-bucket snapshot. Pass Update/Prepare
+	// must use this rather than racing the live manager between phases.
+	uint32_t preparedRasterBucketCount = 0;
+	std::vector<MaterialRasterFlags> preparedRasterBucketFlags;
 	SkeletonManager* skeletonManager = nullptr;
 	rhi::DescriptorHeap textureDescriptorHeap;
 	rhi::DescriptorHeap samplerDescriptorHeap;

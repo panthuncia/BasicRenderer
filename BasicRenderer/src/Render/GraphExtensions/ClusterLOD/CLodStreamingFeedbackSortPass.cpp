@@ -280,7 +280,7 @@ PreparedPass CLodStreamingFeedbackSortPass::PrepareFrame(FramePreparationContext
         add(m_scatterPso, true, data.indirectResources[0], c);
         std::swap(sourceKeys, destKeys); std::swap(sourcePayloads, destPayloads);
     }
-    return PreparedPass::Make(std::move(data), &RecordPreparedStreamingFeedbackSort);
+    return PreparedPass::MakeOwned(std::move(data), &RecordPreparedStreamingFeedbackSort);
 }
 
 void CLodStreamingFeedbackSortPass::PushRootConstants(

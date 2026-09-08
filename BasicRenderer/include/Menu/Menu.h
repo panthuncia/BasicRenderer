@@ -74,6 +74,10 @@ struct PreparedImGuiDrawData {
         drawData.FramebufferScale = source.FramebufferScale;
         drawData.TotalIdxCount = source.TotalIdxCount;
         drawData.TotalVtxCount = source.TotalVtxCount;
+		// Texture update requests belong to the owner-thread preparation step.
+		// The copied packet must never ask a recording worker to enter ImGui's
+		// mutable renderer backend or inspect the global platform texture list.
+		drawData.Textures = nullptr;
         lists.reserve(source.CmdListsCount);
         for (const auto* list : source.CmdLists) {
             if (!list) continue;
@@ -1962,6 +1966,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), rhi::vulkan::get_cmd_list(commandList));
         }
 #endif
+		commandList.EndPass();
         return;
     }
 
@@ -2962,6 +2967,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), rhi::vulkan::get_cmd_list(commandList));
     }
 #endif
+	commandList.EndPass();
 
 }
 
@@ -2971,6 +2977,18 @@ inline std::shared_ptr<const PreparedImGuiDrawData> Menu::PrepareDrawData(
     Render(context, {});
     const auto* source = ImGui::GetDrawData();
     if (!source || !source->Valid || source->CmdListsCount == 0) return {};
+	// ImGui 1.92 defers font-atlas and user-texture realization through the
+	// ImDrawData texture journal.  Deep-copying only the draw lists leaves their
+	// ImTextureRef values unresolved (TexID == 0), while forwarding the journal
+	// would make delayed recording mutate the global ImGui backend.  Drain it
+	// once on the preparation owner, then capture commands with stable IDs.
+	if (source->Textures) {
+		for (ImTextureData* texture : *source->Textures) {
+			if (!texture) continue;
+			if (m_imguiBackend == rhi::Backend::D3D12)
+				ImGui_ImplDX12_UpdateTexture(texture);
+		}
+	}
     return std::make_shared<const PreparedImGuiDrawData>(*source, m_imguiBackend,
         g_pd3dSrvDescHeap ? g_pd3dSrvDescHeap->GetHandle() : rhi::DescriptorHeapHandle{});
 }
@@ -2999,6 +3017,7 @@ inline void Menu::RecordPreparedDrawData(const PreparedImGuiDrawData& data,
         ImGui_ImplVulkan_RenderDrawData(const_cast<ImDrawData*>(&data.drawData),
             rhi::vulkan::get_cmd_list(commandList));
 #endif
+    commandList.EndPass();
 }
 
 inline int Menu::FindFileIndex(const std::vector<std::string>& inputHdrFiles, const std::string& existingFile) {

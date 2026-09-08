@@ -43,7 +43,7 @@ PassReturn RasterBucketBlockScanPass::Execute(PassExecutionContext& executionCon
     auto& commandList = executionContext.commandList;
     auto& pm = PSOManager::GetInstance();
 
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
     if (numBuckets == 0) {
         return {};
     }
@@ -76,14 +76,12 @@ PassReturn RasterBucketBlockScanPass::Execute(PassExecutionContext& executionCon
 
 br::render::PreparedComputeDispatch RasterBucketBlockScanPass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    auto payload = m_pso.GetPayload();
     br::render::PreparedComputeDispatch data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.program = preparation.CaptureProgram(m_pso);
+    data.descriptorIndices = CaptureResourceDescriptorIndices(m_pso.GetResourceDescriptorSlots());
     const auto numBuckets = context->materialManager->GetRasterBucketCount();
     data.constants[UintRootConstant0] = numBuckets;
     data.constants[CLOD_PREFIX_SCAN_NUM_BUCKETS] = numBuckets;
@@ -103,7 +101,7 @@ void RasterBucketBlockScanPass::Update(const UpdateExecutionContext& executionCo
 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
     const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
     if (m_offsetsBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {

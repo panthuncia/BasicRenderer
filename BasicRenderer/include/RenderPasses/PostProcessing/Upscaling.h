@@ -107,7 +107,7 @@ public:
             PixelBuffer* depth = nullptr;
             PixelBuffer* motion = nullptr;
         };
-        return PreparedPass::Make(PreparedData{
+        return PreparedPass::MakeOwned(PreparedData{
             .camera = context->primaryCamera,
             .frameNumber = preparation.frameNumber,
             .deltaTime = preparation.deltaTime,

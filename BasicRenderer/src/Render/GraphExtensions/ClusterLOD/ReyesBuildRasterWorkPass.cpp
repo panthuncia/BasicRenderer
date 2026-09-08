@@ -92,12 +92,12 @@ void ReyesBuildRasterWorkPass::DeclareResourceUsages(ComputePassBuilder* builder
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo)
-        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
             m_rasterWorkBuffer,
             m_rasterWorkCounterBuffer,
             m_telemetryBuffer)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
+    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
     if (m_diceQueueReadOffsetBuffer) {
         builder->WithShaderResource(m_diceQueueReadOffsetBuffer);
     }
@@ -202,7 +202,8 @@ PreparedPass ReyesBuildRasterWorkPass::PrepareFrame(FramePreparationContext& pre
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
     data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
     data.constants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
@@ -223,7 +224,7 @@ PreparedPass ReyesBuildRasterWorkPass::PrepareFrame(FramePreparationContext& pre
     data.constants[CLOD_REYES_BUILD_RASTER_WORK_REPLAY_DICE_QUEUE_CAPACITY] = m_replayDiceQueueCapacity;
     data.constants[CLOD_REYES_BUILD_RASTER_WORK_USE_AABB_OCCLUSION] = SettingsManager::GetInstance().getSettingGetter<bool>(CLodReyesUseAabbOcclusionSettingName)() ? 1u : 0u;
     data.constants[CLOD_REYES_BUILD_RASTER_WORK_TERRAIN_RVT_ENABLED] = 0u;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesBuildRasterWorkPass::Cleanup() {}

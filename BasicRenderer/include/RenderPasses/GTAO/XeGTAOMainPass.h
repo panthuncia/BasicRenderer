@@ -76,7 +76,7 @@ public:
         data.constants[UintRootConstant5] = workingEdges->GetUAVShaderVisibleInfo(0).slot.index;
         data.groupsX = (context->renderResolution.x + XE_GTAO_NUMTHREADS_X - 1u) / XE_GTAO_NUMTHREADS_X;
         data.groupsY = (context->renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1u) / XE_GTAO_NUMTHREADS_Y;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

@@ -44,7 +44,9 @@ struct PreparedForwardIndirect {
 
 inline void RecordPreparedForwardIndirect(const PreparedForwardIndirect& data, org::RecordingContext& recording) {
     auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    if (data.resourceHeap.valid())
+        commands.SetDescriptorHeaps(data.resourceHeap,
+            data.samplerHeap.valid() ? std::optional{data.samplerHeap} : std::nullopt);
     rhi::ColorAttachment color{}; color.rtv = data.color; color.loadOp = rhi::LoadOp::Load; color.storeOp = rhi::StoreOp::Store;
     rhi::DepthAttachment depth{}; depth.dsv = data.depth; depth.depthLoad = rhi::LoadOp::Load; depth.depthStore = rhi::StoreOp::Store;
     depth.stencilLoad = rhi::LoadOp::DontCare; depth.stencilStore = rhi::StoreOp::DontCare;
@@ -60,6 +62,7 @@ inline void RecordPreparedForwardIndirect(const PreparedForwardIndirect& data, o
         commands.ExecuteIndirect(data.commandSignature, draw.arguments, 0, draw.arguments,
             draw.countOffset, draw.maximumCount);
     }
+    commands.EndPass();
 }
 }
 
@@ -209,7 +212,7 @@ public:
         data.resolution = context->renderResolution;
         data.settings = {getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled};
         if (!m_meshShaders || !m_indirect)
-            return PreparedPass::Make(std::move(data), &br::render::RecordPreparedForwardIndirect);
+            return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedForwardIndirect);
         const auto workloads = published->Find(context->primaryViewID, Engine::Primary::ForwardPass, false);
         data.draws.reserve(workloads.size());
         for (const auto* workload : workloads) {
@@ -228,7 +231,7 @@ public:
             draw.countOffset = workload->indirectArguments->GetUAVCounterOffset(); draw.maximumCount = workload->count;
             data.draws.push_back(std::move(draw));
         }
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedForwardIndirect);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedForwardIndirect);
     }
 
     void Cleanup() override {

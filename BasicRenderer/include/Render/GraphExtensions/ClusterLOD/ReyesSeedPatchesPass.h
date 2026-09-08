@@ -41,6 +41,7 @@ private:
     std::shared_ptr<Buffer> m_splitQueueCounterBuffer;
     std::shared_ptr<Buffer> m_splitQueueOverflowBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     uint32_t m_maxSplitQueueEntries = 0u;
     uint32_t m_phaseIndex = 0u;

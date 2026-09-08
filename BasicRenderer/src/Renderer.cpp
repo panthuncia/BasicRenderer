@@ -575,6 +575,8 @@ void Renderer::Initialize(
         const int parsed = value == "Shadow" || value == "shadow" || value == "1" ? 1
             : value == "Async" || value == "async" || value == "2" ? 2 : 0;
         settingsManager.getSettingSetter<int>("experimentalAsyncCompileMode")(parsed);
+        spdlog::info("Experimental async compile mode requested through environment: '{}' ({})",
+            value, parsed);
     }
     LoadPipeline(hwnd, x_res, y_res);
     DirectStorageManager::GetInstance().Initialize();
@@ -2737,6 +2739,7 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 	}
 
     m_frameIndex = static_cast<uint8_t>(m_swapChain->CurrentImageIndex());
+    m_preparationFrameIndex = m_frameIndex;
     if (m_dynamicBackbuffer && m_frameIndex < m_backbufferResources.size()) {
         m_dynamicBackbuffer->SetResource(m_backbufferResources[m_frameIndex]);
     }
@@ -3078,6 +3081,9 @@ void Renderer::Update(float elapsedSeconds) {
         });
     }
     SyncOpenRenderGraphSettings(m_numFramesInFlight);
+    const bool asyncFrameQueue = SettingsManager::GetInstance()
+        .getSettingGetter<int>("experimentalAsyncCompileMode")() == 2;
+    if (!asyncFrameQueue) m_preparationFrameIndex = m_frameIndex;
     ApplyPendingPipelineReplacement();
 
     if (rebuildRenderGraph) {
@@ -3115,7 +3121,7 @@ void Renderer::Update(float elapsedSeconds) {
 
     runCapturedStage("WaitForFrame", [&]() {
         BT_ZONE_SCOPE("Renderer::Update::WaitForFrame");
-        WaitForFrame(m_frameIndex);
+        WaitForFrame(m_preparationFrameIndex);
         if (m_pObjectManager) {
             const std::uint64_t retireDelayFrames = static_cast<std::uint64_t>(m_numFramesInFlight) + 1u;
             const std::uint64_t safeFrameNumber = m_totalFramesRendered > retireDelayFrames
@@ -3123,7 +3129,7 @@ void Renderer::Update(float elapsedSeconds) {
                 : 0u;
             m_pObjectManager->PublishDeferredRetireCompletedFrame(safeFrameNumber, retireDelayFrames);
         }
-        DescriptorHeapManager::GetInstance().ProcessDeferredReleases(m_frameIndex);
+        DescriptorHeapManager::GetInstance().ProcessDeferredReleases(m_preparationFrameIndex);
         RendererECSManager::GetInstance().FlushDeferredWorldOperations();
 
 		// Retire upload pages only after the previous use of this frame slot has
@@ -3133,7 +3139,7 @@ void Renderer::Update(float elapsedSeconds) {
 		// submitted their copies.
 		if (currentRenderGraph) {
 			if (auto* uploadService = currentRenderGraph->GetUploadService()) {
-				uploadService->ProcessDeferredReleases(m_frameIndex);
+				uploadService->ProcessDeferredReleases(m_preparationFrameIndex);
 			}
 		}
         });
@@ -3144,7 +3150,7 @@ void Renderer::Update(float elapsedSeconds) {
             if (m_rendererStatePublisher) {
                 auto commit = [&] {
                     BT_ZONE_SCOPE("Renderer::Update::CommitPublishedRendererState::PublisherCommit");
-                    return m_rendererStatePublisher->Commit(m_frameIndex);
+                    return m_rendererStatePublisher->Commit(m_preparationFrameIndex);
                 }();
 				if (m_asyncStateGraph && m_asyncStateGraph->TraceActive()) {
 					m_asyncStateGraph->TraceEvent(
@@ -3152,7 +3158,7 @@ void Renderer::Update(float elapsedSeconds) {
 							br::render::AsyncStateGraphTraceEventID::ManifestCommitUnchanged,
 						{ br::render::ArtifactKind::FrameManifest, 0, 0 },
 						commit.state ? commit.state->epoch : 0, 0,
-						{ { m_frameIndex } });
+						{ { m_preparationFrameIndex } });
 					if (commit.committed && commit.state) {
 						for (std::size_t index = 0; index < br::render::kPublishedFragmentCount; ++index) {
 							const auto& fragment = commit.state->Fragment(
@@ -3161,7 +3167,7 @@ void Renderer::Update(float elapsedSeconds) {
 							m_asyncStateGraph->TraceEvent(br::render::AsyncStateGraphTraceEventID::ManifestFragmentCommitted,
 								fragment.publicationRoot.address, fragment.publicationRoot.revision,
 								fragment.publicationRoot.generation,
-								{ { commit.state->epoch, m_frameIndex, index } });
+								{ { commit.state->epoch, m_preparationFrameIndex, index } });
 						}
 					}
 				}
@@ -3270,6 +3276,13 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.lightManager = m_pLightManager.get();
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
+    updateData.preparedRasterBucketCount = m_pMaterialManager
+        ? m_pMaterialManager->GetRasterBucketCount() : 0;
+    updateData.preparedRasterBucketFlags.reserve(updateData.preparedRasterBucketCount);
+    for (uint32_t bucket = 0; bucket < updateData.preparedRasterBucketCount; ++bucket) {
+        updateData.preparedRasterBucketFlags.push_back(
+            m_pMaterialManager->GetRasterFlagsForBucket(bucket));
+    }
     updateData.skeletonManager = m_pSkeletonManager.get();
     updateData.textureDescriptorHeap = m_context.textureDescriptorHeap;
     updateData.samplerDescriptorHeap = m_context.samplerDescriptorHeap;
@@ -3278,7 +3291,7 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.primaryCamera = camera.get<Components::Camera>();
     updateData.primaryViewID = m_context.primaryViewID;
     updateData.hasPrimaryCamera = true;
-    updateData.frameIndex = m_frameIndex;
+    updateData.frameIndex = m_preparationFrameIndex;
     updateData.frameFenceValue = m_currentFrameFenceValue;
     updateData.frameNumber = m_totalFramesRendered;
     updateData.renderResolution = renderRes;
@@ -3337,8 +3350,8 @@ void Renderer::Update(float elapsedSeconds) {
             });
         });
     }
-    renderSnapshot.preparedRasterBucketCount = updateData.materialManager
-        ? updateData.materialManager->GetRasterBucketCount() : 0;
+    renderSnapshot.preparedRasterBucketCount = updateData.preparedRasterBucketCount;
+    renderSnapshot.preparedRasterBucketFlags = updateData.preparedRasterBucketFlags;
     updateHostData->renderData = std::make_shared<const RenderContext>(std::move(renderSnapshot));
 
     runCapturedStage("PublishDeferredBackingResizesLate", []() {
@@ -3367,7 +3380,8 @@ void Renderer::Update(float elapsedSeconds) {
 
     UpdateExecutionContext context{};
     context.resolverCaptureContext = std::make_shared<const org::ResolverCaptureContext>(m_context.publishedManifestLease);
-    context.frameIndex = m_frameIndex;
+    context.frameIndex = m_preparationFrameIndex;
+    context.preparationSlot = m_preparationFrameIndex;
     context.frameFenceValue = m_currentFrameFenceValue;
     context.deltaTime = elapsedSeconds;
     context.hostData = updateHostData.get();
@@ -3706,6 +3720,12 @@ void Renderer::Update(float elapsedSeconds) {
         BT_ZONE_SCOPE("Renderer::Update::RenderGraphUpdate");
         currentRenderGraph->Update(context, deviceManager.GetDevice());
     });
+    if (asyncFrameQueue) {
+        m_preparationFrameIndex = static_cast<uint8_t>(
+            (m_preparationFrameIndex + 1) % m_numFramesInFlight);
+        BT_PLOT("ORG.AsyncExecution.NextPreparationSlot",
+            static_cast<int64_t>(m_preparationFrameIndex));
+    }
     ProbeGraphicsCommandListCreation(deviceManager.GetDevice(), "after RenderGraphUpdate");
 
     // Clear transform-update tags only after render-graph update so passes such as
@@ -5196,6 +5216,7 @@ void Renderer::Render() {
     PassExecutionContext passExecutionContext{};
     passExecutionContext.device = deviceManager.GetDevice();
     passExecutionContext.frameIndex = m_context.frameIndex;
+    passExecutionContext.executionSlot = renderedFrameIndex;
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
     passExecutionContext.hostData = &hostFrameData;
@@ -5220,6 +5241,9 @@ void Renderer::Render() {
         const auto backbufferRtv = currentBackbufferResource->GetRTVSlot();
         passExecutionContext.externalDescriptorBindings.push_back({
             org::ExternalBindingKey::SwapchainColor, backbufferRtv});
+        passExecutionContext.externalResourceBindings.push_back({
+            org::ExternalBindingKey::SwapchainColor,
+            currentBackbufferResource->GetAPIResource(), currentBackbufferResource});
         if (renderGraphBatchTraceEnabled) {
             spdlog::info(
                 "Renderer: frame {} begin backbuffer diagnostics slot={} dynamicID={} backingID={} handle=({}, {}) rtv=({}, {})",
@@ -5240,6 +5264,13 @@ void Renderer::Render() {
                 currentBackbufferResource->HasHandle(),
                 currentBackbufferResource->HasRTVSlot());
         }
+    }
+
+    if (currentRenderGraph->ShouldDeferAsyncAdmission()) {
+        BT_ZONE_SCOPE("Renderer::Render::AsyncQueuePrefillDeferred");
+        PublishFrameTaskGraphCapture();
+        FrameMark;
+        return;
     }
 
     {
@@ -5333,7 +5364,9 @@ void Renderer::Render() {
 
     runCapturedStage("SignalFence", [&]() {
         BT_ZONE_SCOPE("Renderer::Render::SignalFence");
-        SignalFence(graphicsQueue, renderedFrameIndex);
+        const auto preparationSlot = currentRenderGraph->GetLastExecutedPreparationSlot();
+        SignalFence(graphicsQueue,
+            static_cast<uint8_t>(preparationSlot.value_or(renderedFrameIndex)));
         br::telemetry::nvperf::EndFrameCapture(deviceManager.GetBackend(), graphicsQueue, m_totalFramesRendered);
     });
 

@@ -185,7 +185,7 @@ PreparedPass ReyesQueueResetPass::PrepareFrame(FramePreparationContext& preparat
         c[CLOD_REYES_RESET_OWNERSHIP_BITSET_WORD_COUNT] = m_ownershipBitsetWordCount;
         data.bitsetGroups = (m_ownershipBitsetWordCount + 63u) / 64u;
     }
-    return PreparedPass::Make(std::move(data), &RecordPrepared);
+    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
 }
 
 void ReyesQueueResetPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)

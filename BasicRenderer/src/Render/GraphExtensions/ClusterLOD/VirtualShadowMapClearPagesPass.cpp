@@ -131,7 +131,7 @@ PreparedPass VirtualShadowMapClearPagesPass::PrepareFrame(FramePreparationContex
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_pageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DYNAMIC_CONTENT_FILTER_ENABLED] = SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowDynamicContentFilterSettingName)() ? 1u : 0u;
     data.groupsX = config.maxPhysicalPages;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }
 
 void VirtualShadowMapClearPagesPass::Cleanup()

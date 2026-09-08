@@ -138,7 +138,7 @@ public:
             data.constants[SRC_TEXEL_SIZE_X] = as_uint(1.0f / data.constants[MIP_WIDTH]);
             data.constants[SRC_TEXEL_SIZE_Y] = as_uint(1.0f / data.constants[MIP_HEIGHT]);
         }
-        return PreparedPass::Make(std::move(data), &RecordPrepared);
+        return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
     }
 
     void Cleanup() override {

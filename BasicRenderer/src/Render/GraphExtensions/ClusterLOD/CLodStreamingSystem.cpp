@@ -401,7 +401,7 @@ namespace {
                         copy.source.resource.GetHandle(), copy.sourceOffset, copy.size);
                 }
             };
-            return PreparedPass::MakeWithExternalSignals(std::move(data), record,
+            return PreparedPass::MakeOwnedWithExternalSignals(std::move(data), record,
                 std::move(submission.externalSignalsAfterCompletion));
         }
         void Cleanup() override { CancelClaimedSnapshot(); }

@@ -125,5 +125,5 @@ PreparedPass VirtualShadowMapDirtyHierarchyPass::PrepareFrame(FramePreparationCo
         step.constants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
         step.groupsX = (dst + 7u) / 8u; step.groupsY = step.groupsX; step.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount; data.steps.push_back(std::move(step));
     }
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
 }

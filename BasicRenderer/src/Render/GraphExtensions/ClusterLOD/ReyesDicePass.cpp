@@ -49,8 +49,8 @@ ReyesDicePass::ReyesDicePass(
 void ReyesDicePass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(m_diceQueueBuffer, m_diceQueueCounterBuffer, m_tessTableConfigsBuffer)
-        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_telemetryBuffer);
+    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
     if (m_diceQueueReadOffsetBuffer) {
         builder->WithShaderResource(m_diceQueueReadOffsetBuffer);
     }
@@ -99,7 +99,8 @@ PreparedPass ReyesDicePass::PrepareFrame(FramePreparationContext& preparation) {
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
     data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
     data.constants[CLOD_REYES_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX] = m_diceQueueReadOffsetBuffer ? m_diceQueueReadOffsetBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
     data.constants[CLOD_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
@@ -107,7 +108,7 @@ PreparedPass ReyesDicePass::PrepareFrame(FramePreparationContext& preparation) {
     data.constants[CLOD_REYES_DICE_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_REYES_DICE_PHASE_INDEX] = m_phaseIndex; data.constants[CLOD_REYES_DICE_QUEUE_CAPACITY] = m_maxDiceQueueEntries;
     data.constants[CLOD_REYES_DICE_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesDicePass::Update(const UpdateExecutionContext& executionContext)

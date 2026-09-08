@@ -55,6 +55,7 @@ private:
     std::shared_ptr<Buffer> m_tessTableTrianglesBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     uint32_t m_maxDiceQueueEntries = 0u;

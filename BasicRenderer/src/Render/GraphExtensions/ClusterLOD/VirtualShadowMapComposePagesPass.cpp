@@ -98,5 +98,5 @@ PreparedPass VirtualShadowMapComposePagesPass::PrepareFrame(FramePreparationCont
     data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PHYSICAL_ATLAS_PAGES_WIDE] = config.physicalAtlasPagesWide;
     data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.groupsX = config.maxPhysicalPages;
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
 }

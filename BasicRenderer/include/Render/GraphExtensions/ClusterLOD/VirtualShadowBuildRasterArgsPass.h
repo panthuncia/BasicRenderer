@@ -53,7 +53,7 @@ public:
 
         auto* updateContext = executionContext.hostData->Get<UpdateContext>();
         auto& context = *updateContext;
-        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+        const uint32_t numBuckets = context.preparedRasterBucketCount;
         if (m_indirectArgsBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(RasterizeClustersCommand)) {
             m_indirectArgsBuffer->ResizeStructured(numBuckets);
         }
@@ -69,7 +69,7 @@ public:
         auto* renderContext = executionContext.hostData->Get<RenderContext>();
         auto& context = *renderContext;
         auto& commandList = executionContext.commandList;
-        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+        const uint32_t numBuckets = context.preparedRasterBucketCount;
         if (numBuckets == 0u) {
             return {};
         }

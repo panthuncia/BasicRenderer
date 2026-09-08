@@ -39,6 +39,7 @@ private:
     std::shared_ptr<Buffer> m_allocationRequestsBuffer;
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
     std::shared_ptr<Buffer> m_pageMetadataBuffer;

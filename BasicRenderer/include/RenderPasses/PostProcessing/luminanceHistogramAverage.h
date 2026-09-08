@@ -66,7 +66,7 @@ public:
         data.constants[NUM_PIXELS] = as_uint(static_cast<float>(
             context->renderResolution.x * context->renderResolution.y));
         data.groupsX = 1;
-        return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
     }
 
     void Cleanup() override {

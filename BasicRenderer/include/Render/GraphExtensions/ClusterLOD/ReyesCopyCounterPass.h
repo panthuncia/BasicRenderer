@@ -2,13 +2,19 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/CopyPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Resources/Buffers/Buffer.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 
-class ReyesCopyCounterPass final : public CopyPass, public IHasImmediateModeCommands {
+struct PreparedReyesCounterCopy {
+    org::PreparedResourceReference source;
+    org::PreparedResourceReference destination;
+};
+
+class ReyesCopyCounterPass final
+    : public org::TypedRenderGraphPass<ReyesCopyCounterPass, PreparedReyesCounterCopy> {
 public:
     ReyesCopyCounterPass(std::shared_ptr<Buffer> sourceCounterBuffer, std::shared_ptr<Buffer> destCounterBuffer)
         : m_sourceCounterBuffer(std::move(sourceCounterBuffer))
@@ -16,51 +22,34 @@ public:
     {
     }
 
-    void DeclareResourceUsages(CopyPassBuilder* builder) override
+    void Declare(org::PassBuilder& builder)
     {
-        builder->WithCopySource(m_sourceCounterBuffer)
-            .WithCopyDest(m_destCounterBuffer)
-            .PreferQueue(QueueKind::Copy);
+        m_sourceBinding = builder.BindCopySource(m_sourceCounterBuffer);
+        m_destinationBinding = builder.BindCopyDestination(m_destCounterBuffer);
+        builder.PreferQueue(QueueKind::Copy);
     }
 
-    void Setup() override {}
+    void Initialize() {}
 
-    void RecordImmediateCommands(ImmediateExecutionContext& context) override
+    PreparedReyesCounterCopy Prepare(const org::PassPrepareContext& preparation)
     {
-        context.list.CopyBufferRegion(m_destCounterBuffer.get(), 0, m_sourceCounterBuffer.get(), 0, sizeof(uint32_t));
-    }
-
-    PassReturn Execute(PassExecutionContext& context) override
-    {
-        (void)context;
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext&) override
-    {
-        struct CopyData {
-            rhi::Resource source, destination;
-            std::shared_ptr<const void> sourceOwner, destinationOwner;
+        return {
+            preparation.CaptureResource(m_sourceBinding),
+            preparation.CaptureResource(m_destinationBinding),
         };
-        auto source = m_sourceCounterBuffer->CaptureBackingAllocation();
-        auto destination = m_destCounterBuffer->CaptureBackingAllocation();
-        if (!source || !destination) return {};
-        auto record = +[](const CopyData& data, RecordingContext& recording) {
-            recording.Commands().CopyBufferRegion(
-                data.destination.GetHandle(), 0, data.source.GetHandle(), 0, sizeof(uint32_t));
-        };
-        CopyData data{
-            .source = source.resource,
-            .destination = destination.resource,
-            .sourceOwner = std::move(source.lease),
-            .destinationOwner = std::move(destination.lease),
-        };
-        return PreparedPass::Make(std::move(data), record);
     }
 
-    void Cleanup() override {}
+    static void Record(const PreparedReyesCounterCopy& data,
+        org::PassRecordContext& recording)
+    {
+        recording.Commands().CopyBufferRegion(
+            recording.Resolve(data.destination).GetHandle(), 0,
+            recording.Resolve(data.source).GetHandle(), 0, sizeof(uint32_t));
+    }
 
 private:
     std::shared_ptr<Buffer> m_sourceCounterBuffer;
     std::shared_ptr<Buffer> m_destCounterBuffer;
+    org::ResourceBindingToken m_sourceBinding;
+    org::ResourceBindingToken m_destinationBinding;
 };

@@ -200,8 +200,8 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
             m_sortedToUnsortedMappingBuffer,
             m_viewRasterInfoBuffer)
         .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
-        .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .WithUnorderedAccess(Builtin::DebugVisualization);
+	m_indirectArgumentsBinding = builder->BindIndirectArguments(m_rasterBucketsIndirectArgsBuffer);
 
     if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
         for (auto& vb : m_visibilityBuffers) {
@@ -377,7 +377,7 @@ PassReturn ClusterSoftwareRasterizationPass::Execute(PassExecutionContext& execu
     }
     commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
-    auto numBuckets = context.materialManager->GetRasterBucketCount();
+    auto numBuckets = context.preparedRasterBucketCount;
     if (numBuckets == 0) {
         return {};
     }
@@ -467,7 +467,7 @@ PassReturn ClusterSoftwareRasterizationPass::Execute(PassExecutionContext& execu
     }
 
     for (uint32_t i = 0; i < numBuckets; ++i) {
-        auto flags = context.materialManager->GetRasterFlagsForBucket(i);
+        auto flags = context.preparedRasterBucketFlags.at(i);
         const PipelineState* pso = PSOManager::GetInstance().TryGetClusterLODSoftwareRasterPSO(flags, m_outputKind);
         if (!pso) {
             continue;
@@ -499,12 +499,15 @@ PreparedPass ClusterSoftwareRasterizationPass::PrepareFrame(FramePreparationCont
     // The virtual-shadow wind skin-cache prelude has explicit intra-pass
     // barriers and a second indirect signature; it is migrated separately.
     if (m_dynamicWindSkinCacheHashBuffer) return {};
-    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const auto* context = preparation.frameData
+        ? preparation.frameData->Get<RenderContext>() : nullptr;
+    if (!context) throw std::logic_error("CLod software-raster preparation requires the owned render snapshot");
     br::render::PreparedComputeIndirectSequence data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
     data.commandSignature = m_rasterizationCommandSignature->GetHandle();
     data.arguments = m_rasterBucketsIndirectArgsBuffer->GetAPIResource().GetHandle();
+	data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.argumentsOwner = m_rasterBucketsIndirectArgsBuffer;
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
     constants[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
@@ -531,10 +534,12 @@ PreparedPass ClusterSoftwareRasterizationPass::PrepareFrame(FramePreparationCont
         constants[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = config.virtualResolution;
         if (m_telemetryBuffer) constants[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     }
-    const auto numBuckets = context->materialManager->GetRasterBucketCount();
+    const auto numBuckets = context->preparedRasterBucketCount;
+    BT_PLOT("CLod.RasterArgs.PreparedSoftwareBucketCount", static_cast<int64_t>(numBuckets));
+    BT_PLOT("CLod.RasterArgs.PreparedSoftwareBackingBytes", static_cast<int64_t>(m_rasterBucketsIndirectArgsBuffer->GetSize()));
     data.steps.reserve(numBuckets);
     for (uint32_t bucket = 0; bucket < numBuckets; ++bucket) {
-        const auto flags = context->materialManager->GetRasterFlagsForBucket(bucket);
+        const auto flags = context->preparedRasterBucketFlags.at(bucket);
         const auto* pso = PSOManager::GetInstance().TryGetClusterLODSoftwareRasterPSO(flags, m_outputKind);
         if (!pso) continue;
         auto payload = pso->GetPayload(); br::render::PreparedComputeIndirectSequence::Step step{};
@@ -544,7 +549,7 @@ PreparedPass ClusterSoftwareRasterizationPass::PrepareFrame(FramePreparationCont
         step.argumentsOffset = static_cast<uint64_t>(bucket) * sizeof(RasterizeClustersCommand);
         data.steps.push_back(std::move(step));
     }
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirectSequence);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirectSequence);
 }
 
 void ClusterSoftwareRasterizationPass::Cleanup() {}

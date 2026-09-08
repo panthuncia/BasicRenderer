@@ -80,7 +80,6 @@ void ReyesClassifyPass::DeclareResourceUsages(ComputePassBuilder* builder)
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo)
         .WithConstantBuffer(Builtin::PerFrameBuffer)
-        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
             Builtin::Material::TextureStreamingFeedbackBuffer,
             m_fullClusterOutputsBuffer,
@@ -88,6 +87,7 @@ void ReyesClassifyPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_ownedClustersBuffer,
             m_ownedClustersCounterBuffer,
             m_telemetryBuffer);
+    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
     if (m_ownershipBitsetBuffer) {
         builder->WithUnorderedAccess(m_ownershipBitsetBuffer);
     }
@@ -149,7 +149,8 @@ PreparedPass ReyesClassifyPass::PrepareFrame(FramePreparationContext& preparatio
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
     data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle(); data.arguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
     data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
     data.constants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersReadBaseCounterBuffer ? m_visibleClustersReadBaseCounterBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
     data.constants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
@@ -164,7 +165,7 @@ PreparedPass ReyesClassifyPass::PrepareFrame(FramePreparationContext& preparatio
     data.constants[CLOD_REYES_CLASSIFY_PHASE_INDEX] = m_phaseIndex;
     data.constants[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer ? m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
     data.constants[CLOD_REYES_CLASSIFY_MODE] = static_cast<uint32_t>(m_classifyMode);
-    return PreparedPass::Make(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
 }
 
 void ReyesClassifyPass::Update(const UpdateExecutionContext& executionContext)

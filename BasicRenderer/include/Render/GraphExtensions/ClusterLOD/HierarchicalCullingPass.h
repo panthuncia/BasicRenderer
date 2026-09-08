@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <array>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,7 +15,8 @@
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderPhase.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeCommands.h"
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Resources/PixelBuffer.h"
 #include "ShaderBuffers.h"
@@ -51,7 +53,10 @@ struct HierarchicalCullingPassInputs {
     RG_DEFINE_PASS_INPUTS(HierarchicalCullingPassInputs, &HierarchicalCullingPassInputs::isFirstPass, &HierarchicalCullingPassInputs::maxVisibleClusters, &HierarchicalCullingPassInputs::backend, &HierarchicalCullingPassInputs::workGraphMode, &HierarchicalCullingPassInputs::workGraphReyesVisibility, &HierarchicalCullingPassInputs::renderPhase, &HierarchicalCullingPassInputs::clodOnlyWorkloads, &HierarchicalCullingPassInputs::useShadowCascadeViews, &HierarchicalCullingPassInputs::rasterOutputKind);
 };
 
-class HierarchicalCullingPass : public ComputePass, public IDynamicDeclaredResources {
+class HierarchicalCullingPass
+    : public org::TypedRenderGraphPass<HierarchicalCullingPass,
+          br::render::PreparedComputeCommandSequence>
+    , public IDynamicDeclaredResources {
 public:
     HierarchicalCullingPass(
         std::string stablePassIdentifier,
@@ -97,13 +102,16 @@ public:
         uint32_t reyesDiceQueueCapacity = 0u);
     ~HierarchicalCullingPass();
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
+    void Declare(org::PassBuilder& builder);
+    void Initialize();
+    br::render::PreparedComputeCommandSequence Prepare(
+        const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeCommandSequence& data,
+        org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeCommands(data, recording);
+    }
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    void Cleanup() override;
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
     static size_t ReloadAllWorkGraphs();
@@ -129,7 +137,9 @@ private:
         PipelineState& outClearPipeline);
 
     PipelineResources m_pipelineResources;
-    rhi::WorkGraphPtr m_workGraph;
+    // Work-graph generations are immutable shared owners so prepared packets
+    // may safely outlive a live-reload replacement on the pass object.
+    std::shared_ptr<rhi::WorkGraphPtr> m_workGraph;
     PipelineState m_createCommandPipelineState;
     PipelineState m_clearPipelineState;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -188,7 +198,9 @@ private:
     bool m_hasCachedVoxelQueueDescriptors = false;
     bool m_hasCachedPageJobDescriptors = false;
     bool m_hasUploadedViewDepthSrvIndices = false;
-    bool m_initializeWorkGraphBackingMemory = true;
+    struct WorkGraphInitializationState { std::atomic_bool initialized{false}; };
+    std::shared_ptr<WorkGraphInitializationState> m_workGraphInitialization =
+        std::make_shared<WorkGraphInitializationState>();
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;
