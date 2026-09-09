@@ -22,9 +22,9 @@
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingBeginFramePass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingFeedbackSortPass.h"
-#include "Render/GraphExtensions/ClusterLOD/CLodStreamingReadbackCopyPass.h"
-#include "Render/GraphExtensions/ClusterLOD/CLodAsyncUploadPass.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodStreamingReadbackSources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodDirectStorageLaunchPass.h"
+#include "Render/Runtime/ExternalSignalReservation.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Managers/UploadInstance.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
@@ -206,7 +206,22 @@ namespace {
         return key;
     }
 
-    class CLodStructuralStreamingUploadPass final : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
+    struct CLodStructuralStreamingUploadFrameData {
+        struct Copy {
+            org::PreparedResourceReference destination{};
+            org::PreparedResourceReference source{};
+            uint64_t destinationOffset = 0;
+            uint64_t sourceOffset = 0;
+            uint64_t size = 0;
+            std::shared_ptr<TrackedUploadTicket> ticket;
+        };
+        std::vector<Copy> copies;
+    };
+
+    class CLodStructuralStreamingUploadPass final
+        : public org::TypedRenderGraphPass<CLodStructuralStreamingUploadPass,
+              CLodStructuralStreamingUploadFrameData>,
+          public IDynamicDeclaredResources {
     public:
         using ConsumeUploadsFn = std::function<std::vector<StreamingUploadDescriptor>()>;
 
@@ -235,24 +250,24 @@ namespace {
         bool RequiresPassRebindAfterDeclarationRefresh() const noexcept override { return false; }
         bool DeclarationsProvidedByImmediateCommands() const noexcept override { return true; }
 
-        void DeclareResourceUsages(CopyPassBuilder* builder) override {
-            builder->PreferQueue(QueueKind::Copy);
+        void Declare(org::PassBuilder& builder) {
+            for (const auto& upload : m_inputs.uploads) {
+                if (!upload.dstResource || !upload.srcUploadBuffer || upload.size == 0) continue;
+                builder.WithCopySource(upload.srcUploadBuffer);
+                builder.WithCopyDest(upload.dstResource);
+            }
+            builder.PreferQueue(QueueKind::Copy);
         }
 
-        void Setup() override {}
-
-        void RecordImmediateCommands(ImmediateExecutionContext& context) override {
-			// Declaration refreshes are not guaranteed every frame.  This pass uses
-			// immediate commands and declares no per-resource barriers, so acquire any
-			// uploads that arrived after the last refresh at the actual recording
-			// boundary.  Otherwise their tracked tickets can remain Queued forever.
-			if (!m_uploadSnapshotValid) {
-				m_uploadSnapshot = m_consumeUploads
-					? m_consumeUploads()
-					: std::vector<StreamingUploadDescriptor>{};
-				m_uploadSnapshotValid = true;
-				m_inputs.uploads = m_uploadSnapshot;
-			}
+        CLodStructuralStreamingUploadFrameData Prepare(const org::PassPrepareContext& preparation) {
+            if (!m_uploadSnapshotValid) {
+                m_uploadSnapshot = m_consumeUploads
+                    ? m_consumeUploads() : std::vector<StreamingUploadDescriptor>{};
+                m_uploadSnapshotValid = true;
+                m_inputs.uploads = m_uploadSnapshot;
+            }
+            CLodStructuralStreamingUploadFrameData frame;
+            frame.copies.reserve(m_inputs.uploads.size());
             for (const auto& upload : m_inputs.uploads) {
                 if (upload.ticket && upload.ticket->state.load(std::memory_order_acquire) ==
                     TrackedUploadTicketState::Cancelled) {
@@ -261,17 +276,26 @@ namespace {
                 if (!upload.dstResource || !upload.srcUploadBuffer || upload.size == 0) {
                     continue;
                 }
-                context.list.CopyBufferRegion(
-                    upload.dstResource.get(), upload.dstOffset,
-                    upload.srcUploadBuffer, upload.srcOffset,
-                    upload.size);
+                frame.copies.push_back({
+                    preparation.CaptureResource(upload.dstResource->GetGlobalResourceID()),
+                    preparation.CaptureResource(upload.srcUploadBuffer->GetGlobalResourceID()),
+                    upload.dstOffset, upload.srcOffset, upload.size, upload.ticket});
             }
             m_uploadSnapshot.clear();
             m_uploadSnapshotValid = false;
+            return frame;
         }
 
-        PassReturn Execute(PassExecutionContext&) override { return {}; }
-        void Cleanup() override {}
+        static void Record(const CLodStructuralStreamingUploadFrameData& frame,
+            org::PassRecordContext& recording) {
+            for (const auto& copy : frame.copies) {
+                if (copy.ticket && copy.ticket->state.load(std::memory_order_acquire) ==
+                    TrackedUploadTicketState::Cancelled) continue;
+                recording.Commands().CopyBufferRegion(
+                    recording.Resolve(copy.destination).GetHandle(), copy.destinationOffset,
+                    recording.Resolve(copy.source).GetHandle(), copy.sourceOffset, copy.size);
+            }
+        }
 
     private:
         ConsumeUploadsFn m_consumeUploads;
@@ -289,7 +313,42 @@ namespace {
         uint64_t completionValue = 0;
     };
 
-    class CLodStructuralAsyncUploadPass final : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
+    struct CLodStructuralAsyncUploadFrameData {
+        struct Copy {
+            org::PreparedResourceReference destination{}, source{};
+            uint64_t destinationOffset = 0, sourceOffset = 0, size = 0;
+        };
+        std::vector<Copy> copies;
+    };
+
+    class CLodUploadSignalReservation final : public org::PreparedLifecycleEffect {
+    public:
+        CLodUploadSignalReservation(rhi::Timeline timeline, uint64_t value,
+            std::vector<std::shared_ptr<CLodUploadBatch>> batches)
+            : m_signal{timeline, value}, m_batches(std::move(batches)) {}
+        std::span<const ExternalTimelinePoint> SignalsAfterCompletion() const override {
+            return {&m_signal, 1u};
+        }
+        void Submitted(org::SubmissionContext) const override { m_resolved.store(true); }
+        void Abandoned(org::AbandonReason) const override {
+            if (m_resolved.exchange(true)) return;
+            for (const auto& batch : m_batches) {
+                if (!batch || !batch->ticket) continue;
+                auto expected = CLodUploadTicketState::Submitted;
+                batch->ticket->state.compare_exchange_strong(expected,
+                    CLodUploadTicketState::Cancelled, std::memory_order_acq_rel);
+            }
+        }
+    private:
+        ExternalTimelinePoint m_signal{};
+        std::vector<std::shared_ptr<CLodUploadBatch>> m_batches;
+        mutable std::atomic<bool> m_resolved{false};
+    };
+
+    class CLodStructuralAsyncUploadPass final
+        : public org::TypedRenderGraphPass<CLodStructuralAsyncUploadPass,
+              CLodStructuralAsyncUploadFrameData>,
+          public IDynamicDeclaredResources {
     public:
         using TryAcquireSnapshotFn = std::function<bool(CLodAsyncUploadSnapshot&)>;
         using SubmitSnapshotFn = std::function<PassReturn(CLodAsyncUploadSnapshot&)>;
@@ -310,21 +369,26 @@ namespace {
                 ZoneScopedN("CLodStructuralAsyncUploadPass::DeclaredResourcesChanged::AcquireSnapshot");
                 armed = m_tryAcquireSnapshot && m_tryAcquireSnapshot(nextSnapshot);
             }
-            std::vector<uint64_t> nextDestinationIds;
+            std::vector<uint64_t> nextResourceIds;
             if (armed) {
-                ZoneScopedN("CLodStructuralAsyncUploadPass::DeclaredResourcesChanged::BuildDestinationIds");
-                nextDestinationIds.reserve(nextSnapshot.destinations.size());
-                for (const auto& destination : nextSnapshot.destinations) {
-                    nextDestinationIds.push_back(destination ? destination->GetGlobalResourceID() : 0ull);
+                ZoneScopedN("CLodStructuralAsyncUploadPass::DeclaredResourcesChanged::BuildResourceIds");
+                for (const auto& batch : nextSnapshot.batches) {
+                    if (!batch) continue;
+                    nextResourceIds.reserve(nextResourceIds.size() + batch->copies.size() * 2u);
+                    for (const auto& copy : batch->copies) {
+                        if (!copy.destination || !copy.staging || copy.size == 0u) continue;
+                        nextResourceIds.push_back(copy.destination->GetGlobalResourceID());
+                        nextResourceIds.push_back(copy.staging->GetGlobalResourceID());
+                    }
                 }
             }
 
             bool changed = false;
             {
                 ZoneScopedN("CLodStructuralAsyncUploadPass::DeclaredResourcesChanged::InstallSnapshot");
-                changed = !m_initialized || nextDestinationIds != m_declaredDestinationIds;
+                changed = !m_initialized || nextResourceIds != m_declaredResourceIds;
                 m_initialized = true;
-                m_declaredDestinationIds = std::move(nextDestinationIds);
+                m_declaredResourceIds = std::move(nextResourceIds);
                 m_armed = armed;
                 m_snapshot = std::move(nextSnapshot);
             }
@@ -332,85 +396,57 @@ namespace {
         }
 
         bool RequiresPassRebindAfterDeclarationRefresh() const noexcept override { return false; }
-        bool DeclarationsProvidedByImmediateCommands() const noexcept override { return true; }
-
-        void DeclareResourceUsages(CopyPassBuilder* builder) override {
+        void Declare(org::PassBuilder& builder) {
             ZoneScopedN("CLodStructuralAsyncUploadPass::DeclareResourceUsages");
-            builder->PreferQueue(QueueKind::Graphics);
-        }
-
-        void Setup() override {}
-
-        void RecordImmediateCommands(ImmediateExecutionContext& context) override {
-            ZoneScopedN("CLodStructuralAsyncUploadPass::RecordImmediateCommands");
-            if (m_armed) {
-                for (const auto& batch : m_snapshot.batches) {
-                    if (!batch) continue;
-                    for (const auto& copy : batch->copies) {
-                        if (copy.destination && copy.staging && copy.size != 0u) {
-                            context.list.CopyBufferRegion(
-                                copy.destination, copy.destinationOffset,
-                                copy.staging, copy.stagingOffset,
-                                copy.size);
-                        }
-                    }
+            for (const auto& batch : m_snapshot.batches) {
+                if (!batch) continue;
+                for (const auto& copy : batch->copies) {
+                    if (!copy.destination || !copy.staging || copy.size == 0u) continue;
+                    builder.WithCopySource(copy.staging);
+                    builder.WithCopyDest(copy.destination);
                 }
             }
+            builder.PreferQueue(QueueKind::Graphics);
         }
 
-        PassReturn Execute(PassExecutionContext&) override {
-            ZoneScopedN("CLodStructuralAsyncUploadPass::Execute");
-            if (!m_armed || !m_submitSnapshot) {
-                return {};
-            }
-            m_armed = false;
-            return m_submitSnapshot(m_snapshot);
-        }
-
-        PreparedPass PrepareFrame(FramePreparationContext&) override {
-            if (!m_armed) return PreparedPass::NoOp();
-            struct Copy {
-                BackingAllocationSnapshot destination, source;
-                uint64_t destinationOffset = 0, sourceOffset = 0, size = 0;
-            };
-            struct Data { std::vector<Copy> copies; };
-            Data data;
+        CLodStructuralAsyncUploadFrameData Prepare(const org::PassPrepareContext& preparation) {
+            CLodStructuralAsyncUploadFrameData data;
+            if (!m_armed) return data;
             for (const auto& batch : m_snapshot.batches) {
                 if (!batch) continue;
                 for (const auto& copy : batch->copies) {
                     if (!copy.destination || !copy.staging || !copy.size) continue;
-                    auto* destinationResource = dynamic_cast<BackedResource*>(copy.destination.get());
-                    auto* sourceResource = dynamic_cast<BackedResource*>(copy.staging.get());
-                    auto destination = destinationResource
-                        ? destinationResource->CaptureBackingAllocation() : BackingAllocationSnapshot{};
-                    auto source = sourceResource
-                        ? sourceResource->CaptureBackingAllocation() : BackingAllocationSnapshot{};
-                    if (!destination || !source) return {};
-                    data.copies.push_back({std::move(destination), std::move(source),
+                    data.copies.push_back({
+                        preparation.CaptureResource(copy.destination->GetGlobalResourceID()),
+                        preparation.CaptureResource(copy.staging->GetGlobalResourceID()),
                         copy.destinationOffset, copy.stagingOffset, copy.size});
                 }
             }
-            if (data.copies.empty() || !m_submitSnapshot) return {};
+            if (data.copies.empty() || !m_submitSnapshot) return data;
             auto submission = m_submitSnapshot(m_snapshot);
-            if (submission.fence || submission.fenceValue) return {};
+            if (submission.fence || submission.fenceValue ||
+                submission.externalSignalsAfterCompletion.size() != 1u) return {};
+            const auto completionValue = m_snapshot.completionValue;
+            preparation.Reserve(std::make_shared<CLodUploadSignalReservation>(
+                m_snapshot.completionTimeline, completionValue, m_snapshot.batches));
             m_armed = false;
-            auto record = +[](const Data& value, RecordingContext& recording) {
-                for (const auto& copy : value.copies) {
-                    recording.Commands().CopyBufferRegion(
-                        copy.destination.resource.GetHandle(), copy.destinationOffset,
-                        copy.source.resource.GetHandle(), copy.sourceOffset, copy.size);
-                }
-            };
-            return PreparedPass::MakeOwnedWithExternalSignals(std::move(data), record,
-                std::move(submission.externalSignalsAfterCompletion));
+            return data;
         }
-        void Cleanup() override { CancelClaimedSnapshot(); }
+
+        static void Record(const CLodStructuralAsyncUploadFrameData& data,
+            org::PassRecordContext& recording) {
+            for (const auto& copy : data.copies) recording.Commands().CopyBufferRegion(
+                recording.Resolve(copy.destination).GetHandle(), copy.destinationOffset,
+                recording.Resolve(copy.source).GetHandle(), copy.sourceOffset, copy.size);
+        }
+
+        void ShutdownPass() { CancelClaimedSnapshot(); }
 
     private:
         TryAcquireSnapshotFn m_tryAcquireSnapshot;
         SubmitSnapshotFn m_submitSnapshot;
         mutable CLodAsyncUploadSnapshot m_snapshot;
-        mutable std::vector<uint64_t> m_declaredDestinationIds;
+        mutable std::vector<uint64_t> m_declaredResourceIds;
         mutable bool m_armed = false;
         mutable bool m_initialized = false;
 
@@ -430,7 +466,7 @@ namespace {
     };
 
     struct CLodStreamingReadbackSnapshot {
-        CLodStreamingReadbackCopyInputs inputs;
+        CLodStreamingReadbackSources inputs;
         std::shared_ptr<Buffer> counterStaging;
         std::shared_ptr<Buffer> requestsStaging;
         std::shared_ptr<Buffer> usedGroupsCounterStaging;
@@ -442,7 +478,36 @@ namespace {
         uint32_t selectedSlot = UINT32_MAX;
     };
 
-    class CLodStructuralStreamingReadbackCopyPass final : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
+    struct CLodStructuralReadbackFrameData {
+        struct Copy {
+            org::PreparedResourceReference destination{}, source{};
+            uint64_t bytes = 0;
+        };
+        std::vector<Copy> copies;
+    };
+
+    class CLodReadbackSignalReservation final : public org::PreparedLifecycleEffect {
+    public:
+        CLodReadbackSignalReservation(ExternalTimelinePoint signal,
+            std::function<void()> cancel)
+            : m_signal(signal), m_cancel(std::move(cancel)) {}
+        std::span<const ExternalTimelinePoint> SignalsAfterCompletion() const override {
+            return {&m_signal, 1u};
+        }
+        void Submitted(org::SubmissionContext) const override { m_resolved.store(true); }
+        void Abandoned(org::AbandonReason) const override {
+            if (!m_resolved.exchange(true) && m_cancel) m_cancel();
+        }
+    private:
+        ExternalTimelinePoint m_signal{};
+        std::function<void()> m_cancel;
+        mutable std::atomic<bool> m_resolved{false};
+    };
+
+    class CLodStructuralStreamingReadbackCopyPass final
+        : public org::TypedRenderGraphPass<CLodStructuralStreamingReadbackCopyPass,
+              CLodStructuralReadbackFrameData>,
+          public IDynamicDeclaredResources {
     public:
         using TryAcquireSnapshotFn = std::function<bool(CLodStreamingReadbackSnapshot&)>;
         using CompleteSnapshotFn = std::function<PassReturn(uint32_t)>;
@@ -494,52 +559,70 @@ namespace {
         }
 
         bool RequiresPassRebindAfterDeclarationRefresh() const noexcept override { return false; }
-        bool DeclarationsProvidedByImmediateCommands() const noexcept override { return true; }
-
-        void DeclareResourceUsages(CopyPassBuilder* builder) override {
-            builder->PreferQueue(QueueKind::Graphics);
+        void Declare(org::PassBuilder& builder) {
+            DeclareCopy(builder, m_snapshot.counterStaging, m_snapshot.inputs.counterSource);
+            DeclareCopy(builder, m_snapshot.requestsStaging, m_snapshot.inputs.requestsSource);
+            DeclareCopy(builder, m_snapshot.usedGroupsCounterStaging, m_snapshot.inputs.usedGroupsCounterSource);
+            DeclareCopy(builder, m_snapshot.usedGroupsBufferStaging, m_snapshot.inputs.usedGroupsBufferSource);
+            DeclareCopy(builder, m_snapshot.sourceGroupMismatchCounterStaging, m_snapshot.inputs.sourceGroupMismatchCounterSource);
+            DeclareCopy(builder, m_snapshot.sourceGroupMismatchDetailsStaging, m_snapshot.inputs.sourceGroupMismatchDetailsSource);
+            DeclareCopy(builder, m_snapshot.virtualShadowDependencyCountStaging, m_snapshot.inputs.virtualShadowDependencyCountSource);
+            DeclareCopy(builder, m_snapshot.virtualShadowDependenciesStaging, m_snapshot.inputs.virtualShadowDependenciesSource);
+            builder.PreferQueue(QueueKind::Graphics);
         }
 
-        void Setup() override {}
-
-        void RecordImmediateCommands(ImmediateExecutionContext& context) override {
-            if (!m_armed) {
-                return;
+        CLodStructuralReadbackFrameData Prepare(const org::PassPrepareContext& preparation) {
+            CLodStructuralReadbackFrameData frame;
+            if (!m_armed || !m_completeSnapshot) return frame;
+            CaptureCopy(frame, preparation, m_snapshot.counterStaging, m_snapshot.inputs.counterSource);
+            CaptureCopy(frame, preparation, m_snapshot.requestsStaging, m_snapshot.inputs.requestsSource);
+            CaptureCopy(frame, preparation, m_snapshot.usedGroupsCounterStaging, m_snapshot.inputs.usedGroupsCounterSource);
+            CaptureCopy(frame, preparation, m_snapshot.usedGroupsBufferStaging, m_snapshot.inputs.usedGroupsBufferSource);
+            CaptureCopy(frame, preparation, m_snapshot.sourceGroupMismatchCounterStaging, m_snapshot.inputs.sourceGroupMismatchCounterSource);
+            CaptureCopy(frame, preparation, m_snapshot.sourceGroupMismatchDetailsStaging, m_snapshot.inputs.sourceGroupMismatchDetailsSource);
+            CaptureCopy(frame, preparation, m_snapshot.virtualShadowDependencyCountStaging, m_snapshot.inputs.virtualShadowDependencyCountSource);
+            CaptureCopy(frame, preparation, m_snapshot.virtualShadowDependenciesStaging, m_snapshot.inputs.virtualShadowDependenciesSource);
+            const uint32_t selectedSlot = m_snapshot.selectedSlot;
+            PassReturn ret = m_completeSnapshot(selectedSlot);
+            if (ret.fence && ret.fenceValue) {
+                preparation.Reserve(std::make_shared<CLodReadbackSignalReservation>(
+                    ExternalTimelinePoint{*ret.fence, ret.fenceValue},
+                    [cancel = m_cancelSnapshot, selectedSlot] {
+                        if (cancel) cancel(selectedSlot);
+                    }));
             }
-
-            CopyWholeBuffer(context, m_snapshot.counterStaging, m_snapshot.inputs.counterSource);
-            CopyWholeBuffer(context, m_snapshot.requestsStaging, m_snapshot.inputs.requestsSource);
-            CopyWholeBuffer(context, m_snapshot.usedGroupsCounterStaging, m_snapshot.inputs.usedGroupsCounterSource);
-            CopyWholeBuffer(context, m_snapshot.usedGroupsBufferStaging, m_snapshot.inputs.usedGroupsBufferSource);
-            CopyWholeBuffer(context, m_snapshot.sourceGroupMismatchCounterStaging, m_snapshot.inputs.sourceGroupMismatchCounterSource);
-            CopyWholeBuffer(context, m_snapshot.sourceGroupMismatchDetailsStaging, m_snapshot.inputs.sourceGroupMismatchDetailsSource);
-            CopyWholeBuffer(context, m_snapshot.virtualShadowDependencyCountStaging, m_snapshot.inputs.virtualShadowDependencyCountSource);
-            CopyWholeBuffer(context, m_snapshot.virtualShadowDependenciesStaging, m_snapshot.inputs.virtualShadowDependenciesSource);
-        }
-
-        PassReturn Execute(PassExecutionContext&) override {
-            if (!m_armed || !m_completeSnapshot) {
-                return {};
-            }
-            PassReturn ret = m_completeSnapshot(m_snapshot.selectedSlot);
             m_armed = false;
-            return ret;
+            return frame;
         }
 
-        void Cleanup() override { CancelArmedSnapshot(); }
+        static void Record(const CLodStructuralReadbackFrameData& frame,
+            org::PassRecordContext& recording) {
+            for (const auto& copy : frame.copies) recording.Commands().CopyBufferRegion(
+                recording.Resolve(copy.destination).GetHandle(), 0u,
+                recording.Resolve(copy.source).GetHandle(), 0u, copy.bytes);
+        }
+
+        void ShutdownPass() { CancelArmedSnapshot(); }
 
     private:
-        static void CopyWholeBuffer(
-            ImmediateExecutionContext& context,
+        static void DeclareCopy(org::PassBuilder& builder,
             const std::shared_ptr<Buffer>& staging,
             const std::shared_ptr<Buffer>& source) {
-            if (!source || !staging) {
-                return;
-            }
+            if (!source || !staging) return;
+            builder.WithCopySource(source);
+            builder.WithCopyDest(staging);
+        }
 
+        static void CaptureCopy(CLodStructuralReadbackFrameData& frame,
+            const org::PassPrepareContext& preparation,
+            const std::shared_ptr<Buffer>& staging,
+            const std::shared_ptr<Buffer>& source) {
+            if (!source || !staging) return;
             uint64_t bytes = 0;
             if (source->TryGetBufferByteSize(bytes) && bytes > 0) {
-                context.list.CopyBufferRegion(staging, 0, source.get(), 0, bytes);
+                frame.copies.push_back({
+                    preparation.CaptureResource(staging->GetGlobalResourceID()),
+                    preparation.CaptureResource(source->GetGlobalResourceID()), bytes});
             }
         }
 
@@ -1022,9 +1105,10 @@ CLodStreamingSystem::CLodStreamingSystem() {
         if (result == rhi::Result::Ok && m_streamingUploadCompletionFencePtr) {
             m_streamingUploadCompletionFenceHandle = m_streamingUploadCompletionFencePtr.Get();
         }
-        result = device.CreateTimeline(m_directStorageLaunchFencePtr, 0, "CLodDirectStorageLaunchFence");
-        if (result == rhi::Result::Ok && m_directStorageLaunchFencePtr) {
-            m_directStorageLaunchFenceHandle = m_directStorageLaunchFencePtr.Get();
+        m_directStorageLaunchFencePtr = std::make_shared<rhi::TimelinePtr>();
+        result = device.CreateTimeline(*m_directStorageLaunchFencePtr, 0, "CLodDirectStorageLaunchFence");
+        if (result == rhi::Result::Ok && *m_directStorageLaunchFencePtr) {
+            m_directStorageLaunchFenceHandle = m_directStorageLaunchFencePtr->Get();
         }
     }
 
@@ -1076,6 +1160,10 @@ CLodStreamingSystem::CLodStreamingSystem() {
 }
 
 CLodStreamingSystem::~CLodStreamingSystem() {
+    {
+        std::lock_guard lock(m_streamingWakeState->mutex);
+        m_streamingWakeState->owner = nullptr;
+    }
     Shutdown();
     DestroyParallelSortResources();
 }
@@ -1557,6 +1645,13 @@ void CLodStreamingSystem::RequestStreamingFrameWork() {
 
 void CLodStreamingSystem::PublishStreamingFrameWorkForFrame() {
     ZoneScopedN("CLodStreamingSystem::PublishStreamingFrameWorkForFrame");
+    const auto upgradeJobs = m_virtualShadowUpgradeQueue.ReadCounters();
+    BT_PLOT("CLodStreaming.VSMUpgrade.AcceptedJobs", static_cast<int64_t>(upgradeJobs.accepted));
+    BT_PLOT("CLodStreaming.VSMUpgrade.PendingJobs", static_cast<int64_t>(upgradeJobs.pending));
+    BT_PLOT("CLodStreaming.VSMUpgrade.ReservedJobs", static_cast<int64_t>(upgradeJobs.reserved));
+    BT_PLOT("CLodStreaming.VSMUpgrade.SubmittedJobs", static_cast<int64_t>(upgradeJobs.submitted));
+    BT_PLOT("CLodStreaming.VSMUpgrade.ReturnedJobs", static_cast<int64_t>(upgradeJobs.returned));
+    BT_PLOT("CLodStreaming.VSMUpgrade.DiscardedJobs", static_cast<int64_t>(upgradeJobs.discarded));
     (void)PublishPendingStreamingStorageGpuResizeLocked();
 
     CLodActiveGroupsSnapshot newest;
@@ -1923,6 +2018,10 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
         [this](uint32_t selectedSlot) {
             if (selectedSlot >= m_readbackStagingSlots.size()) return;
             auto expected = ReadbackStagingSlot::State::Recording;
+            if (m_readbackStagingSlots[selectedSlot].state.compare_exchange_strong(
+                expected, ReadbackStagingSlot::State::Free,
+                std::memory_order_acq_rel, std::memory_order_acquire)) return;
+            expected = ReadbackStagingSlot::State::Submitted;
             m_readbackStagingSlots[selectedSlot].state.compare_exchange_strong(
                 expected, ReadbackStagingSlot::State::Free,
                 std::memory_order_acq_rel, std::memory_order_acquire);
@@ -1948,32 +2047,31 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
             }
         }
     }
-    launchInputs.launchCallback = [this]() -> PassReturn {
-        ZoneScopedN("CLodDirectStorageLaunch::PassRecordCallback");
-        if (!m_directStorageLaunchFenceHandle.IsValid()) {
-            return {};
-        }
-
-        if (m_directStorageArmedLaunchFenceValue.load(std::memory_order_acquire) != 0u ||
-            !m_directStorageLaunchRequested.exchange(false, std::memory_order_acq_rel)) {
-            return {};
-        }
-
+    launchInputs.reserveLaunch = [wakeState = m_streamingWakeState]() -> std::shared_ptr<const org::PreparedLifecycleEffect> {
+        std::shared_ptr<org::runtime::ExternalSignalReservation> reservation;
         {
-            ZoneScopedN("CLodDirectStorageLaunch::PassRecordCallback::ArmFence");
-            const uint64_t fenceValue =
-                m_directStorageLaunchFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
-            m_directStorageArmedLaunchFenceValue.store(fenceValue, std::memory_order_release);
-
-            PassReturn result{};
-            result.externalSignalsAfterCompletion.push_back({ m_directStorageLaunchFenceHandle, fenceValue });
-            return result;
+            std::lock_guard lock(wakeState->mutex);
+            auto* owner = wakeState->owner;
+            if (!owner || !owner->m_directStorageLaunchFenceHandle.IsValid() ||
+                owner->m_directStorageArmedLaunchFenceValue.load(std::memory_order_acquire) != 0u ||
+                !owner->m_directStorageLaunchRequested.load(std::memory_order_acquire)) return {};
+            const auto value = owner->m_directStorageLaunchFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1u;
+            reservation = std::make_shared<org::runtime::ExternalSignalReservation>(
+                owner->m_directStorageLaunchFencePtr, value, [wakeState, value] {
+                    std::lock_guard cancelLock(wakeState->mutex);
+                    auto* current = wakeState->owner;
+                    if (!current) return;
+                    auto expected = value;
+                    if (current->m_directStorageArmedLaunchFenceValue.compare_exchange_strong(
+                        expected, 0u, std::memory_order_acq_rel)) {
+                        current->m_directStorageLaunchRequested.store(true, std::memory_order_release);
+                        current->RequestStreamingFrameWork();
+                    }
+                });
+            if (!owner->m_directStorageLaunchRequested.exchange(false, std::memory_order_acq_rel)) return {};
+            owner->m_directStorageArmedLaunchFenceValue.store(value, std::memory_order_release);
         }
-    };
-    launchInputs.hasPendingCallback = [this]() {
-        return m_directStorageLaunchFenceHandle.IsValid()
-            && m_directStorageArmedLaunchFenceValue.load(std::memory_order_acquire) == 0u
-            && m_directStorageLaunchRequested.load(std::memory_order_acquire);
+        return reservation;
     };
 
     outPasses.push_back(
@@ -2729,7 +2827,7 @@ void CLodStreamingSystem::PublishVirtualShadowUpgradeUpload() {
          candidate < m_virtualShadowUpgradeUploadSlotCount;
          ++candidate) {
         auto expected = VirtualShadowUpgradeUploadState::Free;
-        if (m_virtualShadowUpgradeUploadSlots[candidate].state.compare_exchange_strong(
+        if (m_virtualShadowUpgradeUploadSlots[candidate]->state.compare_exchange_strong(
                 expected,
                 VirtualShadowUpgradeUploadState::Filling,
                 std::memory_order_acq_rel)) {
@@ -2742,7 +2840,7 @@ void CLodStreamingSystem::PublishVirtualShadowUpgradeUpload() {
         return;
     }
 
-    auto& slot = m_virtualShadowUpgradeUploadSlots[slotIndex];
+    auto& slot = *m_virtualShadowUpgradeUploadSlots[slotIndex];
     const uint64_t backingGeneration =
         slot.buffer ? slot.buffer->GetBackingGeneration() : 0u;
     if (slot.mapped != nullptr &&
@@ -2789,12 +2887,17 @@ void CLodStreamingSystem::PublishVirtualShadowUpgradeUpload() {
         return;
     }
     slot.inputCount.store(outputCount, std::memory_order_relaxed);
-    slot.state.store(VirtualShadowUpgradeUploadState::Ready, std::memory_order_release);
-    if (!m_virtualShadowReadyUploadSlots.TryPush(slotIndex)) {
-        slot.inputCount.store(0u, std::memory_order_relaxed);
-        slot.state.store(VirtualShadowUpgradeUploadState::Free, std::memory_order_release);
-        return;
-    }
+    // No producer slot can be reused until all owners of this publication retire.
+    auto slotOwner = m_virtualShadowUpgradeUploadSlots[slotIndex];
+    auto lease = std::shared_ptr<const void>(slotOwner.get(),
+        [slotOwner, wakeState = m_streamingWakeState](const void*) {
+            slotOwner->inputCount.store(0u, std::memory_order_relaxed);
+            slotOwner->state.store(VirtualShadowUpgradeUploadState::Free, std::memory_order_release);
+            std::lock_guard lock(wakeState->mutex);
+            if (wakeState->owner) wakeState->owner->RequestStreamingFrameWork();
+        });
+    slot.state.store(VirtualShadowUpgradeUploadState::Published, std::memory_order_release);
+    m_virtualShadowUpgradeQueue.Enqueue({slot.buffer, outputCount, std::move(lease)});
     m_virtualShadowUpgradeStats.eventsUploaded += outputCount;
     TracyPlot("CLodStreaming.VSMUpgrade.PublishedInputs", static_cast<int64_t>(outputCount));
     TracyPlot(
@@ -2813,24 +2916,29 @@ void CLodStreamingSystem::SetVirtualShadowUpgradeUploadBuffers(
         static_cast<uint32_t>(buffers.size()),
         VirtualShadowUpgradeUploadSlotCapacity);
     InvalidateVirtualShadowUpgradeUploadMappings();
-    m_virtualShadowReadyUploadSlots.Reset();
+    m_virtualShadowUpgradeQueue.DiscardUnsubmitted([](const auto&) { return true; });
+    auto previous = m_virtualShadowUpgradeUploadSlots;
     m_virtualShadowUpgradeUploadSlotCount = count;
-    for (uint32_t index = 0u; index < VirtualShadowUpgradeUploadSlotCapacity;
-         ++index) {
-        auto& slot = m_virtualShadowUpgradeUploadSlots[index];
-        slot.buffer = index < count ? std::move(buffers[index]) : nullptr;
-        slot.mapped = nullptr;
-        slot.mappedBackingGeneration = 0u;
-        slot.inputCount.store(0u, std::memory_order_relaxed);
-        slot.state.store(
-            VirtualShadowUpgradeUploadState::Free,
-            std::memory_order_relaxed);
+    for (uint32_t index = 0; index < VirtualShadowUpgradeUploadSlotCapacity; ++index) {
+        std::shared_ptr<VirtualShadowUpgradeUploadSlot> retained;
+        if (index < count) {
+            for (const auto& slot : previous) {
+                if (slot && slot->buffer == buffers[index]) { retained = slot; break; }
+            }
+        }
+        if (!retained) {
+            retained = std::make_shared<VirtualShadowUpgradeUploadSlot>();
+            retained->buffer = index < count ? std::move(buffers[index]) : nullptr;
+        }
+        m_virtualShadowUpgradeUploadSlots[index] = std::move(retained);
     }
     RequestStreamingFrameWork();
 }
 
 void CLodStreamingSystem::InvalidateVirtualShadowUpgradeUploadMappings() {
-    for (auto& slot : m_virtualShadowUpgradeUploadSlots) {
+    for (const auto& owner : m_virtualShadowUpgradeUploadSlots) {
+        if (!owner) continue;
+        auto& slot = *owner;
         if (slot.mapped != nullptr && slot.buffer &&
             slot.buffer->IsMaterialized() &&
             slot.mappedBackingGeneration ==
@@ -2840,37 +2948,6 @@ void CLodStreamingSystem::InvalidateVirtualShadowUpgradeUploadMappings() {
         slot.mapped = nullptr;
         slot.mappedBackingGeneration = 0u;
     }
-}
-
-bool CLodStreamingSystem::TryAcquireVirtualShadowUpgradeUpload(
-    uint32_t& slotIndex,
-    uint32_t& inputCount) {
-    ZoneScopedN("CLodStreamingSystem::TryAcquireVirtualShadowUpgradeUpload");
-    BASIC_TELEMETRY_SCOPE("CLod.VSM.AcquireUpload");
-    if (!m_virtualShadowReadyUploadSlots.TryPop(slotIndex) ||
-        slotIndex >= m_virtualShadowUpgradeUploadSlotCount) {
-        return false;
-    }
-    auto& slot = m_virtualShadowUpgradeUploadSlots[slotIndex];
-    auto expected = VirtualShadowUpgradeUploadState::Ready;
-    if (!slot.state.compare_exchange_strong(
-            expected,
-            VirtualShadowUpgradeUploadState::InFlight,
-            std::memory_order_acq_rel)) {
-        return false;
-    }
-    inputCount = slot.inputCount.load(std::memory_order_relaxed);
-    return inputCount != 0u;
-}
-
-void CLodStreamingSystem::ReleaseVirtualShadowUpgradeUpload(uint32_t slotIndex) {
-    if (slotIndex >= m_virtualShadowUpgradeUploadSlotCount) {
-        return;
-    }
-    auto& slot = m_virtualShadowUpgradeUploadSlots[slotIndex];
-    slot.inputCount.store(0u, std::memory_order_relaxed);
-    slot.state.store(VirtualShadowUpgradeUploadState::Free, std::memory_order_release);
-    RequestStreamingFrameWork();
 }
 
 void CLodStreamingSystem::SetVirtualShadowFallbackFeedbackResources(
@@ -2913,13 +2990,10 @@ void CLodStreamingSystem::ClearVirtualShadowUpgradeState() {
     m_virtualShadowBatchSourceChainOffsetByGroup.clear();
     m_virtualShadowBatchSourceChainCountByGroup.clear();
     m_virtualShadowBatchSourceGeneration = 0u;
-    m_virtualShadowReadyUploadSlots.Reset();
+    // In-flight publications keep their slots and bytes until frame retirement.
+    // Cancelled reservations cannot reappear as work for a newer graph generation.
+    m_virtualShadowUpgradeQueue.DiscardUnsubmitted([](const auto&) { return true; });
     InvalidateVirtualShadowUpgradeUploadMappings();
-    for (uint32_t index = 0u; index < m_virtualShadowUpgradeUploadSlotCount; ++index) {
-        auto& slot = m_virtualShadowUpgradeUploadSlots[index];
-        slot.inputCount.store(0u, std::memory_order_relaxed);
-        slot.state.store(VirtualShadowUpgradeUploadState::Free, std::memory_order_relaxed);
-    }
     m_virtualShadowResidencyGenerationByGroup.clear();
 }
 

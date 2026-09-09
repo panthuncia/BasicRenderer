@@ -48,68 +48,23 @@ CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
         "CLodStreamingBeginFrameClearUint");
 }
 
-void CLodStreamingBeginFramePass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithUnorderedAccess(m_loadCounter, m_loadRequestKeys, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
+void CLodStreamingBeginFramePass::Declare(org::PassBuilder& builder) {
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithUnorderedAccess(m_loadCounter, m_loadRequestKeys, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
     if (m_sourceGroupMismatchCounter) {
-        builder->WithUnorderedAccess(m_sourceGroupMismatchCounter);
+        builder.WithUnorderedAccess(m_sourceGroupMismatchCounter);
     }
 }
 
-void CLodStreamingBeginFramePass::Setup() {}
-
-PassReturn CLodStreamingBeginFramePass::Execute(PassExecutionContext& executionContext) {
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
-    auto clearUintBuffer = [&](const std::shared_ptr<Buffer>& buffer, uint32_t value, uint32_t count) {
-        if (!buffer || count == 0u) {
-            return;
-        }
-
-        BindResourceDescriptorIndices(commandList, m_clearUintPipeline.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_clearUintPipeline.GetAPIPipelineState().GetHandle());
-
-        uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = buffer->GetUAVShaderVisibleInfo(0).slot.index;
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = value;
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = count;
-        commandList.PushConstants(
-            rhi::ShaderStage::Compute,
-            0,
-            MiscUintRootSignatureIndex,
-            0,
-            NumMiscUintRootConstants,
-            clearRootConstants);
-        commandList.Dispatch((count + 63u) / 64u, 1u, 1u);
-    };
-
-    {
-        ZoneScopedN("CLodStreamingBeginFramePass::ClearFeedbackCounters");
-        clearUintBuffer(m_loadCounter, 0u, 1u);
-        clearUintBuffer(m_usedGroupsCounter, 0u, 1u);
-        clearUintBuffer(m_sourceGroupMismatchCounter, 0u, 1u);
-    }
-
-    if (m_loadRequestKeys) {
-        ZoneScopedN("CLodStreamingBeginFramePass::ClearRequestKeys");
-        clearUintBuffer(m_loadRequestKeys, 0xffffffffu, CLodStreamingRequestCapacity);
-    }
-    return {};
-}
-
-PreparedPass CLodStreamingBeginFramePass::PrepareFrame(FramePreparationContext& preparation) {
+br::render::PreparedComputeDispatchSequence CLodStreamingBeginFramePass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    auto payload = m_clearUintPipeline.GetPayload();
     br::render::PreparedComputeDispatchSequence data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    auto program = preparation.CaptureProgramBinding(m_clearUintPipeline);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
     auto appendClear = [&](const std::shared_ptr<Buffer>& buffer, uint32_t value, uint32_t count) {
         if (!buffer || count == 0u) return;
         br::render::PreparedComputeDispatchSequence::Step step{};
@@ -123,7 +78,7 @@ PreparedPass CLodStreamingBeginFramePass::PrepareFrame(FramePreparationContext& 
     appendClear(m_usedGroupsCounter, 0u, 1u);
     appendClear(m_sourceGroupMismatchCounter, 0u, 1u);
     appendClear(m_loadRequestKeys, 0xffffffffu, CLodStreamingRequestCapacity);
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatchSequence);
+    return data;
 }
 
 void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& executionContext) {
@@ -199,4 +154,6 @@ void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& execution
     }
 }
 
-void CLodStreamingBeginFramePass::Cleanup() {}
+void CLodStreamingBeginFramePass::Record(const br::render::PreparedComputeDispatchSequence& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatchSequence(data, recording);
+}

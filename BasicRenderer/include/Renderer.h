@@ -283,7 +283,7 @@ private:
     std::unique_ptr<TerrainManager> m_pTerrainManager = nullptr;
     std::unique_ptr<br::ReadbackManager> m_pReadbackManager = nullptr;
     std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
-    std::unique_ptr<br::render::CLodRayTracingSystem> m_clodRayTracingSystem = nullptr;
+    std::shared_ptr<br::render::CLodRayTracingSystem> m_clodRayTracingSystem = nullptr;
     std::unique_ptr<br::render::AsyncStateGraph> m_asyncStateGraph;
     std::optional<br::render::AsyncStateGraphTraceConfig> m_pendingAsyncStateGraphTrace;
     std::unique_ptr<br::render::RendererStatePublisher> m_rendererStatePublisher;

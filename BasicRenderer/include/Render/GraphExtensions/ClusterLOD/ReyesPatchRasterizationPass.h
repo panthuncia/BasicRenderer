@@ -7,7 +7,8 @@
 
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/PixelBuffer.h"
 
 namespace org { class Buffer; }
@@ -15,7 +16,7 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesPatchRasterizationPass final : public ComputePass, public IDynamicDeclaredResources {
+class ReyesPatchRasterizationPass final : public org::TypedRenderGraphPass<ReyesPatchRasterizationPass, br::render::PreparedComputeIndirect>, public IDynamicDeclaredResources {
 public:
     ReyesPatchRasterizationPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -35,13 +36,11 @@ public:
         uint32_t phaseIndex,
         uint32_t patchVisibilityIndexBase);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;

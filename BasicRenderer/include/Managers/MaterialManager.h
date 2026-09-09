@@ -59,7 +59,7 @@ public:
 		if (m_textureStreamingManager)
 			m_textureStreamingManager->AcknowledgePublishedImageTable(published);
 	}
-	std::shared_ptr<CopyPass> CreateTextureStreamingFeedbackReadbackPass();
+	std::shared_ptr<RenderPass> CreateTextureStreamingFeedbackReadbackPass();
 	void SetTextureStreamingFeedbackSuppressed(bool suppressed) { m_textureStreamingFeedbackSuppressed = suppressed; }
 	MaterialTextureStreamingStats GetMaterialTextureStreamingStats() const;
 	MaterialTextureStreamingReadinessStats GetMaterialTextureStreamingReadinessStats() const;

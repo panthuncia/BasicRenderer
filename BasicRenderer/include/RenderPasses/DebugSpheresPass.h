@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -11,7 +11,21 @@
 #include "Scene/Scene.h"
 #include "Managers/Singletons/RendererECSManager.h"
 
-class DebugSpherePass : public RenderPass {
+struct DebugSphereFrameData {
+    struct Sphere {
+        DirectX::XMFLOAT4 bounds{};
+        uint32_t perObjectIndex = 0;
+    };
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    rhi::PipelineLayoutHandle layout{};
+    org::PreparedProgramReference program{};
+    uint32_t cameraBufferIndex = 0;
+    uint32_t objectBufferIndex = 0;
+    std::vector<Sphere> spheres;
+};
+
+class DebugSpherePass
+    : public org::TypedRenderGraphPass<DebugSpherePass, DebugSphereFrameData> {
 public:
 	DebugSpherePass() {
 		CreateDebugRootSignature();
@@ -22,73 +36,50 @@ public:
 	~DebugSpherePass() {
 	}
 
-	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+	void Declare(org::PassBuilder& declaration) {
+		auto* builder = &declaration;
 		builder->WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
 			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
 			.IsGeometryPass();
 		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
-	void Setup() override {
-	
-		m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-	}
-
-	PassReturn Execute(PassExecutionContext& executionContext) override {
-	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-	    auto& context = *renderContext;
-		auto& commandList = executionContext.commandList;
-
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-		rhi::PassBeginInfo passInfo{};
-		rhi::DepthAttachment depthAttachment{};
-		depthAttachment.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
-
-		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
-
-		commandList.BindLayout(m_debugLayout->GetHandle());
-		commandList.BindPipeline(m_pso->GetHandle());
-		
-		struct Constants { // TODO: Rework how constants are passed here
-			float center[3];
-			float padding;
-			float radius;
-			uint32_t perObjectIndex;
-			uint32_t cameraBufferIndex;
-			uint32_t objectBufferIndex;
-		};
-		Constants constants;
-		constants.center[0] = 0.0;
-		constants.center[1] = 0.0;
-		constants.center[2] = 0.0;
-		constants.radius = 1.0;
-		constants.perObjectIndex = 0;
-		constants.cameraBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
-		constants.objectBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
-
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 8, (uint32_t*)&constants);
-
-		m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
-			auto& meshes = meshInstances.meshInstances;
-
-			for (auto& pMesh : meshes) {
-				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
-				constants.center[0] = meshData.boundingSphere.sphere.x;
-				constants.center[1] = meshData.boundingSphere.sphere.y;
-				constants.center[2] = meshData.boundingSphere.sphere.z;
-				constants.radius = meshData.boundingSphere.sphere.w;
-				constants.perObjectIndex = drawInfo.perObjectCBIndex;
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, (uint32_t*)&constants);
-				commandList.DispatchMesh(1, 1, 1);
+	DebugSphereFrameData Prepare(const org::PassPrepareContext& preparation) {
+		const auto* context = preparation.preparationData->Get<UpdateContext>();
+		DebugSphereFrameData data{};
+		data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+		data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+		data.layout = (*m_debugLayout)->GetHandle();
+		data.program = preparation.CaptureProgram(m_pso);
+		preparation.Retain(m_debugLayout);
+		data.cameraBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
+		data.objectBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
+		m_meshInstancesQuery.each([&](flecs::entity, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
+			for (const auto& instance : meshInstances.meshInstances) {
+				const auto bounds = instance->GetMesh()->GetPerMeshCBData().boundingSphere.sphere;
+				data.spheres.push_back({bounds, drawInfo.perObjectCBIndex});
 			}
-			});
-
-		return {};
+		});
+		return data;
 	}
-
-	void Cleanup() override {
-		// Cleanup the render pass
+	static void Record(const DebugSphereFrameData& data, org::PassRecordContext& recording) {
+		if (data.spheres.empty()) return;
+		auto& commandList = recording.Commands();
+		commandList.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
+		commandList.BindLayout(data.layout);
+		commandList.BindPipeline(recording.Resolve(data.program));
+		struct Constants {
+			float center[3]; float padding; float radius;
+			uint32_t perObjectIndex, cameraBufferIndex, objectBufferIndex;
+		};
+		for (const auto& sphere : data.spheres) {
+			Constants constants{{sphere.bounds.x, sphere.bounds.y, sphere.bounds.z}, 0.0f,
+				sphere.bounds.w, sphere.perObjectIndex, data.cameraBufferIndex, data.objectBufferIndex};
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 8,
+				reinterpret_cast<const uint32_t*>(&constants));
+			commandList.DispatchMesh(1, 1, 1);
+		}
 	}
 
 private:
@@ -109,7 +100,8 @@ private:
 		desc.ranges = rhi::Span<rhi::LayoutBindingRange>{ &binding, 1 };
 		desc.pushConstants = rhi::Span<rhi::PushConstantRangeDesc>{ &pushConstant };
 		desc.staticSamplers = rhi::Span<rhi::StaticSamplerDesc>{};
-		auto result = device.CreatePipelineLayout(desc, m_debugLayout);
+		m_debugLayout = std::make_shared<rhi::PipelineLayoutPtr>();
+		auto result = device.CreatePipelineLayout(desc, *m_debugLayout);
 
 	}
 
@@ -124,7 +116,7 @@ private:
 		auto compiled = PSOManager::GetInstance().CompileShaders(sib);
 
 		// Subobjects
-		rhi::SubobjLayout soLayout{ m_debugLayout->GetHandle() };
+		rhi::SubobjLayout soLayout{ (*m_debugLayout)->GetHandle() };
 
 		rhi::SubobjShader soMS{ rhi::ShaderStage::Mesh,  rhi::DXIL(compiled.meshShader.Get()), "MSMain" };
 		rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()), "SpherePSMain" };
@@ -171,20 +163,19 @@ private:
 			rhi::Make(soSmp),
 		};
 
-		auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+		m_pso = std::make_shared<rhi::PipelinePtr>();
+		auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), *m_pso);
 		if (Failed(result)) {
 			throw std::runtime_error("Failed to create Debug Mesh PSO (RHI)");
 		}
-		m_pso->SetName("Debug.Mesh.Wireframe");
+		(*m_pso)->SetName("Debug.Mesh.Wireframe");
 
 	}
 
 	flecs::query<Components::ObjectDrawInfo, Components::MeshInstances> m_meshInstancesQuery;
-	rhi::PipelineLayoutPtr m_debugLayout;
-	rhi::PipelinePtr m_pso;
+	std::shared_ptr<rhi::PipelineLayoutPtr> m_debugLayout;
+	std::shared_ptr<rhi::PipelinePtr> m_pso;
 	bool m_wireframe;
-
-	PixelBuffer* m_pPrimaryDepthBuffer;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;

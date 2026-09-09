@@ -41,8 +41,10 @@ DeepVisibilityResolvePass::DeepVisibilityResolvePass(
     m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 }
 
-void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builder)
+void DeepVisibilityResolvePass::Declare(org::PassBuilder& declaration)
 {
+    declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    auto* builder = &declaration;
     const bool shadowsEnabled = m_getShadowsEnabled ? m_getShadowsEnabled() : false;
     builder->WithShaderResource(
             Builtin::Light::BufferGroup,
@@ -119,7 +121,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void DeepVisibilityResolvePass::Setup()
+void DeepVisibilityResolvePass::Initialize()
 {
     RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
     if (m_getShadowsEnabled && m_getShadowsEnabled()) {
@@ -149,66 +151,48 @@ bool DeepVisibilityResolvePass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-PassReturn DeepVisibilityResolvePass::Execute(PassExecutionContext& executionContext)
+br::render::PreparedComputeDispatch DeepVisibilityResolvePass::Prepare(const org::PassPrepareContext& preparation)
 {
-    if (!m_primaryHeadPointerTexture || !m_pHDRTarget) {
-        return {};
-    }
-
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-    auto& psoManager = PSOManager::GetInstance();
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
-
-    const auto& pso = psoManager.GetClusterLODDeepVisibilityResolvePSO(context.globalPSOFlags);
-    commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-
-    uint32_t misc[NumMiscUintRootConstants] = {};
-    misc[MiscEnableShadows] = m_getShadowsEnabled();
-    misc[MiscEnablePunctualLights] = m_getPunctualLightingEnabled();
-    misc[MiscEnableGTAO] = m_gtaoEnabled;
-    misc[CLOD_DEEP_VISIBILITY_RESOLVE_HEAD_POINTER_DESCRIPTOR_INDEX] = m_primaryHeadPointerTexture->GetSRVInfo(0).slot.index;
-    misc[CLOD_DEEP_VISIBILITY_RESOLVE_NODE_BUFFER_DESCRIPTOR_INDEX] = m_deepVisibilityNodesBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_DEEP_VISIBILITY_RESOLVE_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityCounterBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_DEEP_VISIBILITY_RESOLVE_OVERFLOW_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityOverflowCounterBuffer->GetSRVInfo(0).slot.index;
-    misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_DEEP_VISIBILITY_RESOLVE_STATS_DESCRIPTOR_INDEX] = m_deepVisibilityStatsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    misc[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBuffer
+    br::render::PreparedComputeDispatch data{};
+    if (!m_primaryHeadPointerTexture || !m_pHDRTarget) return data;
+    const auto& context = *preparation.preparationData->Get<UpdateContext>();
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    const auto& pso = PSOManager::GetInstance().GetClusterLODDeepVisibilityResolvePSO(context.globalPSOFlags);
+    auto binding = preparation.CaptureProgramBinding(pso);
+    data.program = binding.program;
+    data.descriptorIndices = std::move(binding.descriptorIndices);
+    data.constants[MiscEnableShadows] = m_getShadowsEnabled();
+    data.constants[MiscEnablePunctualLights] = m_getPunctualLightingEnabled();
+    data.constants[MiscEnableGTAO] = m_gtaoEnabled;
+    data.constants[CLOD_DEEP_VISIBILITY_RESOLVE_HEAD_POINTER_DESCRIPTOR_INDEX] = m_primaryHeadPointerTexture->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_DEEP_VISIBILITY_RESOLVE_NODE_BUFFER_DESCRIPTOR_INDEX] = m_deepVisibilityNodesBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_DEEP_VISIBILITY_RESOLVE_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityCounterBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_DEEP_VISIBILITY_RESOLVE_OVERFLOW_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityOverflowCounterBuffer->GetSRVInfo(0).slot.index;
+    data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_DEEP_VISIBILITY_RESOLVE_STATS_DESCRIPTOR_INDEX] = m_deepVisibilityStatsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBuffer
         ? m_reyesDiceQueueBuffer->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
-    misc[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
-    misc[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBuffer
+    data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+    data.constants[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBuffer
         ? m_reyesTessTableConfigsBuffer->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
-    misc[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBuffer
+    data.constants[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBuffer
         ? m_reyesTessTableVerticesBuffer->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
-    misc[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBuffer
+    data.constants[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBuffer
         ? m_reyesTessTableTrianglesBuffer->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
-    misc[VISBUF_REYES_USE_NORMAL_MAPS] = CLodReyesUseNormalMaps() ? 1u : 0u;
-    misc[VISBUF_REYES_TERRAIN_NORMAL_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesTerrainNormalBlend());
-    misc[VISBUF_REYES_TERRAIN_NORMAL_MIP_BIAS] = CLodReyesTerrainNormalMipBias();
-    misc[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        misc);
-
-    constexpr uint32_t kThreadGroupSize = 8u;
-    const uint32_t groupCountX = (context.renderResolution.x + kThreadGroupSize - 1u) / kThreadGroupSize;
-    const uint32_t groupCountY = (context.renderResolution.y + kThreadGroupSize - 1u) / kThreadGroupSize;
-    commandList.Dispatch(groupCountX, groupCountY, 1);
-    return {};
+    data.constants[VISBUF_REYES_USE_NORMAL_MAPS] = CLodReyesUseNormalMaps() ? 1u : 0u;
+    data.constants[VISBUF_REYES_TERRAIN_NORMAL_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesTerrainNormalBlend());
+    data.constants[VISBUF_REYES_TERRAIN_NORMAL_MIP_BIAS] = CLodReyesTerrainNormalMipBias();
+    data.constants[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
+    data.groupsX = (context.renderResolution.x + 7u) / 8u;
+    data.groupsY = (context.renderResolution.y + 7u) / 8u;
+    return data;
 }
 
-void DeepVisibilityResolvePass::Cleanup()
-{
+void DeepVisibilityResolvePass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

@@ -157,9 +157,10 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
         "CLod.VirtualShadow.Setup.PSO");
 }
 
-void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VirtualShadowMapSetupPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithUnorderedAccess(
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithUnorderedAccess(
         m_clipmapInfoBuffer,
         m_pageTableTexture,
         m_pageMetadataBuffer,
@@ -172,10 +173,10 @@ void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builde
         m_runtimeStateBuffer,
         m_fallbackCandidateCountBuffer);
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void VirtualShadowMapSetupPass::Setup() {}
+void VirtualShadowMapSetupPass::Initialize() {}
 
 void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionContext)
 {
@@ -476,74 +477,9 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         0);
 }
 
-PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-    const CLodVirtualShadowResolutionConfig virtualShadowConfig = GetVirtualShadowResolutionConfig();
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
-    uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    const uint32_t packedConfig0 =
-        ((virtualShadowConfig.pageTableResolution & CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION_MASK)
-            << CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION_SHIFT) |
-        ((CLodVirtualShadowMaxSupportedClipmapCount & CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT_MASK)
-            << CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT_SHIFT) |
-        ((virtualShadowConfig.maxPhysicalPages & CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT_MASK)
-            << CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT_SHIFT);
-    const uint32_t packedConfig1 =
-        (CLodVirtualShadowDirtyWordCount(virtualShadowConfig.maxPhysicalPages) & CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT_MASK)
-        << CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT_SHIFT;
-    const uint32_t packedFlags =
-        ((m_resetResources ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES_BIT) |
-        ((m_resetReasonForced ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_FORCED_BIT) |
-        ((m_resetReasonNoPreviousState ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE_BIT) |
-        ((m_resetReasonStructureMismatch ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH_BIT) |
-        ((m_resetReasonLightDirectionChanged ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED_BIT) |
-        ((SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName)() ? 1u : 0u)
-            << CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_ENABLED_BIT) |
-        ((m_feedbackRecoveryRefresh ? 1u : 0u)
-            << CLOD_VIRTUAL_SHADOW_SETUP_FEEDBACK_RECOVERY_REFRESH_BIT);
-
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_ALLOCATION_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_CONFIG0] = packedConfig0;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_CONFIG1] = packedConfig1;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_FLAGS] = packedFlags;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RUNTIME_STATE_DESCRIPTOR_INDEX] = m_runtimeStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_SCALE_AS_UINT] =
-        std::bit_cast<uint32_t>(
-            SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName)());
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_FALLBACK_CANDIDATE_COUNT_DESCRIPTOR_INDEX] =
-        m_fallbackCandidateCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-
-    constexpr uint32_t kThreadsPerDimension = 8u;
-    const uint32_t groupCountX = (virtualShadowConfig.pageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
-    const uint32_t groupCountY = (virtualShadowConfig.pageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
-    commandList.Dispatch(groupCountX, groupCountY, CLodVirtualShadowMaxSupportedClipmapCount);
-
-    return {};
-}
-
-PreparedPass VirtualShadowMapSetupPass::PrepareFrame(FramePreparationContext& preparation)
+br::render::PreparedComputeDispatch VirtualShadowMapSetupPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = GetVirtualShadowResolutionConfig();
@@ -552,9 +488,9 @@ PreparedPass VirtualShadowMapSetupPass::PrepareFrame(FramePreparationContext& pr
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    auto program = preparation.CaptureProgramBinding(std::move(payload));
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
     const uint32_t packedConfig0 =
         ((config.pageTableResolution & CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION_MASK) << CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION_SHIFT) |
         ((CLodVirtualShadowMaxSupportedClipmapCount & CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT_MASK) << CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT_SHIFT) |
@@ -586,7 +522,11 @@ PreparedPass VirtualShadowMapSetupPass::PrepareFrame(FramePreparationContext& pr
     data.groupsX = (config.pageTableResolution + 7u) / 8u;
     data.groupsY = data.groupsX;
     data.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount;
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return data;
 }
 
-void VirtualShadowMapSetupPass::Cleanup() {}
+void VirtualShadowMapSetupPass::ShutdownPass() {}
+
+void VirtualShadowMapSetupPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
+}

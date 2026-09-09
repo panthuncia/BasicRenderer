@@ -5,12 +5,19 @@
 #include <rhi.h>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 
-class ReyesRasterWorkHistogramPass final : public ComputePass {
+struct ReyesHistogramFrameData {
+    br::render::PreparedComputeDispatch clear;
+    br::render::PreparedComputeIndirect histogram;
+    org::PreparedResourceReference histogramBarrier;
+};
+
+class ReyesRasterWorkHistogramPass final : public org::TypedRenderGraphPass<ReyesRasterWorkHistogramPass, ReyesHistogramFrameData> {
 public:
     ReyesRasterWorkHistogramPass(
         std::shared_ptr<Buffer> rasterWorkBuffer,
@@ -18,11 +25,10 @@ public:
         std::shared_ptr<Buffer> histogramIndirectCommand,
         std::shared_ptr<Buffer> histogramBuffer);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Declare(org::PassBuilder& builder);
+    ReyesHistogramFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const ReyesHistogramFrameData& data, org::PassRecordContext& recording);
     void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
 
 private:
     void CreatePipelines(
@@ -33,7 +39,7 @@ private:
 
     PipelineState m_histogramPipeline;
     PipelineState m_clearPipeline;
-    rhi::CommandSignaturePtr m_histogramCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_histogramCommandSignature;
     std::shared_ptr<Buffer> m_rasterWorkBuffer;
     std::shared_ptr<Buffer> m_rasterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_histogramIndirectCommand;

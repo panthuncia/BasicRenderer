@@ -15,7 +15,8 @@ namespace br::render {
 struct PreparedFullscreenDraw {
     rhi::DescriptorHeapHandle resourceHeap{};
     rhi::DescriptorHeapHandle samplerHeap{};
-    rhi::DescriptorSlot renderTarget{};
+    std::optional<org::PreparedResourceReference> targetResource;
+    uint32_t targetMip = 0;
     std::optional<org::PreparedDescriptorReference> renderTargetReference;
     std::optional<org::ExternalBindingKey> externalRenderTarget;
     rhi::LoadOp loadOp = rhi::LoadOp::Load;
@@ -23,30 +24,13 @@ struct PreparedFullscreenDraw {
     uint32_t width = 0;
     uint32_t height = 0;
     std::string debugName;
-    rhi::PipelineLayoutHandle layout{};
-    rhi::PipelineHandle pipeline{};
-    std::shared_ptr<const void> pipelineOwner;
     std::optional<org::PreparedProgramReference> program;
     std::vector<unsigned int> descriptorIndices;
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
     rhi::ShaderStage constantStage = rhi::ShaderStage::Pixel;
 };
 
-// Captures both the immutable PSO lifetime and its declaration-derived
-// descriptor mapping into the framework-owned dependency snapshot.  Custom
-// graphics passes use the same one-line operation as PipelineState users and
-// do not carry an ownership field in their frame data.
-inline void BindPreparedProgram(
-    PreparedFullscreenDraw& draw,
-    const org::FramePreparationContext& preparation,
-    std::shared_ptr<const rhi::PipelinePtr> pipeline,
-    const PipelineResources& resources) {
-    auto binding = preparation.CaptureProgramBinding(
-        std::move(pipeline), resources);
-    draw.program = binding.program;
-    draw.descriptorIndices = std::move(binding.descriptorIndices);
-}
-
+// Capture the coherent program version and its declaration-derived descriptor mapping.
 inline void BindPreparedProgram(
     PreparedFullscreenDraw& draw,
     const org::FramePreparationContext& preparation,
@@ -66,8 +50,9 @@ inline void RecordPreparedFullscreenDraw(
     rhi::ColorAttachment color{};
     color.rtv = data.externalRenderTarget
         ? recording.Resolve(*data.externalRenderTarget)
-        : data.renderTargetReference
-            ? recording.Resolve(*data.renderTargetReference) : data.renderTarget;
+        : recording.Resolve(data.renderTargetReference.value());
+    color.mipSlice = data.targetMip;
+    if (data.targetResource) color.resource = recording.Resolve(*data.targetResource).GetHandle();
     color.loadOp = data.loadOp;
     color.storeOp = rhi::StoreOp::Store;
     color.clear = data.clear;
@@ -78,8 +63,8 @@ inline void RecordPreparedFullscreenDraw(
     begin.debugName = data.debugName.empty() ? nullptr : data.debugName.c_str();
     commands.BeginPass(begin);
     commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
-    commands.BindLayout(data.layout);
-    commands.BindPipeline(data.program ? recording.Resolve(*data.program) : data.pipeline);
+    commands.BindLayout(recording.ResolveLayout(data.program.value()));
+    commands.BindPipeline(recording.Resolve(data.program.value()));
     if (!data.descriptorIndices.empty()) {
         commands.PushConstants(rhi::ShaderStage::All, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,

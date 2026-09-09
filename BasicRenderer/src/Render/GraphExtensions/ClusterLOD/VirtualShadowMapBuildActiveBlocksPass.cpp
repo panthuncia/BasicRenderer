@@ -27,55 +27,35 @@ VirtualShadowMapBuildActiveBlocksPass::VirtualShadowMapBuildActiveBlocksPass(
         "CLod.VirtualShadow.BuildActiveBlocks.PSO");
 }
 
-void VirtualShadowMapBuildActiveBlocksPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VirtualShadowMapBuildActiveBlocksPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(m_pageTableTexture, m_clipmapInfoBuffer)
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(m_pageTableTexture, m_clipmapInfoBuffer)
         .WithUnorderedAccess(m_activeBlockMetadataBuffer)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-PassReturn VirtualShadowMapBuildActiveBlocksPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
-    uint32_t constants[NumMiscUintRootConstants] = {};
-    constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_PAGE_TABLE_DESCRIPTOR_INDEX] =
-        m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index;
-    constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_CLIPMAP_INFO_DESCRIPTOR_INDEX] =
-        m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
-    constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_OUTPUT_DESCRIPTOR_INDEX] =
-        m_activeBlockMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_COUNT] = CLodVirtualShadowMaxMarkedBlockCount;
-    constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_DYNAMIC] = m_dynamicPages ? 1u : 0u;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, constants);
-    commandList.Dispatch((CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u, 1u, 1u);
-    return {};
-}
-
-PreparedPass VirtualShadowMapBuildActiveBlocksPass::PrepareFrame(FramePreparationContext& preparation) {
+br::render::PreparedComputeDispatch VirtualShadowMapBuildActiveBlocksPass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     auto payload = m_pso.GetPayload();
     br::render::PreparedComputeDispatch data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    auto program = preparation.CaptureProgramBinding(std::move(payload));
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
     data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index;
     data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_OUTPUT_DESCRIPTOR_INDEX] = m_activeBlockMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_COUNT] = CLodVirtualShadowMaxMarkedBlockCount;
     data.constants[CLOD_VSM_BUILD_ACTIVE_BLOCKS_DYNAMIC] = m_dynamicPages ? 1u : 0u;
     data.groupsX = (CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u;
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return data;
+}
+
+void VirtualShadowMapBuildActiveBlocksPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

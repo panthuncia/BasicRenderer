@@ -1,11 +1,11 @@
 #pragma once
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class DilateMotionVectorsPass : public ComputePass {
+class DilateMotionVectorsPass : public org::TypedRenderGraphPass<DilateMotionVectorsPass, br::render::PreparedComputeDispatch> {
 public:
     DilateMotionVectorsPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -16,65 +16,42 @@ public:
             "DilateMotionVectorsCS");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithShaderResource(
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        builder.WithShaderResource(
             Builtin::Surface::Motion,
             Builtin::PrimaryCamera::ProjectedDepthTexture)
             .WithUnorderedAccess(Builtin::Surface::DilatedMotion);
     }
 
-    void Setup() override {
+    void Initialize() {
         m_source = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Surface::Motion);
         m_depth = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::ProjectedDepthTexture);
         m_destination = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Surface::DilatedMotion);
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& commandList = executionContext.commandList;
 
-        commandList.SetDescriptorHeaps(
-            renderContext->textureDescriptorHeap.GetHandle(),
-            renderContext->samplerDescriptorHeap.GetHandle());
-        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-        commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
 
-        uint32_t constants[NumMiscUintRootConstants] = {};
-        constants[0] = m_source->GetSRVInfo(0).slot.index;
-        constants[1] = m_depth->GetSRVInfo(0).slot.index;
-        constants[2] = m_destination->GetUAVShaderVisibleInfo(0).slot.index;
-        constants[3] = m_destination->GetWidth();
-        constants[4] = m_destination->GetHeight();
-        commandList.PushConstants(
-            rhi::ShaderStage::Compute,
-            0,
-            MiscUintRootSignatureIndex,
-            0,
-            NumMiscUintRootConstants,
-            constants);
-
-        constexpr uint32_t groupSize = 8;
-        commandList.Dispatch(
-            (m_destination->GetWidth() + groupSize - 1) / groupSize,
-            (m_destination->GetHeight() + groupSize - 1) / groupSize,
-            1);
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
-        data.pipelineOwner = std::move(payload);
+        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+
         data.constants[0] = m_source->GetSRVInfo(0).slot.index; data.constants[1] = m_depth->GetSRVInfo(0).slot.index;
         data.constants[2] = m_destination->GetUAVShaderVisibleInfo(0).slot.index;
         data.constants[3] = m_destination->GetWidth(); data.constants[4] = m_destination->GetHeight();
         data.groupsX = (m_destination->GetWidth() + 7u) / 8u; data.groupsY = (m_destination->GetHeight() + 7u) / 8u;
-        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
+
+    void ShutdownPass() {}
 
 private:
     PipelineState m_pso;

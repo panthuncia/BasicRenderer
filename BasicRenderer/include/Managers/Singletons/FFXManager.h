@@ -9,6 +9,7 @@
 #include <vector>
 #include <DirectXMath.h>
 #include <functional>
+#include <mutex>
 #include <rhi.h>
 
 #include <bit> // FFX headers need this, not sure why it's not included by default
@@ -50,6 +51,7 @@ private:
 	FfxSssrContext m_sssrContext{};
 	void* m_pScratchMemory = nullptr;
 	bool m_sssrContextCreated = false;
+    std::mutex m_evaluateMutex;
 };
 
 inline FFXManager& FFXManager::GetInstance() {

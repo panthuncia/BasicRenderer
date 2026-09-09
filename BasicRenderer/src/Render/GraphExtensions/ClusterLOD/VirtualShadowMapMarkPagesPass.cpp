@@ -61,8 +61,10 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
         *m_commandSignature);
 }
 
-void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VirtualShadowMapMarkPagesPass::Declare(org::PassBuilder& declaration)
 {
+    declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    auto* builder = &declaration;
     builder->WithShaderResource(
             Builtin::Shadows::CLodCompactMainCamera,
             m_tileWorkBuffer,
@@ -79,7 +81,7 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
     }
 }
 
-void VirtualShadowMapMarkPagesPass::Setup() {}
+
 
 void VirtualShadowMapMarkPagesPass::Update(const UpdateExecutionContext& executionContext)
 {
@@ -93,146 +95,23 @@ void VirtualShadowMapMarkPagesPass::Update(const UpdateExecutionContext& executi
         : CLodVirtualShadowReceiverSubpageModeOff;
 }
 
-PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
-    BindResourceDescriptorIndices(commandList, m_clearPso.GetResourceDescriptorSlots());
-    commandList.BindPipeline(m_clearPso.GetAPIPipelineState().GetHandle());
-
-    uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
-    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_markedBlocksMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
-    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = CLodVirtualShadowMaxMarkedBlockCount;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        clearRootConstants);
-    commandList.Dispatch((CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u, 1u, 1u);
-
-    if (m_receiverSubpageMode != CLodVirtualShadowReceiverSubpageModeOff) {
-        const PipelineState& receiverClearPso =
-            m_receiverSubpageMode == CLodVirtualShadowReceiverSubpageMode8x8
-                ? m_clearUint2Pso
-                : m_clearPso;
-        BindResourceDescriptorIndices(commandList, receiverClearPso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(receiverClearPso.GetAPIPipelineState().GetHandle());
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] =
-            m_receiverSubpageMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] =
-            CLodVirtualShadowMaxReceiverPageCount;
-        commandList.PushConstants(
-            rhi::ShaderStage::Compute,
-            0,
-            MiscUintRootSignatureIndex,
-            0,
-            NumMiscUintRootConstants,
-            clearRootConstants);
-        commandList.Dispatch(
-            (CLodVirtualShadowMaxReceiverPageCount + 63u) / 64u,
-            1u,
-            1u);
-        BindResourceDescriptorIndices(commandList, m_clearPso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_clearPso.GetAPIPipelineState().GetHandle());
-    }
-
-    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = 1u;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        clearRootConstants);
-    commandList.Dispatch(1u, 1u, 1u);
-
-    rhi::BufferBarrier clearBarriers[3] = {};
-    clearBarriers[0].buffer = m_markedBlocksMaskBuffer->GetAPIResource().GetHandle();
-    clearBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-    clearBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-    clearBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
-    clearBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
-    clearBarriers[1].buffer = m_markedBlocksCountBuffer->GetAPIResource().GetHandle();
-    clearBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-    clearBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-    clearBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
-    clearBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
-    uint32_t clearBarrierCount = 2u;
-    if (m_receiverSubpageMode != CLodVirtualShadowReceiverSubpageModeOff) {
-        clearBarriers[2].buffer =
-            m_receiverSubpageMaskBuffer->GetAPIResource().GetHandle();
-        clearBarriers[2].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-        clearBarriers[2].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-        clearBarriers[2].beforeSync = rhi::ResourceSyncState::ComputeShading;
-        clearBarriers[2].afterSync = rhi::ResourceSyncState::ComputeShading;
-        clearBarrierCount = 3u;
-    }
-    rhi::BarrierBatch barrierBatch{};
-    barrierBatch.buffers =
-        rhi::Span<rhi::BufferBarrier>(clearBarriers, clearBarrierCount);
-    commandList.Barriers(barrierBatch);
-
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-    uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_TILE_WORK_DESCRIPTOR_INDEX] = m_tileWorkBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_TILE_COUNT_DESCRIPTOR_INDEX] = m_tileCountBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_WIDTH] = context.renderResolution.x;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_SCREEN_HEIGHT] = context.renderResolution.y;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_ACTIVE_CLIPMAP_COUNT] = m_activeClipmapCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_MASK_DESCRIPTOR_INDEX] = m_markedBlocksMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_LIST_DESCRIPTOR_INDEX] = m_markedBlocksListBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_COUNT_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_RECEIVER_MASK_DESCRIPTOR_INDEX] =
-        m_receiverSubpageMaskBuffer
-            ? m_receiverSubpageMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index
-            : 0u;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_RECEIVER_MASK_ENABLED] =
-        m_receiverSubpageMode;
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-
-    commandList.ExecuteIndirect((*m_commandSignature)->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
-
-    return {};
-}
-
-PreparedPass VirtualShadowMapMarkPagesPass::PrepareFrame(FramePreparationContext& preparation)
+VirtualShadowMarkFrameData VirtualShadowMapMarkPagesPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    PreparedData data{};
+    VirtualShadowMarkFrameData data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.clearOwner = m_clearPso.GetPayload();
-    data.clearUint2Owner = m_clearUint2Pso.GetPayload();
-    data.markOwner = m_pso.GetPayload();
-    data.clearPipeline = data.clearOwner->pso.Get().GetHandle();
-    data.clearUint2Pipeline = data.clearUint2Owner->pso.Get().GetHandle();
-    data.markPipeline = data.markOwner->pso.Get().GetHandle();
-    data.clearIndices = CaptureResourceDescriptorIndices(data.clearOwner->pipelineResources);
-    data.clearUint2Indices = CaptureResourceDescriptorIndices(data.clearUint2Owner->pipelineResources);
-    data.markIndices = CaptureResourceDescriptorIndices(data.markOwner->pipelineResources);
-    data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle();
-    data.indirectArguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
+    auto clear = preparation.CaptureProgramBinding(m_clearPso);
+    data.clearProgram = clear.program;
+    data.clearIndices = std::move(clear.descriptorIndices);
+    auto clearUint2 = preparation.CaptureProgramBinding(m_clearUint2Pso);
+    data.clearUint2Program = clearUint2.program;
+    data.clearUint2Indices = std::move(clearUint2.descriptorIndices);
+    auto mark = preparation.CaptureProgramBinding(m_pso);
+    data.markProgram = mark.program;
+    data.markIndices = std::move(mark.descriptorIndices);
+    data.commandSignature = preparation.CaptureCommandSignature(m_commandSignature);
+    data.indirectArguments = preparation.CaptureResource(m_indirectArgsBuffer->GetGlobalResourceID());
     data.clearMask[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_markedBlocksMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.clearMask[CLOD_CLEAR_UINT_BUFFER_COUNT] = CLodVirtualShadowMaxMarkedBlockCount;
     data.clearReceiver = data.clearMask;
@@ -245,10 +124,10 @@ PreparedPass VirtualShadowMapMarkPagesPass::PrepareFrame(FramePreparationContext
     data.clearCount = data.clearMask;
     data.clearCount[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.clearCount[CLOD_CLEAR_UINT_BUFFER_COUNT] = 1u;
-    data.barrierResources[0] = m_markedBlocksMaskBuffer->GetAPIResource().GetHandle();
-    data.barrierResources[1] = m_markedBlocksCountBuffer->GetAPIResource().GetHandle();
+    data.barrierResources[0] = preparation.CaptureResource(m_markedBlocksMaskBuffer->GetGlobalResourceID());
+    data.barrierResources[1] = preparation.CaptureResource(m_markedBlocksCountBuffer->GetGlobalResourceID());
     if (data.receiverGroups) {
-        data.barrierResources[2] = m_receiverSubpageMaskBuffer->GetAPIResource().GetHandle();
+        data.barrierResources[2] = preparation.CaptureResource(m_receiverSubpageMaskBuffer->GetGlobalResourceID());
         data.barrierCount = 3;
     }
     auto& c = data.mark;
@@ -263,41 +142,40 @@ PreparedPass VirtualShadowMapMarkPagesPass::PrepareFrame(FramePreparationContext
     c[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_COUNT_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     c[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_RECEIVER_MASK_DESCRIPTOR_INDEX] = m_receiverSubpageMaskBuffer ? m_receiverSubpageMaskBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0u;
     c[CLOD_VIRTUAL_SHADOW_MARK_BLOCKS_RECEIVER_MASK_ENABLED] = m_receiverSubpageMode;
-    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
+    return data;
 }
 
-void VirtualShadowMapMarkPagesPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)
+void VirtualShadowMapMarkPagesPass::Record(const VirtualShadowMarkFrameData& data, org::PassRecordContext& recording)
 {
     auto& commands = recording.Commands();
     commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
     const auto bind = [&](const std::vector<unsigned int>& indices) {
         if (!indices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
             static_cast<uint32_t>(indices.size()), indices.data());
     };
-    commands.BindPipeline(data.clearPipeline); bind(data.clearIndices);
+    commands.BindLayout(recording.ResolveLayout(data.clearProgram)); commands.BindPipeline(recording.Resolve(data.clearProgram)); bind(data.clearIndices);
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, data.clearMask.data());
     commands.Dispatch((CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u, 1u, 1u);
     if (data.receiverGroups) {
-        commands.BindPipeline(data.receiverUint2 ? data.clearUint2Pipeline : data.clearPipeline);
+        const auto program = data.receiverUint2 ? data.clearUint2Program : data.clearProgram;
+        commands.BindLayout(recording.ResolveLayout(program));
+        commands.BindPipeline(recording.Resolve(program));
         bind(data.receiverUint2 ? data.clearUint2Indices : data.clearIndices);
         commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, data.clearReceiver.data());
         commands.Dispatch(data.receiverGroups, 1u, 1u);
-        commands.BindPipeline(data.clearPipeline); bind(data.clearIndices);
+        commands.BindLayout(recording.ResolveLayout(data.clearProgram)); commands.BindPipeline(recording.Resolve(data.clearProgram)); bind(data.clearIndices);
     }
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, data.clearCount.data());
     commands.Dispatch(1u, 1u, 1u);
     std::array<rhi::BufferBarrier, 3> barriers{};
     for (uint32_t i = 0; i < data.barrierCount; ++i) {
-        barriers[i].buffer = data.barrierResources[i];
+        barriers[i].buffer = recording.Resolve(data.barrierResources[i]).GetHandle();
         barriers[i].beforeAccess = barriers[i].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
         barriers[i].beforeSync = barriers[i].afterSync = rhi::ResourceSyncState::ComputeShading;
     }
     rhi::BarrierBatch batch{}; batch.buffers = {barriers.data(), data.barrierCount}; commands.Barriers(batch);
-    commands.BindPipeline(data.markPipeline); bind(data.markIndices);
+    commands.BindLayout(recording.ResolveLayout(data.markProgram)); commands.BindPipeline(recording.Resolve(data.markProgram)); bind(data.markIndices);
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, data.mark.data());
-    commands.ExecuteIndirect(data.commandSignature, data.indirectArguments, 0, {}, 0, 1);
+    commands.ExecuteIndirect(data.commandSignature, recording.Resolve(data.indirectArguments).GetHandle(), 0, {}, 0, 1);
 }
-
-void VirtualShadowMapMarkPagesPass::Cleanup() {}

@@ -2,7 +2,9 @@
 
 #include <filesystem>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedEnvironmentDispatch.h"
+#include "Managers/EnvironmentManager.h"
 #include "Render/PreparedPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
@@ -13,185 +15,72 @@
 
 #include <vector>
 
-class EnvironmentFilterPass : public RenderPass, public IDynamicDeclaredResources {
+class EnvironmentFilterPass : public org::TypedRenderGraphPass<EnvironmentFilterPass, br::render::PreparedEnvironmentDispatch>, public IDynamicDeclaredResources {
 public:
     EnvironmentFilterPass() {
         CreatePrefilterPSO();
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+    void Declare(org::PassBuilder& builder) {
         for (const auto& j : m_pending) {
-            if (!j.srcCubemap || !j.dstPrefilteredCubemap) continue;
+            if (!j->work.srcCubemap || !j->work.dstPrefilteredCubemap) continue;
 
-            builder->WithShaderResource(j.srcCubemap);
-            builder->WithUnorderedAccess(j.dstPrefilteredCubemap);
+            builder.WithShaderResource(j->work.srcCubemap);
+            builder.WithUnorderedAccess(j->work.dstPrefilteredCubemap);
         }
 
         m_declaredResourcesChanged = false;
     }
 
-    void Setup() override { }
+
 
     void Update(const UpdateExecutionContext& context) override {
-        std::vector<Job> newPending;
-        auto* updateData = context.hostData->Get<UpdateContext>();
-
-        if (updateData->environmentManager) {
-            auto environments = updateData->environmentManager->GetAndClearEnvironmentsToPrefilter();
-            newPending.reserve(environments.size());
-
-            for (auto* env : environments) {
-                if (!env) continue;
-
-                auto srcCubeAsset = env->GetEnvironmentCubemap();
-                auto dstPrefilteredCube = env->GetEnvironmentPrefilteredCubemap();
-                if (!srcCubeAsset || !dstPrefilteredCube) continue;
-
-                auto srcCube = srcCubeAsset->ImagePtr();
-                if (!srcCube) continue;
-
-                Job j{};
-                j.srcCubemap = srcCube;
-                j.dstPrefilteredCubemap = dstPrefilteredCube;
-                j.baseResolution = env->GetReflectionCubemapResolution();
-                newPending.push_back(std::move(j));
-            }
-        }
-
-        auto sameJobs = [](const std::vector<Job>& a, const std::vector<Job>& b) {
-            if (a.size() != b.size()) return false;
-            for (size_t i = 0; i < a.size(); ++i) {
-                if (a[i].srcCubemap.get() != b[i].srcCubemap.get()) return false;
-                if (a[i].dstPrefilteredCubemap.get() != b[i].dstPrefilteredCubemap.get()) return false;
-                if (a[i].baseResolution != b[i].baseResolution) return false;
-            }
-            return true;
-        };
-
-        if (!sameJobs(m_pending, newPending)) {
-            m_declaredResourcesChanged = true;
-            m_pending = std::move(newPending);
-        }
+        const auto* input = context.hostData->Get<UpdateContext>();
+        if (input->environmentManager) m_work = input->environmentManager->GetPrefilterWorkQueue();
+        auto pending = m_work.Pending();
+        if (pending != m_pending) { m_pending = std::move(pending); m_declaredResourcesChanged = true; }
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        if (m_pending.empty()) return {};
-
-        auto dev = DeviceManager::GetInstance().GetDevice();
-
-		auto& cl = executionContext.commandList;
-
-        cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-        cl.BindLayout(m_layout->GetHandle());
-        cl.BindPipeline(m_pso->GetHandle());
-
-        for (const auto& j : m_pending)
-        {
-            if (!j.srcCubemap || !j.dstPrefilteredCubemap) continue;
-
-            const uint32_t baseRes = j.baseResolution;
-            const uint32_t srcSrvIndex = j.srcCubemap->GetSRVInfo(0).slot.index;
-
-            const uint32_t group = 8;
-
-            const uint32_t maxMipLevels = j.dstPrefilteredCubemap->GetNumUAVMipLevels();
-            for (uint32_t mip = 0; mip < maxMipLevels; ++mip)
-            {
-                const uint32_t size = std::max(1u, baseRes >> mip);
-                const uint32_t gx = (size + group - 1) / group;
-                const uint32_t gy = (size + group - 1) / group;
-
-                float roughness = (maxMipLevels > 1) ? (float)mip / float(maxMipLevels - 1) : 0.0f;
-
-                for (uint32_t face = 0; face < 6; ++face)
-                {
-                    const uint32_t dstUavIndex =
-                        j.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, face).slot.index;
-
-                    // Push constants: [srcSrv, dstUav, face, size, roughnessBits]
-                    uint32_t pc[5] = {
-                        srcSrvIndex,
-                        dstUavIndex,
-                        face,
-                        size,
-                        as_uint(roughness) // pass float as 32-bit payload
-                    };
-
-                    cl.PushConstants(rhi::ShaderStage::Compute, /*set*/0, /*binding*/0,
-                        /*dstOffset32*/0, /*num32*/5, pc);
-
-                    cl.Dispatch(gx, gy, 1);
-                }
-            }
-        }
-
-        m_declaredResourcesChanged = true;
-        m_pending.clear();
-
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
-        if (m_pending.empty()) return PreparedPass::NoOp();
+    br::render::PreparedEnvironmentDispatch Prepare(const org::PassPrepareContext& preparation) {
+        br::render::PreparedEnvironmentDispatch data;
+        if (m_pending.empty()) return data;
         const auto* context = preparation.preparationData->Get<UpdateContext>();
-        struct PreparedData {
-            rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
-            rhi::PipelineLayoutHandle layout{};
-            rhi::PipelineHandle pipeline{};
-            std::vector<Job> jobs;
-        };
-        PreparedData data{
-            .resourceHeap = context->textureDescriptorHeap.GetHandle(),
-            .samplerHeap = context->samplerDescriptorHeap.GetHandle(),
-            .layout = m_layout->GetHandle(),
-            .pipeline = m_pso->GetHandle(),
-            .jobs = m_pending,
-        };
-        m_pending.clear();
-        m_declaredResourcesChanged = true;
-        return PreparedPass::MakeOwned(std::move(data), +[](const PreparedData& data, RecordingContext& recording) {
-            auto& commands = recording.Commands();
-            commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
-            commands.BindLayout(data.layout);
-            commands.BindPipeline(data.pipeline);
-            for (const auto& job : data.jobs) {
-                const uint32_t src = job.srcCubemap->GetSRVInfo(0).slot.index;
-                const uint32_t mipCount = job.dstPrefilteredCubemap->GetNumUAVMipLevels();
-                for (uint32_t mip = 0; mip < mipCount; ++mip) {
-                    const uint32_t size = std::max(1u, job.baseResolution >> mip);
-                    for (uint32_t face = 0; face < 6; ++face) {
-                        const uint32_t values[5] = { src,
-                            job.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, face).slot.index,
-                            face, size, as_uint(mipCount > 1 ? float(mip) / float(mipCount - 1) : 0.0f) };
-                        commands.PushConstants(rhi::ShaderStage::Compute, 0, 0, 0, 5, values);
-                        commands.Dispatch((size + 7) / 8, (size + 7) / 8, 1);
-                    }
-                }
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.program = preparation.CaptureProgram(m_pso);
+        data.constantCount = 5;
+        for (const auto& entry : m_pending) {
+            const auto& job = entry->work;
+            const auto src = job.srcCubemap->GetSRVInfo(0).slot.index;
+            const auto mipCount = job.dstPrefilteredCubemap->GetNumUAVMipLevels();
+            for (uint32_t mip = 0; mip < mipCount; ++mip) {
+                const auto size = std::max(1u, job.baseResolution >> mip);
+                const auto roughness = as_uint(mipCount > 1 ? float(mip) / float(mipCount - 1) : 0.0f);
+                for (uint32_t face = 0; face < 6; ++face)
+                    data.faces.push_back({{src, job.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, face).slot.index, face, size, roughness}, (size + 7) / 8});
             }
-        });
+        }
+        m_work.Reserve(m_pending, preparation);
+        m_pending.clear(); m_declaredResourcesChanged = true;
+        return data;
+    }
+
+    static void Record(const br::render::PreparedEnvironmentDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordEnvironmentDispatch(data, recording);
     }
 
     bool DeclaredResourcesChanged() const override {
         return m_declaredResourcesChanged;
     }
 
-    void Cleanup() override {}
+
 
 private:
-    struct Job {
-        std::shared_ptr<PixelBuffer> srcCubemap;
-        std::shared_ptr<PixelBuffer> dstPrefilteredCubemap;
-        uint32_t baseResolution = 0;
-    };
-
-    std::vector<Job> m_pending;
+    EnvironmentManager::PrefilterWorkQueue m_work;
+    EnvironmentManager::PrefilterWorkQueue::Snapshot m_pending;
     bool m_declaredResourcesChanged = true;
 
-    rhi::PipelineLayoutPtr m_layout;
-    rhi::PipelinePtr       m_pso;
+    PipelineState m_pso;
 
     void CreatePrefilterPSO() {
         auto dev = DeviceManager::GetInstance().GetDevice();
@@ -220,9 +109,10 @@ private:
         ld.flags = rhi::PipelineLayoutFlags::PF_None;
         ld.pushConstants = { &pc, 1 };
         ld.staticSamplers = { &s, 1 };
-        auto result = dev.CreatePipelineLayout(ld, m_layout);
-        if (!m_layout || !m_layout->IsValid()) throw std::runtime_error("EnvFilter: layout failed");
-        m_layout->SetName("EnvFilter.ComputeLayout");
+        auto layout = std::make_shared<rhi::PipelineLayoutPtr>();
+        auto result = dev.CreatePipelineLayout(ld, *layout);
+        if (!*layout || !layout->Get().IsValid()) throw std::runtime_error("EnvFilter: layout failed");
+        layout->Get().SetName("EnvFilter.ComputeLayout");
 
         // Compile compute shader
         ShaderInfoBundle sib;
@@ -230,17 +120,20 @@ private:
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
 
         // Create compute PSO
-        rhi::SubobjLayout soLayout{ m_layout->GetHandle() };
+        rhi::SubobjLayout soLayout{ layout->Get().GetHandle() };
         rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()), "CSMain" };
 
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
             rhi::Make(soCS),
         };
-        result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        rhi::PipelinePtr pipeline;
+        result = dev.CreatePipeline(items, (uint32_t)std::size(items), pipeline);
         if (Failed(result)) {
             throw std::runtime_error("EnvFilter: PSO failed");
         }
-        m_pso->SetName("EnvFilter.ComputePSO");
+        pipeline->SetName("EnvFilter.ComputePSO");
+        m_pso = PipelineState(std::move(pipeline), compiled.resourceIDsHash,
+            compiled.resourceDescriptorSlots, layout, soLayout.layout);
     }
 };

@@ -4,48 +4,29 @@
 #include <memory>
 #include <utility>
 
-#include <tracy/Tracy.hpp>
-
 #include "Interfaces/IResourceResolver.h"
-#include "RenderPasses/Base/CopyPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 
 struct CLodDirectStorageLaunchInputs {
-	std::unique_ptr<IResourceResolver> targetSlabResolver;
-	std::function<PassReturn()> launchCallback;
-	std::function<bool()> hasPendingCallback;
+    std::unique_ptr<IResourceResolver> targetSlabResolver;
+    std::function<std::shared_ptr<const org::PreparedLifecycleEffect>()> reserveLaunch;
 };
 
-class CLodDirectStorageLaunchPass : public CopyPass {
+class CLodDirectStorageLaunchPass : public org::TypedRenderGraphPass<CLodDirectStorageLaunchPass> {
 public:
-	explicit CLodDirectStorageLaunchPass(CLodDirectStorageLaunchInputs inputs)
-		: m_inputs(std::move(inputs)) {}
-
-	void Setup() override {}
-	void Cleanup() override {}
-
-	PassReturn Execute(PassExecutionContext&) override {
-		ZoneScopedN("CLodDirectStorageLaunchPass::Execute");
-		return m_inputs.launchCallback ? m_inputs.launchCallback() : PassReturn{};
-	}
-
-	PreparedPass PrepareFrame(FramePreparationContext&) override {
-		if (!m_inputs.hasPendingCallback || !m_inputs.hasPendingCallback())
-			return PreparedPass::NoOp();
-		if (!m_inputs.launchCallback) return {};
-		auto result = m_inputs.launchCallback();
-		if (result.fence || result.fenceValue) return {};
-		return PreparedPass::NoOpWithExternalSignals(
-			std::move(result.externalSignalsAfterCompletion));
-	}
-
+    explicit CLodDirectStorageLaunchPass(CLodDirectStorageLaunchInputs inputs)
+        : m_inputs(std::move(inputs)) {}
+    void Declare(org::PassBuilder& builder) {
+        if (m_inputs.targetSlabResolver) builder.WithCopyDest(*m_inputs.targetSlabResolver);
+        builder.PreferQueue(org::QueueKind::Graphics);
+    }
+    org::EmptyPassFrameData Prepare(const org::PassPrepareContext& preparation) {
+        if (m_inputs.reserveLaunch) {
+            if (auto reservation = m_inputs.reserveLaunch()) preparation.Reserve(std::move(reservation));
+        }
+        return {};
+    }
+    static void Record(const org::EmptyPassFrameData&, org::PassRecordContext&) {}
 private:
-	void DeclareResourceUsages(CopyPassBuilder* builder) override {
-		ZoneScopedN("CLodDirectStorageLaunchPass::DeclareResourceUsages");
-		if (m_inputs.targetSlabResolver) {
-			builder->WithCopyDest(*m_inputs.targetSlabResolver);
-		}
-		builder->PreferQueue(QueueKind::Graphics);
-	}
-
-	CLodDirectStorageLaunchInputs m_inputs;
+    CLodDirectStorageLaunchInputs m_inputs;
 };

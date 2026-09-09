@@ -5,7 +5,8 @@
 #include <rhi.h>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
@@ -16,7 +17,7 @@ enum class ReyesReplayMergeKind
     Dice
 };
 
-class ReyesReplayMergePass final : public ComputePass {
+class ReyesReplayMergePass final : public org::TypedRenderGraphPass<ReyesReplayMergePass, br::render::PreparedComputeIndirect> {
 public:
     ReyesReplayMergePass(
         ReyesReplayMergeKind kind,
@@ -29,12 +30,10 @@ public:
         std::shared_ptr<Buffer> telemetryBuffer,
         uint32_t destQueueCapacity);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     ReyesReplayMergeKind m_kind = ReyesReplayMergeKind::Split;

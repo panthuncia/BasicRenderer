@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
@@ -25,11 +25,8 @@
 namespace br::render {
 struct PreparedForwardIndirect {
     struct Draw {
-        rhi::PipelineHandle pipeline{};
-        std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
-        std::vector<unsigned int> descriptorIndices;
-        rhi::ResourceHandle arguments{};
-        std::shared_ptr<const void> argumentsOwner;
+        org::PreparedProgramBinding program{};
+        org::PreparedResourceReference arguments{};
         uint64_t countOffset = 0;
         uint32_t maximumCount = 0;
     };
@@ -40,9 +37,11 @@ struct PreparedForwardIndirect {
     DirectX::XMUINT2 resolution{};
     std::array<unsigned int, 3> settings{};
     std::vector<Draw> draws;
+    bool enabled = false;
 };
 
 inline void RecordPreparedForwardIndirect(const PreparedForwardIndirect& data, org::RecordingContext& recording) {
+    if (!data.enabled) return;
     auto& commands = recording.Commands();
     if (data.resourceHeap.valid())
         commands.SetDescriptorHeaps(data.resourceHeap,
@@ -55,11 +54,13 @@ inline void RecordPreparedForwardIndirect(const PreparedForwardIndirect& data, o
     commands.BeginPass(pass); commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList); commands.BindLayout(data.layout);
     commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscEnableShadows, 3, data.settings.data());
     for (const auto& draw : data.draws) {
-        commands.BindPipeline(draw.pipeline);
-        if (!draw.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
+        commands.BindLayout(recording.ResolveLayout(draw.program.program));
+        commands.BindPipeline(recording.Resolve(draw.program.program));
+        if (!draw.program.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
-            static_cast<uint32_t>(draw.descriptorIndices.size()), draw.descriptorIndices.data());
-        commands.ExecuteIndirect(data.commandSignature, draw.arguments, 0, draw.arguments,
+            static_cast<uint32_t>(draw.program.descriptorIndices.size()), draw.program.descriptorIndices.data());
+        const auto arguments = recording.Resolve(draw.arguments).GetHandle();
+        commands.ExecuteIndirect(data.commandSignature, arguments, 0, arguments,
             draw.countOffset, draw.maximumCount);
     }
     commands.EndPass();
@@ -75,7 +76,8 @@ struct ForwardRenderPassInputs {
 };
 
 
-class ForwardRenderPass : public RenderPass {
+class ForwardRenderPass
+    : public org::TypedRenderGraphPass<ForwardRenderPass, br::render::PreparedForwardIndirect> {
 public:
     ForwardRenderPass()
     {
@@ -90,7 +92,8 @@ public:
     ~ForwardRenderPass() {
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+    void Declare(org::PassBuilder& declaration) {
+		auto* builder = &declaration;
 		auto inputs = Inputs<ForwardRenderPassInputs>();
 		m_wireframe = inputs.wireframe;
 		m_meshShaders = inputs.meshShaders;
@@ -153,17 +156,11 @@ public:
 		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
-    void Setup() override {
+    void Initialize() {
         RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
         if (getShadowsEnabled()) {
             RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
         }
-
-        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-            .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass))
-            .cached().cache_kind(flecs::QueryCacheAll)
-            .build();
 
         // Setup resources
         m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
@@ -173,46 +170,22 @@ public:
             //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        auto& commandList = executionContext.commandList;
-
-        SetupCommonState(context, commandList);
-        SetCommonRootConstants(context, commandList);
-
-
-        if (m_meshShaders) {
-            if (m_indirect) {
-                // Indirect drawing
-                ExecuteMeshShaderIndirect(context, commandList);
-            }
-            else {
-                // Regular mesh shader drawing
-                ExecuteMeshShader(context, commandList);
-            }
-        }
-        else {
-            // Regular forward rendering
-            ExecuteRegular(context, commandList);
-        }
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+    br::render::PreparedForwardIndirect Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         const auto published = context->publishedRendererState
             ? context->publishedRendererState->indirectWorkloads.payload.Get<br::render::PublishedIndirectState>() : nullptr;
-        if (!published) return PreparedPass::NoOp();
+        if (!published) return {};
         br::render::PreparedForwardIndirect data{};
+        data.enabled = true;
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
         data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
-        data.commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature().GetHandle();
+        data.commandSignature = preparation.CaptureCommandSignature(
+            CommandSignatureManager::GetInstance().CaptureDispatchMeshCommandSignature());
         data.color = m_pHDRTarget->GetRTVInfo(0).slot; data.depth = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
         data.resolution = context->renderResolution;
         data.settings = {getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled};
         if (!m_meshShaders || !m_indirect)
-            return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedForwardIndirect);
+            return data;
         const auto workloads = published->Find(context->primaryViewID, Engine::Primary::ForwardPass, false);
         data.draws.reserve(workloads.size());
         for (const auto* workload : workloads) {
@@ -224,21 +197,20 @@ public:
             auto payload = PSOManager::GetInstance().GetMeshPSO(
                 context->globalPSOFlags, workload->key.compileFlags, m_wireframe).GetPayload();
             br::render::PreparedForwardIndirect::Draw draw{};
-            draw.pipeline = payload->pso.Get().GetHandle(); draw.pipelineOwner = std::move(payload);
-            draw.descriptorIndices = CaptureResourceDescriptorIndices(draw.pipelineOwner->pipelineResources);
-            draw.arguments = workload->indirectArguments->GetAPIResource().GetHandle();
-            draw.argumentsOwner = workload->indirectArguments;
+            draw.program = preparation.CaptureProgramBinding(std::move(payload));
+            draw.arguments = preparation.CaptureResource(workload->indirectArguments->GetGlobalResourceID());
             draw.countOffset = workload->indirectArguments->GetUAVCounterOffset(); draw.maximumCount = workload->count;
             data.draws.push_back(std::move(draw));
         }
-        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedForwardIndirect);
+        return data;
     }
-
-    void Cleanup() override {
+    static void Record(const br::render::PreparedForwardIndirect& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedForwardIndirect(data, recording);
     }
 
 private:
-    // Common setup code that doesn't change between techniques
+    // Retained temporarily as implementation reference for the unimplemented
+    // direct-forward modes; graph execution uses only the typed packet above.
     void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());

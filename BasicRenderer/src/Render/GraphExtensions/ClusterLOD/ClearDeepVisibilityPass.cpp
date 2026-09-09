@@ -18,8 +18,9 @@ ClearDeepVisibilityPass::ClearDeepVisibilityPass(
     , m_deepVisibilityStatsBuffer(std::move(deepVisibilityStatsBuffer)) {
 }
 
-void ClearDeepVisibilityPass::DeclareResourceUsages(RenderPassBuilder* builder)
+void ClearDeepVisibilityPass::Declare(org::PassBuilder& declaration)
 {
+    auto* builder = &declaration;
     builder->WithUnorderedAccess(
         m_deepVisibilityCounterBuffer,
         m_deepVisibilityOverflowCounterBuffer,
@@ -29,9 +30,7 @@ void ClearDeepVisibilityPass::DeclareResourceUsages(RenderPassBuilder* builder)
     }
 }
 
-void ClearDeepVisibilityPass::Setup()
-{
-}
+
 
 void ClearDeepVisibilityPass::Update(const UpdateExecutionContext& executionContext)
 {
@@ -72,31 +71,21 @@ bool ClearDeepVisibilityPass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-PassReturn ClearDeepVisibilityPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-    rhi::UavClearUint headPointerClearValue{};
-    headPointerClearValue.v[0] = 0xFFFFFFFFu;
-    headPointerClearValue.v[1] = 0xFFFFFFFFu;
-    headPointerClearValue.v[2] = 0xFFFFFFFFu;
-    headPointerClearValue.v[3] = 0xFFFFFFFFu;
-
-    for (auto& texture : m_headPointerTextures) {
-        rhi::UavClearInfo clearInfo{};
-        clearInfo.cpuVisible = texture->GetUAVNonShaderVisibleInfo(0).slot;
-        clearInfo.shaderVisible = texture->GetUAVShaderVisibleInfo(0).slot;
-        clearInfo.resource = texture->GetAPIResource();
-        commandList.ClearUavUint(clearInfo, headPointerClearValue);
+br::render::PreparedResourceClears ClearDeepVisibilityPass::Prepare(const org::PassPrepareContext& preparation) {
+    const auto& context = *preparation.preparationData->Get<UpdateContext>();
+    br::render::PreparedResourceClears data{};
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    for (const auto& texture : m_headPointerTextures) {
+        const org::ResourceBindingToken binding{texture->GetGlobalResourceID(), 0};
+        data.clears.push_back({preparation.CaptureResource(binding),
+            preparation.CaptureDescriptor(binding, texture->GetUAVNonShaderVisibleInfo(0).slot),
+            preparation.CaptureDescriptor(binding, texture->GetUAVShaderVisibleInfo(0).slot),
+            0.0f, 0xFFFFFFFFu, false});
     }
-
-    return {};
+    return data;
 }
 
-void ClearDeepVisibilityPass::Cleanup()
-{
+void ClearDeepVisibilityPass::Record(const br::render::PreparedResourceClears& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedResourceClears(data, recording);
 }

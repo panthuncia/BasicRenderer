@@ -145,7 +145,7 @@ public:
 	void UnregisterTextureBinding(uint64_t bindingID);
 	void UnregisterTextureBindings(const std::vector<uint64_t>& bindingIDs);
 
-	std::shared_ptr<CopyPass> CreateTextureStreamingFeedbackReadbackPass();
+	std::shared_ptr<RenderPass> CreateTextureStreamingFeedbackReadbackPass();
 	MaterialTextureStreamingStats GetTextureStreamingStats(const std::vector<std::shared_ptr<Resource>>& activeTextureResources) const;
 	MaterialTextureStreamingReadinessStats GetTextureStreamingReadinessStats() const;
 

@@ -47,8 +47,10 @@ VirtualShadowMapDeduplicatePredictedPagesPass::VirtualShadowMapDeduplicatePredic
         "CLod.VirtualShadow.DeduplicatePredictedPages.PSO");
 }
 
-void VirtualShadowMapDeduplicatePredictedPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VirtualShadowMapDeduplicatePredictedPagesPass::Declare(org::PassBuilder& declaration)
 {
+    declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    auto* builder = &declaration;
     builder->WithShaderResource(
             m_predictiveRawPagesBuffer,
             m_predictiveRawPageCountBuffer)
@@ -63,86 +65,22 @@ void VirtualShadowMapDeduplicatePredictedPagesPass::DeclareResourceUsages(Comput
             m_dirtyFlagsBuffer);
 }
 
-void VirtualShadowMapDeduplicatePredictedPagesPass::Setup() {}
 
-PassReturn VirtualShadowMapDeduplicatePredictedPagesPass::Execute(PassExecutionContext& executionContext)
-{
-    auto& commandList = executionContext.commandList;
 
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_clearStatePso.GetResourceDescriptorSlots());
-
-    uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGES_DESCRIPTOR_INDEX] = m_predictiveRawPagesBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictiveRawPageCountBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_SCRATCH_BITSET_DESCRIPTOR_INDEX] = m_predictedScratchBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGES_DESCRIPTOR_INDEX] = m_predictedPagesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictedPageCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PAGE_TABLE_DESCRIPTOR_INDEX] =
-        m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PAGE_METADATA_DESCRIPTOR_INDEX] =
-        m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_DIRTY_FLAGS_DESCRIPTOR_INDEX] =
-        m_dirtyFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PHYSICAL_PAGE_COUNT] =
-        m_physicalPageCount;
-
-    commandList.BindPipeline(m_clearStatePso.GetAPIPipelineState().GetHandle());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-
-    constexpr uint32_t kThreadsPerGroup = 64u;
-    commandList.Dispatch((CLodVirtualShadowFallbackDependencyHashCapacity + kThreadsPerGroup - 1u) / kThreadsPerGroup, 1u, 1u);
-
-    rhi::GlobalBarrier globalBarrier{};
-    globalBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-    globalBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
-    globalBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-    globalBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-    rhi::BarrierBatch barrierBatch{};
-    barrierBatch.globals = rhi::Span<rhi::GlobalBarrier>(&globalBarrier, 1);
-    commandList.Barriers(barrierBatch);
-
-    BindResourceDescriptorIndices(commandList, m_deduplicatePso.GetResourceDescriptorSlots());
-    commandList.BindPipeline(m_deduplicatePso.GetAPIPipelineState().GetHandle());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-    commandList.Dispatch((CLodVirtualShadowPredictiveRawPageCapacity + kThreadsPerGroup - 1u) / kThreadsPerGroup, 1u, 1u);
-    commandList.Barriers(barrierBatch);
-
-    return {};
-}
-
-PreparedPass VirtualShadowMapDeduplicatePredictedPagesPass::PrepareFrame(FramePreparationContext& preparation)
+br::render::PreparedComputePipelineSequence VirtualShadowMapDeduplicatePredictedPagesPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    PreparedData data{};
+    br::render::PreparedComputePipelineSequence data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.clearOwner = m_clearStatePso.GetPayload();
-    data.deduplicateOwner = m_deduplicatePso.GetPayload();
-    data.clearPipeline = data.clearOwner->pso.Get().GetHandle();
-    data.deduplicatePipeline = data.deduplicateOwner->pso.Get().GetHandle();
-    data.clearDescriptorIndices = CaptureResourceDescriptorIndices(data.clearOwner->pipelineResources);
-    data.deduplicateDescriptorIndices = CaptureResourceDescriptorIndices(data.deduplicateOwner->pipelineResources);
-    data.constants.resize(NumMiscUintRootConstants);
-    auto& c = data.constants;
+    data.steps.resize(2);
+    auto clear = preparation.CaptureProgramBinding(m_clearStatePso);
+    data.steps[0].program = clear.program;
+    data.steps[0].descriptorIndices = std::move(clear.descriptorIndices);
+    auto deduplicate = preparation.CaptureProgramBinding(m_deduplicatePso);
+    data.steps[1].program = deduplicate.program;
+    data.steps[1].descriptorIndices = std::move(deduplicate.descriptorIndices);
+    auto& c = data.steps[0].constants;
     c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGES_DESCRIPTOR_INDEX] = m_predictiveRawPagesBuffer->GetSRVInfo(0).slot.index;
     c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictiveRawPageCountBuffer->GetSRVInfo(0).slot.index;
     c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_SCRATCH_BITSET_DESCRIPTOR_INDEX] = m_predictedScratchBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -153,38 +91,13 @@ PreparedPass VirtualShadowMapDeduplicatePredictedPagesPass::PrepareFrame(FramePr
     c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PHYSICAL_PAGE_COUNT] = m_physicalPageCount;
-    data.clearGroups = (CLodVirtualShadowFallbackDependencyHashCapacity + 63u) / 64u;
-    data.deduplicateGroups = (CLodVirtualShadowPredictiveRawPageCapacity + 63u) / 64u;
-    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
+    data.steps[0].groupsX = (CLodVirtualShadowFallbackDependencyHashCapacity + 63u) / 64u;
+    data.steps[1].groupsX = (CLodVirtualShadowPredictiveRawPageCapacity + 63u) / 64u;
+    data.steps[1].constants = c;
+    data.steps[0].uavBarrierAfter = data.steps[1].uavBarrierAfter = true;
+    return data;
 }
 
-void VirtualShadowMapDeduplicatePredictedPagesPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)
-{
-    auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
-    const auto bindIndices = [&](const std::vector<unsigned int>& indices) {
-        if (!indices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
-            org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
-            static_cast<uint32_t>(indices.size()), indices.data());
-    };
-    commands.BindPipeline(data.clearPipeline);
-    bindIndices(data.clearDescriptorIndices);
-    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, data.constants.data());
-    commands.Dispatch(data.clearGroups, 1, 1);
-    rhi::GlobalBarrier barrier{};
-    barrier.beforeSync = barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
-    barrier.beforeAccess = barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-    rhi::BarrierBatch barriers{};
-    barriers.globals = {&barrier, 1};
-    commands.Barriers(barriers);
-    commands.BindPipeline(data.deduplicatePipeline);
-    bindIndices(data.deduplicateDescriptorIndices);
-    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, data.constants.data());
-    commands.Dispatch(data.deduplicateGroups, 1, 1);
-    commands.Barriers(barriers);
+void VirtualShadowMapDeduplicatePredictedPagesPass::Record(const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputePipelineSequence(data, recording);
 }
-
-void VirtualShadowMapDeduplicatePredictedPagesPass::Cleanup() {}

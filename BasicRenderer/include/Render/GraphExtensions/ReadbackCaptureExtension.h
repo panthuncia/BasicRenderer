@@ -12,7 +12,7 @@
 
 class ReadbackCaptureExtension final : public RenderGraph::IRenderGraphExtension {
 public:
-    explicit ReadbackCaptureExtension(org::runtime::IReadbackService* readbackService)
+    explicit ReadbackCaptureExtension(std::shared_ptr<org::runtime::IReadbackService> readbackService)
         : m_readbackService(readbackService) {
     }
 
@@ -126,5 +126,5 @@ public:
     }
 
 private:
-    org::runtime::IReadbackService* m_readbackService = nullptr; // non-owning
+    std::shared_ptr<org::runtime::IReadbackService> m_readbackService;
 };

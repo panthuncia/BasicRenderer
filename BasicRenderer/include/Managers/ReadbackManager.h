@@ -10,6 +10,7 @@
 #include <rhi.h>
 
 #include "OpenRenderGraph/OpenRenderGraph.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 
 namespace br {
 
@@ -28,6 +29,15 @@ public:
     void Cleanup();
 
 private:
+    struct ReadbackFrameData {
+        struct Copy {
+            org::PreparedResourceReference source{};
+            rhi::ResourceHandle destination{};
+            rhi::CopyableFootprint footprint{};
+            uint32_t mip = 0, slice = 0;
+        };
+        std::vector<Copy> copies;
+    };
     struct ReadbackInfo {
         bool cubemap = false;
         std::shared_ptr<PixelBuffer> texture;
@@ -44,28 +54,18 @@ private:
         uint64_t fenceValue = 0;
     };
 
-    class ReadbackPass : public RenderPass, public IHasImmediateModeCommands {
+    class ReadbackPass
+        : public org::TypedRenderGraphPass<ReadbackPass, ReadbackFrameData>,
+          public IDynamicDeclaredResources {
     public:
         explicit ReadbackPass(ReadbackManager& owner)
             : m_owner(owner) {
         }
 
-        void Setup() override {
-        }
-
-        void RecordImmediateCommands(ImmediateExecutionContext& context) override;
-
-        PassReturn Execute(PassExecutionContext& context) override;
-
-        PreparedPass PrepareFrame(FramePreparationContext&) override {
-            std::scoped_lock lock(m_owner.m_mutex);
-            return m_owner.m_queuedReadbacks.empty() && !m_hasWork
-                ? PreparedPass::NoOp()
-                : PreparedPass{};
-        }
-
-        void Cleanup() override {
-        }
+        void Declare(org::PassBuilder& builder);
+        ReadbackFrameData Prepare(const org::PassPrepareContext& preparation);
+        static void Record(const ReadbackFrameData& data, org::PassRecordContext& recording);
+        bool DeclaredResourcesChanged() const override;
 
         void SetReadbackFence(rhi::Timeline fence) {
             m_readbackFence = fence;
@@ -74,8 +74,6 @@ private:
     private:
         ReadbackManager& m_owner;
         rhi::Timeline m_readbackFence;
-        uint64_t m_pendingFenceValue = 0;
-        bool m_hasWork = false;
     };
 
     uint64_t AcquireNextFenceValue() noexcept {

@@ -7,6 +7,7 @@
 #include <vector>
 #include <DirectXMath.h>
 #include <functional>
+#include <mutex>
 
 #include <sl.h>
 #include <sl_consts.h>
@@ -133,7 +134,10 @@ private:
     bool m_resetUpscalerHistory = true;
     // Streamline reports memory pressure as a warning result. Avoid turning a
     // recoverable, persistent condition into one error log entry per frame.
-    bool m_reportedDlssOutOfMemory = false;
+	bool m_reportedDlssOutOfMemory = false;
+    // Vendor upscalers own mutable history/context state. Recording may run on
+    // workers for different frames, so serialize evaluation in frame order.
+    std::mutex m_evaluateMutex;
 };
 
 inline UpscalingManager& UpscalingManager::GetInstance() {

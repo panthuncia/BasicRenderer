@@ -1141,11 +1141,10 @@ public:
             m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
         constants.phaseAndDepthDescriptor = m_latePhase ? kLatePhaseBit : 0u;
         constants.allocationRecords = m_resources->diagnostics->GetUAVShaderVisibleInfo(0).slot.index;
-        data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
         auto program = CaptureProgramBinding(preparation, m_pso);
         data.program = program.program;
         data.descriptorIndices = std::move(program.descriptorIndices);
-        data.commandSignatureOwner = m_signature; data.commandSignature = (*m_signature)->GetHandle();
+        data.commandSignature = preparation.CaptureCommandSignature(m_signature);
         data.argumentsReference = preparation.CaptureResource(m_argumentsBinding);
         data.countBufferReference = preparation.CaptureResource(m_countBinding); data.countOffset = sizeof(uint32_t);
         data.maximumCount = m_resources->typeCount;
@@ -1158,7 +1157,22 @@ public:
 private: std::shared_ptr<WindSharedResources> m_resources; PipelineState m_pso; std::shared_ptr<rhi::CommandSignaturePtr> m_signature; ResourceBindingToken m_argumentsBinding{}, m_countBinding{}; bool m_latePhase = false;
 };
 
-class WindSkeletonDebugPass final : public RenderPass {
+struct WindSkeletonDebugFrameData {
+    bool drawSkeletons = false;
+    bool drawBoundingSpheres = false;
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{}, rtvHeap{};
+    uint32_t rtvIndex = 0;
+    DirectX::XMUINT2 outputResolution{};
+    org::PreparedProgramBinding skeletonProgram{}, sphereProgram{};
+    rhi::CommandSignatureHandle signature{};
+    org::PreparedResourceReference indirectCommands{}, allocationCounters{};
+    std::array<uint32_t, 12> constants{};
+    uint32_t typeCount = 0;
+    uint32_t residentPlacementCount = 0;
+};
+
+class WindSkeletonDebugPass final
+    : public org::TypedRenderGraphPass<WindSkeletonDebugPass, WindSkeletonDebugFrameData> {
 public:
     explicit WindSkeletonDebugPass(std::shared_ptr<WindSharedResources> resources) : m_resources(std::move(resources))
     {
@@ -1184,9 +1198,10 @@ public:
         const rhi::PipelineStreamItem items[] = { rhi::Make(soLayout), rhi::Make(soMS), rhi::Make(soPS),
             rhi::Make(soRaster), rhi::Make(soBlend), rhi::Make(soDepth), rhi::Make(soTargets),
             rhi::Make(soSample), rhi::Make(soTopology) };
-        if (Failed(DeviceManager::GetInstance().GetDevice().CreatePipeline(items, static_cast<uint32_t>(std::size(items)), m_pso)))
+        m_pso = std::make_shared<rhi::PipelinePtr>();
+        if (Failed(DeviceManager::GetInstance().GetDevice().CreatePipeline(items, static_cast<uint32_t>(std::size(items)), *m_pso)))
             throw std::runtime_error("Failed to create procedural-wind skeleton debug PSO");
-        m_pso->SetName("ProceduralWind.SkeletonDebug.PSO");
+        (*m_pso)->SetName("ProceduralWind.SkeletonDebug.PSO");
 
         ShaderInfoBundle sphereShaders;
         sphereShaders.meshShader = { L"shaders/debugSkeleton.hlsl", L"MSWindAssemblySphereMain", L"ms_6_6" };
@@ -1201,19 +1216,22 @@ public:
         const rhi::PipelineStreamItem sphereItems[] = { rhi::Make(soLayout), rhi::Make(sphereMS), rhi::Make(spherePS),
             rhi::Make(sphereRasterState), rhi::Make(soBlend), rhi::Make(soDepth), rhi::Make(soTargets),
             rhi::Make(soSample), rhi::Make(sphereTopology) };
+        m_spherePso = std::make_shared<rhi::PipelinePtr>();
         if (Failed(DeviceManager::GetInstance().GetDevice().CreatePipeline(
-                sphereItems, static_cast<uint32_t>(std::size(sphereItems)), m_spherePso)))
+                sphereItems, static_cast<uint32_t>(std::size(sphereItems)), *m_spherePso)))
             throw std::runtime_error("Failed to create procedural-wind assembly-sphere debug PSO");
-        m_spherePso->SetName("ProceduralWind.AssemblySphereDebug.PSO");
+        (*m_spherePso)->SetName("ProceduralWind.AssemblySphereDebug.PSO");
         rhi::IndirectArg args[] = {
             {.kind=rhi::IndirectArgKind::Constant,.u={.rootConstants={IndirectCommandSignatureRootSignatureIndex,0,3}}},
             {.kind=rhi::IndirectArgKind::DispatchMesh}
         };
+        m_signature = std::make_shared<rhi::CommandSignaturePtr>();
         DeviceManager::GetInstance().GetDevice().CreateCommandSignature(
-            {rhi::Span<rhi::IndirectArg>(args, 2), sizeof(WindIndirectCommand)}, layout.GetHandle(), m_signature);
+            {rhi::Span<rhi::IndirectArg>(args, 2), sizeof(WindIndirectCommand)}, layout.GetHandle(), *m_signature);
     }
-    void DeclareResourceUsages(RenderPassBuilder* b) override
+    void Declare(org::PassBuilder& declaration)
     {
+        auto* b = &declaration;
         b->WithShaderResource(m_resources->windTypes, m_resources->boneEntries, m_resources->activeInstances,
             Builtin::SkinnedAssemblyPlacements, Builtin::ActiveSkinnedAssemblyPlacements,
             Builtin::SkeletonResources::BoneTransforms, Builtin::SkeletonResources::InverseBindMatrices,
@@ -1223,21 +1241,33 @@ public:
             .WithIndirectArguments(m_resources->indirectCommands, m_resources->allocationCounters)
             .WithRenderTarget(Builtin::Backbuffer);
     }
-    void Setup() override {} void Update(const UpdateExecutionContext&) override {}
-    PassReturn Execute(PassExecutionContext& context) override
+    WindSkeletonDebugFrameData Prepare(const org::PassPrepareContext& preparation)
     {
         const auto outputType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("outputType")();
         const bool drawSkeletons = outputType == static_cast<unsigned int>(OutputType::SKELETONS);
         const bool drawBoundingSpheres = outputType == static_cast<unsigned int>(OutputType::SKELETON_BOUNDING_SPHERES);
-        if ((!drawSkeletons && !drawBoundingSpheres) || !m_resources->typeCount) return {};
-        auto* rc = context.hostData->Get<RenderContext>(); auto& cmd = context.commandList;
-        cmd.SetDescriptorHeaps(rc->textureDescriptorHeap.GetHandle(), rc->samplerDescriptorHeap.GetHandle());
-        rhi::PassBeginInfo pass{}; rhi::ColorAttachment color{};
-        color.rtv = { rc->rtvHeap.GetHandle(), rc->frameIndex }; color.loadOp = rhi::LoadOp::Load; color.storeOp = rhi::StoreOp::Store;
-        pass.colors = { &color }; pass.width = rc->outputResolution.x; pass.height = rc->outputResolution.y; pass.debugName = "Wind Skeleton Debug Overlay";
-        cmd.BeginPass(pass);
-        cmd.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-        uint32_t constants[12] = {
+        WindSkeletonDebugFrameData data{};
+        if ((!drawSkeletons && !drawBoundingSpheres) || !m_resources->typeCount) return data;
+        const auto* rc = preparation.preparationData->Get<UpdateContext>();
+        data.drawSkeletons = drawSkeletons;
+        data.drawBoundingSpheres = drawBoundingSpheres;
+        data.resourceHeap = rc->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = rc->samplerDescriptorHeap.GetHandle();
+        data.rtvHeap = rc->rtvHeap;
+        data.rtvIndex = rc->frameIndex;
+        data.outputResolution = rc->outputResolution;
+        data.typeCount = m_resources->typeCount;
+        data.residentPlacementCount = m_resources->residentPlacementCount;
+        preparation.Retain(m_resources);
+        if (drawSkeletons) {
+            data.skeletonProgram = preparation.CaptureProgramBinding(m_pso, m_bindings);
+            data.signature = preparation.CaptureCommandSignature(m_signature);
+            data.indirectCommands = preparation.CaptureResource(m_resources->indirectCommands->GetGlobalResourceID());
+            data.allocationCounters = preparation.CaptureResource(m_resources->allocationCounters->GetGlobalResourceID());
+        }
+        if (drawBoundingSpheres)
+            data.sphereProgram = preparation.CaptureProgramBinding(m_spherePso, m_sphereBindings);
+        data.constants = {
             m_resources->windTypes->GetSRVInfo(0).slot.index, m_resources->boneEntries->GetSRVInfo(0).slot.index,
             m_resources->activeInstances->GetSRVInfo(0).slot.index,
             m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms)->GetSRVInfo(0).slot.index,
@@ -1249,39 +1279,48 @@ public:
             m_resources->skinnedPlacements ? m_resources->skinnedPlacements->GetSRVInfo(0).slot.index : 0u,
             m_resources->activeSkinnedPlacements ? m_resources->activeSkinnedPlacements->GetSRVInfo(0).slot.index : 0u,
             m_resources->residentPlacementCount };
-        cmd.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, 12, constants);
-        if (drawSkeletons) {
-            cmd.SetPrimitiveTopology(rhi::PrimitiveTopology::LineList);
-            cmd.BindPipeline(m_pso->GetHandle());
-            BindResourceDescriptorIndices(cmd, m_bindings);
-            cmd.ExecuteIndirect(m_signature->GetHandle(), m_resources->indirectCommands->GetAPIResource().GetHandle(), 0,
-                m_resources->allocationCounters->GetAPIResource().GetHandle(), sizeof(uint32_t), m_resources->typeCount);
-        }
-        if (drawBoundingSpheres && m_resources->residentPlacementCount != 0u) {
-            cmd.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
-            cmd.BindPipeline(m_spherePso->GetHandle());
-            BindResourceDescriptorIndices(cmd, m_sphereBindings);
-            cmd.DispatchMesh(m_resources->residentPlacementCount, 1u, 1u);
-        }
-        return {};
+        return data;
     }
-    PreparedPass PrepareFrame(FramePreparationContext&) override
+    static void Record(const WindSkeletonDebugFrameData& data, org::PassRecordContext& recording)
     {
-        const auto outputType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("outputType")();
-        const bool drawSkeletons = outputType == static_cast<unsigned int>(OutputType::SKELETONS);
-        const bool drawBoundingSpheres = outputType == static_cast<unsigned int>(OutputType::SKELETON_BOUNDING_SPHERES);
-        // Normal scene rendering has no commands for this diagnostic pass. Keep
-        // the debug modes on the explicitly reported legacy route until their
-        // ImGui/debug drawing packet is migrated.
-        return (!drawSkeletons && !drawBoundingSpheres) || !m_resources->typeCount
-            ? PreparedPass::NoOp() : PreparedPass{};
+        if (!data.drawSkeletons && !data.drawBoundingSpheres) return;
+        auto& cmd = recording.Commands();
+        cmd.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+        rhi::PassBeginInfo pass{}; rhi::ColorAttachment color{};
+        color.rtv = { data.rtvHeap, data.rtvIndex }; color.loadOp = rhi::LoadOp::Load; color.storeOp = rhi::StoreOp::Store;
+        pass.colors = { &color }; pass.width = data.outputResolution.x; pass.height = data.outputResolution.y; pass.debugName = "Wind Skeleton Debug Overlay";
+        cmd.BeginPass(pass);
+        const auto program = data.drawSkeletons ? data.skeletonProgram.program : data.sphereProgram.program;
+        cmd.BindLayout(recording.ResolveLayout(program));
+        cmd.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, 12, data.constants.data());
+        if (data.drawSkeletons) {
+            cmd.SetPrimitiveTopology(rhi::PrimitiveTopology::LineList);
+            cmd.BindPipeline(recording.Resolve(data.skeletonProgram.program));
+            if (!data.skeletonProgram.descriptorIndices.empty())
+                cmd.PushConstants(rhi::ShaderStage::AllGraphics, 0,
+                    org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+                    static_cast<uint32_t>(data.skeletonProgram.descriptorIndices.size()),
+                    data.skeletonProgram.descriptorIndices.data());
+            cmd.ExecuteIndirect(data.signature, recording.Resolve(data.indirectCommands).GetHandle(), 0,
+                recording.Resolve(data.allocationCounters).GetHandle(), sizeof(uint32_t), data.typeCount);
+        }
+        if (data.drawBoundingSpheres && data.residentPlacementCount != 0u) {
+            cmd.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
+            cmd.BindPipeline(recording.Resolve(data.sphereProgram.program));
+            if (!data.sphereProgram.descriptorIndices.empty())
+                cmd.PushConstants(rhi::ShaderStage::AllGraphics, 0,
+                    org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+                    static_cast<uint32_t>(data.sphereProgram.descriptorIndices.size()),
+                    data.sphereProgram.descriptorIndices.data());
+            cmd.DispatchMesh(data.residentPlacementCount, 1u, 1u);
+        }
+        cmd.EndPass();
     }
-    void Cleanup() override { m_signature.Reset(); m_spherePso.Reset(); m_pso.Reset(); }
 private:
     std::shared_ptr<WindSharedResources> m_resources;
-    rhi::PipelinePtr m_pso;
-    rhi::PipelinePtr m_spherePso;
-    rhi::CommandSignaturePtr m_signature;
+    std::shared_ptr<rhi::PipelinePtr> m_pso;
+    std::shared_ptr<rhi::PipelinePtr> m_spherePso;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_signature;
     PipelineResources m_bindings;
     PipelineResources m_sphereBindings;
 };

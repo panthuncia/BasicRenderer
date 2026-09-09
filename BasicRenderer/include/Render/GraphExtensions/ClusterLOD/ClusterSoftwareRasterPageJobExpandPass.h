@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -15,7 +16,8 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "ShaderBuffers.h"
@@ -28,7 +30,13 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ClusterSoftwareRasterPageJobExpandPass : public ComputePass {
+struct ClusterPageJobExpandFrameData {
+    std::vector<br::render::PreparedComputeIndirect> dispatches;
+    std::vector<br::render::PreparedComputeDispatch> clears;
+    std::array<org::PreparedResourceReference, 3> barriers;
+};
+
+class ClusterSoftwareRasterPageJobExpandPass : public org::TypedRenderGraphPass<ClusterSoftwareRasterPageJobExpandPass, ClusterPageJobExpandFrameData> {
 public:
     ClusterSoftwareRasterPageJobExpandPass(
         std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
@@ -68,10 +76,11 @@ public:
         };
 
         auto device = DeviceManager::GetInstance().GetDevice();
+        m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>();
         device.CreateCommandSignature(
             rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 2), sizeof(RasterizeClustersCommand) },
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-            m_commandSignature);
+            *m_commandSignature);
 
         m_rigidPso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -110,8 +119,10 @@ public:
             "CLod_SoftwarePageJobExpandClearUintPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override
+    void Declare(org::PassBuilder& declaration)
     {
+        declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* builder = &declaration;
         builder->WithShaderResource(
                 Builtin::PerMeshBuffer,
                 Builtin::PerMaterialDataBuffer,
@@ -150,81 +161,41 @@ public:
         }
     }
 
-    void Setup() override {}
-
-    void Update(const UpdateExecutionContext&) override {}
-
-    PassReturn Execute(PassExecutionContext& executionContext) override
-    {
+    ClusterPageJobExpandFrameData Prepare(const org::PassPrepareContext& preparation) {
+        ClusterPageJobExpandFrameData data{};
         if (m_runWhenComputeSWRasterEnabledOnly &&
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
-            return {};
+            return data;
         }
 
         auto& settings = SettingsManager::GetInstance();
         if (!CLodVSMRasterModeUsesLargeClusterPageJob(
                 settings.getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)())) {
-            return {};
+            return data;
         }
 
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        auto& commandList = executionContext.commandList;
-
-        commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
-        BindResourceDescriptorIndices(commandList, m_clearPso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_clearPso.GetAPIPipelineState().GetHandle());
-
-        uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
-        for (const auto& pageJobCountBuffer : m_pageJobCountBuffers) {
-            clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = pageJobCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
-            clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = 1u;
-            commandList.PushConstants(
-                rhi::ShaderStage::Compute,
-                0,
-                MiscUintRootSignatureIndex,
-                0,
-                NumMiscUintRootConstants,
-                clearRootConstants);
-            commandList.Dispatch(1u, 1u, 1u);
+        const auto& context = *preparation.preparationData->Get<UpdateContext>();
+        const auto signature = preparation.CaptureCommandSignature(m_commandSignature);
+        const auto clear = preparation.CaptureProgramBinding(m_clearPso);
+        const auto appendClear = [&](const std::shared_ptr<Buffer>& buffer, uint32_t value, uint32_t count) {
+            br::render::PreparedComputeDispatch dispatch{};
+            dispatch.resourceHeap = context.textureDescriptorHeap.GetHandle();
+            dispatch.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+            dispatch.program = clear.program;
+            dispatch.descriptorIndices = clear.descriptorIndices;
+            dispatch.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = buffer->GetUAVShaderVisibleInfo(0).slot.index;
+            dispatch.constants[CLOD_CLEAR_UINT_BUFFER_VALUE] = value;
+            dispatch.constants[CLOD_CLEAR_UINT_BUFFER_COUNT] = count;
+            dispatch.groupsX = (count + 63u) / 64u;
+            data.clears.push_back(std::move(dispatch));
+        };
+        for (uint32_t i = 0; i < m_pageJobCountBuffers.size(); ++i) {
+            appendClear(m_pageJobCountBuffers[i], 0u, 1u);
+            data.barriers[i] = preparation.CaptureResource(m_pageJobCountBuffers[i]->GetGlobalResourceID());
         }
-
-        const uint32_t tagCount = static_cast<uint32_t>(m_pageJobClusterTagsBuffer->GetSize() / sizeof(uint32_t));
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_pageJobClusterTagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0xFFFFFFFFu;
-        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = tagCount;
-        if (tagCount > 0u) {
-            commandList.PushConstants(
-                rhi::ShaderStage::Compute,
-                0,
-                MiscUintRootSignatureIndex,
-                0,
-                NumMiscUintRootConstants,
-                clearRootConstants);
-            commandList.Dispatch((tagCount + 63u) / 64u, 1u, 1u);
-        }
-
-        std::array<rhi::BufferBarrier, 3> clearBarriers{};
-        for (uint32_t variantIndex = 0u; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
-            clearBarriers[variantIndex].buffer = m_pageJobCountBuffers[variantIndex]->GetAPIResource().GetHandle();
-            clearBarriers[variantIndex].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-            clearBarriers[variantIndex].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-            clearBarriers[variantIndex].beforeSync = rhi::ResourceSyncState::ComputeShading;
-            clearBarriers[variantIndex].afterSync = rhi::ResourceSyncState::ComputeShading;
-        }
-        clearBarriers[2].buffer = m_pageJobClusterTagsBuffer->GetAPIResource().GetHandle();
-        clearBarriers[2].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-        clearBarriers[2].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-        clearBarriers[2].beforeSync = rhi::ResourceSyncState::ComputeShading;
-        clearBarriers[2].afterSync = rhi::ResourceSyncState::ComputeShading;
-
-        rhi::BarrierBatch clearBarrierBatch{};
-        clearBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(clearBarriers.data(), static_cast<uint32_t>(clearBarriers.size()));
-        commandList.Barriers(clearBarrierBatch);
-
+        appendClear(m_pageJobClusterTagsBuffer, 0xFFFFFFFFu,
+            static_cast<uint32_t>(m_pageJobClusterTagsBuffer->GetSize() / sizeof(uint32_t)));
+        data.barriers[2] = preparation.CaptureResource(m_pageJobClusterTagsBuffer->GetGlobalResourceID());
         uint32_t misc[NumMiscUintRootConstants] = {};
         misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
         misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
@@ -251,43 +222,53 @@ public:
 
         const uint32_t numBuckets = context.preparedRasterBucketCount;
         if (numBuckets == 0) {
-            return {};
+            return data;
         }
 
-        auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
-        const uint64_t stride = sizeof(RasterizeClustersCommand);
+        const auto arguments = preparation.CaptureResource(m_rasterBucketsIndirectArgsBuffer->GetGlobalResourceID());
+        const std::array bindings{
+            preparation.CaptureProgramBinding(m_rigidPso),
+            preparation.CaptureProgramBinding(m_doubleSidedPso),
+            preparation.CaptureProgramBinding(m_skinnedPso),
+            preparation.CaptureProgramBinding(m_skinnedDoubleSidedPso)};
+        data.dispatches.reserve(numBuckets);
         for (uint32_t i = 0; i < numBuckets; ++i) {
-            const MaterialRasterFlags flags = context.preparedRasterBucketFlags.at(i);
+            const auto flags = context.preparedRasterBucketFlags.at(i);
             const uint32_t variantIndex = (flags & MaterialRasterFlagsSkinned) ? 1u : 0u;
-            const bool doubleSided =
-                (flags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) != 0;
-            const PipelineState& pso =
-                variantIndex != 0u
-                    ? (doubleSided ? m_skinnedDoubleSidedPso : m_skinnedPso)
-                    : (doubleSided ? m_doubleSidedPso : m_rigidPso);
-
-            misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] =
-                m_pageJobRecordsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
-            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] =
-                m_pageJobCountBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
-            commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-            commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-            const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
-            commandList.ExecuteIndirect(
-                m_commandSignature->GetHandle(),
-                apiResource.GetHandle(),
-                argOffset,
-                {},
-                0,
-                1);
+            const bool doubleSided = (flags & MaterialRasterFlagsDoubleSided) != 0;
+            misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
+            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
+            const auto& binding = bindings[variantIndex * 2u + (doubleSided ? 1u : 0u)];
+            br::render::PreparedComputeIndirect dispatch{};
+            dispatch.resourceHeap = context.textureDescriptorHeap.GetHandle();
+            dispatch.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+            dispatch.program = binding.program;
+            dispatch.descriptorIndices = binding.descriptorIndices;
+            std::copy(std::begin(misc), std::end(misc), dispatch.constants.begin());
+            dispatch.commandSignature = signature;
+            dispatch.argumentsReference = arguments;
+            dispatch.argumentsOffset = static_cast<uint64_t>(i) * sizeof(RasterizeClustersCommand);
+            data.dispatches.push_back(std::move(dispatch));
         }
-
-        return {};
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const ClusterPageJobExpandFrameData& data, org::PassRecordContext& recording) {
+        if (data.clears.empty()) return;
+        for (const auto& clear : data.clears)
+            br::render::RecordPreparedComputeDispatch(clear, recording);
+        std::array<rhi::BufferBarrier, 3> barriers{};
+        for (size_t i = 0; i < barriers.size(); ++i) {
+            barriers[i].buffer = recording.Resolve(data.barriers[i]).GetHandle();
+            barriers[i].beforeAccess = barriers[i].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+            barriers[i].beforeSync = barriers[i].afterSync = rhi::ResourceSyncState::ComputeShading;
+        }
+        rhi::BarrierBatch batch{};
+        batch.buffers = {barriers.data(), static_cast<uint32_t>(barriers.size())};
+        recording.Commands().Barriers(batch);
+        for (const auto& dispatch : data.dispatches)
+            br::render::RecordPreparedComputeIndirect(dispatch, recording);
+    }
 
 private:
     PipelineState m_rigidPso;
@@ -295,7 +276,7 @@ private:
     PipelineState m_doubleSidedPso;
     PipelineState m_skinnedDoubleSidedPso;
     PipelineState m_clearPso;
-    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_compactedVisibleClusterTransformIndicesBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;

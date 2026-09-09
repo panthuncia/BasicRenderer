@@ -13,17 +13,12 @@ namespace br::render {
 
 struct PreparedRenderIndirectSequence {
     struct Step {
-        rhi::PipelineHandle pipeline{};
-        std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
-        std::vector<unsigned int> descriptorIndices;
+        org::PreparedProgramBinding program{};
         uint64_t argumentsOffset = 0;
     };
     rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
-    rhi::PipelineLayoutHandle layout{};
     rhi::CommandSignatureHandle commandSignature{};
-    rhi::ResourceHandle arguments{};
-    std::shared_ptr<const void> argumentsOwner;
-	std::optional<org::PreparedResourceReference> argumentsReference;
+    org::PreparedResourceReference arguments{};
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
     std::array<rhi::ColorAttachment, 3> colors{};
     uint32_t colorCount = 0;
@@ -54,16 +49,17 @@ inline void RecordPreparedRenderIndirectSequence(
         commands.SetDescriptorHeaps(data.resourceHeap,
             data.samplerHeap.valid() ? std::optional{data.samplerHeap} : std::nullopt);
     commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
-    commands.BindLayout(data.layout);
-    commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, data.constants.data());
     for (const auto& step : data.steps) {
-        commands.BindPipeline(step.pipeline);
-        if (!step.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
+        commands.BindLayout(recording.ResolveLayout(step.program.program));
+        commands.BindPipeline(recording.Resolve(step.program.program));
+        // Root arguments belong to the bound layout. A fresh recording list has
+        // no layout, and switching layouts can invalidate the previous arguments.
+        commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0,
+            NumMiscUintRootConstants, data.constants.data());
+        if (!step.program.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
-            static_cast<uint32_t>(step.descriptorIndices.size()), step.descriptorIndices.data());
-		const auto arguments = data.argumentsReference
-			? recording.Resolve(*data.argumentsReference).GetHandle() : data.arguments;
+            static_cast<uint32_t>(step.program.descriptorIndices.size()), step.program.descriptorIndices.data());
+		const auto arguments = recording.Resolve(data.arguments).GetHandle();
         commands.ExecuteIndirect(data.commandSignature, arguments, step.argumentsOffset, {}, 0, 1);
     }
     commands.EndPass();

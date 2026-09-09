@@ -61,14 +61,14 @@ public:
         }
 
         LPMConstants lpmConstants = {};
-        
+
         lpmConstants.shoulder = true;
         lpmConstants.con = false;
         lpmConstants.soft = false;
         lpmConstants.con2 = false;
         lpmConstants.clip = true;
         lpmConstants.scaleOnly = false;
-        
+
         // Rest will be filled in by the luminanceHistogramAverage shader
 
         BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), org::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
@@ -81,9 +81,9 @@ public:
 		data.externalRenderTarget = org::ExternalBindingKey::SwapchainColor;
 		data.loadOp = rhi::LoadOp::Clear;
 		data.clear.rgba[3] = 1.0f; data.width = context->outputResolution.x; data.height = context->outputResolution.y;
-		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+
         br::render::BindPreparedProgram(
-            data, preparation, m_pso, m_resourceDescriptorBindings);
+            data, preparation, m_pso);
 		data.constants[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
 		data.constants[TONEMAP_TYPE] = getTonemapType(); data.constants[TONEMAP_BLOOM_ENABLED] = m_bloomEnabled ? 1u : 0u;
 		if (m_bloomEnabled) {
@@ -102,8 +102,7 @@ public:
 
 private:
 
-    std::shared_ptr<rhi::PipelinePtr> m_pso;
-    PipelineResources m_resourceDescriptorBindings;
+    PipelineState m_pso;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<LPMConstants>> m_pLPMConstants;
 
@@ -123,7 +122,6 @@ private:
         sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
         sib.pixelShader = { L"shaders/PostProcessing/tonemapping.hlsl", L"PSMain", L"ps_6_6" };
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
-        m_resourceDescriptorBindings = compiled.resourceDescriptorSlots;
 
         // Subobjects
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
@@ -188,6 +186,8 @@ private:
             throw std::runtime_error("Failed to create tonemapping PSO (RHI)");
         }
         pipeline->SetName("Tonemapping.PSO");
-        m_pso = std::make_shared<rhi::PipelinePtr>(std::move(pipeline));
+        m_pso = PipelineState(std::move(pipeline), compiled.resourceIDsHash,
+            compiled.resourceDescriptorSlots, PSOManager::GetInstance().CaptureLayoutOwner(soLayout.layout),
+            soLayout.layout);
     }
 };

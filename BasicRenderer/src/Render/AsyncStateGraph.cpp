@@ -1953,7 +1953,8 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
                 // newer desired revision blocks on capacity after this archive
                 // is reclaimed, the consumer and producer can otherwise wait
                 // on each other forever.
-                const auto* selected = SelectSnapshot(requirement);
+                ArtifactSnapshot currentSnapshot;
+                const auto* selected = SelectSnapshot(requirement, currentSnapshot);
                 return selected && selected->revision == version.revision &&
                     selected->generation == version.generation;
             }
@@ -2100,7 +2101,11 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
 		}
     }
 
-    const ArtifactSnapshot* SelectSnapshot(const ArtifactRequirement& requirement) const {
+    // The caller holds the graph mutex and owns temporary selection storage.
+    // Owning TLS here retained GPU payloads until TBB worker/process exit,
+    // well beyond graph shutdown and device allocator teardown.
+    const ArtifactSnapshot* SelectSnapshot(const ArtifactRequirement& requirement,
+        ArtifactSnapshot& currentSnapshot) const {
         if (requirement.invalidation == DependencyInvalidationPolicy::ExactSnapshot ||
             requirement.invalidation == DependencyInvalidationPolicy::LifetimeHold ||
             (requirement.invalidation == DependencyInvalidationPolicy::ReadyGate &&
@@ -2130,9 +2135,8 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
                 current->second.producedRevision == requirement.minimumRevision &&
                 (requirement.requiredGeneration == 0 ||
                     current->second.versionGeneration == requirement.requiredGeneration)) {
-                static thread_local ArtifactSnapshot selected;
-                selected = MakeSnapshot(current->second);
-                return &selected;
+                currentSnapshot = MakeSnapshot(current->second);
+                return &currentSnapshot;
             }
             return nullptr;
         }
@@ -2140,7 +2144,6 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
         // necessarily the address's in-progress desired cursor. Advancing an
         // address to a blocked successor must not make an already-satisfied
         // minimum false for consumers that can safely use that ready version.
-        static thread_local ArtifactSnapshot currentSnapshot;
         const ArtifactSnapshot* selected = nullptr;
         if (const auto current = nodes.find(requirement.key); current != nodes.end() &&
             current->second.producedRevision >= requirement.minimumRevision) {
@@ -2374,8 +2377,19 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
 
     bool RequirementSatisfied(const ArtifactRequirement& requirement) const {
         ++const_cast<Impl*>(this)->stats.dependencyEvaluations;
-        const auto* snapshot = SelectSnapshot(requirement);
+        ArtifactSnapshot currentSnapshot;
+        const auto* snapshot = SelectSnapshot(requirement, currentSnapshot);
         return snapshot && Satisfies(snapshot->readiness, requirement.requiredReadiness);
+    }
+
+    bool DiagnosticRequirementSatisfied(const Node& node,
+        const ArtifactRequirement& requirement) const {
+        // The producer already consumed this one-shot gate. Its old source
+        // version may retire without making the completed consumer blocked.
+        if (requirement.invalidation == DependencyInvalidationPolicy::ReadyGate &&
+            node.producedRevision == node.desiredRevision &&
+            Satisfies(node.state, ArtifactReadiness::CpuReady)) return true;
+        return RequirementSatisfied(requirement);
     }
 
     // Address-level ReadyGate is a one-shot synchronization edge. Once any
@@ -2389,9 +2403,9 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
             if (requirement.invalidation != DependencyInvalidationPolicy::ReadyGate ||
                 requirement.minimumRevision != 0) continue;
 
+            ArtifactSnapshot currentSnapshot;
             const ArtifactSnapshot* selected = nullptr;
             if (const auto current = nodes.find(requirement.key); current != nodes.end()) {
-                static thread_local ArtifactSnapshot currentSnapshot;
                 currentSnapshot = MakeSnapshot(current->second);
                 if (currentSnapshot.revision != 0 &&
                     Satisfies(currentSnapshot.readiness, requirement.requiredReadiness)) {
@@ -2486,7 +2500,7 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
 			if (!detail.empty()) output += " " + detail;
         }
         for (const auto& requirement : node.requirements) {
-            if (requirement.policy == DependencyPolicy::Optional || RequirementSatisfied(requirement)) continue;
+            if (requirement.policy == DependencyPolicy::Optional || DiagnosticRequirementSatisfied(node, requirement)) continue;
             output += std::format(" <- [requires rev {} gen {} readiness {} policy {} invalidation {}; ",
                 requirement.minimumRevision,
                 requirement.requiredGeneration,
@@ -2509,7 +2523,8 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
             const auto groupIdentity = (static_cast<std::uint64_t>(requirement.policy) << 32u) |
                 requirement.alternativeGroup;
             if (alternative && selectedGroups.contains(groupIdentity)) continue;
-            const auto* selected = SelectSnapshot(requirement);
+            ArtifactSnapshot currentSnapshot;
+            const auto* selected = SelectSnapshot(requirement, currentSnapshot);
             if (selected && Satisfies(selected->readiness, requirement.requiredReadiness)) {
                 auto snapshot = *selected;
                 snapshot.lease = AcquireVersionLease(
@@ -4819,7 +4834,7 @@ ArtifactDiagnostic AsyncStateGraph::Diagnose(ArtifactKey key) const {
     result.stateAge = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - node.stateSince);
     for (const auto& requirement : node.requirements) {
-        if (!m_impl->RequirementSatisfied(requirement) && requirement.policy != DependencyPolicy::Optional)
+        if (!m_impl->DiagnosticRequirementSatisfied(node, requirement) && requirement.policy != DependencyPolicy::Optional)
             result.blockers.push_back(requirement);
     }
     recordPhase("collect_direct_blockers");

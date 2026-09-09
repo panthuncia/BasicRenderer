@@ -661,12 +661,7 @@ void PSOManager::Cleanup() {
 
     debugPSO.Reset();
     environmentConversionPSO.Reset();
-    m_rootSignature.Reset();
-	m_peerRootSignature.Reset();
-    m_computeRootSignature.Reset();
-	m_peerComputeRootSignature.Reset();
-    m_debugRootSignature.Reset();
-    m_environmentConversionRootSignature.Reset();
+    m_layoutGeneration = std::make_shared<LayoutGeneration>();
     pUtils.Reset();
     pCompiler.Reset();
 }
@@ -1137,7 +1132,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
         throw std::runtime_error("Failed to create PSO (RHI)");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
@@ -1202,7 +1197,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags ma
         throw std::runtime_error("Failed to create Shadow PSO (RHI)");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 
@@ -1274,7 +1269,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
         throw std::runtime_error("Failed to create PrePass PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
@@ -1340,7 +1335,7 @@ PipelineState PSOManager::CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompi
         throw std::runtime_error("Failed to create PrePass PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateVisibilityBufferMeshPSO(
@@ -1410,7 +1405,7 @@ PipelineState PSOManager::CreateVisibilityBufferMeshPSO(
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODRasterPSO(
@@ -1457,7 +1452,7 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODVirtualShadowRasterPSO(
@@ -1503,7 +1498,7 @@ PipelineState PSOManager::CreateClusterLODVirtualShadowRasterPSO(
         throw std::runtime_error("Failed to create CLod virtual shadow raster PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODVirtualShadowReyesRasterPSO(
@@ -1549,7 +1544,7 @@ PipelineState PSOManager::CreateClusterLODVirtualShadowReyesRasterPSO(
         throw std::runtime_error("Failed to create CLod Reyes virtual shadow raster PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
@@ -1593,7 +1588,7 @@ PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
         throw std::runtime_error("Failed to create CLod deep visibility raster PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODAVBOITRasterPSO(
@@ -1647,7 +1642,7 @@ PipelineState PSOManager::CreateClusterLODAVBOITRasterPSO(
         throw std::runtime_error("Failed to create CLod AVBOIT raster PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODAVBOITOccupancyPSO(
@@ -1703,7 +1698,7 @@ PipelineState PSOManager::CreateClusterLODAVBOITOccupancyPSO(
         throw std::runtime_error("Failed to create CLod AVBOIT occupancy PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODAVBOITShadePSO(
@@ -1793,7 +1788,7 @@ PipelineState PSOManager::CreateClusterLODAVBOITShadePSO(
         throw std::runtime_error("Failed to create CLod AVBOIT shading PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags, CLodRasterOutputKind outputKind) {
@@ -1876,7 +1871,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags mate
         throw std::runtime_error("Failed to create PPLL PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateMeshPSO(
@@ -1954,7 +1949,7 @@ PipelineState PSOManager::CreateMeshPSO(
         throw std::runtime_error("Failed to create Mesh PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateShadowMeshPSO(
@@ -2026,7 +2021,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
         throw std::runtime_error("Failed to create Shadow Mesh PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateMeshPrePassPSO(
@@ -2100,7 +2095,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateMeshPPLLPSO(
@@ -2173,7 +2168,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
-    return { std::move(psoPrepass), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(psoPrepass), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots, CaptureLayoutOwner(soLayout.layout), soLayout.layout };
 }
 
 PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
@@ -2326,10 +2321,11 @@ PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayoutHandle layout,
     const wchar_t* shaderPath,
     const wchar_t* entryPoint,
     std::vector<DxcDefine> defines,
-    const char* debugName)
+    const char* debugName, std::shared_ptr<const void> layoutOwner)
 {
     ComputeRecipe recipe;
     recipe.layout = layout;
+    recipe.layoutOwner = layoutOwner ? std::move(layoutOwner) : CaptureLayoutOwner(layout);
     recipe.shaderPath = shaderPath;
     recipe.entryPoint = entryPoint;
     recipe.debugName = debugName ? debugName : ws2s(entryPoint);
@@ -2392,7 +2388,7 @@ PipelineState PSOManager::BuildComputePipeline(const ComputeRecipe& recipe, cons
     PipelineState out{
         std::move(pso),
         compiled.resourceIDsHash,
-        compiled.resourceDescriptorSlots
+        compiled.resourceDescriptorSlots, recipe.layoutOwner, recipe.layout
     };
     auto payload = out.GetPayload();
     payload->bytecodeHash = HashBytesStable(
@@ -2433,7 +2429,7 @@ void PSOManager::BuildComputePipelineForBackend(const ComputeRecipe& recipe, con
 		pso->SetName(name.c_str());
 	}
 	pipeline.AttachBackendPipeline(backendInstance, std::move(pso), compiled.resourceIDsHash,
-		compiled.resourceDescriptorSlots);
+		compiled.resourceDescriptorSlots, CaptureLayoutOwner(layout.layout), layout.layout);
 	spdlog::info("PSOManager materialized compute pipeline '{}' for backend instance {}",
 		recipe.debugName, static_cast<uint8_t>(backendInstance));
 }
@@ -3593,9 +3589,9 @@ void PSOManager::createRootSignature() {
             .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
             .flags = rhi::PipelineLayoutFlags::PF_AllowInputAssembler
         },
-        m_rootSignature);
+        m_layoutGeneration->rootSignature);
 
-    if (Failed(result) || !m_rootSignature || !m_rootSignature->IsValid()) {
+    if (Failed(result) || !m_layoutGeneration->rootSignature || !m_layoutGeneration->rootSignature->IsValid()) {
         spdlog::error(
             "Failed to create graphics root signature / pipeline layout: {} ({})",
             rhi::ResultName(result),
@@ -3615,9 +3611,9 @@ void PSOManager::createRootSignature() {
             .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
             .flags = rhi::PipelineLayoutFlags::PF_None
         },
-        m_computeRootSignature);
+        m_layoutGeneration->computeRootSignature);
 
-    if (Failed(result) || !m_computeRootSignature || !m_computeRootSignature->IsValid()) {
+    if (Failed(result) || !m_layoutGeneration->computeRootSignature || !m_layoutGeneration->computeRootSignature->IsValid()) {
         spdlog::error(
             "Failed to create compute root signature / pipeline layout: {} ({})",
             rhi::ResultName(result),
@@ -3637,8 +3633,8 @@ void PSOManager::createRootSignature() {
 				.pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
 				.staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
 				.flags = rhi::PipelineLayoutFlags::PF_AllowInputAssembler },
-			m_peerRootSignature);
-		if (Failed(result) || !m_peerRootSignature || !m_peerRootSignature->IsValid()) {
+			m_layoutGeneration->peerRootSignature);
+		if (Failed(result) || !m_layoutGeneration->peerRootSignature || !m_layoutGeneration->peerRootSignature->IsValid()) {
 			throw std::runtime_error("Failed to create peer graphics pipeline layout");
 		}
 		result = peerDevice.CreatePipelineLayout(
@@ -3647,42 +3643,52 @@ void PSOManager::createRootSignature() {
 				.pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
 				.staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
 				.flags = rhi::PipelineLayoutFlags::PF_None },
-			m_peerComputeRootSignature);
-		if (Failed(result) || !m_peerComputeRootSignature || !m_peerComputeRootSignature->IsValid()) {
+			m_layoutGeneration->peerComputeRootSignature);
+		if (Failed(result) || !m_layoutGeneration->peerComputeRootSignature || !m_layoutGeneration->peerComputeRootSignature->IsValid()) {
 			throw std::runtime_error("Failed to create peer compute pipeline layout");
 		}
 		spdlog::info("PSOManager created graphics and compute layouts for the peer backend");
 	}
 }
 
+std::shared_ptr<const void> PSOManager::CaptureLayoutOwner(rhi::PipelineLayoutHandle layout) const {
+    const auto generation = m_layoutGeneration;
+    for (const auto* candidate : {&generation->rootSignature, &generation->peerRootSignature,
+            &generation->computeRootSignature, &generation->peerComputeRootSignature,
+            &generation->debugRootSignature, &generation->environmentConversionRootSignature}) {
+        if (*candidate && rhi::HandleEqual<rhi::PipelineLayoutHandle>{}(candidate->Get().GetHandle(), layout)) return generation;
+    }
+    throw std::invalid_argument("Custom pipeline layout requires explicit lifetime ownership");
+}
+
 const rhi::PipelineLayout& PSOManager::GetRootSignature() {
-	if (!m_rootSignature || !m_rootSignature->IsValid()) {
+	if (!m_layoutGeneration->rootSignature || !m_layoutGeneration->rootSignature->IsValid()) {
 		throw std::runtime_error("Graphics root signature / pipeline layout is not initialized");
 	}
-    return m_rootSignature.Get();
+    return m_layoutGeneration->rootSignature.Get();
 }
 
 const rhi::PipelineLayout& PSOManager::GetComputeRootSignature() {
-	if (!m_computeRootSignature || !m_computeRootSignature->IsValid()) {
+	if (!m_layoutGeneration->computeRootSignature || !m_layoutGeneration->computeRootSignature->IsValid()) {
 		throw std::runtime_error("Compute root signature / pipeline layout is not initialized");
 	}
-	return m_computeRootSignature.Get();
+	return m_layoutGeneration->computeRootSignature.Get();
 }
 
 const rhi::PipelineLayout& PSOManager::GetRootSignature(BackendInstanceId backendInstance) {
 	if (backendInstance == BackendInstanceId::Primary) return GetRootSignature();
-	if (!m_peerRootSignature || !m_peerRootSignature->IsValid()) {
+	if (!m_layoutGeneration->peerRootSignature || !m_layoutGeneration->peerRootSignature->IsValid()) {
 		throw std::runtime_error("Peer graphics pipeline layout is not initialized");
 	}
-	return m_peerRootSignature.Get();
+	return m_layoutGeneration->peerRootSignature.Get();
 }
 
 const rhi::PipelineLayout& PSOManager::GetComputeRootSignature(BackendInstanceId backendInstance) {
 	if (backendInstance == BackendInstanceId::Primary) return GetComputeRootSignature();
-	if (!m_peerComputeRootSignature || !m_peerComputeRootSignature->IsValid()) {
+	if (!m_layoutGeneration->peerComputeRootSignature || !m_layoutGeneration->peerComputeRootSignature->IsValid()) {
 		throw std::runtime_error("Peer compute pipeline layout is not initialized");
 	}
-	return m_peerComputeRootSignature.Get();
+	return m_layoutGeneration->peerComputeRootSignature.Get();
 }
 
 bool PSOManager::RebuildAllPipelines(std::string& error) {

@@ -482,7 +482,7 @@ void MaterialManager::ShutdownTextureStreaming() {
 		m_textureStreamingManager->Shutdown();
 	}
 }
-std::shared_ptr<CopyPass> MaterialManager::CreateTextureStreamingFeedbackReadbackPass() {
+std::shared_ptr<RenderPass> MaterialManager::CreateTextureStreamingFeedbackReadbackPass() {
 	if (!m_textureStreamingManager || m_textureStreamingFeedbackSuppressed) {
 		return {};
 	}

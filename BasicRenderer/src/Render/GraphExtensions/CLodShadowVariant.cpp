@@ -714,21 +714,8 @@ std::string CLodShadowVariant::AppendStructuralPrelude(
             extension.m_shadowClipmapInfoBuffer,
             extension.m_shadowCompactShadowCameraBuffer,
             extension.m_shadowStatsBuffer,
-            [&extension](uint32_t& slotIndex, uint32_t& inputCount) {
-                return extension.m_streamingSystem &&
-                    extension.m_streamingSystem
-                        ->TryAcquireVirtualShadowUpgradeUpload(
-                            slotIndex,
-                            inputCount);
-            },
-            [&extension](uint32_t slotIndex) {
-                if (extension.m_streamingSystem) {
-                    extension.m_streamingSystem
-                        ->ReleaseVirtualShadowUpgradeUpload(slotIndex);
-                }
-            },
-            SettingsManager::GetInstance()
-                .getSettingGetter<uint8_t>("numFramesInFlight")()));
+            extension.m_streamingSystem ? extension.m_streamingSystem->GetVirtualShadowUpgradeQueue()
+                                        : VirtualShadowUpgradeQueue{}));
     shadowAdmitPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowGatherStatsPassName));
     outPasses.push_back(std::move(shadowAdmitPagesPassDesc));
 

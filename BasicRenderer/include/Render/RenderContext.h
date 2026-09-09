@@ -2,6 +2,7 @@
 
 #include <rhi.h>
 #include <OpenRenderGraph/OpenRenderGraph.h>
+#include <memory>
 #include <vector>
 
 #include "Scene/Components.h"
@@ -85,6 +86,9 @@ struct UpdateContext {
 	LightManager* lightManager = nullptr;
 	EnvironmentManager* environmentManager = nullptr;
 	MaterialManager* materialManager = nullptr;
+	// Ordered ray-tracing build/trace service. The typed reflections pass captures
+	// all resource and program ownership before invoking it on a recording worker.
+	std::shared_ptr<br::render::CLodRayTracingSystem> clodRayTracingSystem;
 	// Immutable logical-frame material-bucket snapshot. Pass Update/Prepare
 	// must use this rather than racing the live manager between phases.
 	uint32_t preparedRasterBucketCount = 0;

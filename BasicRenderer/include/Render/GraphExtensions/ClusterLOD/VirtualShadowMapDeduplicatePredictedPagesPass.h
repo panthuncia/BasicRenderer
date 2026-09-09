@@ -4,14 +4,15 @@
 #include <vector>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapDeduplicatePredictedPagesPass final : public ComputePass {
+class VirtualShadowMapDeduplicatePredictedPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapDeduplicatePredictedPagesPass, br::render::PreparedComputePipelineSequence> {
 public:
     VirtualShadowMapDeduplicatePredictedPagesPass(
         std::shared_ptr<Buffer> predictiveRawPagesBuffer,
@@ -25,23 +26,12 @@ public:
         std::shared_ptr<Buffer> dirtyFlagsBuffer,
         uint32_t physicalPageCount);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
 
 private:
-    struct PreparedData {
-        rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
-        rhi::PipelineLayoutHandle layout{};
-        rhi::PipelineHandle clearPipeline{}, deduplicatePipeline{};
-        std::shared_ptr<const PipelineStatePayload> clearOwner, deduplicateOwner;
-        std::vector<unsigned int> clearDescriptorIndices, deduplicateDescriptorIndices;
-        std::vector<unsigned int> constants;
-        uint32_t clearGroups = 0, deduplicateGroups = 0;
-    };
-    static void RecordPrepared(const PreparedData&, RecordingContext&);
+
     PipelineState m_clearStatePso;
     PipelineState m_deduplicatePso;
     std::shared_ptr<Buffer> m_predictiveRawPagesBuffer;

@@ -8,7 +8,8 @@
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/PixelBuffer.h"
 
 namespace org { class Buffer; }
@@ -16,7 +17,7 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesVirtualShadowRasterizationPass final : public ComputePass, public IDynamicDeclaredResources {
+class ReyesVirtualShadowRasterizationPass final : public org::TypedRenderGraphPass<ReyesVirtualShadowRasterizationPass, br::render::PreparedComputeIndirect>, public IDynamicDeclaredResources {
 public:
     ReyesVirtualShadowRasterizationPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -38,12 +39,11 @@ public:
         std::string_view resourceName,
         uint32_t phaseIndex);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    void Cleanup() override;
+    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -68,5 +68,5 @@ private:
     std::vector<CLodViewRasterInfo> m_viewRasterInfos;
     bool m_declaredResourcesChanged = true;
     PipelineState m_pso;
-    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
 };

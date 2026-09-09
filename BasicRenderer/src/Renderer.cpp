@@ -43,7 +43,6 @@
 #include "Materials/MaterialTextureStreaming.h"
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
-#include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
 #include "RenderPasses/DebugSkeletonPass.h"
 #include "RenderPasses/Base/ComputePass.h"
@@ -875,7 +874,7 @@ void Renderer::Initialize(
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
 	m_pMeshManager->SetSkeletonManager(m_pSkeletonManager.get());
     m_pTextureFactory = TextureFactory::CreateUnique();
-    m_clodRayTracingSystem = std::make_unique<br::render::CLodRayTracingSystem>();
+    m_clodRayTracingSystem = std::make_shared<br::render::CLodRayTracingSystem>();
     if (currentRenderGraph) {
         m_pTextureFactory->SetReadbackService(currentRenderGraph->GetReadbackService());
     }
@@ -3276,6 +3275,7 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.lightManager = m_pLightManager.get();
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
+    updateData.clodRayTracingSystem = m_clodRayTracingSystem;
     updateData.preparedRasterBucketCount = m_pMaterialManager
         ? m_pMaterialManager->GetRasterBucketCount() : 0;
     updateData.preparedRasterBucketFlags.reserve(updateData.preparedRasterBucketCount);
@@ -3390,8 +3390,64 @@ void Renderer::Update(float elapsedSeconds) {
         BT_ZONE_SCOPE("Renderer::Update::TerrainRvtTelemetry");
         MaybeRequestTerrainRvtTelemetry();
         MaybeRequestObjectReyesAtlasTelemetry();
+        // Opt-in, one-frame GPU work snapshot. Capture producers as well as their
+        // indirect consumers so visual failures can be localized without GPU printf.
+        static const uint64_t diagnosticCaptureFrame = [] {
+            char* value = nullptr;
+            size_t length = 0;
+            _dupenv_s(&value, &length, "SARP_GPU_WORK_READBACK_FRAME");
+            const uint64_t frame = value ? std::strtoull(value, nullptr, 10) : 120u;
+            std::free(value);
+            return frame;
+        }();
+        static bool gpuWorkReadbackRequested = false;
+        if (!gpuWorkReadbackRequested && m_totalFramesRendered >= diagnosticCaptureFrame && currentRenderGraph) {
+            wchar_t* value = nullptr;
+            size_t length = 0;
+            _wdupenv_s(&value, &length, L"SARP_GPU_WORK_READBACK_DIR");
+            if (value && value[0]) {
+                const std::filesystem::path directory(value);
+                std::filesystem::create_directories(directory);
+                if (auto* service = currentRenderGraph->GetReadbackService()) {
+                    gpuWorkReadbackRequested = true;
+                    const auto captureResource = [&](const char* label, const char* anchor, std::shared_ptr<Resource> resource) {
+                        if (!resource) return;
+                        const auto frame = m_totalFramesRendered;
+                        const auto path = directory / (std::string(label) + ".bin");
+                        service->RequestReadbackCapture(anchor, resource.get(), RangeSpec{},
+                            [path, frame](ReadbackCaptureResult&& result) {
+                                std::ofstream output(path, std::ios::binary | std::ios::trunc);
+                                output.write(reinterpret_cast<const char*>(result.data.data()),
+                                    static_cast<std::streamsize>(result.data.size()));
+                                auto metadataPath = path;
+                                metadataPath += L".meta.txt";
+                                std::ofstream metadata(metadataPath);
+                                metadata << "frame=" << frame << '\n'
+                                    << "resource=" << result.desc.resourceId << '\n'
+                                    << "format=" << static_cast<uint32_t>(result.format) << '\n'
+                                    << "width=" << result.width << '\n'
+                                    << "height=" << result.height << '\n'
+                                    << "bytes=" << result.data.size() << '\n';
+                                if (!result.layouts.empty()) metadata
+                                    << "offset=" << result.layouts.front().offset << '\n'
+                                    << "row_pitch=" << result.layouts.front().rowPitch << '\n';
+                            });
+                    };
+                    const auto capture = [&](const char* label, const char* anchor, ResourceIdentifier id) {
+                        captureResource(label, anchor, currentRenderGraph->RequestResourcePtr(id, true));
+                    };
+                    capture("visibility", "MaterialHistogramPass", Builtin::PrimaryCamera::VisibilityTexture);
+                    capture("material-counts", "BuildMaterialIndirectCommandBufferPass", "Builtin::VisUtil::MaterialPixelCountBuffer");
+                    capture("material-offsets", "BuildMaterialIndirectCommandBufferPass", "Builtin::VisUtil::MaterialOffsetBuffer");
+                    capture("material-args", "BuildMaterialIndirectCommandBufferPass", "Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
+                    capture("pixel-list", "BuildPixelListPass", "Builtin::VisUtil::PixelListBuffer");
+                    capture("surface-identity", "EvaluateMaterialGroupsPass", Builtin::Surface::Identity);
+                }
+            }
+            std::free(value);
+        }
         static bool colorOutputReadbackRequested = false;
-        if (!colorOutputReadbackRequested && m_totalFramesRendered >= 120u &&
+        if (!colorOutputReadbackRequested && m_totalFramesRendered >= diagnosticCaptureFrame &&
             currentRenderGraph && m_dynamicBackbuffer) {
             wchar_t* outputPath = nullptr;
             size_t outputPathLength = 0;
@@ -5153,10 +5209,12 @@ void Renderer::Render() {
             m_context.clodRayTracingSystem = m_clodRayTracingSystem.get();
 
             if (m_context.rayTracedReflectionsEnabled && m_clodRayTracingSystem && m_pMeshManager) {
+                std::scoped_lock rayTracingLock(m_clodRayTracingSystem->FrameOperationMutex());
                 m_clodRayTracingSystem->Refresh(*m_pMeshManager);
                 m_clodRayTracingSystem->UpdateGpuResources(deviceManager.GetDevice(), deviceManager.GetRayTracingFeatures());
             }
             else if (m_clodRayTracingSystem) {
+                std::scoped_lock rayTracingLock(m_clodRayTracingSystem->FrameOperationMutex());
                 m_clodRayTracingSystem->Reset();
             }
             m_context.drawStats = drawStats;
@@ -5427,15 +5485,19 @@ void Renderer::StallPipeline() {
     }
     auto& devices = DeviceManager::GetInstance();
     spdlog::info("Renderer::StallPipeline waiting for all initialized devices idle");
-    devices.GetDevice().WaitIdle();
+    if (rhi::Failed(devices.GetDevice().WaitIdle()))
+        throw std::runtime_error("Primary device idle wait failed; GPU ownership must be retained");
     if (devices.IsMultiRHIEnabled()) {
-        devices.GetPeerDevice().WaitIdle();
+        if (rhi::Failed(devices.GetPeerDevice().WaitIdle()))
+            throw std::runtime_error("Peer device idle wait failed; GPU ownership must be retained");
     }
     spdlog::info("Renderer::StallPipeline all initialized devices idle complete");
 }
 
 void Renderer::Cleanup() {
     spdlog::info("In cleanup");
+    auto retiringDescriptors = currentRenderGraph ? currentRenderGraph->RetainDescriptorService() : nullptr;
+    if (currentRenderGraph) currentRenderGraph->StopFrameProduction();
     // Wait for all GPU frames to complete
 	spdlog::info("Stalling pipeline for cleanup");
 	StallPipeline();
@@ -5488,6 +5550,9 @@ void Renderer::Cleanup() {
         m_rendererStatePublisher.reset();
     }
     if (currentRenderGraph) {
+        // Publication and texture-streaming producers have now stopped. Cover
+        // submissions made after the first wait before cleaning their services.
+        StallPipeline();
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
             uploadService->Cleanup();
         }
@@ -5496,9 +5561,6 @@ void Renderer::Cleanup() {
         }
         if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
             readbackService->Cleanup();
-        }
-        if (auto* descriptorService = currentRenderGraph->GetDescriptorService()) {
-            descriptorService->Cleanup();
         }
     }
     if (m_pReadbackManager) {
@@ -5567,10 +5629,14 @@ void Renderer::Cleanup() {
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
     RendererECSManager::GetInstance().FlushDeferredWorldOperations();
-	RenderGraph::ShutdownRuntime();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
     RendererECSManager::GetInstance().Cleanup();
+	// ECS components and manager destructors can retire resources. Keep the
+	// runtime descriptor/backing services alive through their final release.
+    if (retiringDescriptors) retiringDescriptors->Cleanup();
+    retiringDescriptors.reset();
+	RenderGraph::ShutdownRuntime();
 	spdlog::info("Cleaning up swap chain");
     m_swapChain.Reset();
 	spdlog::info("Cleaning up device manager");
@@ -5774,7 +5840,7 @@ void Renderer::RegisterPipelineExtensions() {
         m_managerInterface.GetMaterialManager()),
         "BuiltinIO");
     currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
-        currentRenderGraph->GetReadbackService()),
+        currentRenderGraph->GetReadbackServiceOwner()),
         "BuiltinReadbackCapture");
 
     if (!m_producerPersistentState->clodStreaming) m_producerPersistentState->clodStreaming = std::make_shared<CLodStreamingSystem>();
@@ -6067,7 +6133,7 @@ void Renderer::CreateRenderGraph() {
                 CreateCanonicalSurfaceResources(newGraph.get());
                 CreateDebugVisualizationResources(newGraph.get());
                 if (m_visibilityRendering) {
-                    newGraph->BuildRenderPass<ClearVisibilityBufferPass>("ClearVisibilityBufferPass");
+                    newGraph->BuildPass<ClearVisibilityBufferPass>("ClearVisibilityBufferPass");
                     newGraph->SetPassTechnique("ClearVisibilityBufferPass", "Primary Visibility::Canonical Surface Construction");
                 }
                 break;
@@ -6114,30 +6180,30 @@ void Renderer::CreateRenderGraph() {
                 histogram->SetName("Luminance Histogram Buffer");
                 org::memory::SetResourceUsageHint(*histogram, "Post-Processing resources");
                 newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogram);
-				auto& histogramBuilder = newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
+				auto& histogramBuilder = newGraph->BuildPass<LuminanceHistogramPass>("luminanceHistogramPass");
 #if BASICRENDERER_HAS_INTEROP_VALIDATION
 				br::validation::SARPInteropValidation::ApplyPassPolicy(
 					"luminanceHistogramPass", histogramBuilder, DeviceManager::GetInstance().GetPeerBackend());
 #endif
                 newGraph->SetPassTechnique("luminanceHistogramPass", "Post Process::Exposure");
-                newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
+                newGraph->BuildPass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
                 newGraph->SetPassTechnique("LuminanceAveragePass", "Post Process::Exposure");
                 break;
             }
             case Upscaling:
                 if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS &&
                     SettingsManager::GetInstance().getSettingGetter<bool>("enableDilatedMotionVectors")()) {
-                    newGraph->BuildComputePass<DilateMotionVectorsPass>("DilateMotionVectorsPass");
+                    newGraph->BuildPass<DilateMotionVectorsPass>("DilateMotionVectorsPass");
                     newGraph->SetPassTechnique("DilateMotionVectorsPass", "Post Process::Upscaling");
                 }
-                newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
+                newGraph->BuildPass<UpscalingPass>("UpscalingPass");
                 newGraph->SetPassTechnique("UpscalingPass", "Post Process::Upscaling");
                 break;
             case Bloom:
 				BuildBloomPipeline(newGraph.get());
                 break;
             case Tonemapping:
-                newGraph->BuildRenderPass<TonemappingPass>(
+                newGraph->BuildPass<TonemappingPass>(
                     "TonemappingPass",
                     m_pipelineRecipe.Contains<br::pipeline::BloomTechnique>());
                 newGraph->SetPassTechnique("TonemappingPass", "Post Process::Tonemapping");
@@ -6146,28 +6212,28 @@ void Renderer::CreateRenderGraph() {
                 const bool skeletons = SettingsManager::GetInstance().getSettingGetter<unsigned int>("outputType")() ==
                     static_cast<unsigned int>(OutputType::SKELETONS) && DeviceManager::GetInstance().GetMeshShadersSupported();
                 if (skeletons) {
-                    newGraph->BuildRenderPass<DebugSkeletonPass>("DebugSkeletonPass");
+                    newGraph->BuildPass<DebugSkeletonPass>("DebugSkeletonPass");
                     newGraph->SetPassTechnique("DebugSkeletonPass", "Debug::Visualization");
                 }
                 else {
-                    newGraph->BuildRenderPass<DebugResolvePass>("DebugResolvePass");
+                    newGraph->BuildPass<DebugResolvePass>("DebugResolvePass");
                     newGraph->SetPassTechnique("DebugResolvePass", "Debug::Visualization");
                 }
                 if (getDrawBoundingSpheres()) {
-                    newGraph->BuildRenderPass<DebugSpherePass>("DebugSpherePass");
+                    newGraph->BuildPass<DebugSpherePass>("DebugSpherePass");
                     newGraph->SetPassTechnique("DebugSpherePass", "Debug::Visualization");
                 }
                 break;
             }
             case DebugUi:
-                newGraph->BuildRenderPass<MenuRenderPass>("MenuRenderPass");
+                newGraph->BuildPass<MenuRenderPass>("MenuRenderPass");
                 newGraph->SetPassTechnique("MenuRenderPass", "Debug::UI");
                 break;
             case DepthHistory:
                 BuildLinearDepthHistoryCopyPass(newGraph.get(), m_pViewManager.get());
                 break;
             case Present:
-                newGraph->BuildRenderPass<PresentPass>("PresentPass");
+                newGraph->BuildPass<PresentPass>("PresentPass");
                 newGraph->SetPassTechnique("PresentPass", "Frame::Present");
                 break;
             }

@@ -2,20 +2,32 @@
 
 #include <functional>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Scene/Scene.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Render/PreparedPass.h"
 
-class UpscalingPass : public RenderPass {
+struct UpscalingFrameData {
+    Components::Camera camera;
+    uint64_t frameNumber = 0;
+    double deltaTime = 0;
+    std::shared_ptr<PixelBuffer> hdr;
+    std::shared_ptr<PixelBuffer> output;
+    std::shared_ptr<PixelBuffer> depth;
+    std::shared_ptr<PixelBuffer> motion;
+};
+
+class UpscalingPass
+    : public org::TypedRenderGraphPass<UpscalingPass, UpscalingFrameData> {
 public:
     UpscalingPass() {
         m_renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 		m_outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+    void Declare(org::PassBuilder& declaration) {
+        auto* builder = &declaration;
         // Upscalers produce only the full-resolution image in mip 0. Keep the
         // interop contract explicit so it remains correct if this output is
         // replaced by an external resource with additional subresources.
@@ -76,38 +88,22 @@ public:
         }
     }
 
-    void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
+    void Initialize() {
+        m_pHDRTarget = m_resourceRegistryView->RequestSharedAs<PixelBuffer>(Builtin::Color::HDRColorTarget);
         const bool useDilatedMotionVectors =
             UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS &&
             SettingsManager::GetInstance().getSettingGetter<bool>("enableDilatedMotionVectors")();
         const auto motionVectors = useDilatedMotionVectors
             ? Builtin::Surface::DilatedMotion
             : Builtin::Surface::Motion;
-        m_pMotionVectors = m_resourceRegistryView->RequestPtr<PixelBuffer>(motionVectors);
-		m_pDepthTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::ProjectedDepthTexture);
-		m_pUpscaledHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+        m_pMotionVectors = m_resourceRegistryView->RequestSharedAs<PixelBuffer>(motionVectors);
+		m_pDepthTexture = m_resourceRegistryView->RequestSharedAs<PixelBuffer>(Builtin::PrimaryCamera::ProjectedDepthTexture);
+		m_pUpscaledHDRTarget = m_resourceRegistryView->RequestSharedAs<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        UpscalingManager::GetInstance().Evaluate(executionContext.commandList, &context.primaryCamera, context.frameNumber, context.deltaTime, m_pHDRTarget, m_pUpscaledHDRTarget, m_pDepthTexture, m_pMotionVectors);
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+    UpscalingFrameData Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
-        struct PreparedData {
-            Components::Camera camera;
-            uint64_t frameNumber = 0;
-            double deltaTime = 0;
-            PixelBuffer* hdr = nullptr;
-            PixelBuffer* output = nullptr;
-            PixelBuffer* depth = nullptr;
-            PixelBuffer* motion = nullptr;
-        };
-        return PreparedPass::MakeOwned(PreparedData{
+        return UpscalingFrameData{
             .camera = context->primaryCamera,
             .frameNumber = preparation.frameNumber,
             .deltaTime = preparation.deltaTime,
@@ -115,22 +111,20 @@ public:
             .output = m_pUpscaledHDRTarget,
             .depth = m_pDepthTexture,
             .motion = m_pMotionVectors,
-        }, +[](const PreparedData& data, RecordingContext& recording) {
-            UpscalingManager::GetInstance().Evaluate(recording.Commands(), &data.camera,
-                data.frameNumber, data.deltaTime, data.hdr, data.output, data.depth, data.motion);
-        });
+        };
     }
-
-    void Cleanup() override {
-        // Cleanup the render pass
+    static void Record(const UpscalingFrameData& data, org::PassRecordContext& recording) {
+        UpscalingManager::GetInstance().Evaluate(recording.Commands(), &data.camera,
+            data.frameNumber, data.deltaTime, data.hdr.get(), data.output.get(),
+            data.depth.get(), data.motion.get());
     }
 
 private:
 
-    PixelBuffer* m_pHDRTarget;
-    PixelBuffer* m_pMotionVectors;
-	PixelBuffer* m_pDepthTexture;
-	PixelBuffer* m_pUpscaledHDRTarget;
+    std::shared_ptr<PixelBuffer> m_pHDRTarget;
+    std::shared_ptr<PixelBuffer> m_pMotionVectors;
+	std::shared_ptr<PixelBuffer> m_pDepthTexture;
+	std::shared_ptr<PixelBuffer> m_pUpscaledHDRTarget;
 
     DirectX::XMUINT2 m_renderRes;
     DirectX::XMUINT2 m_outputRes;

@@ -55,8 +55,10 @@ ReyesQueueResetPass::ReyesQueueResetPass(
     }
 }
 
-void ReyesQueueResetPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void ReyesQueueResetPass::Declare(org::PassBuilder& declaration)
 {
+    declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    auto* builder = &declaration;
     builder->WithUnorderedAccess(m_fullClusterCounter, m_ownedClusterCounter, m_diceQueueCounter, m_diceQueueOverflowCounter, m_telemetryBuffer);
     if (m_replaySplitQueueCounter) {
         builder->WithUnorderedAccess(m_replaySplitQueueCounter);
@@ -83,87 +85,21 @@ void ReyesQueueResetPass::DeclareResourceUsages(ComputePassBuilder* builder)
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void ReyesQueueResetPass::Setup() {}
+void ReyesQueueResetPass::Initialize() {}
 
-PassReturn ReyesQueueResetPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
-    uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-    uintRootConstants[CLOD_REYES_RESET_FULL_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_fullClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_OWNED_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_ownedClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_A_DESCRIPTOR_INDEX] = m_splitQueueCounters[0]->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_A_DESCRIPTOR_INDEX] = m_splitQueueOverflowCounters[0]->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_B_DESCRIPTOR_INDEX] = m_splitQueueCounters[1]->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_B_DESCRIPTOR_INDEX] = m_splitQueueOverflowCounters[1]->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_diceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_CLEAR_DICE_QUEUE_COUNTER] = m_clearDiceQueueCounter ? 1u : 0u;
-    uintRootConstants[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replaySplitQueueCounter
-        ? m_replaySplitQueueCounter->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replaySplitQueueOverflowCounter
-        ? m_replaySplitQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replayDiceQueueCounter
-        ? m_replayDiceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replayDiceQueueOverflowCounter
-        ? m_replayDiceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-
-    commandList.BindPipeline(m_clearCountersPso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_clearCountersPso.GetResourceDescriptorSlots());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        uintRootConstants);
-    commandList.Dispatch(1, 1, 1);
-
-    if (!m_ownershipBitsetBuffer || m_ownershipBitsetWordCount == 0u) {
-        return {};
-    }
-
-    commandList.BindPipeline(m_clearOwnershipBitsetPso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_clearOwnershipBitsetPso.GetResourceDescriptorSlots());
-
-    uintRootConstants[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_RESET_OWNERSHIP_BITSET_WORD_COUNT] = m_ownershipBitsetWordCount;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        uintRootConstants);
-
-    constexpr uint32_t kThreadsPerGroup = 64u;
-    const uint32_t groupCountX = (m_ownershipBitsetWordCount + kThreadsPerGroup - 1u) / kThreadsPerGroup;
-    commandList.Dispatch(groupCountX, 1, 1);
-
-    return {};
-}
-
-PreparedPass ReyesQueueResetPass::PrepareFrame(FramePreparationContext& preparation)
+br::render::PreparedComputePipelineSequence ReyesQueueResetPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    PreparedData data{};
+    br::render::PreparedComputePipelineSequence data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.countersOwner = m_clearCountersPso.GetPayload();
-    data.countersPipeline = data.countersOwner->pso.Get().GetHandle();
-    data.countersDescriptorIndices = CaptureResourceDescriptorIndices(data.countersOwner->pipelineResources);
-    data.constants.resize(NumMiscUintRootConstants);
-    auto& c = data.constants;
+    data.steps.reserve(2);
+    auto& counters = data.steps.emplace_back();
+    auto program = preparation.CaptureProgramBinding(m_clearCountersPso);
+    counters.program = program.program;
+    counters.descriptorIndices = std::move(program.descriptorIndices);
+    counters.groupsX = 1;
+    auto& c = counters.constants;
     c[CLOD_REYES_RESET_FULL_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_fullClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
     c[CLOD_REYES_RESET_OWNED_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_ownedClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
     c[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_A_DESCRIPTOR_INDEX] = m_splitQueueCounters[0]->GetUAVShaderVisibleInfo(0).slot.index;
@@ -178,37 +114,21 @@ PreparedPass ReyesQueueResetPass::PrepareFrame(FramePreparationContext& preparat
     c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replayDiceQueueCounter ? m_replayDiceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
     c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replayDiceQueueOverflowCounter ? m_replayDiceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
     if (m_ownershipBitsetBuffer && m_ownershipBitsetWordCount) {
-        data.bitsetOwner = m_clearOwnershipBitsetPso.GetPayload();
-        data.bitsetPipeline = data.bitsetOwner->pso.Get().GetHandle();
-        data.bitsetDescriptorIndices = CaptureResourceDescriptorIndices(data.bitsetOwner->pipelineResources);
+        br::render::PreparedComputePipelineSequence::Step bitset{};
+        auto bitsetProgram = preparation.CaptureProgramBinding(m_clearOwnershipBitsetPso);
+        bitset.program = bitsetProgram.program;
+        bitset.descriptorIndices = std::move(bitsetProgram.descriptorIndices);
         c[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         c[CLOD_REYES_RESET_OWNERSHIP_BITSET_WORD_COUNT] = m_ownershipBitsetWordCount;
-        data.bitsetGroups = (m_ownershipBitsetWordCount + 63u) / 64u;
+        bitset.constants = c;
+        bitset.groupsX = (m_ownershipBitsetWordCount + 63u) / 64u;
+        data.steps.push_back(std::move(bitset));
     }
-    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
+    return data;
 }
 
-void ReyesQueueResetPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)
-{
-    auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
-    auto bindIndices = [&](const std::vector<unsigned int>& indices) {
-        if (!indices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
-            org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
-            static_cast<uint32_t>(indices.size()), indices.data());
-    };
-    commands.BindPipeline(data.countersPipeline);
-    bindIndices(data.countersDescriptorIndices);
-    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, data.constants.data());
-    commands.Dispatch(1, 1, 1);
-    if (!data.bitsetGroups) return;
-    commands.BindPipeline(data.bitsetPipeline);
-    bindIndices(data.bitsetDescriptorIndices);
-    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, data.constants.data());
-    commands.Dispatch(data.bitsetGroups, 1, 1);
+void ReyesQueueResetPass::Record(const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputePipelineSequence(data, recording);
 }
 
 void ReyesQueueResetPass::Update(const UpdateExecutionContext& executionContext)
@@ -228,5 +148,3 @@ void ReyesQueueResetPass::Update(const UpdateExecutionContext& executionContext)
     telemetry.objectReyesAtlasDebugMinHeightUvSetIndex = 0xFFFFFFFFu;
     BUFFER_UPLOAD(&telemetry, sizeof(CLodReyesTelemetry), org::runtime::UploadTarget::FromShared(m_telemetryBuffer), 0);
 }
-
-void ReyesQueueResetPass::Cleanup() {}

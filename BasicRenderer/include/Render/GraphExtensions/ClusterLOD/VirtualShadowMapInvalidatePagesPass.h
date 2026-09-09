@@ -4,7 +4,8 @@
 
 #include "Render/PipelineState.h"
 #include "Render/RendererComponents.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
@@ -14,7 +15,7 @@ namespace org { class DynamicBuffer; }
 using org::DynamicBuffer;
 class VirtualShadowInvalidationQueue;
 
-class VirtualShadowMapInvalidatePagesPass final : public ComputePass {
+class VirtualShadowMapInvalidatePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapInvalidatePagesPass, br::render::PreparedComputePipelineSequence> {
 public:
     VirtualShadowMapInvalidatePagesPass(
         std::shared_ptr<Buffer> invalidationInputsBuffer,
@@ -28,12 +29,10 @@ public:
         std::shared_ptr<Buffer> statsBuffer,
         std::shared_ptr<VirtualShadowInvalidationQueue> extensionInvalidations = nullptr);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
 
 private:
     PipelineState m_pso;

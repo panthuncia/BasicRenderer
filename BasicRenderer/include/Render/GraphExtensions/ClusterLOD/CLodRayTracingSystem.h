@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "Managers/MeshManager.h"
@@ -17,6 +18,7 @@ namespace br::render {
 
 class CLodRayTracingSystem {
 public:
+    std::mutex& FrameOperationMutex() noexcept { return m_frameOperationMutex; }
     struct Stats {
         uint32_t residentGroups = 0;
         uint32_t residentPages = 0;
@@ -89,6 +91,7 @@ public:
     rhi::AccelerationStructure GetTlas() const { return m_tlas ? m_tlas.Get() : rhi::AccelerationStructure{}; }
 
 private:
+    std::mutex m_frameOperationMutex;
     void EnsureBuffers(
         uint32_t pageSourceCount,
         uint32_t clusterCount,

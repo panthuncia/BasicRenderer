@@ -2,7 +2,8 @@
 
 #include <bit>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/SettingsManager.h"
@@ -30,7 +31,7 @@ namespace TerrainRegionMaterialEval
     }
 }
 
-class TerrainRegionCounterResetPass : public ComputePass {
+class TerrainRegionCounterResetPass : public org::TypedRenderGraphPass<TerrainRegionCounterResetPass, br::render::PreparedComputeDispatch> {
 public:
     TerrainRegionCounterResetPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -41,39 +42,39 @@ public:
             "VisUtil_ClearTerrainRegionCountersPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithUnorderedAccess(
             "Builtin::VisUtil::TerrainRegionPixelCountBuffer",
             "Builtin::VisUtil::TerrainRegionWriteCursorBuffer",
             "Builtin::VisUtil::TerrainRegionActiveCountBuffer");
     }
 
-    void Setup() override {}
-
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& pm = PSOManager::GetInstance();
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-        uint32_t rc[NumMiscUintRootConstants] = {};
-        rc[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-        cl.Dispatch((TerrainRegionMaterialEval::MaxTerrainRegions + 63u) / 64u, 1u, 1u);
-        return {};
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+        const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = ctx.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+        data.constants[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
+        data.groupsX = (TerrainRegionMaterialEval::MaxTerrainRegions + 63u) / 64u; data.groupsY = 1u; data.groupsZ = 1u;
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
 
 private:
     PipelineState m_pso;
 };
 
-class TerrainRegionMaterialRangePassBase : public ComputePass {
-protected:
+template<class Derived>
+class TerrainRegionMaterialRangePassBase : public org::TypedRenderGraphPass<Derived, std::vector<br::render::PreparedComputeIndirect>> {
+public:
     explicit TerrainRegionMaterialRangePassBase(const wchar_t* entryPoint, const char* debugName) {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -83,36 +84,30 @@ protected:
             debugName);
     }
 
-    void Setup() override {
-        m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
+    void Initialize() {
+        m_materialEvalCmds = this->m_resourceRegistryView->template RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    void Cleanup() override {
-        m_materialEvalCmds = nullptr;
-    }
+    void ShutdownPass() { m_materialEvalCmds = nullptr; }
 
-    void ExecuteTerrainRanges(PassExecutionContext& executionContext) {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& pm = PSOManager::GetInstance();
-        const auto& sig = CommandSignatureManager::GetInstance().GetMaterialEvaluationCommandSignature();
+    std::vector<br::render::PreparedComputeIndirect> Prepare(const org::PassPrepareContext& preparation) {
+        const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
+        std::vector<br::render::PreparedComputeIndirect> result;
+        br::render::PreparedComputeIndirect data{};
+        data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = ctx.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+        data.commandSignature = preparation.CaptureCommandSignature(
+            CommandSignatureManager::GetInstance().CaptureMaterialEvaluationCommandSignature());
+        data.argumentsReference = preparation.CaptureResource(m_materialEvalCmds->GetGlobalResourceID());
+        data.constants[0] = TerrainRegionMaterialEval::TerrainSetIndexV1;
         const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);
-        auto argBuf = m_materialEvalCmds->GetAPIResource();
-
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-
-        uint32_t rc[NumMiscUintRootConstants] = {};
-        rc[0] = TerrainRegionMaterialEval::TerrainSetIndexV1;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-
         const auto materialState = ctx.publishedRendererState
             ? ctx.publishedRendererState->materials.payload.Get<br::render::PublishedMaterialState>()
             : nullptr;
-        if (!materialState) return;
+        if (!materialState) return result;
         for (std::size_t activeIndex = 0; activeIndex < materialState->activeCompileFlags.size(); ++activeIndex) {
             const MaterialCompileFlags flags = materialState->activeCompileFlags[activeIndex];
             if (!TerrainRegionMaterialEval::IsTerrainMaterialFlags(flags)) {
@@ -124,20 +119,28 @@ protected:
             const uint32_t slot = materialState->activeCompileFlagSlots[activeIndex];
             if (slot >= materialState->compileFlagSlotsUsed) continue;
             const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
-            cl.ExecuteIndirect(sig.GetHandle(), argBuf.GetHandle(), argOffset, rhi::ResourceHandle{}, 0, 1);
+            data.argumentsOffset = argOffset;
+            result.push_back(data);
         }
+        return result;
+    }
+
+    static void Record(const std::vector<br::render::PreparedComputeIndirect>& work, org::PassRecordContext& recording) {
+        for (const auto& data : work) br::render::RecordPreparedComputeIndirect(data, recording);
     }
 
     Resource* m_materialEvalCmds = nullptr;
     PipelineState m_pso;
 };
 
-class TerrainRegionHistogramPass : public TerrainRegionMaterialRangePassBase {
+class TerrainRegionHistogramPass : public TerrainRegionMaterialRangePassBase<TerrainRegionHistogramPass> {
 public:
     TerrainRegionHistogramPass()
-        : TerrainRegionMaterialRangePassBase(L"TerrainRegionHistogramFromMaterialRangeCS", "VisUtil_TerrainRegionHistogramPSO") {}
+        : TerrainRegionMaterialRangePassBase<TerrainRegionHistogramPass>(L"TerrainRegionHistogramFromMaterialRangeCS", "VisUtil_TerrainRegionHistogramPSO") {}
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithShaderResource(
             "Builtin::VisUtil::PixelListBuffer",
             Builtin::PrimaryCamera::VisibilityTexture,
@@ -147,17 +150,14 @@ public:
                 "Builtin::VisUtil::TerrainRegionPixelCountBuffer",
                 "Builtin::VisUtil::TerrainRegionActiveListBuffer",
                 "Builtin::VisUtil::TerrainRegionActiveCountBuffer")
-            .WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer")
+
             .WithConstantBuffer(Builtin::PerFrameBuffer);
+        builder.WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        ExecuteTerrainRanges(executionContext);
-        return {};
-    }
 };
 
-class TerrainRegionBlockScanPass : public ComputePass {
+class TerrainRegionBlockScanPass : public org::TypedRenderGraphPass<TerrainRegionBlockScanPass, br::render::PreparedComputeDispatch> {
 public:
     TerrainRegionBlockScanPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -168,38 +168,37 @@ public:
             "VisUtil_TerrainRegionBlockScanPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithShaderResource("Builtin::VisUtil::TerrainRegionPixelCountBuffer")
             .WithUnorderedAccess(
                 "Builtin::VisUtil::TerrainRegionOffsetBuffer",
                 "Builtin::VisUtil::TerrainRegionBlockSumsBuffer");
     }
 
-    void Setup() override {}
-
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& pm = PSOManager::GetInstance();
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-        uint32_t rc[NumMiscUintRootConstants] = {};
-        rc[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-        cl.Dispatch((TerrainRegionMaterialEval::MaxTerrainRegions + TerrainRegionMaterialEval::PrefixBlockSize - 1u) / TerrainRegionMaterialEval::PrefixBlockSize, 1u, 1u);
-        return {};
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+        const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = ctx.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+        data.constants[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
+        data.groupsX = (TerrainRegionMaterialEval::MaxTerrainRegions + TerrainRegionMaterialEval::PrefixBlockSize - 1u) / TerrainRegionMaterialEval::PrefixBlockSize; data.groupsY = 1u; data.groupsZ = 1u;
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
 
 private:
     PipelineState m_pso;
 };
 
-class TerrainRegionBlockOffsetsPass : public ComputePass {
+class TerrainRegionBlockOffsetsPass : public org::TypedRenderGraphPass<TerrainRegionBlockOffsetsPass, br::render::PreparedComputeDispatch> {
 public:
     TerrainRegionBlockOffsetsPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -210,7 +209,9 @@ public:
             "VisUtil_TerrainRegionBlockOffsetsPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithShaderResource(
             "Builtin::VisUtil::TerrainRegionPixelCountBuffer",
             "Builtin::VisUtil::TerrainRegionBlockSumsBuffer")
@@ -220,37 +221,36 @@ public:
                 "Builtin::VisUtil::TerrainRegionTotalPixelCountBuffer");
     }
 
-    void Setup() override {}
-
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& pm = PSOManager::GetInstance();
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-        uint32_t rc[NumMiscUintRootConstants] = {};
-        rc[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
-        rc[1] = (TerrainRegionMaterialEval::MaxTerrainRegions + TerrainRegionMaterialEval::PrefixBlockSize - 1u) / TerrainRegionMaterialEval::PrefixBlockSize;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-        cl.Dispatch(1u, 1u, 1u);
-        return {};
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+        const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = ctx.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+        data.constants[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
+        data.constants[1] = (TerrainRegionMaterialEval::MaxTerrainRegions + TerrainRegionMaterialEval::PrefixBlockSize - 1u) / TerrainRegionMaterialEval::PrefixBlockSize;
+        data.groupsX = 1u; data.groupsY = 1u; data.groupsZ = 1u;
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
 
 private:
     PipelineState m_pso;
 };
 
-class TerrainRegionPixelListPass : public TerrainRegionMaterialRangePassBase {
+class TerrainRegionPixelListPass : public TerrainRegionMaterialRangePassBase<TerrainRegionPixelListPass> {
 public:
     TerrainRegionPixelListPass()
-        : TerrainRegionMaterialRangePassBase(L"TerrainRegionListFromMaterialRangeCS", "VisUtil_TerrainRegionPixelListPSO") {}
+        : TerrainRegionMaterialRangePassBase<TerrainRegionPixelListPass>(L"TerrainRegionListFromMaterialRangeCS", "VisUtil_TerrainRegionPixelListPSO") {}
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithShaderResource(
             "Builtin::VisUtil::PixelListBuffer",
             Builtin::PrimaryCamera::VisibilityTexture,
@@ -260,17 +260,14 @@ public:
             .WithUnorderedAccess(
                 "Builtin::VisUtil::TerrainRegionWriteCursorBuffer",
                 "Builtin::VisUtil::TerrainRegionPixelListBuffer")
-            .WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer")
+
             .WithConstantBuffer(Builtin::PerFrameBuffer);
+        builder.WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        ExecuteTerrainRanges(executionContext);
-        return {};
-    }
 };
 
-class BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass : public ComputePass {
+class BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass : public org::TypedRenderGraphPass<BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass, br::render::PreparedComputeDispatch> {
 public:
     BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -281,33 +278,35 @@ public:
             "VisUtil_BuildTerrainRegionCommandBuildDispatchArgsPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithShaderResource("Builtin::VisUtil::TerrainRegionActiveCountBuffer")
             .WithUnorderedAccess("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuildDispatchArgsBuffer");
     }
 
-    void Setup() override {}
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+        const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedComputeDispatch data{};
+        data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = ctx.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& pm = PSOManager::GetInstance();
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-        cl.Dispatch(1u, 1u, 1u);
-        return {};
+        data.groupsX = 1u; data.groupsY = 1u; data.groupsZ = 1u;
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
 
 private:
     PipelineState m_pso;
 };
 
-class BuildTerrainRegionMaterialIndirectCommandBufferPass : public ComputePass {
+class BuildTerrainRegionMaterialIndirectCommandBufferPass : public org::TypedRenderGraphPass<BuildTerrainRegionMaterialIndirectCommandBufferPass, br::render::PreparedComputeIndirect> {
 public:
     BuildTerrainRegionMaterialIndirectCommandBufferPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -318,46 +317,41 @@ public:
             "VisUtil_BuildTerrainRegionEvaluateIndirectArgsPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithShaderResource(
             "Builtin::VisUtil::TerrainRegionActiveCountBuffer",
             "Builtin::VisUtil::TerrainRegionActiveListBuffer",
             "Builtin::VisUtil::TerrainRegionPixelCountBuffer",
             "Builtin::VisUtil::TerrainRegionOffsetBuffer")
-            .WithUnorderedAccess("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuffer")
-            .WithIndirectArguments("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuildDispatchArgsBuffer");
+            .WithUnorderedAccess("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuffer");
+        builder.WithIndirectArguments("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuildDispatchArgsBuffer");
     }
 
-    void Setup() override {
+    void Initialize() {
         m_dispatchArgs = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuildDispatchArgsBuffer");
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& pm = PSOManager::GetInstance();
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-        uint32_t rc[NumMiscUintRootConstants] = {};
-        rc[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
-        rc[1] = TerrainRegionMaterialEval::TerrainSetIndexV1;
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-        const auto& sig = CommandSignatureManager::GetInstance().GetRawDispatchCommandSignature();
-        cl.ExecuteIndirect(
-            sig.GetHandle(),
-            m_dispatchArgs->GetAPIResource().GetHandle(),
-            0,
-            rhi::ResourceHandle{},
-            0,
-            1);
-        return {};
+    void ShutdownPass() { m_dispatchArgs = nullptr; }
+
+    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation) {
+        const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedComputeIndirect data{};
+        data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = ctx.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+        data.constants[0] = TerrainRegionMaterialEval::MaxTerrainRegions;
+        data.constants[1] = TerrainRegionMaterialEval::TerrainSetIndexV1;
+        data.commandSignature = preparation.CaptureCommandSignature(CommandSignatureManager::GetInstance().CaptureRawDispatchCommandSignature());
+        data.argumentsReference = preparation.CaptureResource(m_dispatchArgs->GetGlobalResourceID());
+        return data;
     }
 
-    void Cleanup() override {
-        m_dispatchArgs = nullptr;
+    static void Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeIndirect(data, recording);
     }
 
 private:
@@ -365,7 +359,7 @@ private:
     Resource* m_dispatchArgs = nullptr;
 };
 
-class EvaluateTerrainRegionMaterialGroupsPass : public ComputePass {
+class EvaluateTerrainRegionMaterialGroupsPass : public org::TypedRenderGraphPass<EvaluateTerrainRegionMaterialGroupsPass, br::render::PreparedComputeIndirect> {
 public:
     EvaluateTerrainRegionMaterialGroupsPass() {
         std::vector<DxcDefine> defines;
@@ -418,7 +412,9 @@ public:
         } catch (...) {}
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
         b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
         b->WithShaderResource(ECSResourceResolver(m_reyesTessTableConfigsQuery));
@@ -496,7 +492,7 @@ public:
             "Builtin::VisUtil::TerrainRegionActiveCountBuffer");
     }
 
-    void Setup() override {
+    void Initialize() {
         RefreshResourcePointers();
         RefreshDescriptorIndices();
         m_terrainRegionEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuffer");
@@ -591,44 +587,38 @@ public:
             : 0xFFFFFFFFu;
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& pm = PSOManager::GetInstance();
-        const auto& sig = CommandSignatureManager::GetInstance().GetTerrainRegionMaterialEvaluationCommandSignature();
-
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
+    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation) {
+        const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedComputeIndirect data{};
+        data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = ctx.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
         RefreshDescriptorIndices();
-
-        unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-        miscRootConstants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
-        miscRootConstants[VISBUF_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
-        miscRootConstants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
-        miscRootConstants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
-        miscRootConstants[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBufferSRVIndex;
-        miscRootConstants[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBufferSRVIndex;
-        miscRootConstants[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBufferSRVIndex;
-        miscRootConstants[VISBUF_REYES_USE_NORMAL_MAPS] = CLodReyesUseNormalMaps() ? 1u : 0u;
-        miscRootConstants[VISBUF_REYES_TERRAIN_NORMAL_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesTerrainNormalBlend());
-        miscRootConstants[VISBUF_REYES_TERRAIN_NORMAL_MIP_BIAS] = CLodReyesTerrainNormalMipBias();
-        miscRootConstants[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
-
-        cl.ExecuteIndirect(
-            sig.GetHandle(),
-            m_terrainRegionEvalCmds->GetAPIResource().GetHandle(),
-            0,
-            m_activeCount->GetAPIResource().GetHandle(),
-            0,
-            TerrainRegionMaterialEval::MaxTerrainRegions);
-        return {};
+        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+        data.constants[VISBUF_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
+        data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
+        data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+        data.constants[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBufferSRVIndex;
+        data.constants[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBufferSRVIndex;
+        data.constants[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBufferSRVIndex;
+        data.constants[VISBUF_REYES_USE_NORMAL_MAPS] = CLodReyesUseNormalMaps() ? 1u : 0u;
+        data.constants[VISBUF_REYES_TERRAIN_NORMAL_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesTerrainNormalBlend());
+        data.constants[VISBUF_REYES_TERRAIN_NORMAL_MIP_BIAS] = CLodReyesTerrainNormalMipBias();
+        data.constants[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
+        data.commandSignature = preparation.CaptureCommandSignature(CommandSignatureManager::GetInstance().CaptureTerrainRegionMaterialEvaluationCommandSignature());
+        data.argumentsReference = preparation.CaptureResource(m_terrainRegionEvalCmds->GetGlobalResourceID());
+        data.countBufferReference = preparation.CaptureResource(m_activeCount->GetGlobalResourceID());
+        data.maximumCount = TerrainRegionMaterialEval::MaxTerrainRegions;
+        return data;
     }
 
-    void Cleanup() override {
+    static void Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeIndirect(data, recording);
+    }
+
+    void ShutdownPass() {
         m_visibleClustersQuery = {};
         m_reyesDiceQueueQuery = {};
         m_reyesTessTableConfigsQuery = {};

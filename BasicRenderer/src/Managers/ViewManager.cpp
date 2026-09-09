@@ -82,7 +82,9 @@ namespace
     }
 }
 
-ViewManager::ViewManager() {
+ViewManager::ViewManager()
+    : m_publicationOwner(std::make_shared<PublicationOwner>()) {
+    m_publicationOwner->manager = this;
     auto& resourceManager = ::ResourceManager::GetInstance();
     m_cameraBuffer = LazyDynamicStructuredBuffer<CameraInfo>::CreateShared(1, "cameraBuffer<ViewManager>");
 	m_cullingCameraBuffer = LazyDynamicStructuredBuffer<CullingCameraInfo>::CreateShared(1, "cullingCameraBuffer<ViewManager>");
@@ -98,6 +100,11 @@ ViewManager::ViewManager() {
         std::make_shared<ResourceGroupResolver>(m_linearDepthGroup);
     m_resolvers[Builtin::LastFrameLinearDepthMaps] =
         std::make_shared<ResourceGroupResolver>(m_lastFrameLinearDepthGroup);
+}
+
+ViewManager::~ViewManager() {
+    std::lock_guard lock(m_publicationOwner->mutex);
+    m_publicationOwner->manager = nullptr;
 }
 
 void ViewManager::SetIndirectCommandBufferManager(IndirectCommandBufferManager* manager) {
@@ -215,6 +222,7 @@ void ViewManager::AttachDepth(uint64_t viewID,
     v->gpu.linearDepthMap = linearDepth;
     v->gpu.lastFrameLinearDepthMap.reset();
     v->gpu.lastFrameLinearDepthValid = false;
+    ++v->gpu.depthHistoryEpoch;
 
     if (linearDepth) {
         const uint64_t sourceID = linearDepth->GetGlobalResourceID();
@@ -304,6 +312,48 @@ void ViewManager::MarkDepthHistoryValid(uint64_t viewID) {
 
     v->gpu.lastFrameLinearDepthValid = true;
     ++m_resourceLayoutRevision;
+}
+
+std::shared_ptr<const org::PreparedLifecycleEffect> ViewManager::ReserveDepthHistoryPublication() {
+    struct Publication {
+        struct Entry {
+            uint64_t viewID = 0;
+            uint64_t sourceResourceID = 0;
+            uint64_t sourceGeneration = 0;
+            uint64_t historyEpoch = 0;
+        };
+        std::shared_ptr<PublicationOwner> owner;
+        std::vector<Entry> entries;
+    };
+
+    auto publication = std::make_shared<Publication>();
+    publication->owner = m_publicationOwner;
+    publication->entries.reserve(m_views.size());
+    ForEachView([&](uint64_t viewID) {
+        const auto* view = Get(viewID);
+        if (!view || !view->gpu.linearDepthMap) return;
+        publication->entries.push_back({
+            viewID,
+            view->gpu.linearDepthMap->GetGlobalResourceID(),
+            view->gpu.linearDepthMap->GetBackingGeneration(),
+            view->gpu.depthHistoryEpoch });
+    });
+
+    const auto submitted = [](Publication& value, org::SubmissionContext) {
+        std::lock_guard lock(value.owner->mutex);
+        auto* manager = value.owner->manager;
+        if (!manager) return;
+        for (const auto& entry : value.entries) {
+            const auto* view = manager->Get(entry.viewID);
+            if (!view || !view->gpu.linearDepthMap ||
+                view->gpu.depthHistoryEpoch != entry.historyEpoch ||
+                view->gpu.linearDepthMap->GetGlobalResourceID() != entry.sourceResourceID ||
+                view->gpu.linearDepthMap->GetBackingGeneration() != entry.sourceGeneration) continue;
+            manager->MarkDepthHistoryValid(entry.viewID);
+        }
+    };
+    return std::make_shared<const org::PreparedOwnedLifecycle<Publication>>(
+        std::move(publication), submitted);
 }
 
 View* ViewManager::Get(uint64_t viewID) {

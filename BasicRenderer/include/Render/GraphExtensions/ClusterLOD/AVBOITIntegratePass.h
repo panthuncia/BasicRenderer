@@ -4,14 +4,15 @@
 #include <memory>
 
 #include "Interfaces/IDynamicDeclaredResources.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITIntegratePass final : public ComputePass, public IDynamicDeclaredResources {
+class AVBOITIntegratePass final : public org::TypedRenderGraphPass<AVBOITIntegratePass, br::render::PreparedComputeDispatch>, public IDynamicDeclaredResources {
 public:
     AVBOITIntegratePass(
         std::shared_ptr<Buffer> configBuffer,
@@ -24,12 +25,11 @@ public:
         std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
         std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    void Cleanup() override;
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

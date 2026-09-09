@@ -1,6 +1,7 @@
 #include "Render/GraphExtensions/ClusterLOD/AVBOITEarlyDepthPass.h"
 
 #include "BuiltinResources.h"
+#include "Render/ShaderAPI.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -76,89 +77,74 @@ AVBOITEarlyDepthPass::AVBOITEarlyDepthPass(
     }
 
     pso->SetName("CLod.AVBOITEarlyDepth.PSO");
-    m_pso = PipelineState(std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots);
+    m_pso = PipelineState(std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots,
+        PSOManager::GetInstance().CaptureLayoutOwner(soLayout.layout), soLayout.layout);
 
     rhi::IndirectArg args[] = {
         {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 3 } } },
         {.kind = rhi::IndirectArgKind::Draw }
     };
+    m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>();
     result = dev.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 2), sizeof(CLodAVBOITEarlyDepthTileIndirectCommand) },
         layout.GetHandle(),
-        m_commandSignature);
+        *m_commandSignature);
     if (Failed(result)) {
         throw std::runtime_error("Failed to create CLod AVBOIT early depth command signature");
     }
 }
 
-void AVBOITEarlyDepthPass::DeclareResourceUsages(RenderPassBuilder* builder)
+void AVBOITEarlyDepthPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(Builtin::CameraBuffer, m_configBuffer)
+    builder.WithShaderResource(Builtin::CameraBuffer, m_configBuffer)
         .WithIndirectArguments(m_tileCommandsBuffer, m_tileCountBuffer)
         .WithDepthReadWrite(m_earlyDepthTexture);
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void AVBOITEarlyDepthPass::Setup()
-{
+AVBOITEarlyDepthFrameData AVBOITEarlyDepthPass::Prepare(const org::PassPrepareContext& preparation) {
+    AVBOITEarlyDepthFrameData data;
+    if (!m_configBuffer || !m_tileCommandsBuffer || !m_tileCountBuffer || !m_earlyDepthTexture) return data;
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    data.enabled = true;
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    auto program = preparation.CaptureProgramBinding(m_pso);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
+    data.signature = preparation.CaptureCommandSignature(m_commandSignature);
+    data.arguments = preparation.CaptureResource(m_tileCommandsBuffer->GetGlobalResourceID());
+    data.count = preparation.CaptureResource(m_tileCountBuffer->GetGlobalResourceID());
+    data.depth = preparation.CaptureDescriptor({m_earlyDepthTexture->GetGlobalResourceID(), 0}, m_earlyDepthTexture->GetDSVInfo(0).slot);
+    data.clear = m_earlyDepthTexture->GetClearColor();
+    data.width = m_earlyDepthTexture->GetWidth(); data.height = m_earlyDepthTexture->GetHeight();
+    data.maximumCount = static_cast<uint32_t>(m_tileCommandsBuffer->GetSize() / sizeof(CLodAVBOITEarlyDepthTileIndirectCommand));
+    data.constants[CLOD_AVBOIT_VBOIT_EARLY_DEPTH_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
+    return data;
 }
 
-void AVBOITEarlyDepthPass::Update(const UpdateExecutionContext& executionContext)
-{
-    (void)executionContext;
-}
-
-PassReturn AVBOITEarlyDepthPass::Execute(PassExecutionContext& executionContext)
-{
-    if (!m_configBuffer || !m_tileCommandsBuffer || !m_tileCountBuffer || !m_earlyDepthTexture) {
-        return {};
-    }
-
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-    rhi::PassBeginInfo passInfo{};
-    rhi::DepthAttachment depthAttachment{};
-    depthAttachment.dsv = m_earlyDepthTexture->GetDSVInfo(0).slot;
-    depthAttachment.depthLoad = rhi::LoadOp::Clear;
-    depthAttachment.depthStore = rhi::StoreOp::Store;
-    depthAttachment.stencilLoad = rhi::LoadOp::DontCare;
-    depthAttachment.stencilStore = rhi::StoreOp::DontCare;
-    depthAttachment.clear = m_earlyDepthTexture->GetClearColor();
-    passInfo.depth = &depthAttachment;
-    passInfo.width = m_earlyDepthTexture->GetWidth();
-    passInfo.height = m_earlyDepthTexture->GetHeight();
-    passInfo.debugName = "CLod AVBOIT early depth";
-    commandList.BeginPass(passInfo);
-
-    commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
-    commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-    uint32_t misc[NumMiscUintRootConstants] = {};
-    misc[CLOD_AVBOIT_VBOIT_EARLY_DEPTH_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
-    commandList.PushConstants(
-        rhi::ShaderStage::AllGraphics,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        misc);
-
-    commandList.ExecuteIndirect(
-        m_commandSignature->GetHandle(),
-        m_tileCommandsBuffer->GetAPIResource().GetHandle(),
-        0,
-        m_tileCountBuffer->GetAPIResource().GetHandle(),
-        0,
-        static_cast<uint32_t>(m_tileCommandsBuffer->GetSize() / sizeof(CLodAVBOITEarlyDepthTileIndirectCommand)));
-    return {};
-}
-
-void AVBOITEarlyDepthPass::Cleanup()
-{
+void AVBOITEarlyDepthPass::Record(const AVBOITEarlyDepthFrameData& data, org::PassRecordContext& recording) {
+    if (!data.enabled) return;
+    auto& commands = recording.Commands();
+    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
+    rhi::DepthAttachment depth{};
+    depth.dsv = recording.Resolve(data.depth);
+    depth.depthLoad = rhi::LoadOp::Clear; depth.depthStore = rhi::StoreOp::Store;
+    depth.stencilLoad = rhi::LoadOp::DontCare; depth.stencilStore = rhi::StoreOp::DontCare;
+    depth.clear = data.clear;
+    rhi::PassBeginInfo pass{};
+    pass.depth = &depth; pass.width = data.width; pass.height = data.height;
+    pass.debugName = "CLod AVBOIT early depth";
+    commands.BeginPass(pass);
+    commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
+    commands.BindLayout(recording.ResolveLayout(data.program));
+    commands.BindPipeline(recording.Resolve(data.program));
+    if (!data.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
+        org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+        static_cast<uint32_t>(data.descriptorIndices.size()), data.descriptorIndices.data());
+    commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0,
+        NumMiscUintRootConstants, data.constants.data());
+    commands.ExecuteIndirect(data.signature, recording.Resolve(data.arguments).GetHandle(), 0,
+        recording.Resolve(data.count).GetHandle(), 0, data.maximumCount);
+    commands.EndPass();
 }

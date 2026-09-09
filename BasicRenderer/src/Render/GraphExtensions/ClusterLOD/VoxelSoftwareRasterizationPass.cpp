@@ -15,48 +15,33 @@
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
 
-namespace {
-struct PreparedVoxelRaster {
-    struct Step {
-        rhi::PipelineHandle buildPipeline{}, rasterPipeline{};
-        std::shared_ptr<const org::PipelineStatePayload> buildOwner, rasterOwner;
-        std::vector<unsigned int> buildDescriptors, rasterDescriptors;
-        std::array<uint32_t, NumMiscUintRootConstants> constants{};
-        rhi::ResourceHandle arguments{};
-    };
-    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
-    rhi::PipelineLayoutHandle layout{};
-    std::shared_ptr<const void> commandSignatureOwner;
-    rhi::CommandSignatureHandle commandSignature{};
-    std::array<Step, 2> steps;
-};
-
-void RecordPreparedVoxelRaster(const PreparedVoxelRaster& data, org::RecordingContext& recording) {
+void VoxelSoftwareRasterizationPass::Record(const VoxelRasterFrameData& data, org::PassRecordContext& recording) {
     auto& commands = recording.Commands();
     commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
     for (const auto& step : data.steps) {
-        commands.BindPipeline(step.buildPipeline);
-        if (!step.buildDescriptors.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
+        commands.BindLayout(recording.ResolveLayout(step.buildProgram.program));
+        commands.BindPipeline(recording.Resolve(step.buildProgram.program));
+        if (!step.buildProgram.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
-            static_cast<uint32_t>(step.buildDescriptors.size()), step.buildDescriptors.data());
+            static_cast<uint32_t>(step.buildProgram.descriptorIndices.size()), step.buildProgram.descriptorIndices.data());
         commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
             NumMiscUintRootConstants, step.constants.data());
         commands.Dispatch(1u, 1u, 1u);
+        const auto arguments = recording.Resolve(step.arguments).GetHandle();
         rhi::BufferBarrier barrier{};
-        barrier.buffer = step.arguments;
+        barrier.buffer = arguments;
         barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
         barrier.afterAccess = rhi::ResourceAccessType::IndirectArgument;
         barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
         barrier.afterSync = rhi::ResourceSyncState::ExecuteIndirect;
         rhi::BarrierBatch barriers{}; barriers.buffers = {&barrier, 1}; commands.Barriers(barriers);
-        commands.BindPipeline(step.rasterPipeline);
-        if (!step.rasterDescriptors.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
+        commands.BindLayout(recording.ResolveLayout(step.rasterProgram.program));
+        commands.BindPipeline(recording.Resolve(step.rasterProgram.program));
+        if (!step.rasterProgram.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
-            static_cast<uint32_t>(step.rasterDescriptors.size()), step.rasterDescriptors.data());
-        commands.ExecuteIndirect(data.commandSignature, step.arguments, 0, {}, 0, 1);
+            static_cast<uint32_t>(step.rasterProgram.descriptorIndices.size()), step.rasterProgram.descriptorIndices.data());
+        commands.ExecuteIndirect(data.commandSignature, arguments, 0, {}, 0, 1);
     }
-}
 }
 
 VoxelSoftwareRasterizationPass::VoxelSoftwareRasterizationPass(
@@ -162,8 +147,10 @@ VoxelSoftwareRasterizationPass::VoxelSoftwareRasterizationPass(
 
 VoxelSoftwareRasterizationPass::~VoxelSoftwareRasterizationPass() = default;
 
-void VoxelSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VoxelSoftwareRasterizationPass::Declare(org::PassBuilder& declaration)
 {
+    auto* builder = &declaration;
+    builder->PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
     const ResourceState indirectState{
         rhi::ResourceAccessType::IndirectArgument,
         rhi::ResourceLayout::GenericRead,
@@ -227,8 +214,6 @@ void VoxelSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* b
     }
 }
 
-void VoxelSoftwareRasterizationPass::Setup() {}
-
 void VoxelSoftwareRasterizationPass::Update(const UpdateExecutionContext& executionContext)
 {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
@@ -290,82 +275,12 @@ bool VoxelSoftwareRasterizationPass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-PassReturn VoxelSoftwareRasterizationPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
-    uint32_t misc[NumMiscUintRootConstants] = {};
-    misc[CLOD_RASTER_VOXEL_WORK_CAPACITY] = m_voxelWorkCapacity;
-    misc[CLOD_RASTER_VOXEL_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_VOXEL_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] =
-        m_visibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
-    if (m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled()) {
-        misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    }
-    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-        const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] =
-            m_virtualShadowDynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowConfig.virtualResolution;
-    }
-
-    const bool telemetryEnabled = m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled();
-    for (uint32_t variantIndex = 0u; variantIndex < m_voxelWorkRecordsBuffers.size(); ++variantIndex) {
-        misc[CLOD_RASTER_VOXEL_WORK_RECORDS_DESCRIPTOR_INDEX] = m_voxelWorkRecordsBuffers[variantIndex]->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_VOXEL_WORK_COUNTER_DESCRIPTOR_INDEX] = m_voxelWorkCounterBuffers[variantIndex]->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_VOXEL_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_voxelIndirectArgsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
-
-        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-        BindResourceDescriptorIndices(commandList, m_buildArgsPso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_buildArgsPso.GetAPIPipelineState().GetHandle());
-        commandList.Dispatch(1u, 1u, 1u);
-
-        rhi::BufferBarrier argsBarrier{};
-        argsBarrier.buffer = m_voxelIndirectArgsBuffers[variantIndex]->GetAPIResource().GetHandle();
-        argsBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-        argsBarrier.afterAccess = rhi::ResourceAccessType::IndirectArgument;
-        argsBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-        argsBarrier.afterSync = rhi::ResourceSyncState::ExecuteIndirect;
-        rhi::BarrierBatch barrierBatch{};
-        barrierBatch.buffers = { &argsBarrier };
-        commandList.Barriers(barrierBatch);
-
-        const PipelineState& pso = telemetryEnabled
-            ? (variantIndex == 0u ? m_rigidTelemetryRasterPso : m_skinnedTelemetryRasterPso)
-            : (variantIndex == 0u ? m_rigidRasterPso : m_skinnedRasterPso);
-        BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-        commandList.ExecuteIndirect(
-            (*m_dispatchCommandSignature)->GetHandle(),
-            m_voxelIndirectArgsBuffers[variantIndex]->GetAPIResource().GetHandle(),
-            0,
-            {},
-            0,
-            1);
-    }
-
-    return {};
-}
-
-PreparedPass VoxelSoftwareRasterizationPass::PrepareFrame(FramePreparationContext& preparation)
+VoxelRasterFrameData VoxelSoftwareRasterizationPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    PreparedVoxelRaster data{};
+    VoxelRasterFrameData data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.commandSignatureOwner = m_dispatchCommandSignature; data.commandSignature = (*m_dispatchCommandSignature)->GetHandle();
+    data.commandSignature = preparation.CaptureCommandSignature(m_dispatchCommandSignature);
     std::array<uint32_t, NumMiscUintRootConstants> misc{};
     misc[CLOD_RASTER_VOXEL_WORK_CAPACITY] = m_voxelWorkCapacity;
     misc[CLOD_RASTER_VOXEL_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
@@ -388,15 +303,11 @@ PreparedPass VoxelSoftwareRasterizationPass::PrepareFrame(FramePreparationContex
         step.constants[CLOD_RASTER_VOXEL_WORK_RECORDS_DESCRIPTOR_INDEX] = m_voxelWorkRecordsBuffers[i]->GetSRVInfo(0).slot.index;
         step.constants[CLOD_RASTER_VOXEL_WORK_COUNTER_DESCRIPTOR_INDEX] = m_voxelWorkCounterBuffers[i]->GetSRVInfo(0).slot.index;
         step.constants[CLOD_RASTER_VOXEL_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_voxelIndirectArgsBuffers[i]->GetUAVShaderVisibleInfo(0).slot.index;
-        step.buildOwner = m_buildArgsPso.GetPayload(); step.buildPipeline = step.buildOwner->pso.Get().GetHandle();
+        step.buildProgram = preparation.CaptureProgramBinding(m_buildArgsPso);
         const PipelineState& raster = telemetry ? (i == 0 ? m_rigidTelemetryRasterPso : m_skinnedTelemetryRasterPso)
             : (i == 0 ? m_rigidRasterPso : m_skinnedRasterPso);
-        step.rasterOwner = raster.GetPayload(); step.rasterPipeline = step.rasterOwner->pso.Get().GetHandle();
-        step.buildDescriptors = CaptureResourceDescriptorIndices(step.buildOwner->pipelineResources);
-        step.rasterDescriptors = CaptureResourceDescriptorIndices(step.rasterOwner->pipelineResources);
-        step.arguments = m_voxelIndirectArgsBuffers[i]->GetAPIResource().GetHandle();
+        step.rasterProgram = preparation.CaptureProgramBinding(raster);
+        step.arguments = preparation.CaptureResource(m_voxelIndirectArgsBuffers[i]->GetGlobalResourceID());
     }
-    return PreparedPass::MakeOwned(std::move(data), &RecordPreparedVoxelRaster);
+    return data;
 }
-
-void VoxelSoftwareRasterizationPass::Cleanup() {}

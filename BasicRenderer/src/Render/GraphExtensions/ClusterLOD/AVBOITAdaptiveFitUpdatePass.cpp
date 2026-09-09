@@ -22,55 +22,40 @@ AVBOITAdaptiveFitUpdatePass::AVBOITAdaptiveFitUpdatePass(
         "CLod.AVBOITAdaptiveFitUpdate.PSO");
 }
 
-void AVBOITAdaptiveFitUpdatePass::DeclareResourceUsages(ComputePassBuilder* builder)
+void AVBOITAdaptiveFitUpdatePass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(m_configBuffer, m_occupancyHistogramBuffer)
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(m_configBuffer, m_occupancyHistogramBuffer)
         .WithUnorderedAccess(m_fitStateBuffer);
 }
 
-void AVBOITAdaptiveFitUpdatePass::Setup()
-{
-}
-
-void AVBOITAdaptiveFitUpdatePass::Update(const UpdateExecutionContext& executionContext)
-{
-    (void)executionContext;
-}
-
-PassReturn AVBOITAdaptiveFitUpdatePass::Execute(PassExecutionContext& executionContext)
-{
+br::render::PreparedComputeDispatch AVBOITAdaptiveFitUpdatePass::Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_occupancyHistogramBuffer || !m_fitStateBuffer) {
         return {};
     }
 
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    const auto* renderContext = preparation.preparationData->Get<UpdateContext>();
     auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    auto program = preparation.CaptureProgramBinding(m_pso);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
 
-    uint32_t misc[NumMiscUintRootConstants] = {};
+    auto& misc = data.constants;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_CONFIG_DESCRIPTOR_INDEX] =
         m_configBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_STATE_DESCRIPTOR_INDEX] =
         m_fitStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_HISTOGRAM_DESCRIPTOR_INDEX] =
         m_occupancyHistogramBuffer->GetSRVInfo(0).slot.index;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        misc);
 
-    commandList.Dispatch(1u, 1u, 1u);
-    return {};
+    data.groupsX = 1u; data.groupsY = 1u; data.groupsZ = 1u;
+    return data;
 }
 
-void AVBOITAdaptiveFitUpdatePass::Cleanup()
-{
+void AVBOITAdaptiveFitUpdatePass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

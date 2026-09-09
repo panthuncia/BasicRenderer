@@ -25,9 +25,10 @@ AVBOITResolvePass::AVBOITResolvePass(
         "CLod.AVBOITResolve.PSO");
 }
 
-void AVBOITResolvePass::DeclareResourceUsages(ComputePassBuilder* builder)
+void AVBOITResolvePass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(
             m_configBuffer,
             m_accumulationTexture,
             m_normalizationTexture,
@@ -35,51 +36,35 @@ void AVBOITResolvePass::DeclareResourceUsages(ComputePassBuilder* builder)
         .WithUnorderedAccess(Builtin::Color::HDRColorTarget);
 }
 
-void AVBOITResolvePass::Setup()
-{
-}
-
-void AVBOITResolvePass::Update(const UpdateExecutionContext& executionContext)
-{
-    (void)executionContext;
-}
-
-PassReturn AVBOITResolvePass::Execute(PassExecutionContext& executionContext)
-{
+br::render::PreparedComputeDispatch AVBOITResolvePass::Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_accumulationTexture || !m_normalizationTexture || !m_shadingExtinctionTexture) {
         return {};
     }
 
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    const auto* renderContext = preparation.preparationData->Get<UpdateContext>();
     auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    auto program = preparation.CaptureProgramBinding(m_pso);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
 
-    uint32_t misc[NumMiscUintRootConstants] = {};
+    auto& misc = data.constants;
     misc[CLOD_AVBOIT_VBOIT_RESOLVE_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_RESOLVE_ACCUMULATION_DESCRIPTOR_INDEX] = m_accumulationTexture->GetSRVInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_RESOLVE_NORMALIZATION_DESCRIPTOR_INDEX] =
         m_normalizationTexture->GetSRVInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_RESOLVE_SHADING_EXTINCTION_DESCRIPTOR_INDEX] =
         m_shadingExtinctionTexture->GetSRVInfo(0).slot.index;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        misc);
 
     const uint32_t groupCountX = (m_accumulationTexture->GetWidth() + 7u) / 8u;
     const uint32_t groupCountY = (m_accumulationTexture->GetHeight() + 7u) / 8u;
-    commandList.Dispatch(groupCountX, groupCountY, 1u);
-    return {};
+    data.groupsX = groupCountX; data.groupsY = groupCountY; data.groupsZ = 1u;
+    return data;
 }
 
-void AVBOITResolvePass::Cleanup()
-{
+void AVBOITResolvePass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

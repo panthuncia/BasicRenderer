@@ -6,7 +6,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/SettingsManager.h"
@@ -25,7 +25,7 @@
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class EvaluateMaterialGroupsPass : public ComputePass {
+class EvaluateMaterialGroupsPass : public org::TypedRenderGraphPass<EvaluateMaterialGroupsPass, br::render::PreparedComputeIndirectSequence> {
 public:
     EvaluateMaterialGroupsPass(ProducerPassServices& services, bool terrainRvtEnabled)
         : m_services(services), m_terrainRvtEnabled(terrainRvtEnabled) {
@@ -83,7 +83,9 @@ public:
         } catch (...) {}
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* b = &builder;
         // TODO(async-state-coherence): CLOD visibility/mesh metadata is still sourced
         // from live manager resources while draw and material tables can come from
         // PublishedRendererState. Select exact generations in one transaction.
@@ -167,7 +169,7 @@ public:
         b->WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    void Setup() override {
+    void Initialize() {
         RefreshResourcePointers();
         RefreshDescriptorIndices();
         m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
@@ -279,104 +281,16 @@ public:
             : 0xFFFFFFFFu;
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        if (!renderContext) return {};
-        auto& ctx = *renderContext;
-        auto& cl = executionContext.commandList;
-        auto& psoMgr = *m_services.pipelines;
-
-        cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
-        cl.BindLayout(psoMgr.GetComputeRootSignature().GetHandle());
-
-        // Execute one indirect compute per compile-flag slot captured by this
-        // frame's immutable renderer-state snapshot.
-        const auto materialState = ctx.publishedRendererState
-            ? ctx.publishedRendererState->materials.payload.Get<br::render::PublishedMaterialState>()
-            : nullptr;
-        if (!materialState) return {};
-        const auto& sig = m_services.commandSignatures->GetMaterialEvaluationCommandSignature();
-
-        const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);
-        auto argBuf = m_materialEvalCmds->GetAPIResource();
-        RefreshDescriptorIndices();
-
-        const bool terrainRegionMaterialEvaluation =
-            m_services.settings->getSettingGetter<bool>("enableTerrainRegionMaterialEvaluation")();
-        const auto outputType = m_services.settings->getSettingGetter<unsigned int>("outputType")();
-		for (std::size_t activeIndex = 0; activeIndex < materialState->activeCompileFlags.size(); ++activeIndex) {
-            const MaterialCompileFlags flags = materialState->activeCompileFlags[activeIndex];
-            if (terrainRegionMaterialEvaluation &&
-                (flags & MaterialCompileFlags::MaterialCompileTerrain) != 0) {
-                continue;
-            }
-            if (activeIndex >= materialState->activeCompileFlagSlots.size()) {
-                continue;
-            }
-            const unsigned int slot = materialState->activeCompileFlagSlots[activeIndex];
-            if (slot >= materialState->compileFlagSlotsUsed) continue;
-            MaterialCompileFlags shaderKey = GetMaterialEvaluationShaderKey(flags);
-            if (outputType == OutputType::COLOR) {
-                shaderKey |= MaterialCompileFlags::MaterialCompileMaterialEvalColorOnly;
-            }
-            const PipelineState* pso = psoMgr.TryGetMaterialEvalPSO(shaderKey);
-            if (!pso) {
-                continue;
-            }
-
-            cl.BindPipeline(pso->GetAPIPipelineState().GetHandle());
-            BindMaterialResourceDescriptorIndices(cl, pso->GetResourceDescriptorSlots());
-
-            // Set per-pass root constants
-            unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-            miscRootConstants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
-            miscRootConstants[VISBUF_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBufferSRVIndex;
-            miscRootConstants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
-            miscRootConstants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
-            miscRootConstants[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBufferSRVIndex;
-            miscRootConstants[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBufferSRVIndex;
-            miscRootConstants[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBufferSRVIndex;
-            miscRootConstants[VISBUF_REYES_USE_NORMAL_MAPS] = CLodReyesUseNormalMaps() ? 1u : 0u;
-            miscRootConstants[VISBUF_REYES_TERRAIN_NORMAL_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesTerrainNormalBlend());
-            miscRootConstants[VISBUF_REYES_TERRAIN_NORMAL_MIP_BIAS] = CLodReyesTerrainNormalMipBias();
-            miscRootConstants[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
-            cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
-
-            const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
-            if (auto* bufferBase = dynamic_cast<BufferBase*>(m_materialEvalCmds)) {
-                if (argOffset + stride > bufferBase->GetBufferSize()) {
-                    spdlog::error(
-                        "EvaluateMaterialGroupsPass: skipping undersized material eval args flags=0x{:X} slot={} offset={} stride={} backingBytes={}",
-                        static_cast<uint64_t>(flags),
-                        slot,
-                        argOffset,
-                        stride,
-                        bufferBase->GetBufferSize());
-                    continue;
-                }
-            }
-            cl.ExecuteIndirect(
-                sig.GetHandle(),
-                argBuf.GetHandle(), argOffset,
-                rhi::ResourceHandle{}, 0, // no count buffer
-                1                         // single command
-            );
-        }
-
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+    br::render::PreparedComputeIndirectSequence Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         const auto materialState = context->publishedRendererState
             ? context->publishedRendererState->materials.payload.Get<br::render::PublishedMaterialState>() : nullptr;
-        if (!materialState) return PreparedPass::NoOp();
+        if (!materialState) return {};
         RefreshDescriptorIndices();
         br::render::PreparedComputeIndirectSequence data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.layout = m_services.pipelines->GetComputeRootSignature().GetHandle();
-        data.commandSignature = m_services.commandSignatures->GetMaterialEvaluationCommandSignature().GetHandle();
-        data.arguments = m_materialEvalCmds->GetAPIResource().GetHandle();
+        data.commandSignature = preparation.CaptureCommandSignature(m_services.commandSignatures->CaptureMaterialEvaluationCommandSignature());
+        data.argumentsReference = preparation.CaptureResource(m_materialEvalCmds->GetGlobalResourceID());
         const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);
         const bool terrainEvaluation = m_services.settings->getSettingGetter<bool>("enableTerrainRegionMaterialEvaluation")();
         const auto outputType = m_services.settings->getSettingGetter<unsigned int>("outputType")();
@@ -393,9 +307,14 @@ public:
             const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
             if (auto* buffer = dynamic_cast<BufferBase*>(m_materialEvalCmds);
                 buffer && argOffset + stride > buffer->GetBufferSize()) continue;
-            auto payload = pso->GetPayload(); br::render::PreparedComputeIndirectSequence::Step step{};
-            step.pipeline = payload->pso.Get().GetHandle(); step.pipelineOwner = std::move(payload);
-            step.descriptorIndices = CaptureMaterialResourceDescriptorIndices(step.pipelineOwner->pipelineResources);
+            auto capture = preparation;
+            capture.captureDescriptorIndices = [this](const PipelineResources& resources) {
+                return CaptureMaterialResourceDescriptorIndices(resources);
+            };
+            auto program = capture.CaptureProgramBinding(*pso);
+            br::render::PreparedComputeIndirectSequence::Step step{};
+            step.program = program.program;
+            step.descriptorIndices = std::move(program.descriptorIndices);
             step.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
             step.constants[VISBUF_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBufferSRVIndex;
             step.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
@@ -409,10 +328,14 @@ public:
             step.constants[VISBUF_REYES_OBJECT_NORMAL_MAP_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesObjectNormalMapBlend());
             step.argumentsOffset = argOffset; data.steps.push_back(std::move(step));
         }
-        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirectSequence);
+        return data;
     }
 
-    void Cleanup() override {
+    static void Record(const br::render::PreparedComputeIndirectSequence& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeIndirectSequence(data, recording);
+    }
+
+    void ShutdownPass() {
         m_visibleClustersQuery = {};
         m_visibleClusterTransformIndicesQuery = {};
         m_reyesDiceQueueQuery = {};
@@ -425,32 +348,6 @@ public:
 
 private:
     ProducerPassServices& m_services;
-    void BindMaterialResourceDescriptorIndices(
-        rhi::CommandList& commandList,
-        const PipelineResources& resources) {
-        unsigned int indices[org::shaderapi::kNumResourceDescriptorIndicesRootConstants] = {};
-        int indexCount = 0;
-        for (const auto& binding : resources.mandatoryResourceDescriptorSlots) {
-            const bool allowMissing =
-                !m_terrainRvtEnabled && binding.name.starts_with("Builtin::Terrain::Rvt");
-            indices[indexCount++] =
-                m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding, allowMissing);
-        }
-        for (const auto& binding : resources.optionalResourceDescriptorSlots) {
-            indices[indexCount++] =
-                m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding, true);
-        }
-        if (indexCount > 0) {
-            commandList.PushConstants(
-                rhi::ShaderStage::Compute,
-                0,
-                org::shaderapi::kResourceDescriptorIndicesRootParameter,
-                0,
-                indexCount,
-                indices);
-        }
-    }
-
     std::vector<unsigned int> CaptureMaterialResourceDescriptorIndices(const PipelineResources& resources) const {
         std::vector<unsigned int> indices;
         indices.reserve(resources.mandatoryResourceDescriptorSlots.size() + resources.optionalResourceDescriptorSlots.size());

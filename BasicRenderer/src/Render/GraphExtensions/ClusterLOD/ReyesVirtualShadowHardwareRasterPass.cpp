@@ -57,15 +57,18 @@ ReyesVirtualShadowHardwareRasterPass::ReyesVirtualShadowHardwareRasterPass(
     };
 
     auto device = DeviceManager::GetInstance().GetDevice();
+    m_rasterizationCommandSignature = std::make_shared<rhi::CommandSignaturePtr>();
     device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 2), sizeof(RasterizeClustersCommand) },
         PSOManager::GetInstance().GetRootSignature().GetHandle(),
-        m_rasterizationCommandSignature);
+        *m_rasterizationCommandSignature);
 }
 
 ReyesVirtualShadowHardwareRasterPass::~ReyesVirtualShadowHardwareRasterPass() = default;
 
-void ReyesVirtualShadowHardwareRasterPass::DeclareResourceUsages(RenderPassBuilder* builder) {
+void ReyesVirtualShadowHardwareRasterPass::Declare(org::PassBuilder& declaration) {
+    declaration.PreferQueue(org::QueueKind::Graphics);
+    auto* builder = &declaration;
     builder->WithShaderResource(
             Builtin::PerObjectBuffer,
             Builtin::PerMeshBuffer,
@@ -107,8 +110,6 @@ void ReyesVirtualShadowHardwareRasterPass::DeclareResourceUsages(RenderPassBuild
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
-
-void ReyesVirtualShadowHardwareRasterPass::Setup() {}
 
 void ReyesVirtualShadowHardwareRasterPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
@@ -159,75 +160,68 @@ bool ReyesVirtualShadowHardwareRasterPass::DeclaredResourcesChanged() const {
     return m_declaredResourcesChanged;
 }
 
-PassReturn ReyesVirtualShadowHardwareRasterPass::Execute(PassExecutionContext& executionContext) {
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-    const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
-
-    rhi::PassBeginInfo p{};
-    p.width = m_passWidth;
-    p.height = m_passHeight;
-    p.debugName = "CLod Reyes virtual shadow hardware raster pass";
-
-    executionContext.commandList.BeginPass(p);
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
-    commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-
-    uint32_t misc[NumMiscUintRootConstants] = {};
-    misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_REYES_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
+ReyesShadowHardwareFrameData ReyesVirtualShadowHardwareRasterPass::Prepare(const org::PassPrepareContext& preparation) {
+    const auto& context = *preparation.preparationData->Get<UpdateContext>();
+    ReyesShadowHardwareFrameData data{};
+    data.width = m_passWidth;
+    data.height = m_passHeight;
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    data.signature = preparation.CaptureCommandSignature(m_rasterizationCommandSignature);
+    data.arguments = preparation.CaptureResource(m_rasterBucketsIndirectArgsBuffer->GetGlobalResourceID());
+    const auto virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
+    data.constants[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_REYES_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
         m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] =
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] =
         m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    misc[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] =
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] =
         m_virtualShadowDynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
-    misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-    misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowConfig.virtualResolution;
-    misc[CLOD_RASTER_REYES_PACKED_RASTER_WORK_GROUPS_DESCRIPTOR_INDEX] = m_packedRasterWorkGroupsBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_REYES_COMPACTED_RASTER_WORK_INDICES_DESCRIPTOR_INDEX] = m_compactedRasterWorkIndicesBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_REYES_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
-    commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-
-    auto& psoManager = PSOManager::GetInstance();
-    const auto numBuckets = context.preparedRasterBucketCount;
-    if (numBuckets == 0u) {
-        return {};
-    }
-
-    auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
-    const auto stride = sizeof(RasterizeClustersCommand);
-    for (uint32_t i = 0; i < numBuckets; ++i) {
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowConfig.virtualResolution;
+    data.constants[CLOD_RASTER_REYES_PACKED_RASTER_WORK_GROUPS_DESCRIPTOR_INDEX] = m_packedRasterWorkGroupsBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_REYES_COMPACTED_RASTER_WORK_INDICES_DESCRIPTOR_INDEX] = m_compactedRasterWorkIndicesBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_REYES_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_RASTER_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
+    for (uint32_t i = 0; i < context.preparedRasterBucketCount; ++i) {
         const auto flags = context.preparedRasterBucketFlags.at(i);
-        const PipelineState* pso = psoManager.TryGetClusterLODVirtualShadowReyesRasterPSO(flags);
-        if (!pso) {
-            continue;
-        }
-        BindResourceDescriptorIndices(commandList, pso->GetResourceDescriptorSlots());
-        commandList.BindPipeline(pso->GetAPIPipelineState().GetHandle());
-
-        const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
-        commandList.ExecuteIndirect(
-            m_rasterizationCommandSignature->GetHandle(),
-            apiResource.GetHandle(),
-            argOffset,
-            {},
-            0,
-            1);
+        const auto* pso = PSOManager::GetInstance().TryGetClusterLODVirtualShadowReyesRasterPSO(flags);
+        if (!pso) continue;
+        auto binding = preparation.CaptureProgramBinding(*pso);
+        data.buckets.push_back({binding.program, std::move(binding.descriptorIndices),
+            static_cast<uint64_t>(i) * sizeof(RasterizeClustersCommand)});
     }
-
-    return {};
+    return data;
 }
 
-void ReyesVirtualShadowHardwareRasterPass::Cleanup() {}
+void ReyesVirtualShadowHardwareRasterPass::Record(const ReyesShadowHardwareFrameData& data, org::PassRecordContext& recording) {
+    auto& commands = recording.Commands();
+    rhi::PassBeginInfo pass{};
+    pass.width = data.width;
+    pass.height = data.height;
+    pass.debugName = "CLod Reyes virtual shadow hardware raster pass";
+    commands.BeginPass(pass);
+    br::render::BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
+    commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
+    const auto arguments = recording.Resolve(data.arguments).GetHandle();
+    for (const auto& bucket : data.buckets) {
+        commands.BindLayout(recording.ResolveLayout(bucket.program));
+        commands.BindPipeline(recording.Resolve(bucket.program));
+        if (!bucket.descriptorIndices.empty())
+            commands.PushConstants(rhi::ShaderStage::AllGraphics, 0,
+                org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+                static_cast<uint32_t>(bucket.descriptorIndices.size()), bucket.descriptorIndices.data());
+        commands.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0,
+            NumMiscUintRootConstants, data.constants.data());
+        commands.ExecuteIndirect(data.signature, arguments, bucket.argumentsOffset, {}, 0, 1);
+    }
+    commands.EndPass();
+}

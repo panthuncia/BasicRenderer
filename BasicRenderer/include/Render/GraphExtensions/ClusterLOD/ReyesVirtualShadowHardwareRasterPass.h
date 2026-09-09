@@ -8,7 +8,8 @@
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
@@ -17,7 +18,21 @@ using org::PixelBuffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesVirtualShadowHardwareRasterPass final : public RenderPass, public IDynamicDeclaredResources {
+struct ReyesShadowHardwareFrameData {
+    struct Bucket {
+        org::PreparedProgramReference program;
+        std::vector<unsigned int> descriptorIndices;
+        uint64_t argumentsOffset = 0;
+    };
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    rhi::CommandSignatureHandle signature{};
+    org::PreparedResourceReference arguments;
+    std::array<unsigned int, NumMiscUintRootConstants> constants{};
+    std::vector<Bucket> buckets;
+    uint32_t width = 1, height = 1;
+};
+
+class ReyesVirtualShadowHardwareRasterPass final : public org::TypedRenderGraphPass<ReyesVirtualShadowHardwareRasterPass, ReyesShadowHardwareFrameData>, public IDynamicDeclaredResources {
 public:
     ReyesVirtualShadowHardwareRasterPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -38,12 +53,11 @@ public:
         std::shared_ptr<ResourceGroup> slabResourceGroup);
     ~ReyesVirtualShadowHardwareRasterPass();
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    void Cleanup() override;
+    ReyesShadowHardwareFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const ReyesShadowHardwareFrameData& data, org::PassRecordContext& recording);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -65,7 +79,7 @@ private:
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
 
     std::vector<CLodViewRasterInfo> m_viewRasterInfos;
-    rhi::CommandSignaturePtr m_rasterizationCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_rasterizationCommandSignature;
     uint32_t m_passWidth = 1u;
     uint32_t m_passHeight = 1u;
     bool m_declaredResourcesChanged = true;

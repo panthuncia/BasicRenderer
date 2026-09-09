@@ -27,63 +27,34 @@ ReyesCreateDispatchArgsPass::ReyesCreateDispatchArgsPass(
         "CLod.ReyesCreateDispatchArgs.PSO");
 }
 
-void ReyesCreateDispatchArgsPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void ReyesCreateDispatchArgsPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(m_sourceCounterBuffer)
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(m_sourceCounterBuffer)
         .WithUnorderedAccess(m_indirectArgsBuffer);
     if (m_sourceBaseCounterBuffer) {
-        builder->WithShaderResource(m_sourceBaseCounterBuffer);
+        builder.WithShaderResource(m_sourceBaseCounterBuffer);
     }
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void ReyesCreateDispatchArgsPass::Setup()
+void ReyesCreateDispatchArgsPass::Initialize()
 {
 }
 
-PassReturn ReyesCreateDispatchArgsPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-    uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-    uintRootConstants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_COUNTER_DESCRIPTOR_INDEX] = m_sourceCounterBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_CREATE_DISPATCH_ARGS_OUTPUT_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_CREATE_DISPATCH_ARGS_THREADS_PER_GROUP] = m_threadsPerGroup;
-    uintRootConstants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_sourceBaseCounterBuffer
-        ? m_sourceBaseCounterBuffer->GetSRVInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_CREATE_DISPATCH_ARGS_MAX_WORK_ITEM_COUNT] = m_maxWorkItemCount;
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        uintRootConstants);
-
-    commandList.Dispatch(1, 1, 1);
-    return {};
-}
 
 void ReyesCreateDispatchArgsPass::Update(const UpdateExecutionContext& executionContext)
 {
     (void)executionContext;
 }
 
-void ReyesCreateDispatchArgsPass::Cleanup()
+void ReyesCreateDispatchArgsPass::ShutdownPass()
 {
 }
 
-PreparedPass ReyesCreateDispatchArgsPass::PrepareFrame(FramePreparationContext& preparation)
+br::render::PreparedComputeDispatch ReyesCreateDispatchArgsPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     auto payload = m_pso.GetPayload();
@@ -91,9 +62,9 @@ PreparedPass ReyesCreateDispatchArgsPass::PrepareFrame(FramePreparationContext& 
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    auto program = preparation.CaptureProgramBinding(std::move(payload));
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
     data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_COUNTER_DESCRIPTOR_INDEX] = m_sourceCounterBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_OUTPUT_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_THREADS_PER_GROUP] = m_threadsPerGroup;
@@ -101,5 +72,9 @@ PreparedPass ReyesCreateDispatchArgsPass::PrepareFrame(FramePreparationContext& 
         ? m_sourceBaseCounterBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
     data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_MAX_WORK_ITEM_COUNT] = m_maxWorkItemCount;
     data.groupsX = 1;
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return data;
+}
+
+void ReyesCreateDispatchArgsPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

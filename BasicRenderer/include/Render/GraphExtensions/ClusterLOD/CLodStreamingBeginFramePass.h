@@ -4,14 +4,15 @@
 #include <memory>
 #include <vector>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class UploadInstance; }
 using org::UploadInstance;
 
-class CLodStreamingBeginFramePass : public ComputePass {
+class CLodStreamingBeginFramePass : public org::TypedRenderGraphPass<CLodStreamingBeginFramePass, br::render::PreparedComputeDispatchSequence> {
 public:
     CLodStreamingBeginFramePass(
         std::function<UploadInstance*()> getUploadInstance,
@@ -27,12 +28,10 @@ public:
         std::function<void()> scheduleStreamingReadbacks,
         std::function<void()> processStreamingRequests);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatchSequence Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatchSequence&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
 
 private:
     std::shared_ptr<Buffer> m_loadCounter;

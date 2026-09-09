@@ -7,14 +7,21 @@
 
 #include "Render/PipelineState.h"
 #include "Render/ShaderAPI.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class ReyesSplitPass final : public ComputePass {
+struct ReyesSplitFrameData {
+    br::render::PreparedComputeDispatch clear;
+    br::render::PreparedComputeIndirect split;
+    std::array<org::PreparedResourceReference, 2> outputCounters;
+};
+
+class ReyesSplitPass final : public org::TypedRenderGraphPass<ReyesSplitPass, ReyesSplitFrameData> {
 public:
     ReyesSplitPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -43,27 +50,11 @@ public:
         std::shared_ptr<Buffer> replaySplitQueueCounterBuffer = nullptr,
         std::shared_ptr<Buffer> replaySplitQueueOverflowBuffer = nullptr);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
+    void Declare(org::PassBuilder& builder);
+    ReyesSplitFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const ReyesSplitFrameData&, org::PassRecordContext&);
 
 private:
-    struct PreparedData {
-        rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
-        rhi::PipelineLayoutHandle layout{};
-        rhi::PipelineHandle clearPipeline{}, splitPipeline{};
-        std::shared_ptr<const PipelineStatePayload> clearPipelineOwner, splitPipelineOwner;
-        std::shared_ptr<const rhi::CommandSignaturePtr> commandSignatureOwner;
-        rhi::CommandSignatureHandle commandSignature{};
-        rhi::ResourceHandle indirectArguments{};
-        std::vector<unsigned int> clearDescriptorIndices, splitDescriptorIndices;
-        std::vector<uint32_t> constants;
-    };
-    static void RecordPrepared(const PreparedData&, RecordingContext&);
-
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_inputSplitQueueBuffer;
     std::shared_ptr<Buffer> m_inputSplitQueueCounterBuffer;

@@ -2,6 +2,7 @@
 #include <stdexcept>
 
 #include "Render/Pipeline/PipelineRecipe.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 
 namespace {
 void Require(bool condition, const char* message)
@@ -9,6 +10,29 @@ void Require(bool condition, const char* message)
     if (!condition) {
         throw std::runtime_error(message);
     }
+}
+
+void TestResolverSnapshotLifetime()
+{
+    std::weak_ptr<const org::ResolverDeclarationState> lifetime;
+    std::shared_ptr<const org::ResolverDeclarationState> retained;
+    {
+        auto group = std::make_shared<ResourceGroup>("LifetimeTest");
+        ResourceGroupResolver resolver(group);
+        auto first = resolver.CaptureDeclarationState();
+        Require(first == resolver.CaptureDeclarationState(), "unchanged group must reuse its snapshot");
+        auto clone = resolver;
+        Require(clone.CaptureDeclarationState() == first, "clones must share the declaration cache");
+        group->ClearResources();
+        retained = resolver.CaptureDeclarationState();
+        Require(retained != first, "group revision must replace the cached snapshot");
+        Require(retained->dependencyIdentity == first->dependencyIdentity,
+            "dependency identity must stay stable across revisions");
+        lifetime = retained;
+    }
+    Require(!lifetime.expired(), "queued snapshot must outlive its resolver");
+    retained.reset();
+    Require(lifetime.expired(), "declaration cache must not own itself through dependency identity");
 }
 
 void TestDemoPreset()
@@ -115,6 +139,7 @@ void TestInvalidRecipes()
 int main()
 {
     try {
+        TestResolverSnapshotLifetime();
         TestDemoPreset();
         TestSarpPreset();
         TestGeometryMaterialProducerPreset();

@@ -1,6 +1,8 @@
 #pragma once
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedEnvironmentDispatch.h"
+#include "Managers/EnvironmentManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -10,141 +12,70 @@
 
 #include <vector>
 
-class EnvironmentConversionPass : public ComputePass, public IDynamicDeclaredResources {
+class EnvironmentConversionPass : public org::TypedRenderGraphPass<EnvironmentConversionPass, br::render::PreparedEnvironmentDispatch>, public IDynamicDeclaredResources {
 public:
     EnvironmentConversionPass() {
-        getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
+
         CreateEnvironmentConversionPSO();
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override {
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         for (const auto& j : m_pending) {
-            if (!j.srcTexture || !j.dstCubemap) continue;
+            if (!j->work.srcTexture || !j->work.dstCubemap) continue;
 
-            builder->WithShaderResource(j.srcTexture);
-            builder->WithUnorderedAccess(j.dstCubemap);
+            builder.WithShaderResource(j->work.srcTexture);
+            builder.WithUnorderedAccess(j->work.dstCubemap);
         }
 
         m_declaredResourcesChanged = false;
     }
 
-    void Setup() override {
-    }
+
 
     void Update(const UpdateExecutionContext& context) override {
-        std::vector<Job> newPending;
-        auto* updateData = context.hostData->Get<UpdateContext>();
-
-        if (updateData->environmentManager) {
-            auto environments = updateData->environmentManager->GetAndClearEnvironmentsToConvert();
-            newPending.reserve(environments.size());
-
-            for (auto* env : environments) {
-                if (!env) continue;
-
-                auto srcTex = env->GetHDRITexture();
-                auto dstCubemap = env->GetEnvironmentCubemap();
-                if (!srcTex || !dstCubemap) continue;
-
-                auto srcImage = srcTex->ImagePtr();
-                auto dstImage = dstCubemap->ImagePtr();
-                if (!srcImage || !dstImage) continue;
-
-                newPending.push_back(Job{ srcImage, dstImage });
-            }
-        }
-
-        auto sameJobs = [](const std::vector<Job>& a, const std::vector<Job>& b) {
-            if (a.size() != b.size()) return false;
-            for (size_t i = 0; i < a.size(); ++i) {
-                if (a[i].srcTexture.get() != b[i].srcTexture.get()) return false;
-                if (a[i].dstCubemap.get() != b[i].dstCubemap.get()) return false;
-            }
-            return true;
-        };
-
-        if (!sameJobs(m_pending, newPending)) {
-            m_declaredResourcesChanged = true;
-            m_pending = std::move(newPending);
-        }
+        const auto* input = context.hostData->Get<UpdateContext>();
+        if (input->environmentManager) m_work = input->environmentManager->GetConversionWorkQueue();
+        auto pending = m_work.Pending();
+        if (pending != m_pending) { m_pending = std::move(pending); m_declaredResourcesChanged = true; }
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        if (m_pending.empty()) return {};
-
-        const uint16_t skyboxRes = getSkyboxResolution();
-
-        auto dev = DeviceManager::GetInstance().GetDevice();
-
-		auto& cl = executionContext.commandList;
-        cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-        // Bind layout + pipeline
-        cl.BindLayout(m_layout->GetHandle());
-        cl.BindPipeline(m_pso->GetHandle());
-
-        for (const auto& j : m_pending)
-        {
-            if (!j.srcTexture || !j.dstCubemap) continue;
-
-            const uint32_t srcSrvIndex = j.srcTexture->GetSRVInfo(0).slot.index;
-
-            const uint32_t groupSize = 8;
-            const uint32_t gx = (skyboxRes + groupSize - 1) / groupSize;
-            const uint32_t gy = (skyboxRes + groupSize - 1) / groupSize;
-
+    br::render::PreparedEnvironmentDispatch Prepare(const org::PassPrepareContext& preparation) {
+        br::render::PreparedEnvironmentDispatch data;
+        if (m_pending.empty()) return data;
+        const auto* context = preparation.preparationData->Get<UpdateContext>();
+        data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        data.program = preparation.CaptureProgram(m_pso);
+        data.constantCount = 4;
+        for (const auto& entry : m_pending) {
+            const auto& job = entry->work;
+            const auto size = job.dstCubemap->GetWidth();
+            const auto src = job.srcTexture->GetSRVInfo(0).slot.index;
             for (uint32_t face = 0; face < 6; ++face)
-            {
-                const uint32_t dstFaceUavIndex =
-                    j.dstCubemap->GetUAVShaderVisibleInfo(0, face).slot.index;
-
-                // Root constants payload: [srcSrv, dstFaceUav, face, size]
-                uint32_t pc[4] = { srcSrvIndex, dstFaceUavIndex, face, (uint32_t)skyboxRes };
-
-                // Push constants to CS: (set=0, binding=0) matches b0, space0 in HLSL
-                cl.PushConstants(rhi::ShaderStage::Compute,
-                    /*set*/0, /*binding*/0,
-                    /*dstOffset32*/0, /*num32*/4, pc);
-
-                cl.Dispatch(gx, gy, 1);
-            }
+                data.faces.push_back({{src, job.dstCubemap->GetUAVShaderVisibleInfo(0, face).slot.index, face, size, 0}, (size + 7) / 8});
         }
-
-        m_declaredResourcesChanged = true;
-        m_pending.clear();
-
-        return {};
+        m_work.Reserve(m_pending, preparation);
+        m_pending.clear(); m_declaredResourcesChanged = true;
+        return data;
     }
 
-    PreparedPass PrepareFrame(FramePreparationContext&) override {
-        // Conversion jobs still use the legacy immediate mutable queue. Once
-        // drained, this structural pass is genuinely command-free and must not
-        // prevent selection of an otherwise complete async scene bundle.
-        return m_pending.empty() ? PreparedPass::NoOp() : PreparedPass{};
+    static void Record(const br::render::PreparedEnvironmentDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordEnvironmentDispatch(data, recording);
     }
 
     bool DeclaredResourcesChanged() const override {
         return m_declaredResourcesChanged;
     }
 
-    void Cleanup() override {
-        // Cleanup if necessary
-    }
+
 
 private:
-    struct Job {
-        std::shared_ptr<PixelBuffer> srcTexture;
-        std::shared_ptr<PixelBuffer> dstCubemap;
-    };
-
-    std::function<uint16_t()> getSkyboxResolution;
-    std::vector<Job> m_pending;
+    EnvironmentManager::ConversionWorkQueue m_work;
+    EnvironmentManager::ConversionWorkQueue::Snapshot m_pending;
     bool m_declaredResourcesChanged = true;
 
-    rhi::PipelineLayoutPtr m_layout;
-    rhi::PipelinePtr        m_pso;
+    PipelineState m_pso;
 
     void CreateEnvironmentConversionPSO() {
         auto dev = DeviceManager::GetInstance().GetDevice();
@@ -171,25 +102,29 @@ private:
         ld.flags = rhi::PipelineLayoutFlags::PF_None;
         ld.pushConstants = { &pc, 1 };
         ld.staticSamplers = { &s, 1 };
-        auto result = dev.CreatePipelineLayout(ld, m_layout);
-        if (!m_layout || !m_layout->IsValid()) throw std::runtime_error("EnvConvert: layout failed");
-        m_layout->SetName("EnvConvert.ComputeLayout");
+        auto layout = std::make_shared<rhi::PipelineLayoutPtr>();
+        auto result = dev.CreatePipelineLayout(ld, *layout);
+        if (!*layout || !layout->Get().IsValid()) throw std::runtime_error("EnvConvert: layout failed");
+        layout->Get().SetName("EnvConvert.ComputeLayout");
 
         ShaderInfoBundle sib;
         sib.computeShader = { L"shaders/envToCubemap.hlsl", L"CSMain", L"cs_6_6" };
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
 
-        rhi::SubobjLayout soLayout{ m_layout->GetHandle() };
+        rhi::SubobjLayout soLayout{ layout->Get().GetHandle() };
         rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()), "CSMain" };
 
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
             rhi::Make(soCS),
         };
-        result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        rhi::PipelinePtr pipeline;
+        result = dev.CreatePipeline(items, (uint32_t)std::size(items), pipeline);
         if (Failed(result)) {
             throw std::runtime_error("EnvConvert: PSO failed");
         }
-        m_pso->SetName("EnvConvert.ComputePSO");
+        pipeline->SetName("EnvConvert.ComputePSO");
+        m_pso = PipelineState(std::move(pipeline), compiled.resourceIDsHash,
+            compiled.resourceDescriptorSlots, layout, soLayout.layout);
     }
 };

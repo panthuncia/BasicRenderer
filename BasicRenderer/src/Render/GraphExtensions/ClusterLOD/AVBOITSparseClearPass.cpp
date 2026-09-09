@@ -29,9 +29,10 @@ AVBOITSparseClearPass::AVBOITSparseClearPass(
         "CLod.AVBOITSparseClear.PSO");
 }
 
-void AVBOITSparseClearPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void AVBOITSparseClearPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(m_configBuffer)
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(m_configBuffer)
         .WithUnorderedAccess(
             m_occupancyTexture,
             m_occupancySliceMaskTexture,
@@ -40,47 +41,31 @@ void AVBOITSparseClearPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_zeroTransmittanceSliceTexture);
 }
 
-void AVBOITSparseClearPass::Setup()
-{
-}
-
-void AVBOITSparseClearPass::Update(const UpdateExecutionContext& executionContext)
-{
-    (void)executionContext;
-}
-
-PassReturn AVBOITSparseClearPass::Execute(PassExecutionContext& executionContext)
-{
+br::render::PreparedComputeDispatch AVBOITSparseClearPass::Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_occupancyTexture || !m_occupancySliceMaskTexture ||
         !m_scalarExtinctionTexture || !m_chromaticExtinctionTexture || !m_zeroTransmittanceSliceTexture) {
         return {};
     }
 
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    const auto* renderContext = preparation.preparationData->Get<UpdateContext>();
     auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    auto program = preparation.CaptureProgramBinding(m_pso);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
 
-    uint32_t misc[NumMiscUintRootConstants] = {};
+    auto& misc = data.constants;
     misc[CLOD_AVBOIT_VBOIT_INTEGRATE_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        misc);
 
     const uint32_t groupCountX = (m_occupancyTexture->GetWidth() + 7u) / 8u;
     const uint32_t groupCountY = (m_occupancyTexture->GetHeight() + 7u) / 8u;
-    commandList.Dispatch(groupCountX, groupCountY, 1u);
-    return {};
+    data.groupsX = groupCountX; data.groupsY = groupCountY; data.groupsZ = 1u;
+    return data;
 }
 
-void AVBOITSparseClearPass::Cleanup()
-{
+void AVBOITSparseClearPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

@@ -3,14 +3,15 @@
 #include <memory>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapComposePagesPass final : public ComputePass {
+class VirtualShadowMapComposePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapComposePagesPass, br::render::PreparedComputeDispatch> {
 public:
     VirtualShadowMapComposePagesPass(
         std::shared_ptr<PixelBuffer> staticPagesTexture,
@@ -19,11 +20,11 @@ public:
         std::shared_ptr<Buffer> pageMetadataBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override {}
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override {}
+    void Declare(org::PassBuilder& builder);
+    void Initialize() {}
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    void ShutdownPass() {}
 
 private:
     PipelineState m_pso;

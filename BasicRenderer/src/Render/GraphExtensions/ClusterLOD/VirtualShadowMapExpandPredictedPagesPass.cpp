@@ -58,9 +58,10 @@ VirtualShadowMapExpandPredictedPagesPass::VirtualShadowMapExpandPredictedPagesPa
     spdlog::info("VirtualShadowMapExpandPredictedPagesPass: reset pipeline complete");
 }
 
-void VirtualShadowMapExpandPredictedPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VirtualShadowMapExpandPredictedPagesPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(
             Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::CameraBuffer,
             m_clipmapInfoBuffer)
@@ -75,93 +76,10 @@ void VirtualShadowMapExpandPredictedPagesPass::DeclareResourceUsages(ComputePass
             m_pageMetadataBuffer,
             m_pageViewInfoBuffer);
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void VirtualShadowMapExpandPredictedPagesPass::Setup() {}
-
-PassReturn VirtualShadowMapExpandPredictedPagesPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-    uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_CANDIDATES_DESCRIPTOR_INDEX] = m_predictiveCandidatesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_CANDIDATE_COUNT_DESCRIPTOR_INDEX] = m_predictiveCandidateCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_RAW_PAGES_DESCRIPTOR_INDEX] = m_predictiveRawPagesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_RAW_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictiveRawPageCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_SCRATCH_BITSET_DESCRIPTOR_INDEX] = m_scratchBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_PAGE_TABLE_DESCRIPTOR_INDEX] =
-        m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_PAGE_METADATA_DESCRIPTOR_INDEX] =
-        m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_PHYSICAL_PAGE_COUNT] = m_physicalPageCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_CLIPMAP_COUNT] =
-        CLodVirtualShadowMaxSupportedClipmapCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] =
-        m_pageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-
-    commandList.BindPipeline(m_stampContentGenerationPso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_stampContentGenerationPso.GetResourceDescriptorSlots());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-    commandList.Dispatch((m_physicalPageCount + 63u) / 64u, 1u, 1u);
-
-    rhi::GlobalBarrier globalBarrier{};
-    globalBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-    globalBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
-    globalBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-    globalBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-    rhi::BarrierBatch barrierBatch{};
-    barrierBatch.globals = rhi::Span<rhi::GlobalBarrier>(&globalBarrier, 1);
-    commandList.Barriers(barrierBatch);
-
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-
-    commandList.Dispatch(
-        (CLodVirtualShadowPredictiveCandidateCapacity + 63u) / 64u,
-        1u,
-        1u);
-    commandList.Barriers(barrierBatch);
-
-    commandList.BindPipeline(
-        m_resetCandidateCountPso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(
-        commandList,
-        m_resetCandidateCountPso.GetResourceDescriptorSlots());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-    commandList.Dispatch(1u, 1u, 1u);
-    return {};
-}
-
-PreparedPass VirtualShadowMapExpandPredictedPagesPass::PrepareFrame(FramePreparationContext& preparation)
+br::render::PreparedComputePipelineSequence VirtualShadowMapExpandPredictedPagesPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     br::render::PreparedComputePipelineSequence data{};
@@ -183,9 +101,9 @@ PreparedPass VirtualShadowMapExpandPredictedPagesPass::PrepareFrame(FramePrepara
     constants[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_pageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     const auto append = [&](const PipelineState& pso, uint32_t groups, bool barrierBefore) {
         br::render::PreparedComputePipelineSequence::Step step{};
-        step.pipelineOwner = pso.GetPayload();
-        step.pipeline = step.pipelineOwner->pso.Get().GetHandle();
-        step.descriptorIndices = CaptureResourceDescriptorIndices(step.pipelineOwner->pipelineResources);
+        auto program = preparation.CaptureProgramBinding(pso);
+        step.program = program.program;
+        step.descriptorIndices = std::move(program.descriptorIndices);
         step.constants = constants;
         step.groupsX = groups;
         step.uavBarrierBefore = barrierBefore;
@@ -194,7 +112,9 @@ PreparedPass VirtualShadowMapExpandPredictedPagesPass::PrepareFrame(FramePrepara
     append(m_stampContentGenerationPso, (m_physicalPageCount + 63u) / 64u, false);
     append(m_pso, (CLodVirtualShadowPredictiveCandidateCapacity + 63u) / 64u, true);
     append(m_resetCandidateCountPso, 1u, true);
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputePipelineSequence);
+    return data;
 }
 
-void VirtualShadowMapExpandPredictedPagesPass::Cleanup() {}
+void VirtualShadowMapExpandPredictedPagesPass::Record(const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputePipelineSequence(data, recording);
+}

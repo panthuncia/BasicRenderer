@@ -30,9 +30,9 @@ public:
             m_lutBinding, m_lutTexture->GetRTVInfo(0).slot);
         data.loadOp = rhi::LoadOp::Clear;
         data.clear = m_lutTexture->GetClearColor(); data.width = 512; data.height = 512;
-        data.debugName = "BRDF Integration Pass"; data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+        data.debugName = "BRDF Integration Pass";
         br::render::BindPreparedProgram(
-            data, preparation, PSO, m_resourceDescriptorBindings);
+            data, preparation, PSO);
         invalidated = false;
         return data;
     }
@@ -46,8 +46,7 @@ private:
     PixelBuffer* m_lutTexture = nullptr;
     org::ResourceBindingToken m_lutBinding;
 
-    std::shared_ptr<rhi::PipelinePtr> PSO;
-    PipelineResources m_resourceDescriptorBindings;
+    PipelineState PSO;
 
     void CreatePSO() {
         auto dev = DeviceManager::GetInstance().GetDevice();
@@ -57,7 +56,6 @@ private:
         sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
         sib.pixelShader = { L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6" };
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
-        m_resourceDescriptorBindings = compiled.resourceDescriptorSlots;
 
         // Subobjects
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
@@ -118,6 +116,8 @@ private:
                 ")");
         }
         pipeline->SetName("BRDFIntegration.PSO");
-        PSO = std::make_shared<rhi::PipelinePtr>(std::move(pipeline));
+        PSO = PipelineState(std::move(pipeline), compiled.resourceIDsHash,
+            compiled.resourceDescriptorSlots, PSOManager::GetInstance().CaptureLayoutOwner(soLayout.layout),
+            soLayout.layout);
     }
 };

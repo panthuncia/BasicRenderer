@@ -5,14 +5,15 @@
 #include <rhi.h>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapAllocatePagesPass final : public ComputePass {
+class VirtualShadowMapAllocatePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapAllocatePagesPass, br::render::PreparedComputeIndirect> {
 public:
     VirtualShadowMapAllocatePagesPass(
         std::shared_ptr<Buffer> allocationRequestsBuffer,
@@ -27,11 +28,9 @@ public:
         std::shared_ptr<Buffer> pageListHeaderBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     PipelineState m_pso;

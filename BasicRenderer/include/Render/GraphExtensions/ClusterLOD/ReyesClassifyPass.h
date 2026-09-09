@@ -5,7 +5,8 @@
 #include <rhi.h>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
@@ -17,7 +18,7 @@ enum class ReyesClassifyMode : uint32_t
     ShadowCoarseLargeOnly = 2u,
 };
 
-class ReyesClassifyPass final : public ComputePass {
+class ReyesClassifyPass final : public org::TypedRenderGraphPass<ReyesClassifyPass, br::render::PreparedComputeIndirect> {
 public:
     ReyesClassifyPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -35,12 +36,9 @@ public:
         uint32_t phaseIndex,
         ReyesClassifyMode classifyMode = ReyesClassifyMode::Default);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Update(const UpdateExecutionContext& executionContext) override;
-    void Cleanup() override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;

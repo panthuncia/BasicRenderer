@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "ShaderBuffers.h"
@@ -11,14 +11,14 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class GTAOFilterPass : public ComputePass {
+class GTAOFilterPass : public org::TypedRenderGraphPass<GTAOFilterPass, br::render::PreparedComputeDispatch> {
 public:
     GTAOFilterPass() {
         CreatePointClampSampler();
         CreateXeGTAOComputePSO();
     }
 
-    void Setup() override {
+    void Initialize() {
         m_gtaoConstantsHandle = m_resourceRegistryView->RequestHandle("Builtin::GTAO::ConstantsBuffer");
     }
 
@@ -46,58 +46,27 @@ public:
             0);
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder)override {
-        builder->WithShaderResource(Builtin::Surface::NormalRoughness)
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        builder.WithShaderResource(Builtin::Surface::NormalRoughness)
             .WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
             .WithUnorderedAccess(Builtin::GTAO::WorkingDepths)
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = executionContext.commandList;
-        auto depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);
-        auto workingDepths = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
 
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		// Set the compute pipeline state
-		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
-		commandList.BindPipeline(PrefilterDepths16x16PSO.GetAPIPipelineState().GetHandle());
-
-        BindResourceDescriptorIndices(commandList, PrefilterDepths16x16PSO.GetResourceDescriptorSlots());
-
-        unsigned int passConstants[NumMiscUintRootConstants] = {};
-        passConstants[UintRootConstant0] = m_samplerIndex;
-        passConstants[UintRootConstant1] = depthTexture->GetSRVInfo(0).slot.index;
-        passConstants[UintRootConstant2] = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
-        passConstants[UintRootConstant3] = workingDepths->GetUAVShaderVisibleInfo(1).slot.index;
-        passConstants[UintRootConstant4] = workingDepths->GetUAVShaderVisibleInfo(2).slot.index;
-        passConstants[UintRootConstant5] = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
-        passConstants[UintRootConstant6] = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
-
-        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
-
-        // Dispatch
-        // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)
-		unsigned int x = (context.renderResolution.x + 16 - 1) / 16;
-		unsigned int y = (context.renderResolution.y + 16 - 1) / 16;
-		commandList.Dispatch(x, y, 1);
-
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         const auto depth = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);
         const auto workingDepths = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
         auto payload = PrefilterDepths16x16PSO.GetPayload(); br::render::PreparedComputeDispatch data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
-        data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+
         data.constants[UintRootConstant0] = m_samplerIndex;
         data.constants[UintRootConstant1] = depth->GetSRVInfo(0).slot.index;
         data.constants[UintRootConstant2] = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
@@ -106,10 +75,14 @@ public:
         data.constants[UintRootConstant5] = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
         data.constants[UintRootConstant6] = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
         data.groupsX = (context->renderResolution.x + 15u) / 16u; data.groupsY = (context->renderResolution.y + 15u) / 16u;
-        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return data;
     }
 
-    void Cleanup() override {
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
+
+    void ShutdownPass() {
         // Cleanup if necessary
     }
 

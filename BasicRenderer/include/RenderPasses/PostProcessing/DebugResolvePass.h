@@ -26,9 +26,9 @@ public:
 		data.externalRenderTarget = org::ExternalBindingKey::SwapchainColor;
 		data.loadOp = rhi::LoadOp::Load;
 		data.width = context->outputResolution.x; data.height = context->outputResolution.y;
-		data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
+
 		br::render::BindPreparedProgram(
-			data, preparation, m_pso, m_resourceDescriptorBindings);
+			data, preparation, m_pso);
 		return data;
 	}
 
@@ -38,8 +38,7 @@ public:
 	}
 
 private:
-	std::shared_ptr<rhi::PipelinePtr> m_pso;
-	PipelineResources m_resourceDescriptorBindings;
+	PipelineState m_pso;
 
 	void CreatePSO() {
 		auto dev = DeviceManager::GetInstance().GetDevice();
@@ -48,7 +47,6 @@ private:
 		sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
 		sib.pixelShader = { L"shaders/PostProcessing/debugResolve.hlsl", L"PSMain", L"ps_6_6" };
 		auto compiled = PSOManager::GetInstance().CompileShaders(sib);
-		m_resourceDescriptorBindings = compiled.resourceDescriptorSlots;
 
 		auto& layout = PSOManager::GetInstance().GetRootSignature();
 		rhi::SubobjLayout soLayout{ layout.GetHandle() };
@@ -112,6 +110,8 @@ private:
 			throw std::runtime_error("Failed to create DebugResolve PSO");
 		}
 		pipeline->SetName("DebugResolve.PSO");
-		m_pso = std::make_shared<rhi::PipelinePtr>(std::move(pipeline));
+		m_pso = PipelineState(std::move(pipeline), compiled.resourceIDsHash,
+            compiled.resourceDescriptorSlots, PSOManager::GetInstance().CaptureLayoutOwner(soLayout.layout),
+            soLayout.layout);
 	}
 };

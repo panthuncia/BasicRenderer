@@ -26,7 +26,7 @@ public:
         const auto version = m_resourceGroup->GetContentVersion();
         if (const auto cached = m_cache->state.load(std::memory_order_acquire);
             cached && cached->contentRevision == version) return cached;
-        state->dependencyIdentity = m_cache;
+        state->dependencyIdentity = m_cache->identity;
         state->resourceSetIdentity = { version, 0x7267726f75700001ull };
         state->contentRevision = version;
         state->resources = std::make_shared<const org::ResolverResourceList>(m_resourceGroup->GetChildren());
@@ -38,6 +38,10 @@ public:
 
 private:
     struct Cache {
+        // The identity outlives the resolver when a queued frame retains it,
+        // but must not point back to the cache that owns that frame's snapshot.
+        struct Identity {};
+        std::shared_ptr<const Identity> identity = std::make_shared<const Identity>();
         std::atomic<std::shared_ptr<const org::ResolverDeclarationState>> state;
     };
     std::shared_ptr<ResourceGroup> m_resourceGroup;

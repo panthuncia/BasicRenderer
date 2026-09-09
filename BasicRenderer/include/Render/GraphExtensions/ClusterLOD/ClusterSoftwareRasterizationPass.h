@@ -7,7 +7,8 @@
 
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/PixelBuffer.h"
 
 namespace org { class Buffer; }
@@ -15,7 +16,22 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ClusterSoftwareRasterizationPass : public ComputePass, public IDynamicDeclaredResources {
+struct ClusterSoftwareRasterFrameData {
+    br::render::PreparedComputeIndirectSequence raster;
+    bool enabled = false;
+    bool hasSkinCache = false;
+    uint32_t bucketCount = 0;
+    std::array<uint32_t, NumMiscUintRootConstants> cacheConstants{};
+    std::array<uint32_t, NumMiscUintRootConstants> clearConstants{};
+    org::PreparedProgramBinding clearProgram{}, buildProgram{}, finalizeProgram{}, skinProgram{}, resolveProgram{};
+    rhi::CommandSignatureHandle cacheDispatchSignature{};
+    org::PreparedResourceReference cacheIndirectArgs{};
+    org::PreparedResourceReference cacheAllocator{}, cacheHash{}, cacheWorkRecords{}, cachePositions{}, cacheMapping{};
+};
+
+class ClusterSoftwareRasterizationPass
+    : public org::TypedRenderGraphPass<ClusterSoftwareRasterizationPass, ClusterSoftwareRasterFrameData>,
+      public IDynamicDeclaredResources {
 public:
     ClusterSoftwareRasterizationPass(
         std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
@@ -34,17 +50,15 @@ public:
         bool runWhenComputeSWRasterEnabledOnly = false);
     ~ClusterSoftwareRasterizationPass();
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    ClusterSoftwareRasterFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const ClusterSoftwareRasterFrameData&, org::PassRecordContext&);
 
 private:
-    rhi::CommandSignaturePtr m_rasterizationCommandSignature;
-    rhi::CommandSignaturePtr m_dynamicWindSkinCacheDispatchCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_rasterizationCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_dynamicWindSkinCacheDispatchCommandSignature;
     PipelineState m_dynamicWindSkinCacheBuildPipeline;
     PipelineState m_dynamicWindSkinCacheSkinPipeline;
     PipelineState m_dynamicWindSkinCacheFinalizePipeline;

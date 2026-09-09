@@ -8,14 +8,28 @@
 
 #include "Render/PipelineState.h"
 #include "ShaderBuffers.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapMarkPagesPass final : public ComputePass {
+    struct VirtualShadowMarkFrameData {
+        rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+        org::PreparedProgramReference clearProgram, clearUint2Program, markProgram;
+        rhi::CommandSignatureHandle commandSignature{};
+        org::PreparedResourceReference indirectArguments;
+        std::vector<unsigned int> clearIndices, clearUint2Indices, markIndices;
+        std::array<unsigned int, NumMiscUintRootConstants> clearMask{}, clearReceiver{}, clearCount{}, mark{};
+        std::array<org::PreparedResourceReference, 3> barrierResources{};
+        uint32_t barrierCount = 2;
+        uint32_t receiverGroups = 0;
+        bool receiverUint2 = false;
+    };
+
+class VirtualShadowMapMarkPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapMarkPagesPass, VirtualShadowMarkFrameData> {
 public:
     VirtualShadowMapMarkPagesPass(
         std::shared_ptr<Buffer> tileWorkBuffer,
@@ -27,30 +41,13 @@ public:
         std::shared_ptr<Buffer> markedBlocksCountBuffer,
         std::shared_ptr<Buffer> receiverSubpageMaskBuffer);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    VirtualShadowMarkFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const VirtualShadowMarkFrameData&, org::PassRecordContext&);
 
 private:
-    struct PreparedData {
-        rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
-        rhi::PipelineLayoutHandle layout{};
-        rhi::PipelineHandle clearPipeline{}, clearUint2Pipeline{}, markPipeline{};
-        std::shared_ptr<const PipelineStatePayload> clearOwner, clearUint2Owner, markOwner;
-        std::shared_ptr<const rhi::CommandSignaturePtr> commandSignatureOwner;
-        rhi::CommandSignatureHandle commandSignature{};
-        rhi::ResourceHandle indirectArguments{};
-        std::vector<unsigned int> clearIndices, clearUint2Indices, markIndices;
-        std::array<unsigned int, NumMiscUintRootConstants> clearMask{}, clearReceiver{}, clearCount{}, mark{};
-        std::array<rhi::ResourceHandle, 3> barrierResources{};
-        uint32_t barrierCount = 2;
-        uint32_t receiverGroups = 0;
-        bool receiverUint2 = false;
-    };
-    static void RecordPrepared(const PreparedData&, RecordingContext&);
+
     PipelineState m_pso;
     PipelineState m_clearPso;
     PipelineState m_clearUint2Pso;

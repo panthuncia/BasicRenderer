@@ -60,6 +60,7 @@ struct ViewResources {
     std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
     std::shared_ptr<PixelBuffer> lastFrameLinearDepthMap = nullptr;
     bool lastFrameLinearDepthValid = false;
+    uint64_t depthHistoryEpoch = 0;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
     std::shared_ptr<PixelBuffer> clodDeepVisibilityHeadPointers = nullptr;
 };
@@ -122,6 +123,7 @@ public:
     static std::shared_ptr<ViewManager> CreateShared() {
         return std::shared_ptr<ViewManager>(new ViewManager());
     }
+    ~ViewManager();
 
     // Inject IndirectCommandBufferManager
     void SetIndirectCommandBufferManager(IndirectCommandBufferManager* manager);
@@ -148,6 +150,7 @@ public:
 	uint32_t GetCameraBufferSize() const { return static_cast<uint32_t>(m_cameraBuffer->Size()); }
     uint64_t GetResourceLayoutRevision() const { return m_resourceLayoutRevision; }
     void MarkDepthHistoryValid(uint64_t viewID);
+    std::shared_ptr<const org::PreparedLifecycleEffect> ReserveDepthHistoryPublication();
 
     // Access
     View* Get(uint64_t viewID);
@@ -179,6 +182,10 @@ public:
     std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
     std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 private:
+    struct PublicationOwner {
+        std::mutex mutex;
+        ViewManager* manager = nullptr;
+    };
     ViewManager();
 
     std::unordered_map<uint64_t, View> m_views;
@@ -201,4 +208,5 @@ private:
 
     std::mutex m_cameraUpdateMutex;
     ViewEvents m_events;
+    std::shared_ptr<PublicationOwner> m_publicationOwner;
 };

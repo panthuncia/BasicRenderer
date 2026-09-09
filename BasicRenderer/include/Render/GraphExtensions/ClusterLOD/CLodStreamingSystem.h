@@ -23,6 +23,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodUploadStream.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Utilities/BoundedSpscQueue.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowUpgradeService.h"
 
 namespace org { class UploadInstance; }
 using org::UploadInstance;
@@ -72,8 +73,7 @@ public:
     std::shared_ptr<Buffer> GetSourceGroupMismatchCounterBuffer() const { return m_sourceGroupMismatchCounter; }
     std::shared_ptr<Buffer> GetSourceGroupMismatchDetailsBuffer() const { return m_sourceGroupMismatchDetails; }
     void SetVirtualShadowUpgradeUploadBuffers(std::vector<std::shared_ptr<Buffer>> buffers);
-    bool TryAcquireVirtualShadowUpgradeUpload(uint32_t& slotIndex, uint32_t& inputCount);
-    void ReleaseVirtualShadowUpgradeUpload(uint32_t slotIndex);
+    VirtualShadowUpgradeQueue GetVirtualShadowUpgradeQueue() const { return m_virtualShadowUpgradeQueue; }
     void SetVirtualShadowFallbackFeedbackResources(
         std::shared_ptr<Buffer> dependencies,
         std::shared_ptr<Buffer> dependencyCount);
@@ -563,8 +563,7 @@ private:
     enum class VirtualShadowUpgradeUploadState : uint8_t {
         Free,
         Filling,
-        Ready,
-        InFlight,
+        Published,
     };
     struct VirtualShadowUpgradeUploadSlot {
         std::shared_ptr<Buffer> buffer;
@@ -589,11 +588,10 @@ private:
     std::vector<uint32_t> m_virtualShadowBatchSourceChainOffsetByGroup;
     std::vector<uint32_t> m_virtualShadowBatchSourceChainCountByGroup;
     uint32_t m_virtualShadowBatchSourceGeneration = 0u;
-    std::array<VirtualShadowUpgradeUploadSlot, VirtualShadowUpgradeUploadSlotCapacity>
+    std::array<std::shared_ptr<VirtualShadowUpgradeUploadSlot>, VirtualShadowUpgradeUploadSlotCapacity>
         m_virtualShadowUpgradeUploadSlots;
     uint32_t m_virtualShadowUpgradeUploadSlotCount = 0u;
-    BoundedSpscQueue<uint32_t, VirtualShadowUpgradeUploadSlotCapacity>
-        m_virtualShadowReadyUploadSlots;
+    VirtualShadowUpgradeQueue m_virtualShadowUpgradeQueue;
     std::vector<uint32_t> m_virtualShadowResidencyGenerationByGroup;
     CLodVirtualShadowUpgradeQueueStats m_virtualShadowUpgradeStats;
     std::shared_ptr<Buffer> m_virtualShadowFallbackDependenciesBuffer;
@@ -639,7 +637,7 @@ private:
     rhi::TimelinePtr m_streamingUploadCompletionFencePtr;
     rhi::Timeline m_streamingUploadCompletionFenceHandle;
     std::atomic<uint64_t> m_streamingUploadCompletionFenceCounter{0};
-    rhi::TimelinePtr m_directStorageLaunchFencePtr;
+    std::shared_ptr<rhi::TimelinePtr> m_directStorageLaunchFencePtr;
     rhi::Timeline m_directStorageLaunchFenceHandle;
     std::atomic<uint64_t> m_directStorageLaunchFenceCounter{0};
     // Worker publishes launch demand; the graph thread supplies the queue

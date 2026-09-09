@@ -23,54 +23,39 @@ AVBOITDepthWarpPass::AVBOITDepthWarpPass(
         "CLod.AVBOITDepthWarp.PSO");
 }
 
-void AVBOITDepthWarpPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void AVBOITDepthWarpPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(m_configBuffer, m_occupancyHistogramBuffer)
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(m_configBuffer, m_occupancyHistogramBuffer)
         .WithUnorderedAccess(m_depthWarpLUTBuffer);
 }
 
-void AVBOITDepthWarpPass::Setup()
-{
-}
-
-void AVBOITDepthWarpPass::Update(const UpdateExecutionContext& executionContext)
-{
-    (void)executionContext;
-}
-
-PassReturn AVBOITDepthWarpPass::Execute(PassExecutionContext& executionContext)
-{
+br::render::PreparedComputeDispatch AVBOITDepthWarpPass::Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_occupancyHistogramBuffer || !m_depthWarpLUTBuffer) {
         return {};
     }
 
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    const auto* renderContext = preparation.preparationData->Get<UpdateContext>();
     auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    auto program = preparation.CaptureProgramBinding(m_pso);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
 
-    uint32_t misc[NumMiscUintRootConstants] = {};
+    auto& misc = data.constants;
     misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_HISTOGRAM_DESCRIPTOR_INDEX] = m_occupancyHistogramBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_DESCRIPTOR_INDEX] = m_depthWarpLUTBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        misc);
 
     const uint32_t groupCountX =
         (CLodAVBOITDepthWarpLUTResolution + 63u) / 64u;
-    commandList.Dispatch(groupCountX, 1u, 1u);
-    return {};
+    data.groupsX = groupCountX; data.groupsY = 1u; data.groupsZ = 1u;
+    return data;
 }
 
-void AVBOITDepthWarpPass::Cleanup()
-{
+void AVBOITDepthWarpPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

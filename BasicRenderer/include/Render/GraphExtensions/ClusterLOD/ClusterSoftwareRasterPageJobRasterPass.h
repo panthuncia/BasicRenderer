@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -13,7 +14,8 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Render/RenderContext.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "../../../../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
@@ -23,7 +25,11 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ClusterSoftwareRasterPageJobRasterPass : public ComputePass {
+struct ClusterPageJobRasterFrameData {
+    std::vector<br::render::PreparedComputeIndirect> dispatches;
+};
+
+class ClusterSoftwareRasterPageJobRasterPass : public org::TypedRenderGraphPass<ClusterSoftwareRasterPageJobRasterPass, ClusterPageJobRasterFrameData> {
 public:
     ClusterSoftwareRasterPageJobRasterPass(
         std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
@@ -62,10 +68,11 @@ public:
         };
 
         auto device = DeviceManager::GetInstance().GetDevice();
+        m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>();
         device.CreateCommandSignature(
             rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 2), sizeof(RasterizeClustersCommand) },
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-            m_commandSignature);
+            *m_commandSignature);
 
         m_rigidPso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -82,8 +89,10 @@ public:
             "CLod_SoftwarePageJobRasterSkinnedPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override
+    void Declare(org::PassBuilder& declaration)
     {
+        declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* builder = &declaration;
         builder->WithShaderResource(
                 Builtin::PerMeshBuffer,
                 Builtin::PerMeshInstanceBuffer,
@@ -123,28 +132,21 @@ public:
         }
     }
 
-    void Setup() override {}
-
-    PassReturn Execute(PassExecutionContext& executionContext) override
-    {
+    ClusterPageJobRasterFrameData Prepare(const org::PassPrepareContext& preparation) {
+        ClusterPageJobRasterFrameData data{};
         if (m_runWhenComputeSWRasterEnabledOnly &&
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
-            return {};
+            return data;
         }
 
         auto& settings = SettingsManager::GetInstance();
         if (!CLodVSMRasterModeUsesLargeClusterPageJob(
                 settings.getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)())) {
-            return {};
+            return data;
         }
 
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        auto& commandList = executionContext.commandList;
-
-        commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
+        const auto& context = *preparation.preparationData->Get<UpdateContext>();
+        const auto signature = preparation.CaptureCommandSignature(m_commandSignature);
         uint32_t misc[NumMiscUintRootConstants] = {};
         misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
         misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] =
@@ -159,30 +161,32 @@ public:
             m_virtualShadowStatsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_TELEMETRY_ENABLED] =
             IsCLodWorkGraphTelemetryEnabled() ? 1u : 0u;
-        for (uint32_t variantIndex = 0u; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
-            const PipelineState& pso = variantIndex != 0u ? m_skinnedPso : m_rigidPso;
+        for (uint32_t variantIndex = 0; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
+            const auto binding = preparation.CaptureProgramBinding(variantIndex ? m_skinnedPso : m_rigidPso);
             misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffers[variantIndex]->GetSRVInfo(0).slot.index;
             misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffers[variantIndex]->GetSRVInfo(0).slot.index;
-            commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-            commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-            commandList.ExecuteIndirect(
-                m_commandSignature->GetHandle(),
-                m_pageJobIndirectArgsBuffers[variantIndex]->GetAPIResource().GetHandle(),
-                0,
-                {},
-                0,
-                1);
+            br::render::PreparedComputeIndirect dispatch{};
+            dispatch.resourceHeap = context.textureDescriptorHeap.GetHandle();
+            dispatch.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+            dispatch.program = binding.program;
+            dispatch.descriptorIndices = binding.descriptorIndices;
+            std::copy(std::begin(misc), std::end(misc), dispatch.constants.begin());
+            dispatch.commandSignature = signature;
+            dispatch.argumentsReference = preparation.CaptureResource(m_pageJobIndirectArgsBuffers[variantIndex]->GetGlobalResourceID());
+            data.dispatches.push_back(std::move(dispatch));
         }
-        return {};
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const ClusterPageJobRasterFrameData& data, org::PassRecordContext& recording) {
+        for (const auto& dispatch : data.dispatches)
+            br::render::RecordPreparedComputeIndirect(dispatch, recording);
+    }
 
 private:
     PipelineState m_rigidPso;
     PipelineState m_skinnedPso;
-    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_compactedVisibleClusterTransformIndicesBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;

@@ -65,6 +65,7 @@ void FFXManager::EvaluateSSSR(rhi::CommandList& commandList,
     PixelBuffer* pEnvironmentCubemap,
     PixelBuffer* pBRDFLUT,
     PixelBuffer* pReflectionsTarget) {
+    std::scoped_lock evaluateLock(m_evaluateMutex);
 
     const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
     if (!m_sssrContextCreated) {

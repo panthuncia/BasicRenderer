@@ -2,14 +2,20 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "ShaderBuffers.h"
+#include "RenderPasses/PreparedResourceClears.h"
+#include <array>
+#include <vector>
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITSetupPass final : public RenderPass {
+using AVBOITSetupFrameData = br::render::PreparedResourceClears;
+
+class AVBOITSetupPass final : public org::TypedRenderGraphPass<AVBOITSetupPass, AVBOITSetupFrameData> {
 public:
     AVBOITSetupPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -26,11 +32,10 @@ public:
         std::shared_ptr<PixelBuffer> normalizationTexture,
         std::shared_ptr<PixelBuffer> shadingExtinctionTexture);
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    void Cleanup() override;
+    AVBOITSetupFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const AVBOITSetupFrameData&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

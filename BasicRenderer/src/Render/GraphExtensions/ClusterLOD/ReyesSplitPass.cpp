@@ -89,8 +89,10 @@ ReyesSplitPass::ReyesSplitPass(
     m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
-void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void ReyesSplitPass::Declare(org::PassBuilder& declaration)
 {
+    declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    auto* builder = &declaration;
     builder->WithShaderResource(
             m_visibleClustersBuffer,
             m_inputSplitQueueBuffer,
@@ -143,111 +145,26 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void ReyesSplitPass::Setup() {
-}
 
-PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-    uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-    uintRootConstants[CLOD_REYES_SPLIT_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_MAX_PASS_COUNT] = m_maxSplitPassCount;
-    uintRootConstants[CLOD_REYES_SPLIT_INPUT_QUEUE_DESCRIPTOR_INDEX] = m_inputSplitQueueBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_INPUT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_inputSplitQueueCounterBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_SPLIT_QUEUE_DESCRIPTOR_INDEX] = m_outputSplitQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_outputSplitQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_outputSplitQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_diceQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_QUEUE_CAPACITY] = m_maxSplitQueueEntries;
-    uintRootConstants[CLOD_REYES_SPLIT_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_shadowClipmapInfoBuffer
-        ? m_shadowClipmapInfoBuffer->GetSRVInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_SPLIT_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX] = m_shadowDirtyHierarchyTexture
-        ? m_shadowDirtyHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_SPLIT_SHADOW_NON_RASTERABLE_HIERARCHY_DESCRIPTOR_INDEX] = m_shadowNonRasterableHierarchyTexture
-        ? m_shadowNonRasterableHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_SPLIT_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer
-        ? m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_SPLIT_REPLAY_SPLIT_QUEUE_DESCRIPTOR_INDEX] = m_replaySplitQueueBuffer
-        ? m_replaySplitQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_SPLIT_REPLAY_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replaySplitQueueCounterBuffer
-        ? m_replaySplitQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_SPLIT_REPLAY_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replaySplitQueueOverflowBuffer
-        ? m_replaySplitQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    uintRootConstants[CLOD_REYES_SPLIT_ENABLE_PATCH_OCCLUSION] =
-        (m_viewDepthSrvIndicesBuffer && m_replaySplitQueueBuffer && m_replaySplitQueueCounterBuffer && m_replaySplitQueueOverflowBuffer)
-            ? 1u
-            : 0u;
-    uintRootConstants[CLOD_REYES_SPLIT_PHASE_INDEX] = m_phaseIndex;
-    uintRootConstants[CLOD_REYES_SPLIT_USE_AABB_OCCLUSION] =
-        SettingsManager::GetInstance().getSettingGetter<bool>(CLodReyesUseAabbOcclusionSettingName)() ? 1u : 0u;
-    uintRootConstants[UintRootConstant18] = as_uint(std::max(
-        SettingsManager::GetInstance().getSettingGetter<float>(CLodReyesShadowCoarseTargetPagesPerTriangleSettingName)(),
-        CLodReyesShadowCoarseTargetPagesPerTriangleMin));
-
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_clearCountersPso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_clearCountersPso.GetResourceDescriptorSlots());
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        uintRootConstants);
-    commandList.Dispatch(1, 1, 1);
-
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        uintRootConstants);
-
-    commandList.ExecuteIndirect((*m_commandSignature)->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
-
-    return {};
-}
-
-PreparedPass ReyesSplitPass::PrepareFrame(FramePreparationContext& preparation)
+ReyesSplitFrameData ReyesSplitPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    PreparedData data{};
-    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
-    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.clearPipelineOwner = m_clearCountersPso.GetPayload();
-    data.splitPipelineOwner = m_pso.GetPayload();
-    data.clearPipeline = data.clearPipelineOwner->pso.Get().GetHandle();
-    data.splitPipeline = data.splitPipelineOwner->pso.Get().GetHandle();
-    data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle();
-    data.indirectArguments = m_indirectArgsBuffer->GetAPIResource().GetHandle();
-    data.clearDescriptorIndices = CaptureResourceDescriptorIndices(data.clearPipelineOwner->pipelineResources);
-    data.splitDescriptorIndices = CaptureResourceDescriptorIndices(data.splitPipelineOwner->pipelineResources);
-    data.constants.resize(NumMiscUintRootConstants);
-    auto& c = data.constants;
+    ReyesSplitFrameData data{};
+    data.clear.resourceHeap = data.split.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.clear.samplerHeap = data.split.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    auto clearProgram = preparation.CaptureProgramBinding(m_clearCountersPso);
+    data.clear.program = clearProgram.program;
+    data.clear.descriptorIndices = std::move(clearProgram.descriptorIndices);
+    data.clear.groupsX = 1;
+    auto splitProgram = preparation.CaptureProgramBinding(m_pso);
+    data.split.program = splitProgram.program;
+    data.split.descriptorIndices = std::move(splitProgram.descriptorIndices);
+    data.split.commandSignature = preparation.CaptureCommandSignature(m_commandSignature);
+    data.split.argumentsReference = preparation.CaptureResource(m_indirectArgsBuffer->GetGlobalResourceID());
+    data.outputCounters = {preparation.CaptureResource(m_outputSplitQueueCounterBuffer->GetGlobalResourceID()),
+        preparation.CaptureResource(m_outputSplitQueueOverflowBuffer->GetGlobalResourceID())};
+    auto& c = data.split.constants;
     c[CLOD_REYES_SPLIT_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     c[CLOD_REYES_SPLIT_MAX_PASS_COUNT] = m_maxSplitPassCount;
     c[CLOD_REYES_SPLIT_INPUT_QUEUE_DESCRIPTOR_INDEX] = m_inputSplitQueueBuffer->GetSRVInfo(0).slot.index;
@@ -274,34 +191,21 @@ PreparedPass ReyesSplitPass::PrepareFrame(FramePreparationContext& preparation)
     c[CLOD_REYES_SPLIT_PHASE_INDEX] = m_phaseIndex;
     c[CLOD_REYES_SPLIT_USE_AABB_OCCLUSION] = SettingsManager::GetInstance().getSettingGetter<bool>(CLodReyesUseAabbOcclusionSettingName)() ? 1u : 0u;
     c[UintRootConstant18] = as_uint(std::max(SettingsManager::GetInstance().getSettingGetter<float>(CLodReyesShadowCoarseTargetPagesPerTriangleSettingName)(), CLodReyesShadowCoarseTargetPagesPerTriangleMin));
-    return PreparedPass::MakeOwned(std::move(data), &RecordPrepared);
+    data.clear.constants = data.split.constants;
+    return data;
 }
 
-void ReyesSplitPass::RecordPrepared(const PreparedData& data, RecordingContext& recording)
-{
-    auto& commands = recording.Commands();
-    commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
-    auto bindIndices = [&](const std::vector<unsigned int>& indices) {
-        if (!indices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
-            org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
-            static_cast<uint32_t>(indices.size()), indices.data());
-    };
-    commands.BindPipeline(data.clearPipeline);
-    bindIndices(data.clearDescriptorIndices);
-    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, data.constants.data());
-    commands.Dispatch(1, 1, 1);
-    commands.BindPipeline(data.splitPipeline);
-    bindIndices(data.splitDescriptorIndices);
-    commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
-        NumMiscUintRootConstants, data.constants.data());
-    commands.ExecuteIndirect(data.commandSignature, data.indirectArguments, 0, {}, 0, 1);
+void ReyesSplitPass::Record(const ReyesSplitFrameData& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data.clear, recording);
+    // Split atomics must observe the preceding counter reset.
+    std::array<rhi::BufferBarrier, 2> counters{};
+    for (size_t index = 0; index < counters.size(); ++index) {
+        counters[index].buffer = recording.Resolve(data.outputCounters[index]).GetHandle();
+        counters[index].beforeAccess = counters[index].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        counters[index].beforeSync = counters[index].afterSync = rhi::ResourceSyncState::ComputeShading;
+    }
+    rhi::BarrierBatch barriers{};
+    barriers.buffers = {counters.data(), static_cast<uint32_t>(counters.size())};
+    recording.Commands().Barriers(barriers);
+    br::render::RecordPreparedComputeIndirect(data.split, recording);
 }
-
-void ReyesSplitPass::Update(const UpdateExecutionContext& executionContext)
-{
-    (void)executionContext;
-}
-
-void ReyesSplitPass::Cleanup() {}

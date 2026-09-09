@@ -38,42 +38,38 @@ AVBOITSetupPass::AVBOITSetupPass(
 {
 }
 
-void AVBOITSetupPass::DeclareResourceUsages(RenderPassBuilder* builder)
+void AVBOITSetupPass::Declare(org::PassBuilder& builder)
 {
     if (m_configBuffer) {
-        builder->WithShaderResource(m_configBuffer);
+        builder.WithShaderResource(m_configBuffer);
     }
     if (m_fitStateBuffer) {
-        builder->WithShaderResource(m_fitStateBuffer);
+        builder.WithShaderResource(m_fitStateBuffer);
     }
     if (m_depthWarpLUTBuffer) {
-        builder->WithShaderResource(m_depthWarpLUTBuffer);
+        builder.WithShaderResource(m_depthWarpLUTBuffer);
     }
 
-    builder->WithUnorderedAccessClear(
+    builder.WithUnorderedAccessClear(
         m_occupancyTexture,
         m_coverageTexture,
         m_occupancySliceMaskTexture,
         m_integratedTransmittanceTexture,
         m_zeroTransmittanceSliceTexture);
 
-    builder->WithUnorderedAccess(
+    builder.WithUnorderedAccess(
         m_scalarExtinctionTexture,
         m_chromaticExtinctionTexture);
 
     if (m_accumulationTexture) {
-        builder->WithRenderTargetClear(m_accumulationTexture);
+        builder.WithRenderTargetClear(m_accumulationTexture);
     }
     if (m_normalizationTexture) {
-        builder->WithRenderTargetClear(m_normalizationTexture);
+        builder.WithRenderTargetClear(m_normalizationTexture);
     }
     if (m_shadingExtinctionTexture) {
-        builder->WithRenderTargetClear(m_shadingExtinctionTexture);
+        builder.WithRenderTargetClear(m_shadingExtinctionTexture);
     }
-}
-
-void AVBOITSetupPass::Setup()
-{
 }
 
 void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
@@ -157,80 +153,34 @@ void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
     }
 }
 
-PassReturn AVBOITSetupPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-    const auto clearFloatResource = [&commandList](PixelBuffer* resource, float clearValueScalar = 0.0f) {
-        if (!resource) {
-            return;
-        }
-
-        rhi::UavClearFloat clearValue{};
-        clearValue.v[0] = clearValueScalar;
-        clearValue.v[1] = clearValueScalar;
-        clearValue.v[2] = clearValueScalar;
-        clearValue.v[3] = clearValueScalar;
-
-        const unsigned int sliceCount = resource->GetNumUAVSlices();
-        for (unsigned int sliceIndex = 0; sliceIndex < sliceCount; ++sliceIndex) {
-            rhi::UavClearInfo clearInfo{};
-            clearInfo.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0, sliceIndex).slot;
-            clearInfo.shaderVisible = resource->GetUAVShaderVisibleInfo(0, sliceIndex).slot;
-            clearInfo.resource = resource->GetAPIResource();
-            commandList.ClearUavFloat(clearInfo, clearValue);
+AVBOITSetupFrameData AVBOITSetupPass::Prepare(const org::PassPrepareContext& preparation) {
+    const auto* context = preparation.preparationData->Get<UpdateContext>();
+    AVBOITSetupFrameData data;
+    data.resourceHeap = context->textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+    const auto append = [&](PixelBuffer* resource, bool isFloat, float floatValue, uint32_t uintValue) {
+        if (!resource) return;
+        const org::ResourceBindingToken binding{resource->GetGlobalResourceID(), 0};
+        const auto captured = preparation.CaptureResource(binding);
+        for (uint32_t slice = 0; slice < resource->GetNumUAVSlices(); ++slice) {
+            data.clears.push_back({captured,
+                preparation.CaptureDescriptor(binding, resource->GetUAVNonShaderVisibleInfo(0, slice).slot),
+                preparation.CaptureDescriptor(binding, resource->GetUAVShaderVisibleInfo(0, slice).slot),
+                floatValue, uintValue, isFloat});
         }
     };
-
-    const auto clearUintResource = [&commandList](PixelBuffer* resource, uint32_t clearValueScalar = 0u) {
-        if (!resource) {
-            return;
-        }
-
-        rhi::UavClearUint clearValue{};
-        clearValue.v[0] = clearValueScalar;
-        clearValue.v[1] = clearValueScalar;
-        clearValue.v[2] = clearValueScalar;
-        clearValue.v[3] = clearValueScalar;
-
-        const unsigned int sliceCount = resource->GetNumUAVSlices();
-        for (unsigned int sliceIndex = 0; sliceIndex < sliceCount; ++sliceIndex) {
-            rhi::UavClearInfo clearInfo{};
-            clearInfo.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0, sliceIndex).slot;
-            clearInfo.shaderVisible = resource->GetUAVShaderVisibleInfo(0, sliceIndex).slot;
-            clearInfo.resource = resource->GetAPIResource();
-            commandList.ClearUavUint(clearInfo, clearValue);
-        }
-    };
-
-    clearFloatResource(m_occupancyTexture.get());
-    clearFloatResource(m_coverageTexture.get());
-    clearFloatResource(m_integratedTransmittanceTexture.get(), 1.0f);
-    clearUintResource(m_occupancySliceMaskTexture.get());
-    clearUintResource(m_zeroTransmittanceSliceTexture.get(), CLodAVBOITDefaultSliceCount);
-
-    if (m_accumulationTexture) {
-        commandList.ClearRenderTargetView(
-            m_accumulationTexture->GetRTVInfo(0).slot,
-            m_accumulationTexture->GetClearColor());
+    append(m_occupancyTexture.get(), true, 0, 0);
+    append(m_coverageTexture.get(), true, 0, 0);
+    append(m_integratedTransmittanceTexture.get(), true, 1, 0);
+    append(m_occupancySliceMaskTexture.get(), false, 0, 0);
+    append(m_zeroTransmittanceSliceTexture.get(), false, 0, CLodAVBOITDefaultSliceCount);
+    for (const auto* resource : {m_accumulationTexture.get(), m_normalizationTexture.get(), m_shadingExtinctionTexture.get()}) {
+        if (resource) data.targets.push_back({preparation.CaptureDescriptor(
+            {resource->GetGlobalResourceID(), 0}, resource->GetRTVInfo(0).slot), resource->GetClearColor()});
     }
-    if (m_normalizationTexture) {
-        commandList.ClearRenderTargetView(
-            m_normalizationTexture->GetRTVInfo(0).slot,
-            m_normalizationTexture->GetClearColor());
-    }
-    if (m_shadingExtinctionTexture) {
-        commandList.ClearRenderTargetView(
-            m_shadingExtinctionTexture->GetRTVInfo(0).slot,
-            m_shadingExtinctionTexture->GetClearColor());
-    }
-    return {};
+    return data;
 }
 
-void AVBOITSetupPass::Cleanup()
-{
+void AVBOITSetupPass::Record(const AVBOITSetupFrameData& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedResourceClears(data, recording);
 }

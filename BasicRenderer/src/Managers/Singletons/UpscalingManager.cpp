@@ -793,6 +793,7 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
 }
 
 void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    std::scoped_lock evaluateLock(m_evaluateMutex);
     SyncSettingsFromSettingsManager();
     const UpscalingMode effectiveMode = ResolveEffectiveUpscalingMode(m_upscalingMode, m_dlssSupported);
     switch (effectiveMode)

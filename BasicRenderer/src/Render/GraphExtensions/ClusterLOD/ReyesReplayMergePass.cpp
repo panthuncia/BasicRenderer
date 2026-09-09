@@ -50,62 +50,29 @@ ReyesReplayMergePass::ReyesReplayMergePass(
     m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
-void ReyesReplayMergePass::DeclareResourceUsages(ComputePassBuilder* builder)
+void ReyesReplayMergePass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(m_sourceQueueBuffer, m_sourceQueueCounterBuffer)
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(m_sourceQueueBuffer, m_sourceQueueCounterBuffer)
         .WithUnorderedAccess(m_destQueueBuffer, m_destQueueCounterBuffer, m_destQueueOverflowBuffer, m_telemetryBuffer)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
-    m_indirectArgumentsBinding = builder->BindIndirectArguments(m_indirectArgsBuffer);
+    m_indirectArgumentsBinding = builder.BindIndirectArguments(m_indirectArgsBuffer);
 }
-
-void ReyesReplayMergePass::Setup() {}
 
 void ReyesReplayMergePass::Update(const UpdateExecutionContext& executionContext)
 {
     (void)executionContext;
 }
 
-PassReturn ReyesReplayMergePass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-    uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-    uintRootConstants[CLOD_REYES_REPLAY_MERGE_SOURCE_DESCRIPTOR_INDEX] = m_sourceQueueBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_REPLAY_MERGE_SOURCE_COUNTER_DESCRIPTOR_INDEX] = m_sourceQueueCounterBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_REPLAY_MERGE_DEST_DESCRIPTOR_INDEX] = m_destQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_REPLAY_MERGE_DEST_COUNTER_DESCRIPTOR_INDEX] = m_destQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_REPLAY_MERGE_DEST_OVERFLOW_DESCRIPTOR_INDEX] = m_destQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_REPLAY_MERGE_CAPACITY] = m_destQueueCapacity;
-    uintRootConstants[CLOD_REYES_REPLAY_MERGE_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        uintRootConstants);
-
-    commandList.ExecuteIndirect((*m_commandSignature)->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
-    return {};
-}
-
-PreparedPass ReyesReplayMergePass::PrepareFrame(FramePreparationContext& preparation) {
+br::render::PreparedComputeIndirect ReyesReplayMergePass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
-    auto payload = m_pso.GetPayload(); br::render::PreparedComputeIndirect data{};
+    br::render::PreparedComputeIndirect data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload); data.commandSignatureOwner = m_commandSignature;
-    data.commandSignature = (*m_commandSignature)->GetHandle();
+    data.commandSignature = preparation.CaptureCommandSignature(m_commandSignature);
     data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    auto program = preparation.CaptureProgramBinding(m_pso);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
     data.constants[CLOD_REYES_REPLAY_MERGE_SOURCE_DESCRIPTOR_INDEX] = m_sourceQueueBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_REPLAY_MERGE_SOURCE_COUNTER_DESCRIPTOR_INDEX] = m_sourceQueueCounterBuffer->GetSRVInfo(0).slot.index;
     data.constants[CLOD_REYES_REPLAY_MERGE_DEST_DESCRIPTOR_INDEX] = m_destQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -113,7 +80,9 @@ PreparedPass ReyesReplayMergePass::PrepareFrame(FramePreparationContext& prepara
     data.constants[CLOD_REYES_REPLAY_MERGE_DEST_OVERFLOW_DESCRIPTOR_INDEX] = m_destQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_REYES_REPLAY_MERGE_CAPACITY] = m_destQueueCapacity;
     data.constants[CLOD_REYES_REPLAY_MERGE_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeIndirect);
+    return data;
 }
 
-void ReyesReplayMergePass::Cleanup() {}
+void ReyesReplayMergePass::Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeIndirect(data, recording);
+}

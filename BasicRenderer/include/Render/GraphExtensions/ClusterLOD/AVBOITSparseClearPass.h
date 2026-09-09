@@ -2,14 +2,15 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITSparseClearPass final : public ComputePass {
+class AVBOITSparseClearPass final : public org::TypedRenderGraphPass<AVBOITSparseClearPass, br::render::PreparedComputeDispatch> {
 public:
     AVBOITSparseClearPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -19,11 +20,9 @@ public:
         std::shared_ptr<PixelBuffer> chromaticExtinctionTexture,
         std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    void Cleanup() override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

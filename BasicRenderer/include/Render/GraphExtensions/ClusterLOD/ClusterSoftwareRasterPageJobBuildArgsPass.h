@@ -7,11 +7,12 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/Buffers/Buffer.h"
 #include "../../../../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
 
-class ClusterSoftwareRasterPageJobBuildArgsPass : public ComputePass {
+class ClusterSoftwareRasterPageJobBuildArgsPass : public org::TypedRenderGraphPass<ClusterSoftwareRasterPageJobBuildArgsPass, br::render::PreparedComputeDispatchSequence> {
 public:
     ClusterSoftwareRasterPageJobBuildArgsPass(
         std::shared_ptr<Buffer> rigidPageJobCountBuffer,
@@ -31,18 +32,15 @@ public:
             "CLod_SoftwarePageJobBuildIndirectArgsPSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override
-    {
+    void Declare(org::PassBuilder& declaration) {
+        declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        auto* builder = &declaration;
         builder->WithShaderResource(m_pageJobCountBuffers[0], m_pageJobCountBuffers[1])
             .WithUnorderedAccess(m_pageJobIndirectArgsBuffers[0], m_pageJobIndirectArgsBuffers[1]);
     }
 
-    void Setup() override {}
+    br::render::PreparedComputeDispatchSequence Prepare(const org::PassPrepareContext& preparation) {
 
-    void Update(const UpdateExecutionContext&) override {}
-
-    PassReturn Execute(PassExecutionContext& executionContext) override
-    {
         if (m_runWhenComputeSWRasterEnabledOnly &&
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
             return {};
@@ -52,26 +50,26 @@ public:
             return {};
         }
 
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        auto& commandList = executionContext.commandList;
-
-        commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
-        uint32_t misc[NumMiscUintRootConstants] = {};
-        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        for (uint32_t variantIndex = 0u; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
-            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffers[variantIndex]->GetSRVInfo(0).slot.index;
-            misc[CLOD_RASTER_PAGE_JOB_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_pageJobIndirectArgsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
-            commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-            commandList.Dispatch(1, 1, 1);
+        const auto& context = *preparation.preparationData->Get<UpdateContext>();
+        br::render::PreparedComputeDispatchSequence data{};
+        data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+        data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+        auto program = preparation.CaptureProgramBinding(m_pso);
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+        for (uint32_t variantIndex = 0; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
+            br::render::PreparedComputeDispatchSequence::Step step{};
+            step.constants[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffers[variantIndex]->GetSRVInfo(0).slot.index;
+            step.constants[CLOD_RASTER_PAGE_JOB_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_pageJobIndirectArgsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
+            step.groupsX = 1;
+            data.steps.push_back(std::move(step));
         }
-        return {};
+        return data;
     }
 
-    void Cleanup() override {}
+    static void Record(const br::render::PreparedComputeDispatchSequence& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatchSequence(data, recording);
+    }
 
 private:
     PipelineState m_pso;

@@ -34,46 +34,6 @@ void RasterBucketBlockOffsetsPass::Declare(org::PassBuilder& builder) {
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-#if 0 // Removed legacy recording path.
-PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
-        return {};
-    }
-
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-
-    auto& commandList = executionContext.commandList;
-    auto& pm = PSOManager::GetInstance();
-
-    auto numBuckets = context.preparedRasterBucketCount;
-    const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
-
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(pm.GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-    uint32_t rc[NumMiscUintRootConstants] = {};
-    rc[CLOD_PREFIX_OFFSETS_NUM_BUCKETS] = numBuckets;
-    rc[CLOD_PREFIX_OFFSETS_NUM_BLOCKS] = numBlocks;
-    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_blockSumsBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_scannedBlockSumsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX] = m_totalCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rc);
-
-    commandList.Dispatch(1, 1, 1);
-    return {};
-}
-#endif
 
 br::render::PreparedComputeDispatch RasterBucketBlockOffsetsPass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();

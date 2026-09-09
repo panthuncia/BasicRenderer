@@ -2,14 +2,15 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITOccupancyHistogramPass final : public ComputePass {
+class AVBOITOccupancyHistogramPass final : public org::TypedRenderGraphPass<AVBOITOccupancyHistogramPass, br::render::PreparedComputeDispatch> {
 public:
     AVBOITOccupancyHistogramPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -17,11 +18,10 @@ public:
         std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
         std::shared_ptr<Buffer> occupancyHistogramBuffer);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    void Cleanup() override;
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

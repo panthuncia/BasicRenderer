@@ -35,72 +35,31 @@ VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(
         "CLod.VirtualShadow.ClearDirtyBits.PSO");
 }
 
-void VirtualShadowMapClearDirtyBitsPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VirtualShadowMapClearDirtyBitsPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithUnorderedAccess(
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithUnorderedAccess(
         m_pageTableTexture,
         m_dirtyFlagsBuffer,
         m_statsBuffer);
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void VirtualShadowMapClearDirtyBitsPass::Setup()
+void VirtualShadowMapClearDirtyBitsPass::Initialize()
 {
 }
 
-PassReturn VirtualShadowMapClearDirtyBitsPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-    const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
-    uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    // An exact page-job dispatch proves that an admitted job which produced no
-    // depth writes is genuinely empty. The amplified hardware/software paths
-    // do not provide that guarantee: missing work and empty work are
-    // indistinguishable there, so synthesizing ContentValid can hide missing
-    // coarse-clipmap geometry.
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_COMPLETE_EMPTY_ADMITTED_PAGES] =
-        CLodVSMRasterModeUsesLargeClusterPageJob(
-            SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(
-                CLodVSMRasterModeSettingName)())
-        ? 1u
-        : 0u;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_DIRTY_FLAGS_DESCRIPTOR_INDEX] =
-        m_dirtyFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-
-    constexpr uint32_t threadsPerDimension = 8u;
-    const uint32_t groupCountX = (virtualShadowConfig.pageTableResolution + threadsPerDimension - 1u) / threadsPerDimension;
-    const uint32_t groupCountY = (virtualShadowConfig.pageTableResolution + threadsPerDimension - 1u) / threadsPerDimension;
-    commandList.Dispatch(groupCountX, groupCountY, CLodVirtualShadowMaxSupportedClipmapCount);
-    return {};
-}
-
-PreparedPass VirtualShadowMapClearDirtyBitsPass::PrepareFrame(FramePreparationContext& preparation) {
+br::render::PreparedComputeDispatch VirtualShadowMapClearDirtyBitsPass::Prepare(const org::PassPrepareContext& preparation) {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
     auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -108,9 +67,13 @@ PreparedPass VirtualShadowMapClearDirtyBitsPass::PrepareFrame(FramePreparationCo
         SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)()) ? 1u : 0u;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.groupsX = (config.pageTableResolution + 7u) / 8u; data.groupsY = data.groupsX; data.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount;
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return data;
 }
 
-void VirtualShadowMapClearDirtyBitsPass::Cleanup()
+void VirtualShadowMapClearDirtyBitsPass::ShutdownPass()
 {
+}
+
+void VirtualShadowMapClearDirtyBitsPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

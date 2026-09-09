@@ -1,62 +1,34 @@
 #pragma once
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class GTAODenoisePass : public ComputePass {
+class GTAODenoisePass : public org::TypedRenderGraphPass<GTAODenoisePass, br::render::PreparedComputeDispatch> {
 public:
     GTAODenoisePass() {
         CreatePointClampSampler();
         CreateXeGTAOComputePSO();
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        builder.WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
             .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm)
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
-    void Setup() override {
+    void Initialize() {
         // Removed redundant Register calls now covered by declared-resource auto descriptor registration
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
 
-        auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = executionContext.commandList;
-        auto workingAOTerm = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
-        auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
-        auto outputAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm);
 
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-		// Set the root signature
-		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
-		commandList.BindPipeline(DenoiseLastPassPSO.GetAPIPipelineState().GetHandle());
-
-		BindResourceDescriptorIndices(commandList, DenoiseLastPassPSO.GetResourceDescriptorSlots());
-
-        unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
-        gtaoConstants[UintRootConstant0] = workingAOTerm->GetSRVInfo(0).slot.index;
-        gtaoConstants[UintRootConstant1] = workingEdges->GetSRVInfo(0).slot.index;
-        gtaoConstants[UintRootConstant2] = m_samplerIndex;
-        gtaoConstants[UintRootConstant3] = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
-            
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, gtaoConstants);
-
-        commandList.Dispatch((context.renderResolution.x + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.renderResolution.y + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
-    
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         const auto workingAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
         const auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
@@ -66,19 +38,25 @@ public:
         data.resourceHeap = context->textureDescriptorHeap.GetHandle();
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
         data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
-        data.pipeline = payload->pso.Get().GetHandle();
-        data.pipelineOwner = std::move(payload);
-        data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        auto program = preparation.CaptureProgramBinding(std::move(payload));
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+
+
         data.constants[UintRootConstant0] = workingAO->GetSRVInfo(0).slot.index;
         data.constants[UintRootConstant1] = workingEdges->GetSRVInfo(0).slot.index;
         data.constants[UintRootConstant2] = m_samplerIndex;
         data.constants[UintRootConstant3] = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
         data.groupsX = (context->renderResolution.x + XE_GTAO_NUMTHREADS_X * 2u - 1u) / (XE_GTAO_NUMTHREADS_X * 2u);
         data.groupsY = (context->renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1u) / XE_GTAO_NUMTHREADS_Y;
-        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return data;
     }
 
-    void Cleanup() override {
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
+
+    void ShutdownPass() {
         // Cleanup if necessary
     }
 

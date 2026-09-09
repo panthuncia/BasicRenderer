@@ -7,9 +7,11 @@
 #include "Render/VersionedGpuBufferArtifacts.h"
 #include "Render/TextureImageTableArtifacts.h"
 #include "Render/StaticStateArtifacts.h"
+#include "Render/ObjectBufferStateArtifacts.h"
 #include "Resources/Resolvers/PublishedStateResourceResolver.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Utilities/TripleGenerationMailbox.h"
+#include "RenderPasses/PreparedRenderIndirect.h"
 
 #include <atomic>
 #include <cstring>
@@ -51,6 +53,63 @@ ArtifactSnapshot FragmentSnapshot(PublishedFragmentKind kind, ArtifactAddress ad
 }
 
 int main() {
+    {
+        // A fresh list, and every layout switch, invalidate root arguments.
+        // Exercise the shared raster recorder without relying on a previous pass.
+        struct CommandState {
+            rhi::PipelineLayoutHandle layout{};
+            bool constantsValid = false;
+            unsigned draws = 0;
+        } state;
+        rhi::CommandListVTable table{};
+        table.beginPass = +[](rhi::CommandList*, const rhi::PassBeginInfo&) noexcept {};
+        table.endPass = +[](rhi::CommandList*) noexcept {};
+        table.setPrimitiveTopology = +[](rhi::CommandList*, rhi::PrimitiveTopology) noexcept {};
+        table.bindLayout = +[](rhi::CommandList* list, rhi::PipelineLayoutHandle layout) noexcept {
+            auto& state = *static_cast<CommandState*>(list->impl);
+            state.layout = layout;
+            state.constantsValid = false;
+        };
+        table.bindPipeline = +[](rhi::CommandList*, rhi::PipelineHandle) noexcept {};
+        table.pushConstants = +[](rhi::CommandList* list, rhi::ShaderStage, uint32_t,
+            uint32_t binding, uint32_t, uint32_t count, const void* data) noexcept {
+            auto& state = *static_cast<CommandState*>(list->impl);
+            Check(state.layout.valid());
+            if (binding == MiscUintRootSignatureIndex) {
+                Check(count == NumMiscUintRootConstants);
+                Check(static_cast<const unsigned int*>(data)[0] == 1234u);
+                state.constantsValid = true;
+            }
+        };
+        table.executeIndirect = +[](rhi::CommandList* list, rhi::CommandSignatureHandle,
+            rhi::ResourceHandle, uint64_t, rhi::ResourceHandle, uint64_t, uint32_t) noexcept {
+            auto& state = *static_cast<CommandState*>(list->impl);
+            Check(state.constantsValid);
+            ++state.draws;
+        };
+        rhi::CommandList commands;
+        commands.impl = &state;
+        commands.vt = &table;
+        auto owner = std::make_shared<int>(0);
+        auto bindings = std::make_shared<org::FrozenExecutionBindings>(
+            std::vector<org::FrozenExecutionBindings::ResourceBinding>{
+                {rhi::Resource(rhi::ResourceHandle{1, 1}), owner}});
+        org::RecordingContext recording(commands, bindings);
+        recording.SetPreparedDependencies(std::make_shared<org::PreparedDependencySnapshot>(
+            std::vector<org::CapturedPipeline>{{{1, 1}, owner, {1, 1}}, {{2, 1}, owner, {2, 1}}},
+            std::vector<std::shared_ptr<const rhi::WorkGraphPtr>>{},
+            std::vector<org::PreparedDependencySnapshot::DescriptorBinding>{},
+            std::vector<std::shared_ptr<const void>>{},
+            std::vector<std::shared_ptr<const org::PreparedLifecycleEffect>>{}));
+        PreparedRenderIndirectSequence data;
+        data.constants[0] = 1234u;
+        data.arguments = {0};
+        data.steps.resize(2);
+        data.steps[0].program.program = {0};
+        data.steps[1].program.program = {1};
+        RecordPreparedRenderIndirectSequence(data, recording);
+        Check(state.draws == 2);
+    }
     {
         br::TripleGenerationMailbox<Value> mailbox;
         mailbox.ProducerValue().value = 1;
@@ -274,6 +333,134 @@ int main() {
     Check(scheduler.DomainConcurrency(TaskDomain::RendererState) == 1);
     Check(scheduler.DomainConcurrency(TaskDomain::GraphControl) == 1);
     Check(scheduler.DomainConcurrency(TaskDomain::GraphPublication) == 1);
+
+    // A sealed object cut must survive newer buffer publications without
+    // rebuilding its old ABI/revision DTO against the successor payload.
+    {
+        AsyncStateGraph objects(scheduler, "ObjectCutReplacement");
+        objects.RegisterProducer(ArtifactKind::BufferVersion, {
+            TaskLane::Streaming, TaskDomain::General, "ObjectBufferTestVersion",
+            [](const ArtifactBuildContext& context) {
+                return ArtifactBuildResult::Ready(context.input);
+            }
+        });
+        RegisterObjectBufferStateProducer(objects);
+        const ArtifactKey bufferKey{ArtifactKind::BufferVersion, 0xee10, 1};
+        const ArtifactKey rootKey{ArtifactKind::DrawRecordPage, 0xee10, 0};
+        const auto bufferPayload = [](std::uint64_t revision) {
+            auto version = std::make_shared<PublishedGpuBufferVersion>();
+            version->revision = revision;
+            version->elementStride = sizeof(std::uint32_t);
+            version->resource = org::Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, 16);
+            auto fragment = std::make_shared<RendererStateFragmentArtifact>();
+            fragment->fragment.payload = ArtifactPayload::Make<PublishedGpuBufferVersion>(version);
+            return ArtifactPayload::Make<RendererStateFragmentArtifact>(fragment);
+        };
+        Check(objects.Request(bufferKey, 1, {}, bufferPayload(1), 1));
+        objects.WaitIdle();
+        const auto firstBuffer = objects.Snapshot(bufferKey);
+        auto input = std::make_shared<ObjectBufferStateBuildInput>();
+        input->coveredMutationGeneration = 17;
+        input->buffers.push_back({bufferKey, 1, sizeof(std::uint32_t), kObjectDrawRecordVariant});
+        Check(objects.Request(rootKey, 1,
+            {Exact(firstBuffer.Version(), ArtifactReadiness::UploadSubmitted)},
+            ArtifactPayload::Make<ObjectBufferStateBuildInput>(input), 17));
+        objects.WaitIdle();
+        const auto firstRoot = objects.Snapshot(rootKey);
+        Check(firstRoot.readiness == ArtifactReadiness::GpuReady);
+        Check(objects.Request(bufferKey, 2, {}, bufferPayload(2), 2));
+        objects.WaitIdle();
+        const auto retainedRoot = objects.Snapshot(rootKey);
+        Check(retainedRoot.readiness == ArtifactReadiness::GpuReady);
+        Check(retainedRoot.generation == firstRoot.generation);
+        const auto fragment = retainedRoot.payload.Get<RendererStateFragmentArtifact>();
+        const auto state = fragment->fragment.payload.Get<PublishedObjectBufferState>();
+        Check(state && state->coveredMutationGeneration == 17);
+        Check(state->versions.size() == 1 && state->versions[0]->revision == 1);
+        auto nextInput = std::make_shared<ObjectBufferStateBuildInput>();
+        nextInput->coveredMutationGeneration = 18;
+        nextInput->buffers.push_back({bufferKey, 2, sizeof(std::uint32_t), kObjectDrawRecordVariant});
+        Check(objects.Request(rootKey, 2,
+            {Exact(objects.Snapshot(bufferKey).Version(), ArtifactReadiness::UploadSubmitted)},
+            ArtifactPayload::Make<ObjectBufferStateBuildInput>(nextInput), 18));
+        objects.WaitIdle();
+        const auto nextRoot = objects.Snapshot(rootKey);
+        Check(nextRoot.readiness == ArtifactReadiness::GpuReady);
+        const auto nextState = nextRoot.payload.Get<RendererStateFragmentArtifact>()
+            ->fragment.payload.Get<PublishedObjectBufferState>();
+        Check(nextState->coveredMutationGeneration == 18 && nextState->versions[0]->revision == 2);
+        Check(state->versions[0]->revision == 1);
+        objects.Shutdown();
+    }
+
+    // Dependency selection must not leave payloads in process-lifetime worker
+    // TLS. Keep the scheduler alive after destroying each graph to catch this.
+    for (bool readyGate : {false, true}) {
+        std::weak_ptr<const Value> lifetime;
+        {
+            AsyncStateGraph ownership(scheduler, "SnapshotLifetime");
+            ownership.RegisterProducer(ArtifactKind::Generic, {
+                TaskLane::Streaming, TaskDomain::General, "OwnedSnapshotProducer",
+                [](const ArtifactBuildContext& context) {
+                    return ArtifactBuildResult::Ready(context.input);
+                }
+            });
+            const ArtifactKey source{ArtifactKind::Generic, 0xee01, 0};
+            const ArtifactKey consumer{ArtifactKind::Generic, 0xee02, 0};
+            auto payload = std::make_shared<const Value>(Value{42});
+            lifetime = payload;
+            Check(ownership.Request(source, 1, {}, ArtifactPayload::Make(std::move(payload)), 42));
+            ownership.WaitIdle();
+            auto requirement = readyGate ? ReadyGate(source, ArtifactReadiness::GpuReady)
+                : LatestAtLeast(source, 1, ArtifactReadiness::GpuReady);
+            Check(ownership.Request(consumer, 1, {requirement}, Payload(7), 7));
+            ownership.WaitIdle();
+            Check(ownership.Snapshot(consumer).readiness == ArtifactReadiness::GpuReady);
+            ownership.Shutdown();
+        }
+        Check(lifetime.expired());
+    }
+
+    // A completed one-shot gate is not a live dependency on an archived
+    // source version. Reclaim that version while the consumer stays current.
+    {
+        AsyncStateGraph gates(scheduler, "RetiredReadyGate");
+        gates.RegisterProducer(ArtifactKind::Generic, {
+            TaskLane::Streaming, TaskDomain::General, "GateProducer",
+            [](const ArtifactBuildContext& context) {
+                return ArtifactBuildResult::Ready(context.input);
+            }
+        });
+        const ArtifactKey source{ArtifactKind::Generic, 0xee03, 0};
+        const ArtifactKey consumer{ArtifactKind::Generic, 0xee04, 0};
+        const ArtifactKey absent{ArtifactKind::Generic, 0xee05, 0};
+        std::weak_ptr<const Value> lifetime;
+        auto payload = std::make_shared<const Value>(Value{42});
+        lifetime = payload;
+        Check(gates.SubmitLatestIntent(source, 1, {},
+            ArtifactPayload::Make(std::move(payload)), 42) == ArtifactRequestStatus::Accepted);
+        gates.WaitIdle();
+        Check(gates.SubmitLatestIntent(consumer, 1,
+            {ReadyGate(source, ArtifactReadiness::GpuReady)}, Payload(7), 7) ==
+            ArtifactRequestStatus::Accepted);
+        gates.WaitIdle();
+        Check(gates.SubmitLatestIntent(source, 2, {}, Payload(43), 43) ==
+            ArtifactRequestStatus::Accepted);
+        gates.WaitIdle();
+        Check(lifetime.expired());
+        Check(gates.Diagnose(consumer).blockers.empty());
+        Check(gates.Diagnose(consumer).blockerChain.find(" <- ") == std::string::npos);
+        Check(gates.SubmitLatestIntent(consumer, 2,
+            {ReadyGate(absent, ArtifactReadiness::GpuReady)}, Payload(8), 8) ==
+            ArtifactRequestStatus::Accepted);
+        const auto blockedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (gates.Snapshot(consumer).readiness != ArtifactReadiness::Blocked) {
+            Check(std::chrono::steady_clock::now() < blockedDeadline);
+            std::this_thread::yield();
+        }
+        Check(!gates.Diagnose(consumer).blockers.empty());
+        gates.Shutdown();
+    }
 
     AsyncStateGraph graph(scheduler, "AsyncStateGraphTests");
     RegisterStaticStateProducers(graph);

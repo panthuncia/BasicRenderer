@@ -8,7 +8,7 @@
 
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Resources/PixelBuffer.h"
 
 namespace org { class Buffer; }
@@ -16,7 +16,20 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class VoxelSoftwareRasterizationPass : public ComputePass, public IDynamicDeclaredResources {
+struct VoxelRasterFrameData {
+    struct Step {
+        org::PreparedProgramBinding buildProgram{}, rasterProgram{};
+        std::array<uint32_t, NumMiscUintRootConstants> constants{};
+        org::PreparedResourceReference arguments{};
+    };
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    rhi::CommandSignatureHandle commandSignature{};
+    std::array<Step, 2> steps;
+};
+
+class VoxelSoftwareRasterizationPass
+    : public org::TypedRenderGraphPass<VoxelSoftwareRasterizationPass, VoxelRasterFrameData>,
+      public IDynamicDeclaredResources {
 public:
     VoxelSoftwareRasterizationPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -38,13 +51,11 @@ public:
         uint32_t voxelWorkCapacity);
     ~VoxelSoftwareRasterizationPass() override;
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    VoxelRasterFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const VoxelRasterFrameData&, org::PassRecordContext&);
 
 private:
     PipelineState m_buildArgsPso;

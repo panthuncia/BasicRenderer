@@ -56,7 +56,7 @@ inline void RecordPreparedComputeDispatch(
     if (data.groupsX == 0 || data.groupsY == 0 || data.groupsZ == 0) return;
     auto& commands = recording.Commands();
     BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
+    commands.BindLayout(data.program ? recording.ResolveLayout(*data.program, data.layout) : data.layout);
     commands.BindPipeline(data.program ? recording.Resolve(*data.program) : data.pipeline);
     if (!data.descriptorIndices.empty()) {
         commands.PushConstants(rhi::ShaderStage::Compute, 0,
@@ -72,13 +72,8 @@ struct PreparedComputeIndirect {
     bool enabled = true;
     rhi::DescriptorHeapHandle resourceHeap{};
     rhi::DescriptorHeapHandle samplerHeap{};
-    rhi::PipelineLayoutHandle layout{};
-    rhi::PipelineHandle pipeline{};
-    std::shared_ptr<const org::PipelineStatePayload> pipelineOwner;
     std::optional<org::PreparedProgramReference> program;
-    std::shared_ptr<const void> commandSignatureOwner;
     rhi::CommandSignatureHandle commandSignature{};
-    rhi::ResourceHandle arguments{}, countBuffer{};
     std::optional<org::PreparedResourceReference> argumentsReference;
     std::optional<org::PreparedResourceReference> countBufferReference;
     std::vector<unsigned int> descriptorIndices;
@@ -92,8 +87,8 @@ inline void RecordPreparedComputeIndirect(
     if (!data.enabled) return;
     auto& commands = recording.Commands();
     BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
-    commands.BindPipeline(data.program ? recording.Resolve(*data.program) : data.pipeline);
+    commands.BindLayout(recording.ResolveLayout(data.program.value()));
+    commands.BindPipeline(recording.Resolve(data.program.value()));
     if (!data.descriptorIndices.empty()) {
         commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
@@ -101,10 +96,9 @@ inline void RecordPreparedComputeIndirect(
     }
     commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0,
         NumMiscUintRootConstants, data.constants.data());
-    const auto arguments = data.argumentsReference
-        ? recording.Resolve(*data.argumentsReference).GetHandle() : data.arguments;
+    const auto arguments = recording.Resolve(data.argumentsReference.value()).GetHandle();
     const auto countBuffer = data.countBufferReference
-        ? recording.Resolve(*data.countBufferReference).GetHandle() : data.countBuffer;
+        ? recording.Resolve(*data.countBufferReference).GetHandle() : rhi::ResourceHandle{};
     commands.ExecuteIndirect(data.commandSignature, arguments, data.argumentsOffset,
         countBuffer, data.countOffset, data.maximumCount);
 }
@@ -135,8 +129,8 @@ inline void RecordPreparedComputeIndirectSequence(
     const PreparedComputeIndirectSequence& data, org::RecordingContext& recording) {
     auto& commands = recording.Commands();
     BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
     for (const auto& step : data.steps) {
+        commands.BindLayout(step.program ? recording.ResolveLayout(*step.program, data.layout) : data.layout);
         commands.BindPipeline(step.program ? recording.Resolve(*step.program) : step.pipeline);
         if (!step.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
@@ -174,7 +168,7 @@ inline void RecordPreparedComputeDispatchSequence(
     if (data.steps.empty()) return;
     auto& commands = recording.Commands();
     BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
+    commands.BindLayout(data.program ? recording.ResolveLayout(*data.program, data.layout) : data.layout);
     commands.BindPipeline(data.program ? recording.Resolve(*data.program) : data.pipeline);
     if (!data.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
         org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
@@ -222,7 +216,6 @@ inline void RecordPreparedComputePipelineSequence(
     const PreparedComputePipelineSequence& data, org::RecordingContext& recording) {
     auto& commands = recording.Commands();
     BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
-    commands.BindLayout(data.layout);
     for (const auto& step : data.steps) {
         if (step.uavBarrierBefore) {
             rhi::GlobalBarrier barrier{};
@@ -232,6 +225,7 @@ inline void RecordPreparedComputePipelineSequence(
             barriers.globals = {&barrier, 1};
             commands.Barriers(barriers);
         }
+        commands.BindLayout(step.program ? recording.ResolveLayout(*step.program, data.layout) : data.layout);
         commands.BindPipeline(step.program ? recording.Resolve(*step.program) : step.pipeline);
         if (!step.descriptorIndices.empty()) commands.PushConstants(rhi::ShaderStage::Compute, 0,
             org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,

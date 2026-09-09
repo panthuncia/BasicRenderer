@@ -5,12 +5,22 @@
 #include <rhi.h>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 
-class CLodStreamingFeedbackSortPass final : public ComputePass {
+struct StreamingFeedbackSortFrameData {
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    rhi::CommandSignatureHandle signature{};
+    std::array<org::PreparedProgramBinding, 6> programs;
+    std::array<org::PreparedResourceReference, 7> uavResources;
+    std::array<org::PreparedResourceReference, 2> indirectResources;
+    std::array<std::array<unsigned int, NumMiscUintRootConstants>, 2> constants;
+};
+
+class CLodStreamingFeedbackSortPass final : public org::TypedRenderGraphPass<CLodStreamingFeedbackSortPass, StreamingFeedbackSortFrameData> {
 public:
     CLodStreamingFeedbackSortPass(
         std::shared_ptr<Buffer> requestKeys,
@@ -24,23 +34,11 @@ public:
         std::shared_ptr<Buffer> countScatterArgs,
         std::shared_ptr<Buffer> reduceScanArgs);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override {}
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override {}
+    void Declare(org::PassBuilder& builder);
+    StreamingFeedbackSortFrameData Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const StreamingFeedbackSortFrameData& data, org::PassRecordContext& recording);
 
 private:
-    void PushRootConstants(
-        rhi::CommandList& commandList,
-        const std::shared_ptr<Buffer>& sourceKeys,
-        const std::shared_ptr<Buffer>& destKeys,
-        const std::shared_ptr<Buffer>& sourcePayloads,
-        const std::shared_ptr<Buffer>& destPayloads,
-        uint32_t iterationIndex) const;
-    void UavBarrier(rhi::CommandList& commandList) const;
-    void TransitionIndirectArgsForExecute(rhi::CommandList& commandList) const;
-
     PipelineState m_setupPso;
     PipelineState m_countPso;
     PipelineState m_reducePso;

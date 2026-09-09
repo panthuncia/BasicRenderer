@@ -10,7 +10,8 @@
 #include "BuiltinRenderPasses.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/RenderPhase.h"
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedRenderIndirect.h"
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Resources/PixelBuffer.h"
@@ -29,7 +30,9 @@ struct ClusterRasterizationPassInputs {
     RG_DEFINE_PASS_INPUTS(ClusterRasterizationPassInputs, &ClusterRasterizationPassInputs::wireframe, &ClusterRasterizationPassInputs::clearGbuffer, &ClusterRasterizationPassInputs::renderPhase, &ClusterRasterizationPassInputs::outputKind);
 };
 
-class ClusterRasterizationPass : public RenderPass, public IDynamicDeclaredResources {
+class ClusterRasterizationPass
+    : public org::TypedRenderGraphPass<ClusterRasterizationPass, br::render::PreparedRenderIndirectSequence>,
+      public IDynamicDeclaredResources {
 public:
     ClusterRasterizationPass(
         ClusterRasterizationPassInputs inputs,
@@ -63,13 +66,14 @@ public:
           std::shared_ptr<PixelBuffer> virtualShadowDynamicPagesTexture = nullptr);
     ~ClusterRasterizationPass();
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
+    void Initialize();
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    br::render::PreparedRenderIndirectSequence Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedRenderIndirectSequence& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedRenderIndirectSequence(data, recording);
+    }
 
 private:
     bool m_wireframe = false;
@@ -112,7 +116,7 @@ private:
 
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
-    rhi::CommandSignaturePtr m_rasterizationCommandSignature;
+    std::shared_ptr<rhi::CommandSignaturePtr> m_rasterizationCommandSignature;
 
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     uint32_t m_passWidth = 1;

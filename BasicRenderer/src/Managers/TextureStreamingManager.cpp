@@ -110,48 +110,70 @@ namespace {
 		RG_DEFINE_PASS_INPUTS(MaterialTextureStreamingReadbackInputs, &MaterialTextureStreamingReadbackInputs::source);
 	};
 
-	class MaterialTextureStreamingReadbackPass final : public CopyPass, public IHasImmediateModeCommands {
+	struct MaterialTextureStreamingReadbackFrameData {
+		org::PreparedResourceReference source{}, destination{};
+		uint64_t bytes = 0;
+	};
+
+	class MaterialReadbackReservation final : public org::PreparedLifecycleEffect {
+	public:
+		MaterialReadbackReservation(ExternalTimelinePoint signal,
+			std::function<void()> submitted, std::function<void()> cancelled)
+			: m_signal(signal), m_submitted(std::move(submitted)), m_cancelled(std::move(cancelled)) {}
+		std::span<const ExternalTimelinePoint> SignalsAfterCompletion() const override { return {&m_signal, 1u}; }
+		void Submitted(org::SubmissionContext) const override {
+			if (!m_resolved.exchange(true) && m_submitted) m_submitted();
+		}
+		void Abandoned(org::AbandonReason) const override {
+			if (!m_resolved.exchange(true) && m_cancelled) m_cancelled();
+		}
+	private:
+		ExternalTimelinePoint m_signal{};
+		std::function<void()> m_submitted, m_cancelled;
+		mutable std::atomic<bool> m_resolved{false};
+	};
+
+	class MaterialTextureStreamingReadbackPass final
+		: public org::TypedRenderGraphPass<MaterialTextureStreamingReadbackPass,
+			  MaterialTextureStreamingReadbackFrameData> {
 	public:
 		MaterialTextureStreamingReadbackPass(
 			std::shared_ptr<Resource> source,
 			std::shared_ptr<Buffer> staging,
 			uint64_t bytes,
-			std::function<PassReturn()> complete,
+			ExternalTimelinePoint signal,
+			std::function<void()> submitted,
 			std::function<void()> cancel)
-			: m_staging(std::move(staging)), m_bytes(bytes), m_complete(std::move(complete)),
+			: m_source(std::move(source)), m_staging(std::move(staging)), m_bytes(bytes),
+			  m_signal(signal), m_submitted(std::move(submitted)),
 			  m_cancel(std::move(cancel)) {
-			SetInputs(MaterialTextureStreamingReadbackInputs{std::move(source)});
-		}
-		~MaterialTextureStreamingReadbackPass() override {
-			if (!m_executed && m_cancel) {
-				m_cancel();
-			}
 		}
 
-		void DeclareResourceUsages(CopyPassBuilder* builder) override {
-			const auto& inputs = Inputs<MaterialTextureStreamingReadbackInputs>();
-			builder->WithCopySource(inputs.source);
-			builder->WithCopyDest(m_staging);
-			builder->PreferQueue(QueueKind::Copy);
+		void Declare(org::PassBuilder& builder) {
+			builder.WithCopySource(m_source);
+			builder.WithCopyDest(m_staging);
+			builder.PreferQueue(QueueKind::Copy);
 		}
-		void Setup() override {}
-		void RecordImmediateCommands(ImmediateExecutionContext& context) override {
-			const auto& inputs = Inputs<MaterialTextureStreamingReadbackInputs>();
-			if (inputs.source && m_staging && m_bytes != 0) {
-				context.list.CopyBufferRegion(m_staging, 0, inputs.source.get(), 0, m_bytes);
-			}
+		MaterialTextureStreamingReadbackFrameData Prepare(const org::PassPrepareContext& preparation) {
+			if (!m_source || !m_staging || m_bytes == 0) return {};
+			preparation.Reserve(std::make_shared<MaterialReadbackReservation>(
+				m_signal, m_submitted, m_cancel));
+			return {preparation.CaptureResource(m_source->GetGlobalResourceID()),
+				preparation.CaptureResource(m_staging->GetGlobalResourceID()), m_bytes};
 		}
-		PassReturn Execute(PassExecutionContext&) override {
-			m_executed = true;
-			return m_complete ? m_complete() : PassReturn{};
+		static void Record(const MaterialTextureStreamingReadbackFrameData& frame,
+			org::PassRecordContext& recording) {
+			if (frame.bytes) recording.Commands().CopyBufferRegion(
+				recording.Resolve(frame.destination).GetHandle(), 0,
+				recording.Resolve(frame.source).GetHandle(), 0, frame.bytes);
 		}
-		void Cleanup() override {}
 	private:
+		std::shared_ptr<Resource> m_source;
 		std::shared_ptr<Buffer> m_staging;
 		uint64_t m_bytes = 0;
-		std::function<PassReturn()> m_complete;
+		ExternalTimelinePoint m_signal{};
+		std::function<void()> m_submitted;
 		std::function<void()> m_cancel;
-		bool m_executed = false;
 	};
 }
 
@@ -959,7 +981,7 @@ void TextureStreamingManager::BeginTextureStreamingFeedbackFrame(uint64_t frameI
 	}
 }
 
-std::shared_ptr<CopyPass> TextureStreamingManager::CreateTextureStreamingFeedbackReadbackPass()
+std::shared_ptr<RenderPass> TextureStreamingManager::CreateTextureStreamingFeedbackReadbackPass()
 {
 	if (!IsMaterialTextureStreamingEnabledSetting() || !m_readbackFence.IsValid() || !m_textureStreamingFeedbackBuffer) {
 		return {};
@@ -1004,18 +1026,16 @@ std::shared_ptr<CopyPass> TextureStreamingManager::CreateTextureStreamingFeedbac
 	}
 
 	std::shared_ptr<Resource> source = m_textureStreamingFeedbackBuffer;
+	const uint64_t fenceValue = m_readbackFenceCounter.fetch_add(1u, std::memory_order_acq_rel) + 1u;
 	return std::make_shared<MaterialTextureStreamingReadbackPass>(
-		std::move(source), std::move(staging), bytes,
-		[this, selectedSlot]() -> PassReturn {
-			uint64_t fenceValue = 0;
+		std::move(source), std::move(staging), bytes, ExternalTimelinePoint{m_readbackFence, fenceValue},
+		[this, selectedSlot, fenceValue]() {
 			{
 				std::lock_guard lock(m_readbackSlotMutex);
-				if (selectedSlot >= m_readbackSlots.size() || !m_readbackSlots[selectedSlot].inFlight) return {};
-				fenceValue = m_readbackFenceCounter.fetch_add(1u, std::memory_order_acq_rel) + 1u;
+				if (selectedSlot >= m_readbackSlots.size() || !m_readbackSlots[selectedSlot].inFlight) return;
 				m_readbackSlots[selectedSlot].fenceValue = fenceValue;
 			}
 			ScheduleDrain();
-			return {m_readbackFence, fenceValue};
 		},
 		[this, selectedSlot]() {
 			std::lock_guard lock(m_readbackSlotMutex);

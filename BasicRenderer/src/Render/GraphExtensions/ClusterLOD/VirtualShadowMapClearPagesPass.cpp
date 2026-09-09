@@ -37,9 +37,10 @@ VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(
         "CLod.VirtualShadow.ClearPhysicalPages.PSO");
 }
 
-void VirtualShadowMapClearPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
+void VirtualShadowMapClearPagesPass::Declare(org::PassBuilder& builder)
 {
-    builder->WithUnorderedAccess(
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithUnorderedAccess(
         m_staticPagesTexture,
         m_dynamicPagesTexture,
         m_dirtyPageFlagsBuffer,
@@ -48,65 +49,19 @@ void VirtualShadowMapClearPagesPass::DeclareResourceUsages(ComputePassBuilder* b
         m_pageViewInfoBuffer,
         m_statsBuffer);
 
-    builder->WithShaderResource(
+    builder.WithShaderResource(
             m_clipmapInfoBuffer,
             Builtin::CameraBuffer)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
-void VirtualShadowMapClearPagesPass::Setup()
+void VirtualShadowMapClearPagesPass::Initialize()
 {
 }
 
-PassReturn VirtualShadowMapClearPagesPass::Execute(PassExecutionContext& executionContext)
-{
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
-    auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-    const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
-    uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_STATIC_PAGES_DESCRIPTOR_INDEX] =
-        m_staticPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DYNAMIC_PAGES_DESCRIPTOR_INDEX] =
-        m_dynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_METADATA_DESCRIPTOR_INDEX] =
-        m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGE_COUNT] = virtualShadowConfig.maxPhysicalPages;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_ATLAS_PAGES_WIDE] = virtualShadowConfig.physicalAtlasPagesWide;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_STATS_DESCRIPTOR_INDEX] =
-        m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_CLIPMAP_INFO_DESCRIPTOR_INDEX] =
-        m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] =
-        m_pageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DYNAMIC_CONTENT_FILTER_ENABLED] =
-        SettingsManager::GetInstance().getSettingGetter<bool>(
-            CLodDirectionalVirtualShadowDynamicContentFilterSettingName)()
-            ? 1u
-            : 0u;
-
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        rootConstants);
-
-    commandList.Dispatch(virtualShadowConfig.maxPhysicalPages, 1u, 1u);
-    return {};
-}
-
-PreparedPass VirtualShadowMapClearPagesPass::PrepareFrame(FramePreparationContext& preparation)
+br::render::PreparedComputeDispatch VirtualShadowMapClearPagesPass::Prepare(const org::PassPrepareContext& preparation)
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
@@ -115,9 +70,9 @@ PreparedPass VirtualShadowMapClearPagesPass::PrepareFrame(FramePreparationContex
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
-    data.pipeline = payload->pso.Get().GetHandle();
-    data.pipelineOwner = std::move(payload);
-    data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+    auto program = preparation.CaptureProgramBinding(std::move(payload));
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_STATIC_PAGES_DESCRIPTOR_INDEX] = m_staticPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = m_dynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -131,9 +86,13 @@ PreparedPass VirtualShadowMapClearPagesPass::PrepareFrame(FramePreparationContex
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_pageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DYNAMIC_CONTENT_FILTER_ENABLED] = SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowDynamicContentFilterSettingName)() ? 1u : 0u;
     data.groupsX = config.maxPhysicalPages;
-    return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+    return data;
 }
 
-void VirtualShadowMapClearPagesPass::Cleanup()
+void VirtualShadowMapClearPagesPass::ShutdownPass()
 {
+}
+
+void VirtualShadowMapClearPagesPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

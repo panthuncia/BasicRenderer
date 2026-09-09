@@ -3,25 +3,24 @@
 #include <memory>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapDirtyHierarchyPass final : public ComputePass {
+class VirtualShadowMapDirtyHierarchyPass final : public org::TypedRenderGraphPass<VirtualShadowMapDirtyHierarchyPass, br::render::PreparedComputeDispatchSequence> {
 public:
     VirtualShadowMapDirtyHierarchyPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
         std::shared_ptr<PixelBuffer> dirtyHierarchyTexture,
         std::shared_ptr<Buffer> clipmapInfoBuffer);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatchSequence Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatchSequence&, org::PassRecordContext&);
 
 private:
     PipelineState m_pso;

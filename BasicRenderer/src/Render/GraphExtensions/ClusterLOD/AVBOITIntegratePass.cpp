@@ -35,12 +35,13 @@ AVBOITIntegratePass::AVBOITIntegratePass(
         "CLod.AVBOITIntegrate.PSO");
 }
 
-void AVBOITIntegratePass::DeclareResourceUsages(ComputePassBuilder* builder)
+void AVBOITIntegratePass::Declare(org::PassBuilder& builder)
 {
-    builder->WithShaderResource(m_configBuffer);
-    builder->WithShaderResource(m_fitStateBuffer);
+    builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+    builder.WithShaderResource(m_configBuffer);
+    builder.WithShaderResource(m_fitStateBuffer);
 
-    builder->WithUnorderedAccess(
+    builder.WithUnorderedAccess(
         Builtin::DebugVisualization,
         m_occupancyTexture,
         m_coverageTexture,
@@ -50,11 +51,7 @@ void AVBOITIntegratePass::DeclareResourceUsages(ComputePassBuilder* builder)
         m_integratedTransmittanceTexture,
         m_zeroTransmittanceSliceTexture);
 
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
-}
-
-void AVBOITIntegratePass::Setup()
-{
+    builder.WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void AVBOITIntegratePass::Update(const UpdateExecutionContext& executionContext)
@@ -68,40 +65,33 @@ bool AVBOITIntegratePass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-PassReturn AVBOITIntegratePass::Execute(PassExecutionContext& executionContext)
-{
+br::render::PreparedComputeDispatch AVBOITIntegratePass::Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_fitStateBuffer || !m_occupancyTexture || !m_coverageTexture ||
         !m_occupancySliceMaskTexture || !m_scalarExtinctionTexture || !m_chromaticExtinctionTexture ||
         !m_zeroTransmittanceSliceTexture) {
         return {};
     }
 
-    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    const auto* renderContext = preparation.preparationData->Get<UpdateContext>();
     auto& context = *renderContext;
-    auto& commandList = executionContext.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    data.resourceHeap = context.textureDescriptorHeap.GetHandle();
+    data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
+    auto program = preparation.CaptureProgramBinding(m_pso);
+    data.program = program.program;
+    data.descriptorIndices = std::move(program.descriptorIndices);
 
-    uint32_t misc[NumMiscUintRootConstants] = {};
+    auto& misc = data.constants;
     misc[CLOD_AVBOIT_VBOIT_INTEGRATE_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_AVBOIT_VBOIT_INTEGRATE_FIT_STATE_DESCRIPTOR_INDEX] = m_fitStateBuffer->GetSRVInfo(0).slot.index;
-    commandList.PushConstants(
-        rhi::ShaderStage::Compute,
-        0,
-        MiscUintRootSignatureIndex,
-        0,
-        NumMiscUintRootConstants,
-        misc);
 
     const uint32_t groupCountX = (m_occupancyTexture->GetWidth() + 7u) / 8u;
     const uint32_t groupCountY = (m_occupancyTexture->GetHeight() + 7u) / 8u;
-    commandList.Dispatch(groupCountX, groupCountY, 1u);
-    return {};
+    data.groupsX = groupCountX; data.groupsY = groupCountY; data.groupsZ = 1u;
+    return data;
 }
 
-void AVBOITIntegratePass::Cleanup()
-{
+void AVBOITIntegratePass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    br::render::RecordPreparedComputeDispatch(data, recording);
 }

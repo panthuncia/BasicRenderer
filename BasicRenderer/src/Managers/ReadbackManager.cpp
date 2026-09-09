@@ -11,6 +11,7 @@
 #include <rhi_conversions_dx12.h>
 
 #include "Managers/Singletons/TaskSchedulerManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Utilities/Utilities.h"
 
 namespace br {
@@ -171,55 +172,128 @@ void ReadbackManager::Cleanup() {
     m_readbackPass.reset();
 }
 
-void ReadbackManager::ReadbackPass::RecordImmediateCommands(ImmediateExecutionContext& context) {
-    std::vector<ReadbackInfo> readbacks;
-    uint64_t fenceValue = 0;
-    {
-        std::scoped_lock lock(m_owner.m_mutex);
-        if (m_owner.m_queuedReadbacks.empty()) {
-            m_hasWork = false;
-            m_pendingFenceValue = 0;
-            return;
-        }
-
-        fenceValue = m_owner.AcquireNextFenceValue();
-        m_hasWork = true;
-        m_pendingFenceValue = fenceValue;
-        readbacks = m_owner.m_queuedReadbacks;
-    }
-
-    auto& commandList = context.list;
-    for (auto& readback : readbacks) {
-        if (!readback.texture) {
-            continue;
-        }
-
-        if (readback.cubemap) {
-            m_owner.SaveCubemapToDDS(context.device, commandList, readback.texture, readback.outputFile, fenceValue);
-        }
-        else {
-            m_owner.SaveTextureToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, fenceValue);
-        }
-    }
+bool ReadbackManager::ReadbackPass::DeclaredResourcesChanged() const
+{
+    std::scoped_lock lock(m_owner.m_mutex);
+    return !m_owner.m_queuedReadbacks.empty();
 }
 
-PassReturn ReadbackManager::ReadbackPass::Execute(PassExecutionContext& context) {
-    (void)context;
+void ReadbackManager::ReadbackPass::Declare(org::PassBuilder& builder)
+{
+    std::scoped_lock lock(m_owner.m_mutex);
+    for (const auto& readback : m_owner.m_queuedReadbacks)
+        if (readback.texture) builder.WithCopySource(readback.texture);
+    builder.PreferQueue(QueueKind::Graphics);
+}
 
-    if (!m_hasWork) {
-        return { {} };
+ReadbackManager::ReadbackFrameData ReadbackManager::ReadbackPass::Prepare(
+    const org::PassPrepareContext& preparation)
+{
+    ReadbackFrameData frame;
+    std::vector<ReadbackInfo> inputs;
+    {
+        std::scoped_lock lock(m_owner.m_mutex);
+        inputs = std::move(m_owner.m_queuedReadbacks);
+        m_owner.m_queuedReadbacks.clear();
+    }
+    if (inputs.empty()) return frame;
+
+    const uint64_t fenceValue = m_owner.AcquireNextFenceValue();
+    std::vector<ReadbackRequest> requests;
+    auto device = DeviceManager::GetInstance().GetDevice();
+    for (const auto& input : inputs) {
+        if (!input.texture) continue;
+        const uint32_t mipCount = input.texture->GetMipLevels();
+        const uint32_t slices = input.cubemap ? 6u : 1u;
+        std::vector<rhi::CopyableFootprint> footprints(mipCount * slices);
+        rhi::FootprintRangeDesc range{};
+        range.texture = input.texture->GetAPIResource().GetHandle();
+        range.mipCount = mipCount;
+        range.arraySize = slices;
+        range.planeCount = 1;
+        const auto info = device.GetCopyableFootprints(
+            range, footprints.data(), static_cast<uint32_t>(footprints.size()));
+        auto buffer = Buffer::CreateShared(rhi::HeapType::Readback, info.totalBytes);
+        buffer->SetName("Readback");
+        preparation.Retain(buffer);
+        const auto source = preparation.CaptureResource(input.texture->GetGlobalResourceID());
+        for (uint32_t slice = 0; slice < slices; ++slice) {
+            for (uint32_t mip = 0; mip < mipCount; ++mip) {
+                const uint32_t index = CalcSubresource(mip, slice, 0, mipCount, slices);
+                frame.copies.push_back({source, buffer->GetAPIResource().GetHandle(),
+                    footprints[index], mip, slice});
+            }
+        }
+        const auto width = input.texture->GetWidth();
+        const auto height = input.texture->GetHeight();
+        const auto format = rhi::ToDxgi(input.texture->GetFormat());
+        const auto output = input.outputFile;
+        const auto callback = input.callback;
+        ReadbackRequest request{};
+        request.readbackBuffer = buffer;
+        request.layouts = footprints;
+        request.totalSize = info.totalBytes;
+        request.outputFile = output;
+        request.fenceValue = fenceValue;
+        request.callback = [buffer, footprints, width, height, format, mipCount,
+            output, callback, cubemap = input.cubemap]() {
+            TaskSchedulerManager::GetInstance().Submit(TaskLane::Background,
+                TaskDomain::Cleanup, "ReadbackManager::SaveDDS",
+                [buffer, footprints, width, height, format, mipCount, output,
+                    callback, cubemap]() {
+                    if (cubemap) SaveCubemapReadbackToDds(buffer, footprints,
+                        width, height, format, mipCount, output);
+                    else SaveTextureReadbackToDds(buffer, footprints,
+                        width, height, format, mipCount, output);
+                    if (callback) callback();
+                });
+        };
+        requests.push_back(std::move(request));
     }
 
-    m_owner.ClearReadbacks();
-    m_hasWork = false;
-    const uint64_t fenceValue = m_pendingFenceValue;
-    m_pendingFenceValue = 0;
-    spdlog::debug(
-        "ReadbackManager::ReadbackPass returning external fence timeline(idx={}, gen={}) value={}",
-        m_readbackFence.GetHandle().index,
-        m_readbackFence.GetHandle().generation,
-        fenceValue);
-    return { m_readbackFence, fenceValue };
+    struct Reservation final : org::PreparedLifecycleEffect {
+        ReadbackManager* owner = nullptr;
+        std::vector<ReadbackInfo> inputs;
+        mutable std::vector<ReadbackRequest> requests;
+        ExternalTimelinePoint signal{};
+        mutable std::atomic<bool> resolved{false};
+        std::span<const ExternalTimelinePoint> SignalsAfterCompletion() const override {
+            return {&signal, 1u};
+        }
+        void Submitted(org::SubmissionContext) const override {
+            if (resolved.exchange(true)) return;
+            std::scoped_lock lock(owner->m_mutex);
+            for (auto& request : requests)
+                owner->m_readbackRequests.push_back(std::move(request));
+        }
+        void Abandoned(org::AbandonReason) const override {
+            if (resolved.exchange(true)) return;
+            std::scoped_lock lock(owner->m_mutex);
+            for (auto& input : inputs)
+                owner->m_queuedReadbacks.push_back(std::move(input));
+        }
+    };
+    auto reservation = std::make_shared<Reservation>();
+    reservation->owner = &m_owner;
+    reservation->inputs = std::move(inputs);
+    reservation->requests = std::move(requests);
+    reservation->signal = {m_readbackFence, fenceValue};
+    preparation.Reserve(std::move(reservation));
+    return frame;
+}
+
+void ReadbackManager::ReadbackPass::Record(
+    const ReadbackFrameData& frame, org::PassRecordContext& recording)
+{
+    for (const auto& copy : frame.copies) {
+        rhi::BufferTextureCopyFootprint region{};
+        region.texture = recording.Resolve(copy.source).GetHandle();
+        region.buffer = copy.destination;
+        region.mip = copy.mip;
+        region.arraySlice = copy.slice;
+        region.footprint = copy.footprint;
+        recording.Commands().CopyTextureToBuffer(region);
+    }
 }
 
 void ReadbackManager::SaveCubemapToDDS(

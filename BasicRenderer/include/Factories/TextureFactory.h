@@ -10,6 +10,9 @@
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
+#include "Render/Runtime/FrameWorkQueue.h"
 
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
@@ -65,10 +68,10 @@ public:
 		m_materialTextureTransferService = service;
 	}
 
-    std::shared_ptr<ComputePass> GetMipmappingPass() const { return m_mipmappingPass; }
-    std::shared_ptr<ComputePass> GetBC7CompressionPass() const { return m_bc7CompressionPass; }
+    std::shared_ptr<RenderPass> GetMipmappingPass() const { return m_mipmappingPass; }
+    std::shared_ptr<RenderPass> GetBC7CompressionPass() const { return m_bc7CompressionPass; }
     std::shared_ptr<RenderPass> GetBC7CompressionCopyPass() const { return m_bc7CompressionCopyPass; }
-    std::shared_ptr<CopyPass> GetBC7CompressionReadbackPass() const { return m_bc7CompressionReadbackPass; }
+    std::shared_ptr<RenderPass> GetBC7CompressionReadbackPass() const { return m_bc7CompressionReadbackPass; }
 
     void SetReadbackService(org::runtime::IReadbackService* readbackService);
     bool SubmitBC7CompressionJob(
@@ -91,6 +94,7 @@ private:
             CompressionRecorded,
             CopyRecorded,
             ReadbackRecorded,
+            Completed,
         };
 
         ~BC7CompressionJob()
@@ -114,39 +118,20 @@ private:
         bool outputHasFullMipChain = true;
     };
 
-    class MipmappingPass : public ComputePass, public IDynamicDeclaredResources {
+    class MipmappingPass : public org::TypedRenderGraphPass<MipmappingPass, br::render::PreparedComputePipelineSequence>, public IDynamicDeclaredResources {
     public:
-        MipmappingPass()
-        {
-            m_pMipConstants = LazyDynamicStructuredBuffer<MipmapSpdConstants>::CreateShared(
-                64, "Mipmap SPD constants");
-        }
-
-        void Setup() override {
-	        
-        }
-
         // Called by TextureFactory when you create a texture with only mip0 uploaded.
         void EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb, bool preserveAlphaCoverage = false);
 
-        void DeclareResourceUsages(ComputePassBuilder* builder) override;
+        void Declare(org::PassBuilder& builder);
 
-        void Update(const UpdateExecutionContext& context) override {}
-
-        PassReturn Execute(PassExecutionContext& context) override;
-
-        PreparedPass PrepareFrame(FramePreparationContext&) override {
-            // An empty dynamic pass is a complete execution, not a legacy
-            // callback. Pending jobs remain on the synchronous path until
-            // they have an owned reservation/recording packet.
-            return m_pending.empty() ? PreparedPass::NoOp() : PreparedPass{};
-        }
-
-        void Cleanup() override {
+        br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
+        static void Record(const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
+            br::render::RecordPreparedComputePipelineSequence(data, recording);
         }
 
         bool DeclaredResourcesChanged() const override {
-            return m_declaredResourcesChanged;
+            return m_declaredResourcesChanged || m_jobs.ReadCounters().pending != 0;
         }
 
     private:
@@ -176,7 +161,8 @@ private:
         struct Job
         {
             std::shared_ptr<PixelBuffer> texture;
-            std::shared_ptr<BufferView>  constantsView;
+            std::shared_ptr<BufferView> constantsView;
+            std::shared_ptr<LazyDynamicStructuredBuffer<MipmapSpdConstants>> constantsBuffer;
             std::shared_ptr<GloballyIndexedResource> counter;
             std::shared_ptr<Buffer> alphaStats;
             std::shared_ptr<Buffer> alphaScales;
@@ -194,9 +180,8 @@ private:
             MipmapValueType valueType = MipmapValueType::Float4;
         };
 
-        std::vector<Job> m_pending;
-
-        std::shared_ptr<LazyDynamicStructuredBuffer<MipmapSpdConstants>> m_pMipConstants;
+        org::runtime::FrameWorkQueue<Job> m_jobs;
+        org::runtime::FrameWorkQueue<Job>::Snapshot m_declaredJobs;
 
         PipelineState m_psoFloat1_2D;
         PipelineState m_psoFloat1_Array;
@@ -225,27 +210,24 @@ private:
         PipelineState CreatePipeline(MipmapValueType valueType, bool isArray) const;
         PipelineState& GetOrCreateAlphaPipeline(const wchar_t* entryPoint, PipelineState& pso, bool& hasPso, const char* debugName);
 
-        bool m_declaredResourcesChanged = true;
+        std::atomic_bool m_declaredResourcesChanged = true;
     };
 
-    class BC7CompressionPass : public ComputePass, public IDynamicDeclaredResources {
+    class BC7CompressionPass
+        : public org::TypedRenderGraphPass<BC7CompressionPass,
+              br::render::PreparedComputePipelineSequence>,
+          public IDynamicDeclaredResources {
     public:
-        void Setup() override;
-
         void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
 
         void Update(const UpdateExecutionContext& context) override;
 
-        void DeclareResourceUsages(ComputePassBuilder* builder) override;
-
-        PassReturn Execute(PassExecutionContext& context) override;
-
-        PreparedPass PrepareFrame(FramePreparationContext&) override {
-            std::scoped_lock lock(m_pendingMutex);
-            return m_pending.empty() ? PreparedPass::NoOp() : PreparedPass{};
+        void Declare(org::PassBuilder& builder);
+        br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
+        static void Record(const br::render::PreparedComputePipelineSequence& data,
+            org::PassRecordContext& recording) {
+            br::render::RecordPreparedComputePipelineSequence(data, recording);
         }
-
-        void Cleanup() override;
 
         bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged.load(std::memory_order_acquire);
@@ -262,20 +244,26 @@ private:
         std::atomic_bool m_declaredResourcesChanged = true;
     };
 
-    class BC7CompressionCopyPass : public RenderPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
-    public:
-        void Setup() override;
+    struct BC7CompressionCopyFrameData {
+        struct Copy {
+            org::PreparedResourceReference source{}, destination{};
+            rhi::CopyableFootprint footprint{};
+            uint32_t mip = 0, slice = 0;
+        };
+        std::vector<Copy> copies;
+    };
 
+    class BC7CompressionCopyPass
+        : public org::TypedRenderGraphPass<BC7CompressionCopyPass, BC7CompressionCopyFrameData>,
+          public IDynamicDeclaredResources {
+    public:
         void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
 
         void Update(const UpdateExecutionContext& context) override;
 
-        void DeclareResourceUsages(RenderPassBuilder* builder) override;
-
-        void RecordImmediateCommands(ImmediateExecutionContext& context) override;
-		bool ImmediateCommandsAreCompleteExecution() const noexcept override { return true; }
-
-        void Cleanup() override;
+        void Declare(org::PassBuilder& builder);
+        BC7CompressionCopyFrameData Prepare(const org::PassPrepareContext& preparation);
+        static void Record(const BC7CompressionCopyFrameData& data, org::PassRecordContext& recording);
 
         bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged.load(std::memory_order_acquire);
@@ -287,30 +275,31 @@ private:
         std::atomic_bool m_declaredResourcesChanged = true;
     };
 
-    class BC7CompressionReadbackPass : public CopyPass, public IDynamicDeclaredResources, public IHasImmediateModeCommands {
-    public:
-        void Setup() override;
+    struct BC7CompressionReadbackFrameData {
+        struct Copy {
+            org::PreparedResourceReference source{};
+            rhi::ResourceHandle destination{};
+            rhi::CopyableFootprint footprint{};
+            uint32_t mip = 0, slice = 0;
+        };
+        std::vector<Copy> copies;
+    };
 
+    class BC7CompressionReadbackPass
+        : public org::TypedRenderGraphPass<BC7CompressionReadbackPass,
+              BC7CompressionReadbackFrameData>,
+          public IDynamicDeclaredResources {
+    public:
         void SetReadbackService(org::runtime::IReadbackService* readbackService);
         bool HasReadbackService() const { return m_readbackService != nullptr; }
         void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
 
         void Update(const UpdateExecutionContext& context) override;
 
-        void DeclareResourceUsages(CopyPassBuilder* builder) override;
-
-        void RecordImmediateCommands(ImmediateExecutionContext& context) override;
-
-        PassReturn Execute(PassExecutionContext& context) override;
-
-        PreparedPass PrepareFrame(FramePreparationContext&) override {
-            std::scoped_lock lock(m_pendingMutex);
-            return m_pending.empty() && m_pendingCaptureIds.empty()
-                ? PreparedPass::NoOp()
-                : PreparedPass{};
-        }
-
-        void Cleanup() override;
+        void Declare(org::PassBuilder& builder);
+        BC7CompressionReadbackFrameData Prepare(const org::PassPrepareContext& preparation);
+        static void Record(const BC7CompressionReadbackFrameData& data,
+            org::PassRecordContext& recording);
 
         bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged.load(std::memory_order_acquire);
@@ -318,7 +307,6 @@ private:
 
     private:
         std::vector<std::shared_ptr<BC7CompressionJob>> m_pending;
-        std::vector<uint64_t> m_pendingCaptureIds;
         mutable std::mutex m_pendingMutex;
         org::runtime::IReadbackService* m_readbackService = nullptr;
         std::atomic_bool m_declaredResourcesChanged = true;
@@ -331,9 +319,9 @@ private:
 		m_bc7CompressionReadbackPass = std::make_shared<BC7CompressionReadbackPass>();
     }
 
-	std::shared_ptr<ComputePass> m_mipmappingPass;
-	std::shared_ptr<ComputePass> m_bc7CompressionPass;
+	std::shared_ptr<RenderPass> m_mipmappingPass;
+	std::shared_ptr<RenderPass> m_bc7CompressionPass;
 	std::shared_ptr<RenderPass> m_bc7CompressionCopyPass;
-	std::shared_ptr<CopyPass> m_bc7CompressionReadbackPass;
+	std::shared_ptr<RenderPass> m_bc7CompressionReadbackPass;
     std::shared_ptr<std::atomic_uint32_t> m_bc7InFlightJobs = std::make_shared<std::atomic_uint32_t>(0u);
 };

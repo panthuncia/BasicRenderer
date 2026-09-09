@@ -234,7 +234,8 @@ public:
         const wchar_t* shaderPath,
         const wchar_t* entryPoint,
         std::vector<DxcDefine> defines = {},
-        const char* debugName = nullptr);
+        const char* debugName = nullptr,
+        std::shared_ptr<const void> layoutOwner = {});
 	const rhi::Pipeline& ResolvePipeline(const PipelineState& pipeline, BackendInstanceId backendInstance);
 
     PipelineState RegisterExternalPipeline(
@@ -244,6 +245,7 @@ public:
         LivePipelineKind kind,
         std::function<PipelineState()> rebuild);
 
+    std::shared_ptr<const void> CaptureLayoutOwner(rhi::PipelineLayoutHandle layout) const;
     const rhi::PipelineLayout& GetRootSignature();
     const rhi::PipelineLayout& GetComputeRootSignature();
 	const rhi::PipelineLayout& GetRootSignature(BackendInstanceId backendInstance);
@@ -287,6 +289,7 @@ private:
 
     struct ComputeRecipe {
         rhi::PipelineLayoutHandle layout{};
+        std::shared_ptr<const void> layoutOwner;
         std::wstring shaderPath;
         std::wstring entryPoint;
         std::vector<OwnedDefine> defines;
@@ -341,12 +344,12 @@ private:
     };
 
     PSOManager() = default;
-	rhi::PipelineLayoutPtr m_rootSignature;
-	rhi::PipelineLayoutPtr m_peerRootSignature;
-	rhi::PipelineLayoutPtr m_computeRootSignature;
-	rhi::PipelineLayoutPtr m_peerComputeRootSignature;
-    rhi::PipelineLayoutPtr m_debugRootSignature;
-    rhi::PipelineLayoutPtr m_environmentConversionRootSignature;
+    struct LayoutGeneration {
+        rhi::PipelineLayoutPtr rootSignature, peerRootSignature;
+        rhi::PipelineLayoutPtr computeRootSignature, peerComputeRootSignature;
+        rhi::PipelineLayoutPtr debugRootSignature, environmentConversionRootSignature;
+    };
+    std::shared_ptr<LayoutGeneration> m_layoutGeneration = std::make_shared<LayoutGeneration>();
 
     std::unordered_map<PSOKey, PipelineState> m_psoCache;
     std::unordered_map<PSOKey, PipelineState> m_PPLLPSOCache;

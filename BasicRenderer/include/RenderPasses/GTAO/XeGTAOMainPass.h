@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/PixelBuffer.h"
@@ -8,57 +8,28 @@
 #include "Render/Runtime/DescriptorServiceAccess.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class GTAOMainPass : public ComputePass {
+class GTAOMainPass : public org::TypedRenderGraphPass<GTAOMainPass, br::render::PreparedComputeDispatch> {
 public:
     GTAOMainPass() {
         CreatePointClampSampler();
         CreateXeGTAOComputePSO();
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithShaderResource(Builtin::Surface::NormalRoughness, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
+    void Declare(org::PassBuilder& builder) {
+        builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
+        builder.WithShaderResource(Builtin::Surface::NormalRoughness, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
             .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
-		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
-    void Setup() override {
+    void Initialize() {
         // Removed redundant Register calls now covered by declared-resource auto descriptor registration
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        auto& context = *renderContext;
-        frameIndex++;
-        auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = executionContext.commandList;
-        auto workingDepths = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingDepths);
-        auto workingAOTerm = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
-        auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
-        auto normals = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Surface::NormalRoughness);
 
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
-		commandList.BindPipeline(GTAOHighPSO.GetAPIPipelineState().GetHandle());
-
-        BindResourceDescriptorIndices(commandList, GTAOHighPSO.GetResourceDescriptorSlots());
-
-        unsigned int passConstants[NumMiscUintRootConstants] = {};
-		passConstants[UintRootConstant0] = frameIndex % 64; // For spatiotemporal denoising
-        passConstants[UintRootConstant1] = m_samplerIndex;
-        passConstants[UintRootConstant2] = workingDepths->GetSRVInfo(0).slot.index;
-        passConstants[UintRootConstant3] = normals->GetSRVInfo(0).slot.index;
-        passConstants[UintRootConstant4] = workingAOTerm->GetUAVShaderVisibleInfo(0).slot.index;
-        passConstants[UintRootConstant5] = workingEdges->GetUAVShaderVisibleInfo(0).slot.index;
-
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
-
-        commandList.Dispatch((context.renderResolution.x + XE_GTAO_NUMTHREADS_X - 1) / XE_GTAO_NUMTHREADS_X, (context.renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1) / XE_GTAO_NUMTHREADS_Y, 1);
-        return {};
-    }
-
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override {
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         const auto workingDepths = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingDepths);
         const auto workingAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
@@ -66,8 +37,10 @@ public:
         const auto normals = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Surface::NormalRoughness);
         auto payload = GTAOHighPSO.GetPayload(); br::render::PreparedComputeDispatch data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); data.pipeline = payload->pso.Get().GetHandle();
-        data.pipelineOwner = std::move(payload); data.descriptorIndices = CaptureResourceDescriptorIndices(data.pipelineOwner->pipelineResources);
+        data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
+        data.program = program.program;
+        data.descriptorIndices = std::move(program.descriptorIndices);
+
         data.constants[UintRootConstant0] = (++frameIndex) % 64;
         data.constants[UintRootConstant1] = m_samplerIndex;
         data.constants[UintRootConstant2] = workingDepths->GetSRVInfo(0).slot.index;
@@ -76,10 +49,14 @@ public:
         data.constants[UintRootConstant5] = workingEdges->GetUAVShaderVisibleInfo(0).slot.index;
         data.groupsX = (context->renderResolution.x + XE_GTAO_NUMTHREADS_X - 1u) / XE_GTAO_NUMTHREADS_X;
         data.groupsY = (context->renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1u) / XE_GTAO_NUMTHREADS_Y;
-        return PreparedPass::MakeOwned(std::move(data), &br::render::RecordPreparedComputeDispatch);
+        return data;
     }
 
-    void Cleanup() override {
+    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+        br::render::RecordPreparedComputeDispatch(data, recording);
+    }
+
+    void ShutdownPass() {
         // Cleanup if necessary
     }
 
@@ -144,6 +121,6 @@ private:
 			L"CSGTAOLow",
 			{},
 			"GTAO Low Quality");
-		
+
     }
 };

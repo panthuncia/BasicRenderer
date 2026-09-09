@@ -626,8 +626,11 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 		}
 		rootInput->buffers.push_back({ binding.key, revision,
 			binding.elementStride, binding.catalogVariant });
-		requirements.push_back(br::render::LatestAtLeast(
-			binding.key, revision, br::render::ArtifactReadiness::UploadSubmitted));
+		// The DTO describes this sealed cut, not a minimum acceptable version.
+		// Latest invalidation can rebuild this root with newer buffers before
+		// its replacement root is admitted, mixing two mutation generations.
+		requirements.push_back(br::render::Exact(
+			binding.submittedVersion, br::render::ArtifactReadiness::UploadSubmitted));
 	}
 	if (!m_visibilityGenerationSubmittedVersion) {
 		m_objectBufferGraphDirty.store(true, std::memory_order_release);
@@ -635,8 +638,8 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 	}
 	rootInput->buffers.push_back({ visibilityKey, visibilityRevision,
 		sizeof(std::uint32_t), br::render::kObjectVisibilityGenerationVariant });
-	requirements.push_back(br::render::LatestAtLeast(
-		visibilityKey, visibilityRevision,
+	requirements.push_back(br::render::Exact(
+		m_visibilityGenerationSubmittedVersion,
 		br::render::ArtifactReadiness::UploadSubmitted));
 	if (fingerprint != m_objectBufferFingerprint) {
 		const auto candidateRevision = m_objectBufferStateRevision + 1u;

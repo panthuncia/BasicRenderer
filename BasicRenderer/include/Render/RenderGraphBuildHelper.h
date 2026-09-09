@@ -81,7 +81,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     org::memory::SetResourceUsageHint(*brdfIntegrationTexture, "Environment lighting");
     brdfIntegrationTexture->EnableIdleDematerialization(120);
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
-	graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
+	graph->BuildPass<BRDFIntegrationPass>("BRDF Integration Pass");
     TagPassTechnique(graph, "BRDF Integration Pass", "Environment Lighting::BRDF Integration");
 }
 
@@ -660,45 +660,45 @@ inline void BuildVisibilityMaterialBinningPipeline(RenderGraph* graph)
 
 inline void BuildTerrainRvtPipeline(RenderGraph* graph)
 {
-    graph->BuildComputePass<TerrainRvtFrameResetPass>("TerrainRvtFrameResetPass");
+    graph->BuildPass<TerrainRvtFrameResetPass>("TerrainRvtFrameResetPass");
     TagPassTechnique(graph, "TerrainRvtFrameResetPass", "Primary Visibility::Terrain RVT");
-    graph->BuildComputePass<TerrainRvtResolveRequestsPass>("TerrainRvtResolveMaterialRequestsPass");
+    graph->BuildPass<TerrainRvtResolveRequestsPass>("TerrainRvtResolveMaterialRequestsPass");
     TagPassTechnique(graph, "TerrainRvtResolveMaterialRequestsPass", "Primary Visibility::Terrain RVT");
-    graph->BuildComputePass<TerrainRvtBuildGenerateDispatchArgsPass>("TerrainRvtBuildMaterialGenerateDispatchArgsPass");
+    graph->BuildPass<TerrainRvtBuildGenerateDispatchArgsPass>("TerrainRvtBuildMaterialGenerateDispatchArgsPass");
     TagPassTechnique(graph, "TerrainRvtBuildMaterialGenerateDispatchArgsPass", "Primary Visibility::Terrain RVT");
-    graph->BuildComputePass<TerrainRvtGeneratePagesPass>("TerrainRvtGenerateMaterialPagesPass");
+    graph->BuildPass<TerrainRvtGeneratePagesPass>("TerrainRvtGenerateMaterialPagesPass");
     TagPassTechnique(graph, "TerrainRvtGenerateMaterialPagesPass", "Primary Visibility::Terrain RVT");
-    graph->BuildComputePass<TerrainRvtFinalizeGeneratedPagesPass>("TerrainRvtFinalizeGeneratedMaterialPagesPass");
+    graph->BuildPass<TerrainRvtFinalizeGeneratedPagesPass>("TerrainRvtFinalizeGeneratedMaterialPagesPass");
     TagPassTechnique(graph, "TerrainRvtFinalizeGeneratedMaterialPagesPass", "Primary Visibility::Terrain RVT");
-    graph->BuildComputePass<TerrainRvtBuildHeightResidentCachePass>("TerrainRvtBuildHeightResidentCachePass");
+    graph->BuildPass<TerrainRvtBuildHeightResidentCachePass>("TerrainRvtBuildHeightResidentCachePass");
     TagPassTechnique(graph, "TerrainRvtBuildHeightResidentCachePass", "Primary Visibility::Terrain RVT");
-    graph->BuildComputePass<TerrainRvtClearFeedbackRequestsPass>("TerrainRvtClearFeedbackRequestsPass");
+    graph->BuildPass<TerrainRvtClearFeedbackRequestsPass>("TerrainRvtClearFeedbackRequestsPass");
     TagPassTechnique(graph, "TerrainRvtClearFeedbackRequestsPass", "Primary Visibility::Terrain RVT");
 }
 
 inline void BuildTerrainRegionMaterialEvaluationPipeline(RenderGraph* graph)
 {
-    graph->BuildComputePass<TerrainRegionCounterResetPass>("TerrainRegionCounterResetPass");
+    graph->BuildPass<TerrainRegionCounterResetPass>("TerrainRegionCounterResetPass");
     TagPassTechnique(graph, "TerrainRegionCounterResetPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildComputePass<TerrainRegionHistogramPass>("TerrainRegionHistogramPass");
+    graph->BuildPass<TerrainRegionHistogramPass>("TerrainRegionHistogramPass");
     TagPassTechnique(graph, "TerrainRegionHistogramPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildComputePass<TerrainRegionBlockScanPass>("TerrainRegionBlockScanPass");
+    graph->BuildPass<TerrainRegionBlockScanPass>("TerrainRegionBlockScanPass");
     TagPassTechnique(graph, "TerrainRegionBlockScanPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildComputePass<TerrainRegionBlockOffsetsPass>("TerrainRegionBlockOffsetsPass");
+    graph->BuildPass<TerrainRegionBlockOffsetsPass>("TerrainRegionBlockOffsetsPass");
     TagPassTechnique(graph, "TerrainRegionBlockOffsetsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildComputePass<TerrainRegionPixelListPass>("TerrainRegionPixelListPass");
+    graph->BuildPass<TerrainRegionPixelListPass>("TerrainRegionPixelListPass");
     TagPassTechnique(graph, "TerrainRegionPixelListPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildComputePass<BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass>("BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass");
+    graph->BuildPass<BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass>("BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass");
     TagPassTechnique(graph, "BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildComputePass<BuildTerrainRegionMaterialIndirectCommandBufferPass>("BuildTerrainRegionMaterialIndirectCommandBufferPass");
+    graph->BuildPass<BuildTerrainRegionMaterialIndirectCommandBufferPass>("BuildTerrainRegionMaterialIndirectCommandBufferPass");
     TagPassTechnique(graph, "BuildTerrainRegionMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildComputePass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass");
+    graph->BuildPass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass");
     TagPassTechnique(graph, "EvaluateTerrainRegionMaterialGroupsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 }
 
 inline void BuildMaterialEvaluationPipeline(RenderGraph* graph, ProducerPassServices& services, bool terrainRvt)
 {
-    graph->BuildComputePass<EvaluateMaterialGroupsPass>("EvaluateMaterialGroupsPass", services, terrainRvt);
+    graph->BuildPass<EvaluateMaterialGroupsPass>("EvaluateMaterialGroupsPass", services, terrainRvt);
     TagPassTechnique(graph, "EvaluateMaterialGroupsPass", "Primary Visibility::GBuffer Construction::Material Groups");
 }
 
@@ -751,57 +751,57 @@ void BuildCanonicalSurfacePipeline(
         TagPassTechnique(graph, "BuildMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Material Groups");
 
         if (terrainRvt) {
-            graph->BuildComputePass<TerrainRvtFrameResetPass>("TerrainRvtFrameResetPass");
+            graph->BuildPass<TerrainRvtFrameResetPass>("TerrainRvtFrameResetPass");
             TagPassTechnique(graph, "TerrainRvtFrameResetPass", "Primary Visibility::Terrain RVT");
 
-            graph->BuildComputePass<TerrainRvtResolveRequestsPass>("TerrainRvtResolveMaterialRequestsPass");
+            graph->BuildPass<TerrainRvtResolveRequestsPass>("TerrainRvtResolveMaterialRequestsPass");
             TagPassTechnique(graph, "TerrainRvtResolveMaterialRequestsPass", "Primary Visibility::Terrain RVT");
 
-            graph->BuildComputePass<TerrainRvtBuildGenerateDispatchArgsPass>("TerrainRvtBuildMaterialGenerateDispatchArgsPass");
+            graph->BuildPass<TerrainRvtBuildGenerateDispatchArgsPass>("TerrainRvtBuildMaterialGenerateDispatchArgsPass");
             TagPassTechnique(graph, "TerrainRvtBuildMaterialGenerateDispatchArgsPass", "Primary Visibility::Terrain RVT");
 
-            graph->BuildComputePass<TerrainRvtGeneratePagesPass>("TerrainRvtGenerateMaterialPagesPass");
+            graph->BuildPass<TerrainRvtGeneratePagesPass>("TerrainRvtGenerateMaterialPagesPass");
             TagPassTechnique(graph, "TerrainRvtGenerateMaterialPagesPass", "Primary Visibility::Terrain RVT");
 
-            graph->BuildComputePass<TerrainRvtFinalizeGeneratedPagesPass>("TerrainRvtFinalizeGeneratedMaterialPagesPass");
+            graph->BuildPass<TerrainRvtFinalizeGeneratedPagesPass>("TerrainRvtFinalizeGeneratedMaterialPagesPass");
             TagPassTechnique(graph, "TerrainRvtFinalizeGeneratedMaterialPagesPass", "Primary Visibility::Terrain RVT");
 
-            graph->BuildComputePass<TerrainRvtBuildHeightResidentCachePass>("TerrainRvtBuildHeightResidentCachePass");
+            graph->BuildPass<TerrainRvtBuildHeightResidentCachePass>("TerrainRvtBuildHeightResidentCachePass");
             TagPassTechnique(graph, "TerrainRvtBuildHeightResidentCachePass", "Primary Visibility::Terrain RVT");
 
-            graph->BuildComputePass<TerrainRvtClearFeedbackRequestsPass>("TerrainRvtClearFeedbackRequestsPass");
+            graph->BuildPass<TerrainRvtClearFeedbackRequestsPass>("TerrainRvtClearFeedbackRequestsPass");
             TagPassTechnique(graph, "TerrainRvtClearFeedbackRequestsPass", "Primary Visibility::Terrain RVT");
         }
 
         if (terrainRegionMaterialEvaluation) {
-            graph->BuildComputePass<TerrainRegionCounterResetPass>("TerrainRegionCounterResetPass");
+            graph->BuildPass<TerrainRegionCounterResetPass>("TerrainRegionCounterResetPass");
             TagPassTechnique(graph, "TerrainRegionCounterResetPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildComputePass<TerrainRegionHistogramPass>("TerrainRegionHistogramPass");
+            graph->BuildPass<TerrainRegionHistogramPass>("TerrainRegionHistogramPass");
             TagPassTechnique(graph, "TerrainRegionHistogramPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildComputePass<TerrainRegionBlockScanPass>("TerrainRegionBlockScanPass");
+            graph->BuildPass<TerrainRegionBlockScanPass>("TerrainRegionBlockScanPass");
             TagPassTechnique(graph, "TerrainRegionBlockScanPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildComputePass<TerrainRegionBlockOffsetsPass>("TerrainRegionBlockOffsetsPass");
+            graph->BuildPass<TerrainRegionBlockOffsetsPass>("TerrainRegionBlockOffsetsPass");
             TagPassTechnique(graph, "TerrainRegionBlockOffsetsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildComputePass<TerrainRegionPixelListPass>("TerrainRegionPixelListPass");
+            graph->BuildPass<TerrainRegionPixelListPass>("TerrainRegionPixelListPass");
             TagPassTechnique(graph, "TerrainRegionPixelListPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildComputePass<BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass>("BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass");
+            graph->BuildPass<BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass>("BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass");
             TagPassTechnique(graph, "BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildComputePass<BuildTerrainRegionMaterialIndirectCommandBufferPass>("BuildTerrainRegionMaterialIndirectCommandBufferPass");
+            graph->BuildPass<BuildTerrainRegionMaterialIndirectCommandBufferPass>("BuildTerrainRegionMaterialIndirectCommandBufferPass");
             TagPassTechnique(graph, "BuildTerrainRegionMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildComputePass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass");
+            graph->BuildPass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass");
             TagPassTechnique(graph, "EvaluateTerrainRegionMaterialGroupsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
         }
 
         // Evaluate material groups
         if (materialEvaluation) {
-            graph->BuildComputePass<EvaluateMaterialGroupsPass>("EvaluateMaterialGroupsPass", services, terrainRvt);
+            graph->BuildPass<EvaluateMaterialGroupsPass>("EvaluateMaterialGroupsPass", services, terrainRvt);
             TagPassTechnique(graph, "EvaluateMaterialGroupsPass", "Primary Visibility::GBuffer Construction::Material Groups");
         }
 
@@ -876,13 +876,13 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
     graph->RegisterResource("Builtin::GTAO::ConstantsBuffer", GTAOConstantBuffer);
 
-    graph->BuildComputePass<GTAOFilterPass>("GTAOFilterPass"); // Depth filter pass
+    graph->BuildPass<GTAOFilterPass>("GTAOFilterPass"); // Depth filter pass
     TagPassTechnique(graph, "GTAOFilterPass", "Post Process::GTAO");
 
-    graph->BuildComputePass<GTAOMainPass>("GTAOMainPass"); // Main pass
+    graph->BuildPass<GTAOMainPass>("GTAOMainPass"); // Main pass
     TagPassTechnique(graph, "GTAOMainPass", "Post Process::GTAO");
 
-    graph->BuildComputePass<GTAODenoisePass>("GTAODenoisePass"); // Denoise pass
+    graph->BuildPass<GTAODenoisePass>("GTAODenoisePass"); // Denoise pass
     TagPassTechnique(graph, "GTAODenoisePass", "Post Process::GTAO");
 }
 
@@ -906,23 +906,23 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
 }
 
 void BuildEnvironmentPipeline(RenderGraph* graph) {
-    graph->BuildComputePass<EnvironmentConversionPass>("Environment Conversion Pass");
+    graph->BuildPass<EnvironmentConversionPass>("Environment Conversion Pass");
     TagPassTechnique(graph, "Environment Conversion Pass", "Environment Lighting::Capture & Filtering");
 
-    graph->BuildComputePass<EnvironmentSHPass>("Environment Spherical Harmonics Pass");
+    graph->BuildPass<EnvironmentSHPass>("Environment Spherical Harmonics Pass");
     TagPassTechnique(graph, "Environment Spherical Harmonics Pass", "Environment Lighting::Capture & Filtering");
 
-    graph->BuildRenderPass<EnvironmentFilterPass>("Environment Prefilter Pass");
+    graph->BuildPass<EnvironmentFilterPass>("Environment Prefilter Pass");
     TagPassTechnique(graph, "Environment Prefilter Pass", "Environment Lighting::Capture & Filtering");
 }
 
 void BuildLinearDepthDownsamplePass(RenderGraph* graph) {
-    graph->BuildComputePass<DownsamplePass>("LinearDepthDownsamplePass");
+    graph->BuildPass<DownsamplePass>("LinearDepthDownsamplePass");
     TagPassTechnique(graph, "LinearDepthDownsamplePass", "Depth::Linear Depth");
 }
 
 void BuildLinearDepthHistoryCopyPass(RenderGraph* graph, ViewManager* viewManager) {
-    graph->BuildRenderPass<LinearDepthHistoryCopyPass>("LinearDepthHistoryCopyPass", viewManager);
+    graph->BuildPass<LinearDepthHistoryCopyPass>("LinearDepthHistoryCopyPass", viewManager);
     TagPassTechnique(graph, "LinearDepthHistoryCopyPass", "Post Process::Depth History");
 }
 
@@ -942,7 +942,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment, bool 
     // final opaque-depth classification, avoiding a second full-screen pass.
 
 	// Forward pass for materials incompatible with deferred rendering
-    graph->BuildRenderPass<ForwardRenderPass>("Forward render pass", ForwardRenderPassInputs{
+    graph->BuildPass<ForwardRenderPass>("Forward render pass", ForwardRenderPassInputs{
         wireframe,
         meshShaders,
         indirect});
@@ -1067,7 +1067,7 @@ void BuildBloomPipeline(RenderGraph* graph) {
 	// Downsample numBloomMips mips of the HDR color target
     for (unsigned int i = 0; i < numBloomMips; i++) {
         const std::string passName = "BloomDownsamplePass" + std::to_string(i);
-		auto& builder = graph->BuildRenderPass<BloomSamplePass>(passName, BloomSamplePassInputs{ i, false });
+		auto& builder = graph->BuildPass<BloomSamplePass>(passName, BloomSamplePassInputs{ i, false });
 #if BASICRENDERER_HAS_INTEROP_VALIDATION
 		br::validation::SARPInteropValidation::ApplyPassPolicy(
 			passName, builder, DeviceManager::GetInstance().GetPeerBackend());
@@ -1080,7 +1080,7 @@ void BuildBloomPipeline(RenderGraph* graph) {
     // blend pass, avoiding a separate half-resolution render pass.
     for (unsigned int i = numBloomMips-1; i > 1; i--) {
         const std::string passName = "BloomUpsamplePass" + std::to_string(i);
-        graph->BuildRenderPass<BloomSamplePass>(passName, BloomSamplePassInputs{ i, true });
+        graph->BuildPass<BloomSamplePass>(passName, BloomSamplePassInputs{ i, true });
         graph->SetPassTechnique(passName, "Post Process::Bloom");
     }
     
@@ -1155,10 +1155,10 @@ void BuildSSRPasses(RenderGraph* graph) {
     org::memory::SetResourceUsageHint(*ssrTexture, "Post-Processing resources");
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 
-    graph->BuildComputePass<ScreenSpaceReflectionsPass>("Screen-Space Reflections Pass");
+    graph->BuildPass<ScreenSpaceReflectionsPass>("Screen-Space Reflections Pass");
     TagPassTechnique(graph, "Screen-Space Reflections Pass", "Post Process::Screen-Space Reflections");
 
-    graph->BuildRenderPass<SpecularIBLPass>("Specular IBL & SSR Composite Pass");
+    graph->BuildPass<SpecularIBLPass>("Specular IBL & SSR Composite Pass");
     TagPassTechnique(graph, "Specular IBL & SSR Composite Pass", "Post Process::Screen-Space Reflections");
 }
 
@@ -1185,9 +1185,9 @@ void BuildRayTracedReflectionPasses(RenderGraph* graph) {
     org::memory::SetResourceUsageHint(*rtReflectionTexture, "Post-Processing resources");
     graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, rtReflectionTexture);
 
-    graph->BuildComputePass<RayTracedReflectionsPass>("Ray Traced Reflections Pass");
+    graph->BuildPass<RayTracedReflectionsPass>("Ray Traced Reflections Pass");
     TagPassTechnique(graph, "Ray Traced Reflections Pass", "Ray Tracing::Reflections");
 
-    graph->BuildRenderPass<SpecularIBLPass>("Specular IBL & RT Reflections Composite Pass");
+    graph->BuildPass<SpecularIBLPass>("Specular IBL & RT Reflections Composite Pass");
     TagPassTechnique(graph, "Specular IBL & RT Reflections Composite Pass", "Ray Tracing::Reflections");
 }

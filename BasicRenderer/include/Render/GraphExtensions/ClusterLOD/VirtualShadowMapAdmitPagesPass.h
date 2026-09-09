@@ -6,7 +6,8 @@
 #include <mutex>
 
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowUpgradeService.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
@@ -14,12 +15,8 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapAdmitPagesPass final : public ComputePass {
+class VirtualShadowMapAdmitPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapAdmitPagesPass, br::render::PreparedComputePipelineSequence> {
 public:
-    using AcquireUpgradeUploadFn =
-        std::function<bool(uint32_t&, uint32_t&)>;
-    using ReleaseUpgradeUploadFn = std::function<void(uint32_t)>;
-
     VirtualShadowMapAdmitPagesPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
         std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
@@ -28,37 +25,13 @@ public:
         std::shared_ptr<Buffer> clipmapInfoBuffer,
         std::shared_ptr<Buffer> compactShadowCamerasBuffer,
         std::shared_ptr<Buffer> statsBuffer,
-        AcquireUpgradeUploadFn acquireUpgradeUpload,
-        ReleaseUpgradeUploadFn releaseUpgradeUpload,
-        uint32_t framesInFlight);
+        VirtualShadowUpgradeQueue upgradeQueue);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
-    void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    PreparedPass PrepareFrame(FramePreparationContext& preparation) override;
-    void Cleanup() override;
+    void Declare(org::PassBuilder& builder);
+    br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
 
 private:
-    struct UpgradeSubmissionState {
-        std::mutex mutex;
-        AcquireUpgradeUploadFn acquire;
-        ReleaseUpgradeUploadFn release;
-        std::vector<uint32_t> inFlightSlotByFrame;
-        uint32_t pendingSlot = UINT32_MAX;
-        uint32_t pendingCount = 0;
-        uint64_t pendingGeneration = 0;
-    };
-    struct PreparedData {
-        br::render::PreparedComputePipelineSequence commands;
-        std::shared_ptr<UpgradeSubmissionState> state;
-        uint32_t pendingSlot = UINT32_MAX;
-        uint32_t pendingCount = 0;
-        uint32_t frameSlot = 0;
-        uint64_t pendingGeneration = 0;
-    };
-    static void RecordPrepared(const PreparedData&, RecordingContext&);
-    static void CommitPrepared(const PreparedData&);
     PipelineState m_pso;
     PipelineState m_applyUpgradesPso;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
@@ -68,5 +41,5 @@ private:
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<Buffer> m_compactShadowCamerasBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
-    std::shared_ptr<UpgradeSubmissionState> m_upgradeState;
+    VirtualShadowUpgradeQueue m_upgradeQueue;
 };

@@ -4,222 +4,183 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodRayTracingSystem.h"
 #include "Render/PipelineState.h"
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Render/RenderContext.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodRayTracingSetupRootConstants.h"
 
-class RayTracedReflectionsPass : public ComputePass {
+struct RayTracedReflectionsFrameData {
+    std::shared_ptr<br::render::CLodRayTracingSystem> service;
+    std::shared_ptr<PixelBuffer> output;
+    std::shared_ptr<Buffer> pageSources, buildInfos, clasData, clasAddresses;
+    std::shared_ptr<Buffer> blasData, blasAddresses, tlasInstances;
+    org::PreparedProgramBinding setup{}, tlasSetup{};
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    uint32_t pageSourceCount = 0, buildClusterCapacity = 0;
+};
+
+class RayTracedReflectionsPass
+    : public org::TypedRenderGraphPass<RayTracedReflectionsPass,
+          RayTracedReflectionsFrameData> {
 public:
     RayTracedReflectionsPass() {
-        m_setupPso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-            L"Shaders/ClusterLOD/rayTracingSetup.hlsl",
-            L"CLodRayTracingSetupCSMain",
-            {},
+        auto& manager = PSOManager::GetInstance();
+        m_setupPso = manager.MakeComputePipeline(manager.GetComputeRootSignature().GetHandle(),
+            L"Shaders/ClusterLOD/rayTracingSetup.hlsl", L"CLodRayTracingSetupCSMain", {},
             "CLod.RayTracing.Setup.PSO");
-        m_tlasSetupPso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-            L"Shaders/ClusterLOD/rayTracingTlasSetup.hlsl",
-            L"CLodRayTracingTlasSetupCSMain",
-            {},
+        m_tlasSetupPso = manager.MakeComputePipeline(manager.GetComputeRootSignature().GetHandle(),
+            L"Shaders/ClusterLOD/rayTracingTlasSetup.hlsl", L"CLodRayTracingTlasSetupCSMain", {},
             "CLod.RayTracing.TLASSetup.PSO");
     }
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithShaderResource(
-            Builtin::Color::HDRColorTarget,
-            Builtin::PrimaryCamera::DepthTexture,
-            Builtin::Surface::NormalRoughness,
-            Builtin::Surface::SpecularAo,
-            Builtin::CameraBuffer,
+    void Declare(org::PassBuilder& builder) {
+        builder.WithShaderResource(Builtin::Color::HDRColorTarget,
+            Builtin::PrimaryCamera::DepthTexture, Builtin::Surface::NormalRoughness,
+            Builtin::Surface::SpecularAo, Builtin::CameraBuffer,
             Builtin::Environment::CurrentPrefilteredCubemap);
-        builder->WithUnorderedAccess(Builtin::PostProcessing::ScreenSpaceReflections);
-
-        ResourceState outState{
-            .access = rhi::ResourceAccessType::Common,
-            .layout = rhi::ResourceLayout::Common,
-            .sync = rhi::ResourceSyncState::All,
-        };
-
-        builder->WithInternalTransition(
+        builder.WithUnorderedAccess(Builtin::PostProcessing::ScreenSpaceReflections);
+        builder.WithInternalTransition(
             ResourceIdentifierAndRange(Builtin::PostProcessing::ScreenSpaceReflections, {}),
-            outState);
+            ResourceState{.access = rhi::ResourceAccessType::Common,
+                .layout = rhi::ResourceLayout::Common,
+                .sync = rhi::ResourceSyncState::All});
     }
 
-    void Setup() override {
-        m_output = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
+    void Initialize() {
+        m_output = m_resourceRegistryView->RequestSharedAs<PixelBuffer>(
+            Builtin::PostProcessing::ScreenSpaceReflections);
     }
 
-    PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        if (!renderContext || !m_output) {
-            return {};
-        }
+    RayTracedReflectionsFrameData Prepare(const org::PassPrepareContext& preparation) {
+        RayTracedReflectionsFrameData frame{};
+        const auto* context = preparation.preparationData
+            ? preparation.preparationData->Get<UpdateContext>() : nullptr;
+        if (!context || !m_output || !context->clodRayTracingSystem) return frame;
+        auto service = context->clodRayTracingSystem;
+        std::scoped_lock serviceLock(service->FrameOperationMutex());
+        if (!service->HasGpuClasBuildInputs()) return frame;
+        service->EnsureRayTracingPipeline(DeviceManager::GetInstance().GetDevice(),
+            DeviceManager::GetInstance().GetRayTracingFeatures());
+        frame.service = service;
+        frame.output = m_output;
+        frame.pageSources = service->GetPageSourceBuffer();
+        frame.buildInfos = service->GetClasBuildInfoBuffer();
+        frame.clasData = service->GetClasDataBuffer();
+        frame.clasAddresses = service->GetClasAddressBuffer();
+        frame.blasData = service->GetBlasDataBuffer();
+        frame.blasAddresses = service->GetBlasAddressBuffer();
+        frame.tlasInstances = service->GetTlasInstanceBuffer();
+        frame.setup = preparation.CaptureProgramBinding(m_setupPso);
+        frame.tlasSetup = preparation.CaptureProgramBinding(m_tlasSetupPso);
+        frame.resourceHeap = context->textureDescriptorHeap.GetHandle();
+        frame.samplerHeap = context->samplerDescriptorHeap.GetHandle();
+        frame.pageSourceCount = service->GetGpuPageSourceCount();
+        frame.buildClusterCapacity = service->GetStats().buildableClusters;
+        preparation.Retain(frame.output);
+        preparation.Retain(frame.pageSources); preparation.Retain(frame.buildInfos);
+        preparation.Retain(frame.clasData); preparation.Retain(frame.clasAddresses);
+        preparation.Retain(frame.blasData); preparation.Retain(frame.blasAddresses);
+        preparation.Retain(frame.tlasInstances);
+        return frame;
+    }
 
-        auto& commandList = executionContext.commandList;
-        commandList.SetDescriptorHeaps(
-            renderContext->textureDescriptorHeap.GetHandle(),
-            renderContext->samplerDescriptorHeap.GetHandle());
-
-        bool traceSubmitted = false;
-        if (renderContext->clodRayTracingSystem
-            && renderContext->clodRayTracingSystem->HasGpuClasBuildInputs()) {
-            auto* clodRt = renderContext->clodRayTracingSystem;
-            auto pageSources = clodRt->GetPageSourceBuffer();
-            auto buildInfos = clodRt->GetClasBuildInfoBuffer();
-            if (pageSources && buildInfos) {
-                pageSources->Materialize();
-                buildInfos->Materialize();
-
-                commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-                commandList.BindPipeline(m_setupPso.GetAPIPipelineState().GetHandle());
-                BindResourceDescriptorIndices(commandList, m_setupPso.GetResourceDescriptorSlots());
-
-                const auto& stats = clodRt->GetStats();
-                uint32_t rootConstants[NumMiscUintRootConstants] = {};
-                rootConstants[CLOD_RT_SETUP_PAGE_SOURCES_DESCRIPTOR_INDEX] = pageSources->GetSRVInfo(0).slot.index;
-                rootConstants[CLOD_RT_SETUP_BUILD_INFOS_DESCRIPTOR_INDEX] = buildInfos->GetUAVShaderVisibleInfo(0).slot.index;
-                rootConstants[CLOD_RT_SETUP_PAGE_SOURCE_COUNT] = clodRt->GetGpuPageSourceCount();
-                rootConstants[CLOD_RT_SETUP_BUILD_CLUSTER_CAPACITY] = stats.buildableClusters;
-                commandList.PushConstants(
-                    rhi::ShaderStage::Compute,
-                    0,
-                    MiscUintRootSignatureIndex,
-                    0,
-                    NumMiscUintRootConstants,
-                    rootConstants);
-
-                commandList.Dispatch((rootConstants[CLOD_RT_SETUP_PAGE_SOURCE_COUNT] + 63u) / 64u, 1u, 1u);
-
-                rhi::BufferBarrier buildInfoBarrier{};
-                buildInfoBarrier.buffer = buildInfos->GetAPIResource().GetHandle();
-                buildInfoBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-                buildInfoBarrier.afterAccess = rhi::ResourceAccessType::ShaderResource;
-                buildInfoBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-                buildInfoBarrier.afterSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-
-                rhi::BarrierBatch buildInfoBarrierBatch{};
-                buildInfoBarrierBatch.buffers = { &buildInfoBarrier };
-                commandList.Barriers(buildInfoBarrierBatch);
-
-                clodRt->ExecuteClasBuild(commandList);
-
-                auto clasData = clodRt->GetClasDataBuffer();
-                auto clasAddresses = clodRt->GetClasAddressBuffer();
-                if (clasData && clasAddresses && clodRt->HasGpuBlasBuildInputs()) {
-                    rhi::BufferBarrier clasBarriers[2]{};
-                    clasBarriers[0].buffer = clasData->GetAPIResource().GetHandle();
-                    clasBarriers[0].beforeAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureWrite;
-                    clasBarriers[0].afterAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureRead;
-                    clasBarriers[0].beforeSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-                    clasBarriers[0].afterSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-
-                    clasBarriers[1].buffer = clasAddresses->GetAPIResource().GetHandle();
-                    clasBarriers[1].beforeAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureWrite;
-                    clasBarriers[1].afterAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureRead;
-                    clasBarriers[1].beforeSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-                    clasBarriers[1].afterSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-
-                    rhi::BarrierBatch clasBarrierBatch{};
-                    clasBarrierBatch.buffers = { clasBarriers, 2u };
-                    commandList.Barriers(clasBarrierBatch);
-
-                    clodRt->ExecuteBlasBuild(commandList);
-
-                    auto blasData = clodRt->GetBlasDataBuffer();
-                    auto blasAddresses = clodRt->GetBlasAddressBuffer();
-                    auto tlasInstances = clodRt->GetTlasInstanceBuffer();
-                    if (blasData && blasAddresses && tlasInstances && clodRt->HasGpuTlasBuildInputs()) {
-                        rhi::BufferBarrier blasBarriers[2]{};
-                        blasBarriers[0].buffer = blasData->GetAPIResource().GetHandle();
-                        blasBarriers[0].beforeAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureWrite;
-                        blasBarriers[0].afterAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureRead;
-                        blasBarriers[0].beforeSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-                        blasBarriers[0].afterSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-
-                        blasBarriers[1].buffer = blasAddresses->GetAPIResource().GetHandle();
-                        blasBarriers[1].beforeAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureWrite;
-                        blasBarriers[1].afterAccess = rhi::ResourceAccessType::ShaderResource;
-                        blasBarriers[1].beforeSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-                        blasBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
-
-                        rhi::BarrierBatch blasBarrierBatch{};
-                        blasBarrierBatch.buffers = { blasBarriers, 2u };
-                        commandList.Barriers(blasBarrierBatch);
-
-                        tlasInstances->Materialize();
-
-                        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-                        commandList.BindPipeline(m_tlasSetupPso.GetAPIPipelineState().GetHandle());
-                        BindResourceDescriptorIndices(commandList, m_tlasSetupPso.GetResourceDescriptorSlots());
-
-                        uint32_t tlasRootConstants[NumMiscUintRootConstants] = {};
-                        tlasRootConstants[CLOD_RT_SETUP_BLAS_ADDRESSES_DESCRIPTOR_INDEX] = blasAddresses->GetSRVInfo(0).slot.index;
-                        tlasRootConstants[CLOD_RT_SETUP_TLAS_INSTANCES_DESCRIPTOR_INDEX] = tlasInstances->GetUAVShaderVisibleInfo(0).slot.index;
-                        commandList.PushConstants(
-                            rhi::ShaderStage::Compute,
-                            0,
-                            MiscUintRootSignatureIndex,
-                            0,
-                            NumMiscUintRootConstants,
-                            tlasRootConstants);
-                        commandList.Dispatch(1u, 1u, 1u);
-
-                        rhi::BufferBarrier tlasInstanceBarrier{};
-                        tlasInstanceBarrier.buffer = tlasInstances->GetAPIResource().GetHandle();
-                        tlasInstanceBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-                        tlasInstanceBarrier.afterAccess = rhi::ResourceAccessType::RaytracingAccelerationStructureRead;
-                        tlasInstanceBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-                        tlasInstanceBarrier.afterSync = rhi::ResourceSyncState::BuildRaytracingAccelerationStructure;
-
-                        rhi::BarrierBatch tlasInstanceBarrierBatch{};
-                        tlasInstanceBarrierBatch.buffers = { &tlasInstanceBarrier };
-                        commandList.Barriers(tlasInstanceBarrierBatch);
-
-                        clodRt->ExecuteTlasBuild(commandList);
-
-                        clodRt->EnsureRayTracingPipeline(
-                            DeviceManager::GetInstance().GetDevice(),
-                            DeviceManager::GetInstance().GetRayTracingFeatures());
-                        if (clodRt->HasRayTracingPipeline()) {
-                            clodRt->ExecuteTraceRays(
-                                DeviceManager::GetInstance().GetDevice(),
-                                commandList,
-                                *m_output,
-                                m_output->GetWidth(),
-                                m_output->GetHeight());
-                            traceSubmitted = clodRt->GetStats().traceRaysSubmitted;
-                        }
+    static void Record(const RayTracedReflectionsFrameData& frame,
+        org::PassRecordContext& recording) {
+        if (!frame.output) return;
+        std::unique_lock<std::mutex> serviceLock;
+        if (frame.service) serviceLock = std::unique_lock(frame.service->FrameOperationMutex());
+        auto& commands = recording.Commands();
+        commands.SetDescriptorHeaps(frame.resourceHeap, frame.samplerHeap);
+        bool traced = false;
+        auto bind = [&](const org::PreparedProgramBinding& program) {
+            commands.BindLayout(recording.ResolveLayout(program.program));
+            commands.BindPipeline(recording.Resolve(program.program));
+            if (!program.descriptorIndices.empty()) commands.PushConstants(
+                rhi::ShaderStage::Compute, 0,
+                org::shaderapi::kResourceDescriptorIndicesRootParameter, 0,
+                static_cast<uint32_t>(program.descriptorIndices.size()),
+                program.descriptorIndices.data());
+        };
+        auto barrier = [&](const std::shared_ptr<Buffer>& buffer,
+            rhi::ResourceAccessType before, rhi::ResourceAccessType after,
+            rhi::ResourceSyncState beforeSync, rhi::ResourceSyncState afterSync) {
+            if (!buffer) return;
+            rhi::BufferBarrier value{};
+            value.buffer = buffer->GetAPIResource().GetHandle();
+            value.beforeAccess = before; value.afterAccess = after;
+            value.beforeSync = beforeSync; value.afterSync = afterSync;
+            rhi::BarrierBatch batch{}; batch.buffers = {&value}; commands.Barriers(batch);
+        };
+        if (frame.service && frame.pageSources && frame.buildInfos) {
+            bind(frame.setup);
+            uint32_t constants[NumMiscUintRootConstants]{};
+            constants[CLOD_RT_SETUP_PAGE_SOURCES_DESCRIPTOR_INDEX] =
+                frame.pageSources->GetSRVInfo(0).slot.index;
+            constants[CLOD_RT_SETUP_BUILD_INFOS_DESCRIPTOR_INDEX] =
+                frame.buildInfos->GetUAVShaderVisibleInfo(0).slot.index;
+            constants[CLOD_RT_SETUP_PAGE_SOURCE_COUNT] = frame.pageSourceCount;
+            constants[CLOD_RT_SETUP_BUILD_CLUSTER_CAPACITY] = frame.buildClusterCapacity;
+            commands.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex,
+                0, NumMiscUintRootConstants, constants);
+            commands.Dispatch((frame.pageSourceCount + 63u) / 64u, 1u, 1u);
+            barrier(frame.buildInfos, rhi::ResourceAccessType::UnorderedAccess,
+                rhi::ResourceAccessType::ShaderResource, rhi::ResourceSyncState::ComputeShading,
+                rhi::ResourceSyncState::BuildRaytracingAccelerationStructure);
+            frame.service->ExecuteClasBuild(commands);
+            if (frame.clasData && frame.clasAddresses && frame.service->HasGpuBlasBuildInputs()) {
+                barrier(frame.clasData, rhi::ResourceAccessType::RaytracingAccelerationStructureWrite,
+                    rhi::ResourceAccessType::RaytracingAccelerationStructureRead,
+                    rhi::ResourceSyncState::BuildRaytracingAccelerationStructure,
+                    rhi::ResourceSyncState::BuildRaytracingAccelerationStructure);
+                barrier(frame.clasAddresses, rhi::ResourceAccessType::RaytracingAccelerationStructureWrite,
+                    rhi::ResourceAccessType::RaytracingAccelerationStructureRead,
+                    rhi::ResourceSyncState::BuildRaytracingAccelerationStructure,
+                    rhi::ResourceSyncState::BuildRaytracingAccelerationStructure);
+                frame.service->ExecuteBlasBuild(commands);
+                if (frame.blasData && frame.blasAddresses && frame.tlasInstances &&
+                    frame.service->HasGpuTlasBuildInputs()) {
+                    barrier(frame.blasData, rhi::ResourceAccessType::RaytracingAccelerationStructureWrite,
+                        rhi::ResourceAccessType::RaytracingAccelerationStructureRead,
+                        rhi::ResourceSyncState::BuildRaytracingAccelerationStructure,
+                        rhi::ResourceSyncState::BuildRaytracingAccelerationStructure);
+                    barrier(frame.blasAddresses, rhi::ResourceAccessType::RaytracingAccelerationStructureWrite,
+                        rhi::ResourceAccessType::ShaderResource,
+                        rhi::ResourceSyncState::BuildRaytracingAccelerationStructure,
+                        rhi::ResourceSyncState::ComputeShading);
+                    bind(frame.tlasSetup);
+                    uint32_t tlas[NumMiscUintRootConstants]{};
+                    tlas[CLOD_RT_SETUP_BLAS_ADDRESSES_DESCRIPTOR_INDEX] =
+                        frame.blasAddresses->GetSRVInfo(0).slot.index;
+                    tlas[CLOD_RT_SETUP_TLAS_INSTANCES_DESCRIPTOR_INDEX] =
+                        frame.tlasInstances->GetUAVShaderVisibleInfo(0).slot.index;
+                    commands.PushConstants(rhi::ShaderStage::Compute, 0,
+                        MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, tlas);
+                    commands.Dispatch(1u, 1u, 1u);
+                    barrier(frame.tlasInstances, rhi::ResourceAccessType::UnorderedAccess,
+                        rhi::ResourceAccessType::RaytracingAccelerationStructureRead,
+                        rhi::ResourceSyncState::ComputeShading,
+                        rhi::ResourceSyncState::BuildRaytracingAccelerationStructure);
+                    frame.service->ExecuteTlasBuild(commands);
+                    if (frame.service->HasRayTracingPipeline()) {
+                        frame.service->ExecuteTraceRays(DeviceManager::GetInstance().GetDevice(),
+                            commands, *frame.output, frame.output->GetWidth(), frame.output->GetHeight());
+                        traced = frame.service->GetStats().traceRaysSubmitted;
                     }
                 }
             }
         }
-
-        if (traceSubmitted) {
-            return {};
+        if (!traced) {
+            rhi::UavClearInfo clear{};
+            clear.cpuVisible = frame.output->GetUAVNonShaderVisibleInfo(0).slot;
+            clear.shaderVisible = frame.output->GetUAVShaderVisibleInfo(0).slot;
+            clear.resource = frame.output->GetAPIResource();
+            commands.ClearUavFloat(clear, {});
         }
-
-        rhi::UavClearInfo clearInfo{};
-        clearInfo.cpuVisible = m_output->GetUAVNonShaderVisibleInfo(0).slot;
-        clearInfo.shaderVisible = m_output->GetUAVShaderVisibleInfo(0).slot;
-        clearInfo.resource = m_output->GetAPIResource();
-
-        rhi::UavClearFloat clearValue{};
-        clearValue.v[0] = 0.0f;
-        clearValue.v[1] = 0.0f;
-        clearValue.v[2] = 0.0f;
-        clearValue.v[3] = 0.0f;
-        commandList.ClearUavFloat(clearInfo, clearValue);
-        return {};
     }
 
-    void Cleanup() override {}
-
 private:
-    PipelineState m_setupPso;
-    PipelineState m_tlasSetupPso;
-    PixelBuffer* m_output = nullptr;
+    PipelineState m_setupPso, m_tlasSetupPso;
+    std::shared_ptr<PixelBuffer> m_output;
 };

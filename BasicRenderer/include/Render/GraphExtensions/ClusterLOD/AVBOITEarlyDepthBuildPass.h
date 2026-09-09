@@ -2,14 +2,15 @@
 
 #include <memory>
 
-#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "RenderPasses/PreparedComputeDispatch.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITEarlyDepthBuildPass final : public ComputePass {
+class AVBOITEarlyDepthBuildPass final : public org::TypedRenderGraphPass<AVBOITEarlyDepthBuildPass, br::render::PreparedComputeDispatch> {
 public:
     AVBOITEarlyDepthBuildPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -17,11 +18,10 @@ public:
         std::shared_ptr<Buffer> tileCommandsBuffer,
         std::shared_ptr<Buffer> tileCountBuffer);
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
-    void Setup() override;
+    void Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    PassReturn Execute(PassExecutionContext& executionContext) override;
-    void Cleanup() override;
+    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
+    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;
