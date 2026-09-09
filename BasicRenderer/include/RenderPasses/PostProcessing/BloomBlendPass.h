@@ -10,36 +10,43 @@
 #include "../shaders/PerPassRootConstants/bloomBlendRootConstants.h"
 #include "Resources/PixelBuffer.h"
 
-class BloomBlendPass : public org::TypedRenderGraphPass<BloomBlendPass, br::render::PreparedFullscreenDraw> {
+struct BloomBlendBindings {
+    org::ResourceBindingToken bloom;
+    org::ResourceBindingToken target;
+};
+
+class BloomBlendPass : public org::TypedRenderGraphPass<BloomBlendPass,
+    br::render::PreparedFullscreenDraw, BloomBlendBindings> {
 public:
 
     BloomBlendPass() {
         CreatePSO();
     }
 
-    void Declare(org::PassBuilder& builder) {
-        builder.WithShaderResource(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ 1, 2 }))
-            .WithRenderTarget(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ 0, 1 }));
+    BloomBlendBindings Declare(org::PassBuilder& builder) {
+        return {
+            builder.BindShaderResource(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ 1, 2 })),
+            builder.BindRenderTarget(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ 0, 1 }))
+        };
     }
 
-    void Initialize() {
-        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
-        m_pBloomTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::BloomTexture);
-    }
-
-    br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedFullscreenDraw Prepare(const BloomBlendBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         br::render::PreparedFullscreenDraw data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle();
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.renderTargetReference = preparation.CaptureDescriptor(
-            {m_pHDRTarget->GetGlobalResourceID(), 0}, m_pHDRTarget->GetRTVInfo(0).slot);
-        data.width = m_pHDRTarget->GetWidth();
-        data.height = m_pHDRTarget->GetHeight();
+        data.renderTargetReference = preparation.CaptureView(bindings.target,
+            {org::BindlessViewKind::RenderTarget});
+        const auto& targetDesc = preparation.Describe(bindings.target);
+        data.width = targetDesc.texture.width;
+        data.height = targetDesc.texture.height;
         data.constantStage = rhi::ShaderStage::AllGraphics;
         br::render::BindPreparedProgram(data, preparation, m_pso);
-        data.constants[BLOOM_LOW_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(2).slot.index;
-        data.constants[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(1).slot.index;
+        data.constants[BLOOM_LOW_SOURCE_SRV_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.bloom,
+            {org::BindlessViewKind::ShaderResource, UINT32_MAX, 2}).index;
+        data.constants[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.bloom,
+            {org::BindlessViewKind::ShaderResource, UINT32_MAX, 1}).index;
         data.constants[DST_WIDTH] = data.width;
         data.constants[DST_HEIGHT] = data.height;
         data.constants[BLOOM_BLEND_FILTER_RADIUS] = as_uint(0.001f);
@@ -47,7 +54,8 @@ public:
         return data;
     }
 
-    static void Record(const br::render::PreparedFullscreenDraw& data, org::PassRecordContext& recording) {
+    static void Record(const BloomBlendBindings&, const br::render::PreparedFullscreenDraw& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedFullscreenDraw(data, recording);
     }
 
@@ -61,10 +69,6 @@ private:
     bool m_isUpsample = false;
 
     PipelineState m_pso;
-
-	PixelBuffer* m_pHDRTarget;
-	PixelBuffer* m_pBloomTarget;
-
 
     void CreatePSO() {
         auto dev = DeviceManager::GetInstance().GetDevice();

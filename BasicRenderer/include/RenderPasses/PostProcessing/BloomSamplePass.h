@@ -17,7 +17,14 @@ struct BloomSamplePassInputs {
     RG_DEFINE_PASS_INPUTS(BloomSamplePassInputs, &BloomSamplePassInputs::mipIndex, &BloomSamplePassInputs::isUpsample);
 };
 
-class BloomSamplePass : public org::TypedRenderGraphPass<BloomSamplePass, br::render::PreparedFullscreenDraw> {
+struct BloomSampleBindings {
+    org::ResourceBindingToken source, target;
+    uint32_t sourceMip = 0, targetMip = 0;
+    bool upsample = false;
+};
+
+class BloomSamplePass : public org::TypedRenderGraphPass<BloomSamplePass,
+    br::render::PreparedFullscreenDraw, BloomSampleBindings> {
 public:
     // mipIndex selects which mip is used as render target, and which is used as shader resource.
     // E.g. DownsamplePassIndex 0 will downsample from mip 0 to mip 1, and use mip 1 as the render target.
@@ -26,55 +33,48 @@ public:
         CreatePSO();
     }
 
-    void Declare(org::PassBuilder& builder) {
+    BloomSampleBindings Declare(org::PassBuilder& builder) {
 		auto inputs = Inputs<BloomSamplePassInputs>();
-		m_mipIndex = inputs.mipIndex;
-        m_isUpsample = inputs.isUpsample;
-
-        if (!m_isUpsample) {
-            const auto source = m_mipIndex == 0
+        const auto targetMip = inputs.mipIndex + (inputs.isUpsample ? 0u : 1u);
+        const auto sourceMip = !inputs.isUpsample && inputs.mipIndex == 0
+            ? 0u : inputs.mipIndex + (inputs.isUpsample ? 1u : 0u);
+        if (!inputs.isUpsample) {
+            const auto source = inputs.mipIndex == 0
                 ? Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ 0, 1 })
-                : Subresources(Builtin::PostProcessing::BloomTexture, Mip{ m_mipIndex, 1 });
-            builder.WithShaderResource(source)
-                .WithRenderTarget(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ m_mipIndex + 1, 1 }));
+                : Subresources(Builtin::PostProcessing::BloomTexture, Mip{ inputs.mipIndex, 1 });
+            return {builder.BindShaderResource(source),
+                builder.BindRenderTarget(Subresources(Builtin::PostProcessing::BloomTexture, Mip{targetMip, 1})),
+                sourceMip, targetMip, false};
         }
-        else {
-            builder.WithShaderResource(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ m_mipIndex + 1, 1 }))
-                .WithRenderTarget(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ m_mipIndex, 1 }));
-        }
-    }
-
-    void Initialize() {
-        m_pBloomTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::BloomTexture);
-        if (!m_isUpsample && m_mipIndex == 0) {
-            m_pUpscaledHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
-        }
+        return {builder.BindShaderResource(Subresources(Builtin::PostProcessing::BloomTexture, Mip{sourceMip, 1})),
+            builder.BindRenderTarget(Subresources(Builtin::PostProcessing::BloomTexture, Mip{targetMip, 1})),
+            sourceMip, targetMip, true};
     }
 
 
 
-    br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedFullscreenDraw Prepare(const BloomSampleBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
-        const unsigned int mipOffset = m_isUpsample ? 0u : 1u;
-        const bool readsUpscaledHDR = !m_isUpsample && m_mipIndex == 0;
-        PixelBuffer* source = readsUpscaledHDR ? m_pUpscaledHDRTarget : m_pBloomTarget;
-        const unsigned int sourceMip = readsUpscaledHDR ? 0u : m_mipIndex + (m_isUpsample ? 1u : 0u);
         br::render::PreparedFullscreenDraw data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle();
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.targetMip = m_mipIndex + mipOffset;
-        const org::ResourceBindingToken target{m_pBloomTarget->GetGlobalResourceID(), 0};
-        data.targetResource = preparation.CaptureResource(target);
-        data.renderTargetReference = preparation.CaptureDescriptor(target, m_pBloomTarget->GetRTVInfo(data.targetMip).slot);
-        br::render::BindPreparedProgram(data, preparation, m_isUpsample ? m_upsamplePso : m_downsamplePso);
+        data.targetMip = bindings.targetMip;
+        data.targetResource = preparation.CaptureResource(bindings.target);
+        data.renderTargetReference = preparation.CaptureView(bindings.target,
+            {org::BindlessViewKind::RenderTarget, UINT32_MAX, bindings.targetMip});
+        br::render::BindPreparedProgram(data, preparation, bindings.upsample ? m_upsamplePso : m_downsamplePso);
         data.constantStage = rhi::ShaderStage::AllGraphics;
-        data.width = m_pBloomTarget->GetWidth() >> data.targetMip;
-        data.height = m_pBloomTarget->GetHeight() >> data.targetMip;
-        data.loadOp = m_isUpsample ? rhi::LoadOp::Load : rhi::LoadOp::DontCare;
-        data.constants[SOURCE_TEXTURE_DESCRIPTOR_INDEX] = source->GetSRVInfo(sourceMip).slot.index;
-        data.constants[MIP_WIDTH] = source->GetWidth() >> sourceMip;
-        data.constants[MIP_HEIGHT] = source->GetHeight() >> sourceMip;
-        if (m_isUpsample) {
+        const auto& targetDesc = preparation.Describe(bindings.target);
+        const auto& sourceDesc = preparation.Describe(bindings.source);
+        data.width = targetDesc.texture.width >> bindings.targetMip;
+        data.height = targetDesc.texture.height >> bindings.targetMip;
+        data.loadOp = bindings.upsample ? rhi::LoadOp::Load : rhi::LoadOp::DontCare;
+        data.constants[SOURCE_TEXTURE_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.source,
+            {org::BindlessViewKind::ShaderResource, UINT32_MAX, bindings.sourceMip}).index;
+        data.constants[MIP_WIDTH] = sourceDesc.texture.width >> bindings.sourceMip;
+        data.constants[MIP_HEIGHT] = sourceDesc.texture.height >> bindings.sourceMip;
+        if (bindings.upsample) {
             data.constants[BLOOM_SAMPLE_FILTER_RADIUS] = as_uint(0.001f);
             data.constants[BLOOM_SAMPLE_ASPECT_RATIO] = as_uint(
                 data.constants[MIP_WIDTH] / static_cast<float>(data.constants[MIP_HEIGHT]));
@@ -89,19 +89,14 @@ public:
         // Cleanup the render pass
     }
 
-    static void Record(const br::render::PreparedFullscreenDraw& data, org::PassRecordContext& recording) {
+    static void Record(const BloomSampleBindings&, const br::render::PreparedFullscreenDraw& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedFullscreenDraw(data, recording);
     }
 
 private:
-    unsigned int m_mipIndex;
-    bool m_isUpsample = false;
-
     PipelineState m_downsamplePso;
     PipelineState m_upsamplePso;
-
-	PixelBuffer* m_pBloomTarget = nullptr;
-	PixelBuffer* m_pUpscaledHDRTarget = nullptr;
 
 
     void CreatePSOForBackend(BackendInstanceId backendInstance) {

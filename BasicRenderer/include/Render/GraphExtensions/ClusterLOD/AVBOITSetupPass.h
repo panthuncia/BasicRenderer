@@ -15,7 +15,13 @@ using org::PixelBuffer;
 
 using AVBOITSetupFrameData = br::render::PreparedResourceClears;
 
-class AVBOITSetupPass final : public org::TypedRenderGraphPass<AVBOITSetupPass, AVBOITSetupFrameData> {
+struct AVBOITSetupBindings {
+    std::vector<org::ResourceBindingToken> clears;
+    std::vector<org::ResourceBindingToken> targets;
+};
+
+class AVBOITSetupPass final : public org::TypedRenderGraphPass<AVBOITSetupPass,
+    AVBOITSetupFrameData, AVBOITSetupBindings> {
 public:
     AVBOITSetupPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -32,10 +38,11 @@ public:
         std::shared_ptr<PixelBuffer> normalizationTexture,
         std::shared_ptr<PixelBuffer> shadingExtinctionTexture);
 
-    void Declare(org::PassBuilder& builder);
+    AVBOITSetupBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    AVBOITSetupFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const AVBOITSetupFrameData&, org::PassRecordContext&);
+    AVBOITSetupFrameData Prepare(const AVBOITSetupBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const AVBOITSetupBindings&, const AVBOITSetupFrameData&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

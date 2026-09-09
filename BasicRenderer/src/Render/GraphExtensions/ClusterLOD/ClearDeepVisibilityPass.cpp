@@ -18,16 +18,18 @@ ClearDeepVisibilityPass::ClearDeepVisibilityPass(
     , m_deepVisibilityStatsBuffer(std::move(deepVisibilityStatsBuffer)) {
 }
 
-void ClearDeepVisibilityPass::Declare(org::PassBuilder& declaration)
+ClearDeepVisibilityBindings ClearDeepVisibilityPass::Declare(org::PassBuilder& declaration)
 {
     auto* builder = &declaration;
     builder->WithUnorderedAccess(
         m_deepVisibilityCounterBuffer,
         m_deepVisibilityOverflowCounterBuffer,
         m_deepVisibilityStatsBuffer);
-    for (auto& texture : m_headPointerTextures) {
-        builder->WithUnorderedAccess(texture);
-    }
+    ClearDeepVisibilityBindings bindings;
+    bindings.headPointers.reserve(m_headPointerTextures.size());
+    for (auto& texture : m_headPointerTextures)
+        bindings.headPointers.push_back(builder->BindUnorderedAccess(texture));
+    return bindings;
 }
 
 
@@ -71,21 +73,23 @@ bool ClearDeepVisibilityPass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-br::render::PreparedResourceClears ClearDeepVisibilityPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedResourceClears ClearDeepVisibilityPass::Prepare(
+    const ClearDeepVisibilityBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto& context = *preparation.preparationData->Get<UpdateContext>();
     br::render::PreparedResourceClears data{};
     data.resourceHeap = context.textureDescriptorHeap.GetHandle();
     data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
-    for (const auto& texture : m_headPointerTextures) {
-        const org::ResourceBindingToken binding{texture->GetGlobalResourceID(), 0};
+    for (const auto binding : bindings.headPointers) {
         data.clears.push_back({preparation.CaptureResource(binding),
-            preparation.CaptureDescriptor(binding, texture->GetUAVNonShaderVisibleInfo(0).slot),
-            preparation.CaptureDescriptor(binding, texture->GetUAVShaderVisibleInfo(0).slot),
+            preparation.CaptureView(binding,
+                {org::BindlessViewKind::NonShaderVisibleUnorderedAccess}),
+            preparation.CaptureView(binding, {org::BindlessViewKind::UnorderedAccess}),
             0.0f, 0xFFFFFFFFu, false});
     }
     return data;
 }
 
-void ClearDeepVisibilityPass::Record(const br::render::PreparedResourceClears& data, org::PassRecordContext& recording) {
+void ClearDeepVisibilityPass::Record(const ClearDeepVisibilityBindings&,
+    const br::render::PreparedResourceClears& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedResourceClears(data, recording);
 }

@@ -26,7 +26,12 @@ struct AVBOITEarlyDepthFrameData {
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
 };
 
-class AVBOITEarlyDepthPass final : public org::TypedRenderGraphPass<AVBOITEarlyDepthPass, AVBOITEarlyDepthFrameData> {
+struct AVBOITEarlyDepthBindings {
+    org::ResourceBindingToken config, arguments, count, depth;
+};
+
+class AVBOITEarlyDepthPass final : public org::TypedRenderGraphPass<AVBOITEarlyDepthPass,
+    AVBOITEarlyDepthFrameData, AVBOITEarlyDepthBindings> {
 public:
     AVBOITEarlyDepthPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -34,9 +39,11 @@ public:
         std::shared_ptr<Buffer> tileCountBuffer,
         std::shared_ptr<PixelBuffer> earlyDepthTexture);
 
-    void Declare(org::PassBuilder& builder);
-    AVBOITEarlyDepthFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const AVBOITEarlyDepthFrameData&, org::PassRecordContext&);
+    AVBOITEarlyDepthBindings Declare(org::PassBuilder& builder);
+    AVBOITEarlyDepthFrameData Prepare(const AVBOITEarlyDepthBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const AVBOITEarlyDepthBindings&,
+        const AVBOITEarlyDepthFrameData&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

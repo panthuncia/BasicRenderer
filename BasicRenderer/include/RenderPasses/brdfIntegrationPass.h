@@ -8,44 +8,41 @@
 
 #include <string>
 
+struct BRDFIntegrationBindings { org::ResourceBindingToken target; };
+
 class BRDFIntegrationPass
     : public org::TypedRenderGraphPass<BRDFIntegrationPass,
-          br::render::PreparedFullscreenDraw> {
+          br::render::PreparedFullscreenDraw, BRDFIntegrationBindings> {
 public:
     BRDFIntegrationPass() {
         CreatePSO();
     }
 
-    void Declare(org::PassBuilder& builder) {
-        m_lutBinding = builder.BindRenderTarget(ResourceIdentifier{Builtin::BRDFLUT});
+    BRDFIntegrationBindings Declare(org::PassBuilder& builder) {
+        return {builder.BindRenderTarget(ResourceIdentifier{Builtin::BRDFLUT})};
     }
 
-    void Initialize() {
-		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
-    }
-
-    br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedFullscreenDraw Prepare(const BRDFIntegrationBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         br::render::PreparedFullscreenDraw data{};
-        data.renderTargetReference = preparation.CaptureDescriptor(
-            m_lutBinding, m_lutTexture->GetRTVInfo(0).slot);
+        data.renderTargetReference = preparation.CaptureView(bindings.target,
+            {org::BindlessViewKind::RenderTarget});
         data.loadOp = rhi::LoadOp::Clear;
-        data.clear = m_lutTexture->GetClearColor(); data.width = 512; data.height = 512;
+        data.clear = preparation.ClearValue(bindings.target);
+        const auto& desc = preparation.Describe(bindings.target);
+        data.width = desc.texture.width; data.height = desc.texture.height;
         data.debugName = "BRDF Integration Pass";
         br::render::BindPreparedProgram(
             data, preparation, PSO);
-        invalidated = false;
         return data;
     }
 
-    static void Record(const br::render::PreparedFullscreenDraw& data,
+    static void Record(const BRDFIntegrationBindings&, const br::render::PreparedFullscreenDraw& data,
         org::PassRecordContext& recording) {
         br::render::RecordPreparedFullscreenDraw(data, recording);
     }
 
 private:
-    PixelBuffer* m_lutTexture = nullptr;
-    org::ResourceBindingToken m_lutBinding;
-
     PipelineState PSO;
 
     void CreatePSO() {

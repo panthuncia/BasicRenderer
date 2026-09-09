@@ -38,7 +38,7 @@ AVBOITSetupPass::AVBOITSetupPass(
 {
 }
 
-void AVBOITSetupPass::Declare(org::PassBuilder& builder)
+AVBOITSetupBindings AVBOITSetupPass::Declare(org::PassBuilder& builder)
 {
     if (m_configBuffer) {
         builder.WithShaderResource(m_configBuffer);
@@ -50,26 +50,25 @@ void AVBOITSetupPass::Declare(org::PassBuilder& builder)
         builder.WithShaderResource(m_depthWarpLUTBuffer);
     }
 
-    builder.WithUnorderedAccessClear(
-        m_occupancyTexture,
-        m_coverageTexture,
-        m_occupancySliceMaskTexture,
-        m_integratedTransmittanceTexture,
-        m_zeroTransmittanceSliceTexture);
+    AVBOITSetupBindings bindings;
+    for (const auto& resource : {m_occupancyTexture, m_coverageTexture, m_occupancySliceMaskTexture,
+        m_integratedTransmittanceTexture, m_zeroTransmittanceSliceTexture})
+        if (resource) bindings.clears.push_back(builder.BindUnorderedAccessClear(resource));
 
     builder.WithUnorderedAccess(
         m_scalarExtinctionTexture,
         m_chromaticExtinctionTexture);
 
     if (m_accumulationTexture) {
-        builder.WithRenderTargetClear(m_accumulationTexture);
+        bindings.targets.push_back(builder.BindRenderTargetClear(m_accumulationTexture));
     }
     if (m_normalizationTexture) {
-        builder.WithRenderTargetClear(m_normalizationTexture);
+        bindings.targets.push_back(builder.BindRenderTargetClear(m_normalizationTexture));
     }
     if (m_shadingExtinctionTexture) {
-        builder.WithRenderTargetClear(m_shadingExtinctionTexture);
+        bindings.targets.push_back(builder.BindRenderTargetClear(m_shadingExtinctionTexture));
     }
+    return bindings;
 }
 
 void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
@@ -153,34 +152,37 @@ void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
     }
 }
 
-AVBOITSetupFrameData AVBOITSetupPass::Prepare(const org::PassPrepareContext& preparation) {
+AVBOITSetupFrameData AVBOITSetupPass::Prepare(
+    const AVBOITSetupBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     AVBOITSetupFrameData data;
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-    const auto append = [&](PixelBuffer* resource, bool isFloat, float floatValue, uint32_t uintValue) {
-        if (!resource) return;
-        const org::ResourceBindingToken binding{resource->GetGlobalResourceID(), 0};
+    const auto append = [&](org::ResourceBindingToken binding, bool isFloat, float floatValue, uint32_t uintValue) {
         const auto captured = preparation.CaptureResource(binding);
-        for (uint32_t slice = 0; slice < resource->GetNumUAVSlices(); ++slice) {
+        const auto slices = preparation.ViewSliceCount(binding, {org::BindlessViewKind::UnorderedAccess});
+        for (uint32_t slice = 0; slice < slices; ++slice) {
             data.clears.push_back({captured,
-                preparation.CaptureDescriptor(binding, resource->GetUAVNonShaderVisibleInfo(0, slice).slot),
-                preparation.CaptureDescriptor(binding, resource->GetUAVShaderVisibleInfo(0, slice).slot),
+                preparation.CaptureView(binding,
+                    {org::BindlessViewKind::NonShaderVisibleUnorderedAccess, UINT32_MAX, 0, slice}),
+                preparation.CaptureView(binding,
+                    {org::BindlessViewKind::UnorderedAccess, UINT32_MAX, 0, slice}),
                 floatValue, uintValue, isFloat});
         }
     };
-    append(m_occupancyTexture.get(), true, 0, 0);
-    append(m_coverageTexture.get(), true, 0, 0);
-    append(m_integratedTransmittanceTexture.get(), true, 1, 0);
-    append(m_occupancySliceMaskTexture.get(), false, 0, 0);
-    append(m_zeroTransmittanceSliceTexture.get(), false, 0, CLodAVBOITDefaultSliceCount);
-    for (const auto* resource : {m_accumulationTexture.get(), m_normalizationTexture.get(), m_shadingExtinctionTexture.get()}) {
-        if (resource) data.targets.push_back({preparation.CaptureDescriptor(
-            {resource->GetGlobalResourceID(), 0}, resource->GetRTVInfo(0).slot), resource->GetClearColor()});
-    }
+    if (bindings.clears.size() != 5) throw std::logic_error("AVBOIT clear declaration is incomplete");
+    append(bindings.clears[0], true, 0, 0);
+    append(bindings.clears[1], true, 0, 0);
+    append(bindings.clears[2], false, 0, 0);
+    append(bindings.clears[3], true, 1, 0);
+    append(bindings.clears[4], false, 0, CLodAVBOITDefaultSliceCount);
+    for (const auto target : bindings.targets)
+        data.targets.push_back({preparation.CaptureView(target,
+            {org::BindlessViewKind::RenderTarget}), preparation.ClearValue(target)});
     return data;
 }
 
-void AVBOITSetupPass::Record(const AVBOITSetupFrameData& data, org::PassRecordContext& recording) {
+void AVBOITSetupPass::Record(const AVBOITSetupBindings&,
+    const AVBOITSetupFrameData& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedResourceClears(data, recording);
 }

@@ -8,13 +8,14 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-struct PreparedReyesCounterCopy {
-    org::PreparedResourceReference source;
-    org::PreparedResourceReference destination;
+struct ReyesCounterCopyBindings {
+    org::ResourceBindingToken source;
+    org::ResourceBindingToken destination;
 };
 
 class ReyesCopyCounterPass final
-    : public org::TypedRenderGraphPass<ReyesCopyCounterPass, PreparedReyesCounterCopy> {
+    : public org::TypedRenderGraphPass<ReyesCopyCounterPass,
+        org::EmptyPassFrameData, ReyesCounterCopyBindings> {
 public:
     ReyesCopyCounterPass(std::shared_ptr<Buffer> sourceCounterBuffer, std::shared_ptr<Buffer> destCounterBuffer)
         : m_sourceCounterBuffer(std::move(sourceCounterBuffer))
@@ -22,24 +23,14 @@ public:
     {
     }
 
-    void Declare(org::PassBuilder& builder)
+    ReyesCounterCopyBindings Declare(org::PassBuilder& builder)
     {
-        m_sourceBinding = builder.BindCopySource(m_sourceCounterBuffer);
-        m_destinationBinding = builder.BindCopyDestination(m_destCounterBuffer);
         builder.PreferQueue(QueueKind::Copy);
+        return {builder.BindCopySource(m_sourceCounterBuffer),
+            builder.BindCopyDestination(m_destCounterBuffer)};
     }
 
-    void Initialize() {}
-
-    PreparedReyesCounterCopy Prepare(const org::PassPrepareContext& preparation)
-    {
-        return {
-            preparation.CaptureResource(m_sourceBinding),
-            preparation.CaptureResource(m_destinationBinding),
-        };
-    }
-
-    static void Record(const PreparedReyesCounterCopy& data,
+    static void Record(const ReyesCounterCopyBindings& data,
         org::PassRecordContext& recording)
     {
         recording.Commands().CopyBufferRegion(
@@ -50,6 +41,4 @@ public:
 private:
     std::shared_ptr<Buffer> m_sourceCounterBuffer;
     std::shared_ptr<Buffer> m_destCounterBuffer;
-    org::ResourceBindingToken m_sourceBinding;
-    org::ResourceBindingToken m_destinationBinding;
 };

@@ -9,7 +9,10 @@
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
 
-class SpecularIBLPass : public org::TypedRenderGraphPass<SpecularIBLPass, br::render::PreparedFullscreenDraw> {
+struct SpecularIBLBindings { org::ResourceBindingToken target; };
+
+class SpecularIBLPass : public org::TypedRenderGraphPass<SpecularIBLPass,
+    br::render::PreparedFullscreenDraw, SpecularIBLBindings> {
 public:
     SpecularIBLPass() {
         CreatePSO();
@@ -17,7 +20,7 @@ public:
         m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
     }
 
-    void Declare(org::PassBuilder& builder) {
+    SpecularIBLBindings Declare(org::PassBuilder& builder) {
         builder.WithShaderResource(Builtin::PostProcessing::ScreenSpaceReflections,
             Builtin::Environment::InfoBuffer,
             Builtin::PerMaterialOpenPBRDataBuffer,
@@ -34,38 +37,39 @@ public:
 			Builtin::OpenPBR::IdealMetalEnergyComplement,
 			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
 			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement,
-            Builtin::CameraBuffer)
-            .WithRenderTarget(Builtin::Color::HDRColorTarget)
-            .WithConstantBuffer(Builtin::PerFrameBuffer);
+            Builtin::CameraBuffer).WithConstantBuffer(Builtin::PerFrameBuffer);
 
         builder.WithUnorderedAccess(Builtin::DebugVisualization);
 
         if (m_gtaoEnabled) {
             builder.WithShaderResource(Builtin::GTAO::OutputAOTerm);
         }
+        return {builder.BindRenderTarget(ResourceIdentifier{Builtin::Color::HDRColorTarget})};
     }
 
     void Initialize() {
 		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
-        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
     }
 
-    br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedFullscreenDraw Prepare(const SpecularIBLBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         br::render::PreparedFullscreenDraw data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle();
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.renderTargetReference = preparation.CaptureDescriptor(
-            {m_pHDRTarget->GetGlobalResourceID(), 0}, m_pHDRTarget->GetRTVInfo(0).slot);
-        data.width = m_pHDRTarget->GetWidth();
-        data.height = m_pHDRTarget->GetHeight();
+        data.renderTargetReference = preparation.CaptureView(bindings.target,
+            {org::BindlessViewKind::RenderTarget});
+        const auto& desc = preparation.Describe(bindings.target);
+        data.width = desc.texture.width;
+        data.height = desc.texture.height;
         data.constantStage = rhi::ShaderStage::AllGraphics;
         br::render::BindPreparedProgram(data, preparation, m_pso);
         data.constants[MiscEnableGTAO] = m_gtaoEnabled;
         return data;
     }
 
-    static void Record(const br::render::PreparedFullscreenDraw& data, org::PassRecordContext& recording) {
+    static void Record(const SpecularIBLBindings&, const br::render::PreparedFullscreenDraw& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedFullscreenDraw(data, recording);
     }
 
@@ -76,8 +80,6 @@ public:
 private:
 
     PipelineState m_pso;
-
-    PixelBuffer* m_pHDRTarget;
 
     bool m_gtaoEnabled = true;
 
