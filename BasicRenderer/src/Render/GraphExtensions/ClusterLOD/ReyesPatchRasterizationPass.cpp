@@ -140,12 +140,8 @@ void ReyesPatchRasterizationPass::Update(const UpdateExecutionContext& execution
     auto& context = *updateContext;
 
     std::vector<std::shared_ptr<PixelBuffer>> nextVisibilityBuffers;
-    context.viewManager->ForEachView([&](uint64_t viewID) {
-        const auto* viewInfo = context.viewManager->Get(viewID);
-        if (viewInfo && viewInfo->gpu.visibilityBuffer) {
-            nextVisibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
-        }
-    });
+    for (const auto& view : context.preparedViews)
+        if (view.visibilityBuffer) nextVisibilityBuffers.push_back(view.visibilityBuffer);
 
     m_declaredResourcesChanged = (nextVisibilityBuffers != m_visibilityBuffers);
     m_visibilityBuffers = std::move(nextVisibilityBuffers);

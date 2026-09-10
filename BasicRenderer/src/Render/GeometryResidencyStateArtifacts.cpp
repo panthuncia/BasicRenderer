@@ -40,6 +40,10 @@ ArtifactBuildResult BuildGeometryResidencyState(const ArtifactBuildContext& cont
         }
     }
 
+    if (input->pagePool) state->pagePool = input->pagePool;
+    if (input->slabResources) state->slabResources = input->slabResources;
+    state->storageGeneration = input->storageGeneration;
+
     std::ranges::sort(state->activeRanges, {}, &GeometryResidencyRange::groupsBase);
     state->revision = context.revision;
     state->maxTraversalDepth = 0;

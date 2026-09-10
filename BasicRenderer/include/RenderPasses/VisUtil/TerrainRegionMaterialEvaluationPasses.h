@@ -10,6 +10,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/MeshManager.h"
 #include "Render/RenderContext.h"
+#include "Render/ProducerPassServices.h"
 #include "Render/MaterialStateArtifacts.h"
 #include "Render/IndirectCommand.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
@@ -369,7 +370,7 @@ struct EvaluateTerrainRegionMaterialGroupsBindings {
 class EvaluateTerrainRegionMaterialGroupsPass : public org::TypedRenderGraphPass<EvaluateTerrainRegionMaterialGroupsPass,
     br::render::PreparedComputeIndirect, EvaluateTerrainRegionMaterialGroupsBindings> {
 public:
-    EvaluateTerrainRegionMaterialGroupsPass() {
+    explicit EvaluateTerrainRegionMaterialGroupsPass(ProducerPassServices& services) {
         std::vector<DxcDefine> defines;
         defines.push_back({ L"PSO_TERRAIN", L"1" });
         defines.push_back({ L"VISUTIL_SPECIALIZED_MATERIAL_EVAL", L"1" });
@@ -410,14 +411,7 @@ public:
             .with<CLodReyesTessTableTrianglesTag>()
             .build();
 
-        try {
-            auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
-            if (auto* mm = getter()()) {
-                if (auto* pool = mm->GetCLodPagePool()) {
-                    m_slabResourceGroup = pool->GetSlabResourceGroup();
-                }
-            }
-        } catch (...) {}
+        m_slabResourceGroup = services.clodSlabResources;
     }
 
     EvaluateTerrainRegionMaterialGroupsBindings Declare(org::PassBuilder& builder) {

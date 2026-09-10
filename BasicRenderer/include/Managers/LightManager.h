@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <atomic>
 
 #include "ShaderBuffers.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
@@ -17,7 +18,7 @@
 class ShadowMaps;
 class LinearShadowMaps;
 class IndirectCommandBufferManager;
-class ViewManager;
+namespace br::render { class IShadowViewService; }
 class SortedUnsignedIntBuffer;
 
 struct AddLightReturn {
@@ -34,9 +35,10 @@ public:
     AddLightReturn AddLight(LightInfo* lightInfo, uint64_t entityId);
     void RemoveLight(LightInfo* light);
 	void RemoveLight(flecs::entity light);
-    unsigned int GetNumLights();
+	unsigned int GetNumLights();
+	uint64_t GetPublicationRevision() const noexcept { return m_publicationRevision.load(std::memory_order_acquire); }
     void SetCurrentCamera(flecs::entity camera);
-	void SetViewManager(ViewManager* viewManager);
+	void SetShadowViewService(br::render::IShadowViewService* service);
 	void UpdateLightBufferView(BufferView* view, const LightInfo& data);
     void UpdateLightViewInfo(flecs::entity light);
 	unsigned int GetLightPagePoolSize() { return m_lightPagePoolSize; }
@@ -74,10 +76,11 @@ private:
 	std::function<float()> getDirectionalShadowSceneExtent;
 	std::function<float()> getDirectionalVirtualShadowSourceAngleDegrees;
     std::function<void(std::shared_ptr<void>)> markForDelete;
-	ViewManager* m_pViewManager = nullptr;
+	br::render::IShadowViewService* m_shadowViews = nullptr;
 	unsigned int m_lightPagePoolSize = 0;
 
 	std::mutex m_lightUpdateMutex;
+	std::atomic_uint64_t m_publicationRevision{1};
 
     std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
         CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId);

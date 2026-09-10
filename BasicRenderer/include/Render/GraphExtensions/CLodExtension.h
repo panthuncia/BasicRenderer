@@ -29,6 +29,7 @@ struct CLodExtensionOptions {
     std::shared_ptr<CLodStreamingSystem> streamingSystem;
     std::shared_ptr<VirtualShadowCasterRegistry> virtualShadowCasters;
     std::shared_ptr<ProducerPersistentState> persistentState;
+    std::shared_ptr<ResourceGroup> slabResourceGroup;
 };
 
 class CLodExtension final : public RenderGraph::IRenderGraphExtension, public IResourceProvider {

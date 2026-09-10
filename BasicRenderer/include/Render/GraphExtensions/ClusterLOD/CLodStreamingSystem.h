@@ -59,6 +59,11 @@ public:
     CLodStreamingSystem();
     ~CLodStreamingSystem();
 
+    // Renderer-scoped geometry storage. This dependency is installed before
+    // Initialize and remains valid until Shutdown completes; streaming workers
+    // no longer discover it through the process-global settings registry.
+    void SetGeometryStorage(ICLodGeometryStorage* storage) noexcept { m_geometryStorage = storage; }
+
     void SetPriorityMode(CLodPriorityMode mode) { m_priorityMode = mode; }
     CLodPriorityMode GetPriorityMode() const { return m_priorityMode; }
 
@@ -134,9 +139,9 @@ private:
         uint64_t readbackDecodedNs);
     void EnsureStreamingStorageCapacity(uint32_t requiredGroupCount);
     void ProcessStreamingDomainEvents();
-    void RebuildStreamingDomainFromSnapshot(MeshManager* meshManager);
+    void RebuildStreamingDomainFromSnapshot(ICLodGeometryStorage* meshManager);
     void InitializeActiveRange(
-        MeshManager* meshManager,
+        ICLodGeometryStorage* meshManager,
         uint32_t begin,
         uint32_t count,
         uint32_t& initializedGroups,
@@ -159,7 +164,7 @@ private:
         uint32_t heapIndex,
         PendingStreamingRequest& outRequest);
     void SetGroupUsesPinnedStorage(uint32_t groupIndex, bool usesPinnedStorage);
-    void ApplyDiskStreamingCompletions(MeshManager* meshManager);
+    void ApplyDiskStreamingCompletions(ICLodGeometryStorage* meshManager);
     void ParkReadyCompletionForSharedPage(
         uint32_t groupIndex,
         uint32_t page,
@@ -182,7 +187,7 @@ private:
         uint32_t parentGroupIndex,
         std::vector<MeshManager::CLodDiskStreamingCompletion>*
             immediateCompletions = nullptr);
-    void CommitPendingResidencyPromotions(MeshManager* meshManager);
+    void CommitPendingResidencyPromotions(ICLodGeometryStorage* meshManager);
     void RecordVirtualShadowUpgradeDependencies(
         std::span<const CLodVirtualShadowPredictedPage> dependencies);
     void QueueVirtualShadowReadyDependency(const VirtualShadowDependency& dependency);
@@ -200,7 +205,7 @@ private:
     void PublishVirtualShadowUpgradeUpload();
     void InvalidateVirtualShadowUpgradeUploadMappings();
     void ClearVirtualShadowUpgradeState();
-    void ReconcileStaleDiskIoRequests(MeshManager* meshManager);
+    void ReconcileStaleDiskIoRequests(ICLodGeometryStorage* meshManager);
     bool PromoteGroupPagesAfterUploadDrain(uint32_t groupIndex);
     void EnsureStreamingDiagnosticsCapacity(uint32_t requiredGroupCount);
     void RecordStreamingRequestObserved(
@@ -228,20 +233,20 @@ private:
     void AddPendingMeshPageReference(uint32_t page, uint64_t key);
     void ReleasePendingMeshPageReference(uint32_t page, uint64_t key);
     bool SetGroupResidentBit(uint32_t groupIndex, bool resident);
-    void ForceGroupNonResident(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries);
+    void ForceGroupNonResident(uint32_t groupIndex, ICLodGeometryStorage* meshManager, bool clearPageMapEntries);
     void ForceGroupAndDescendantsNonResident(
         uint32_t groupIndex,
-        MeshManager* meshManager,
+        ICLodGeometryStorage* meshManager,
         bool clearPageMapEntries);
-    bool IsGroupSelectedParentResident(uint32_t groupIndex, MeshManager* meshManager) const;
+    bool IsGroupSelectedParentResident(uint32_t groupIndex, ICLodGeometryStorage* meshManager) const;
     bool IsGroupSelectedParentResidentOrCommitReady(
         uint32_t groupIndex,
-        MeshManager* meshManager) const;
+        ICLodGeometryStorage* meshManager) const;
     uint32_t SelectedAncestorDepth(
         uint32_t groupIndex,
-        MeshManager* meshManager) const;
+        ICLodGeometryStorage* meshManager) const;
     void TouchGroupPages(uint32_t groupIndex);
-    void PrefetchChildGroupLayouts(uint32_t parentGroupIndex, MeshManager* meshManager);
+    void PrefetchChildGroupLayouts(uint32_t parentGroupIndex, ICLodGeometryStorage* meshManager);
     void InstallPrefetchedChildGroupLayouts(
         uint32_t parentGroupIndex,
         std::vector<MeshManager::CLodPrefetchedChildLayout>&& prefetchedLayouts);
@@ -256,8 +261,8 @@ private:
     void RunStreamingServiceWork();
     bool EnsureParallelSortResources();
     void DestroyParallelSortResources();
-    void ClearStreamingUploadFunction(MeshManager* meshManager);
-    void InstallStreamingUploadFunction(MeshManager* meshManager);
+    void ClearStreamingUploadFunction(ICLodGeometryStorage* meshManager);
+    void InstallStreamingUploadFunction(ICLodGeometryStorage* meshManager);
     bool PublishRetainedUploadBatch();
     void SealStreamingUploadBatch();
     void ObserveUploadBatchTickets();
@@ -266,8 +271,8 @@ private:
     void StopStreamingService();
 
     // Page-level LRU helpers
-    void InitializePageLru(MeshManager* meshManager);
-    void EnsurePageTrackingCapacity(MeshManager* meshManager);
+    void InitializePageLru(ICLodGeometryStorage* meshManager);
+    void EnsurePageTrackingCapacity(ICLodGeometryStorage* meshManager);
     struct PagePopFailureStats {
         uint32_t scanned = 0;
         uint32_t scanLimit = 0;
@@ -285,15 +290,15 @@ private:
     };
     std::vector<uint32_t> PopFreePages(
         std::span<const uint32_t> pageSizeBytes,
-        MeshManager* meshManager,
+        ICLodGeometryStorage* meshManager,
         PagePopFailureStats* outStats = nullptr);
     CLodPageLRU& PageLruForPage(uint32_t page);
     const CLodPageLRU& PageLruForPage(uint32_t page) const;
     uint32_t TotalPageLruSize() const;
-    void ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager);
-    void ReleaseGroupResidency(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries);
-    void RetirePhysicalPage(uint32_t page, MeshManager* meshManager, bool pinned);
-    void DrainRetiredPhysicalPages(MeshManager* meshManager);
+    void ReleaseOwnedPagesForGroup(uint32_t groupIndex, ICLodGeometryStorage* meshManager);
+    void ReleaseGroupResidency(uint32_t groupIndex, ICLodGeometryStorage* meshManager, bool clearPageMapEntries);
+    void RetirePhysicalPage(uint32_t page, ICLodGeometryStorage* meshManager, bool pinned);
+    void DrainRetiredPhysicalPages(ICLodGeometryStorage* meshManager);
     bool IsPhysicalPageRetired(uint32_t page);
     bool IsPhysicalPagePinnedStorage(uint32_t page) const;
     uint64_t StreamingUploadVisibilityDelayTicks() const;
@@ -316,7 +321,7 @@ private:
     bool TryGetCachedParentGroup(uint32_t groupIndex, uint32_t& outParentGroupIndex);
     bool IsPhysicalPageCleanForFreshAllocation(uint32_t page) const;
     bool IsPhysicalPageEvictable(uint32_t page) const;
-    bool EvictPhysicalPage(uint32_t page, MeshManager* meshManager);
+    bool EvictPhysicalPage(uint32_t page, ICLodGeometryStorage* meshManager);
     void MarkStreamingNonResidentBitsDirtyWord(uint32_t wordAddress);
     void MarkStreamingNonResidentBitsDirtyAll();
     bool TryConsumeStreamingNonResidentBitsUpload(std::vector<uint32_t>& outBits, uint32_t& outFirstWord, uint32_t maxWords);
@@ -337,16 +342,16 @@ private:
         uint64_t commitTick = 0u;
     };
 
-    PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, MeshManager* meshManager);
+    PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, ICLodGeometryStorage* meshManager);
     PreAllocatedPages PreAllocatePagesForGroup(
         uint32_t groupIndex,
         uint32_t groupsBase,
         std::span<const uint32_t> meshPageIndices,
         std::span<const uint32_t> meshPageBlobSizes,
-        MeshManager* meshManager,
+        ICLodGeometryStorage* meshManager,
         bool buildMeshPageKeys = true);
-    bool AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages, MeshManager* meshManager);
-    void ReleasePreAllocatedPages(const PreAllocatedPages& pages, MeshManager* meshManager);
+    bool AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages, ICLodGeometryStorage* meshManager);
+    void ReleasePreAllocatedPages(const PreAllocatedPages& pages, ICLodGeometryStorage* meshManager);
     bool ValidateRenderableCompletion(
         uint32_t groupIndex,
         const PreAllocatedPages& pages,
@@ -528,7 +533,7 @@ private:
     uint64_t m_streamingNonResidentBitsQueuedTick = 0u;
     uint64_t m_streamingNonResidentBitsUploadFenceEpoch = 0u;
     uint64_t m_streamingNonResidentBitsUploadFenceValue = 0u;
-    std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
+    ICLodGeometryStorage* m_geometryStorage = nullptr;
     std::function<uint32_t()> m_getStreamingCpuUploadBudgetRequests;
 
     std::vector<PendingStreamingRequest> m_pendingStreamingRequests;

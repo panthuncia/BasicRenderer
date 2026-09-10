@@ -40,7 +40,12 @@ public:
 		auto program = CaptureProgramBinding(preparation, m_PSO);
 		data.program = program.program;
 		data.descriptorIndices = std::move(program.descriptorIndices);
-		data.constants[LIGHT_PAGES_POOL_SIZE] = (update ? update->lightManager : render->lightManager)->GetLightPagePoolSize();
+		const auto state = update ? update->publishedRendererState : render->publishedRendererState;
+		const auto lights = state
+			? state->lights.payload.Get<br::render::PublishedLightTableState>() : nullptr;
+		data.constants[LIGHT_PAGES_POOL_SIZE] = lights
+			? lights->lightPagePoolSize
+			: (update ? update->preparedLightPagePoolSize : render->preparedLightPagePoolSize);
 		const auto clusterSize = getClusterSize();
 		data.groupsX = (clusterSize.x * clusterSize.y * clusterSize.z + 127u) / 128u;
 		return data;

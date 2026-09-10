@@ -104,6 +104,7 @@ uint32_t CLodIoTaskBatchSize() {
 }
 
 MeshManager::MeshManager() {
+	m_clodGeometryStorage = std::make_unique<MeshManagerCLodGeometryStorage>(*this);
 	auto& resourceManager = ::ResourceManager::GetInstance();
 
 	try {
@@ -201,13 +202,17 @@ MeshManager::MeshManager() {
 		// This consumes the same eight 128 MiB slabs as the old fixed pool.
 		ppConfig.initialStreamingSlabs = { 2u, 2u, 2u, 4u, 6u };
 		ppConfig.debugName    = "CLodPagePool";
-		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
+		m_clodPagePool = std::make_shared<PagePool>(ppConfig);
 	}
 	org::memory::SetResourceUsageHint(*m_clodPagePool->GetPageTableBuffer(), "Cluster LOD streaming");
 	m_resources[Builtin::CLod::PageTable] = m_clodPagePool->GetPageTableBuffer();
 	// Slab buffers are registered dynamically as they're allocated.
 	// The PagePoolSlabBase descriptor is resolved per-pass from the first slab.
 
+}
+
+ICLodGeometryStorage& MeshManager::GetCLodGeometryStorage() noexcept {
+	return *m_clodGeometryStorage;
 }
 
 MeshManager::~MeshManager() {
@@ -1980,6 +1985,9 @@ void MeshManager::SetRendererStateRequestService(br::render::RendererStateReques
 
 	auto input = std::make_shared<br::render::GeometryResidencyDeltaInput>();
 	input->kind = br::render::GeometryResidencyDeltaKind::Reset;
+	input->pagePool = m_clodPagePool;
+	input->slabResources = GetCLodSlabResourceGroup();
+	input->storageGeneration = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
 	const auto revision = ++m_geometryResidencyRevision;
 	std::shared_ptr<const br::render::GeometryResidencyDeltaInput> immutableInput = std::move(input);
 	const auto result = service->Request(
@@ -2001,6 +2009,9 @@ void MeshManager::PublishGeometryResidencyDelta(const CLodStreamingDomainEvent& 
 	if (m_rendererStateRequests == nullptr) return;
 
 	auto input = std::make_shared<br::render::GeometryResidencyDeltaInput>();
+	input->pagePool = m_clodPagePool;
+	input->slabResources = GetCLodSlabResourceGroup();
+	input->storageGeneration = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
 	switch (event.kind) {
 	case CLodStreamingDomainEventKind::ActiveRangeAdded:
 		input->kind = br::render::GeometryResidencyDeltaKind::AddOrReplace;
@@ -2029,7 +2040,8 @@ void MeshManager::PublishGeometryResidencyDelta(const CLodStreamingDomainEvent& 
 	const auto revision = ++m_geometryResidencyRevision;
 	const std::uint64_t fingerprint = revision ^
 		(static_cast<std::uint64_t>(event.groupsBase) << 32u) ^ event.groupCount ^
-		(static_cast<std::uint64_t>(event.maxTraversalDepth) << 48u);
+		(static_cast<std::uint64_t>(event.maxTraversalDepth) << 48u) ^
+		input->storageGeneration;
 	std::shared_ptr<const br::render::GeometryResidencyDeltaInput> immutableInput = std::move(input);
 	const auto result = m_rendererStateRequests->Request(
 		{ br::render::ArtifactKind::GeometryResidency, 1u, 0u }, revision,
@@ -3542,7 +3554,7 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 
 void MeshManager::GetCLodRayTracingResidencySnapshot(CLodRayTracingResidencySnapshot& outSnapshot) const {
 	outSnapshot.residentGroups.clear();
-	outSnapshot.pagePool = m_clodPagePool.get();
+	outSnapshot.pagePool = m_clodPagePool;
 	outSnapshot.pagePoolGeneration = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
 
 	const_cast<MeshManager*>(this)->RebuildCLodSharedStreamingRangeIndex();

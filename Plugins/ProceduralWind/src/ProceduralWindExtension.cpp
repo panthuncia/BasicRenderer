@@ -15,6 +15,8 @@
 #include "Render/OutputTypes.h"
 #include "Render/RendererSettings.h"
 #include "Render/MemoryIntrospectionAPI.h"
+#include "Render/VersionedGpuBufferArtifacts.h"
+#include "Render/PoseStateArtifacts.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
@@ -381,20 +383,46 @@ struct WindSharedResources {
     void UpdateTypes(const UpdateExecutionContext& context)
     {
         const auto* update = context.hostData ? context.hostData->Get<UpdateContext>() : nullptr;
-        if (!update || !update->skeletonManager) {
+        if (!update || !update->windPaletteService) {
             activeBoneCount = 0u;
             return;
         }
-        const auto transformCount = update->preparedObjects.residentTransformCount;
+        const auto publishedPoses = update->publishedRendererState
+            ? update->publishedRendererState->poses.payload
+                .Get<br::render::PublishedPoseState>()
+            : nullptr;
+        if (!publishedPoses) {
+            activeBoneCount = 0u;
+            return;
+        }
+        const auto publishedObjects = update->publishedRendererState
+            ? update->publishedRendererState->drawRecords.payload
+                .Get<br::render::PublishedObjectBufferState>()
+            : nullptr;
+        if (!publishedObjects) {
+            activeBoneCount = 0u;
+            return;
+        }
+        const auto placementVersion = publishedObjects->FindVersion(
+            br::render::kObjectSkinnedPlacementVariant);
+        const auto activePlacementVersion = publishedObjects->FindVersion(
+            br::render::kObjectActiveSkinnedPlacementVariant);
+        if (!placementVersion || !activePlacementVersion) {
+            activeBoneCount = 0u;
+            return;
+        }
+        const auto transformCount = publishedObjects->residentTransformCount;
         residentTransformCount = transformCount;
-        skinnedPlacements = update->preparedObjects.skinnedPlacements;
-        activeSkinnedPlacements = update->preparedObjects.activeSkinnedPlacements;
-		const auto& activePlacementEntries = update->preparedObjects.activePlacementEntries;
+		skinnedPlacements = placementVersion->resource;
+		activeSkinnedPlacements = activePlacementVersion->resource;
+		activeSkinnedPlacementResidentSize = static_cast<std::uint32_t>(
+			activePlacementVersion->elementCount);
+		const auto& activePlacementEntries = publishedObjects->activePlacementEntries;
 		const std::uint32_t placementCount = activePlacementEntries
 			? static_cast<std::uint32_t>(activePlacementEntries->size()) : 0u;
 		const std::uint32_t placementCapacity = (std::max)(
-			1u, update->preparedObjects.activeSkinnedPlacementResidentSize);
-		const std::uint64_t instanceRevision = update->skeletonManager->GetActiveInstanceRevision();
+			1u, activeSkinnedPlacementResidentSize);
+		const std::uint64_t instanceRevision = publishedPoses->activeInstanceRevision;
 		const std::uint64_t profileRevision = runtime->ProfileRevision();
 		const bool structureChanged =
 			instanceRevision != lastActiveInstanceRevision ||
@@ -409,8 +437,8 @@ struct WindSharedResources {
 			// BeginFrame. Keep this value copy current even when the expensive type
 			// layout is unchanged, or compact LODs address the wrong half every other
 			// frame and visibly alternate between current and stale animation poses.
-			transientRegion = update->skeletonManager->ReserveTransientWindRegion(TransientBoneCapacity());
-			update->skeletonManager->EnsureTransientWindInstanceSlots(transformCount);
+			transientRegion = update->windPaletteService->ReserveTransientWindRegion(TransientBoneCapacity());
+			update->windPaletteService->EnsureTransientWindInstanceSlots(transformCount);
 		}
 		if (!structureChanged) {
 			AdvanceAndPublishFrame(context.deltaTime);
@@ -429,16 +457,16 @@ struct WindSharedResources {
         std::vector<WindTypeGPU> types;
 		std::ostringstream layoutSummary;
         std::uint32_t registeredTypes = 0u;
-		const auto activeInstancesView = update->skeletonManager->GetActiveInstanceViews();
+		const auto& activeInstancesView = publishedPoses->activeInstances;
 		std::uint32_t lookupCount = 0u;
-		for (const auto& instance : activeInstancesView) if (instance.skeleton && instance.skeleton->HasWindSimulationGroups()) {
+		for (const auto& instance : activeInstancesView) if (instance.baseSkeleton && instance.baseSkeleton->HasWindSimulationGroups()) {
 			lookupCount = (std::max)(lookupCount, instance.instanceSlot + 1u);
 		}
 		std::vector<std::uint32_t> sourceSlotToBaseType((std::max)(1u, lookupCount), 0xFFFFFFFFu);
 		std::unordered_map<const Skeleton*, std::uint32_t> firstVariantByBaseSkeleton;
 		for (const auto& instance : activeInstancesView) {
-            if (!instance.skeleton || !instance.skeleton->HasWindSimulationGroups()) continue;
-			auto baseSkeletonOwner = instance.skeleton->GetBaseSkeletonShared();
+            if (!instance.baseSkeleton || !instance.baseSkeleton->HasWindSimulationGroups()) continue;
+			const auto& baseSkeletonOwner = instance.baseSkeleton;
 			const Skeleton* typeSkeleton = baseSkeletonOwner.get();
 			if (!typeSkeleton) continue;
 			if (const auto existing = firstVariantByBaseSkeleton.find(typeSkeleton);
@@ -610,8 +638,8 @@ struct WindSharedResources {
         }
 		std::vector<std::uint32_t> placementCountByFirstVariant(types.size(), 0u);
 		if (activeSkinnedPlacements) {
-			const auto& placementRecords = update->preparedObjects.placementRecords;
-			const auto& activeEntries = update->preparedObjects.activePlacementEntries;
+			const auto& placementRecords = publishedObjects->placementRecords;
+			const auto& activeEntries = publishedObjects->activePlacementEntries;
 			if (placementRecords && activeEntries) for (const auto& activeEntry : *activeEntries) {
 				if (activeEntry.drawRecordIndex >= placementRecords->size()) {
 					continue;
@@ -667,11 +695,9 @@ struct WindSharedResources {
         typeCount = windTypes->Size();
 		registeredTypeCount = registeredTypes;
         if (registeredTypes != 0u) {
-            transientRegion = update->skeletonManager->ReserveTransientWindRegion(TransientBoneCapacity());
-            update->skeletonManager->EnsureTransientWindInstanceSlots(transformCount);
-            residentPlacementCount = activeSkinnedPlacements
-                ? static_cast<std::uint32_t>(activeSkinnedPlacements->ResidentSize())
-                : 0u;
+            transientRegion = update->windPaletteService->ReserveTransientWindRegion(TransientBoneCapacity());
+            update->windPaletteService->EnsureTransientWindInstanceSlots(transformCount);
+            residentPlacementCount = activeSkinnedPlacementResidentSize;
         }
         else {
             residentPlacementCount = 0u;
@@ -723,8 +749,8 @@ struct WindSharedResources {
     std::shared_ptr<DynamicStructuredBuffer<std::uint32_t>> deferredEntries;
     std::shared_ptr<DynamicStructuredBuffer<std::uint32_t>> allocationCounters;
 	std::shared_ptr<DynamicStructuredBuffer<std::uint32_t>> diagnostics;
-    std::shared_ptr<DynamicStructuredBuffer<SkinnedAssemblyPlacementGPU>> skinnedPlacements;
-    std::shared_ptr<SortedUnsignedIntBuffer> activeSkinnedPlacements;
+    std::shared_ptr<org::GloballyIndexedResource> skinnedPlacements;
+    std::shared_ptr<org::GloballyIndexedResource> activeSkinnedPlacements;
     std::shared_ptr<DynamicStructuredBuffer<WindIndirectCommand>> indirectCommands;
 	std::shared_ptr<DynamicStructuredBuffer<WindAllocationRecordGPU>> allocationRecords;
 	std::shared_ptr<DynamicStructuredBuffer<DynamicWindVisibleSkeletonGPU>> visibleSkeletons;
@@ -735,6 +761,7 @@ struct WindSharedResources {
     std::uint32_t activeBoneCount = 0u;
     std::uint32_t typeCount = 0u;
     std::uint32_t residentPlacementCount = 0u;
+    std::uint32_t activeSkinnedPlacementResidentSize = 0u;
     std::uint32_t residentTransformCount = 0u;
     std::uint32_t lastLoggedRegisteredTypes = ~0u;
     std::uint32_t lastLoggedPlacementCount = ~0u;
@@ -744,7 +771,7 @@ struct WindSharedResources {
 	std::uint32_t lastStructuralTransformCount = ~0u;
 	std::uint32_t lastStructuralPlacementCapacity = ~0u;
 	std::uint32_t lastStructuralPlacementCount = ~0u;
-	const SortedUnsignedIntBuffer* lastActivePlacementsBuffer = nullptr;
+	const org::GloballyIndexedResource* lastActivePlacementsBuffer = nullptr;
 	std::string lastLoggedLayoutSummary;
     float nextTelemetrySeconds = 2.0f;
     float elapsedSeconds = 0.0f;
@@ -752,7 +779,7 @@ struct WindSharedResources {
     WindState state{};
     float displacementScale = 1.0f;
     ResidentWindPair residentPair{};
-    SkeletonManager::TransientWindRegion transientRegion{};
+    br::render::TransientWindRegion transientRegion{};
 };
 
 void BindAndDispatch(PassExecutionContext& executionContext, const PipelineState& pso, const WindRootConstants& constants)
@@ -866,19 +893,20 @@ void SetActivationPhaseAndDepth(
     bool latePhase)
 {
     constants.phaseAndDepthDescriptor = latePhase ? kLatePhaseBit : 0u;
-    if (!renderContext || !renderContext->viewManager ||
+    if (!renderContext ||
         !SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")())
         return;
 
-    const auto* view = renderContext->viewManager->Get(renderContext->primaryViewID);
-    if (!view) return;
+    const auto view = std::ranges::find(renderContext->preparedViews,
+        renderContext->primaryViewID, &PreparedViewFrameData::id);
+    if (view == renderContext->preparedViews.end()) return;
     const auto depthMap = latePhase
-        ? view->gpu.linearDepthMap
-        : (view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr);
+        ? view->linearDepthMap
+        : (view->depthHistory ? view->depthHistory.resource : nullptr);
     if (!depthMap || depthMap->GetNumSRVSlices() == 0u) return;
 
-    std::uint32_t slice = view->cameraInfo.depthBufferArrayIndex >= 0
-        ? static_cast<std::uint32_t>(view->cameraInfo.depthBufferArrayIndex)
+    std::uint32_t slice = view->depthBufferArrayIndex >= 0
+        ? static_cast<std::uint32_t>(view->depthBufferArrayIndex)
         : 0u;
     slice = (std::min)(slice, depthMap->GetNumSRVSlices() - 1u);
     constants.phaseAndDepthDescriptor |= depthMap->GetSRVInfo(0, slice).slot.index & kDepthDescriptorMask;
@@ -890,17 +918,18 @@ void SetActivationPhaseAndDepth(
     bool latePhase)
 {
     constants.phaseAndDepthDescriptor = latePhase ? kLatePhaseBit : 0u;
-    if (!context || !context->viewManager ||
+    if (!context ||
         !SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")())
         return;
-    const auto* view = context->viewManager->Get(context->primaryViewID);
-    if (!view) return;
+    const auto view = std::ranges::find(context->preparedViews,
+        context->primaryViewID, &PreparedViewFrameData::id);
+    if (view == context->preparedViews.end()) return;
     const auto depthMap = latePhase
-        ? view->gpu.linearDepthMap
-        : (view->gpu.lastFrameLinearDepthValid ? view->gpu.lastFrameLinearDepthMap : nullptr);
+        ? view->linearDepthMap
+        : (view->depthHistory ? view->depthHistory.resource : nullptr);
     if (!depthMap || depthMap->GetNumSRVSlices() == 0u) return;
-    std::uint32_t slice = view->cameraInfo.depthBufferArrayIndex >= 0
-        ? static_cast<std::uint32_t>(view->cameraInfo.depthBufferArrayIndex) : 0u;
+    std::uint32_t slice = view->depthBufferArrayIndex >= 0
+        ? static_cast<std::uint32_t>(view->depthBufferArrayIndex) : 0u;
     slice = (std::min)(slice, depthMap->GetNumSRVSlices() - 1u);
     constants.phaseAndDepthDescriptor |= depthMap->GetSRVInfo(0, slice).slot.index & kDepthDescriptorMask;
 }
@@ -990,8 +1019,10 @@ public:
             m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::BoneTransforms),
             m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseSkinMatrices),
             m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::SkeletonResources::InverseBindMatrices));
-        if (context && context->viewManager) {
-            if (const auto* view = context->viewManager->Get(context->primaryViewID)) constants.cameraIndex = view->gpu.cameraBufferIndex;
+        if (context) {
+            const auto view = std::ranges::find(context->preparedViews,
+                context->primaryViewID, &PreparedViewFrameData::id);
+            if (view != context->preparedViews.end()) constants.cameraIndex = view->cameraBufferIndex;
         }
         constants.capacityTarget = (std::max)(0.0f,
             SettingsManager::GetInstance().getSettingGetter<float>(ProceduralWindInnerRadiusSettingName)());

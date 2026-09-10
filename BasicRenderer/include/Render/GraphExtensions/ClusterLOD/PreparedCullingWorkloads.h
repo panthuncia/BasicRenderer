@@ -9,6 +9,7 @@
 
 #include "Managers/ViewManager.h"
 #include "Render/PublishedRendererState.h"
+#include "Render/IndirectStateArtifacts.h"
 #include "Render/RenderContext.h"
 #include "Render/RenderPhase.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"

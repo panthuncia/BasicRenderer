@@ -319,7 +319,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     auto& context = *updateContext;
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
-    auto numViews = context.viewManager->GetCameraBufferSize();
+    auto numViews = context.preparedViewCameraBufferSize;
     std::vector<std::shared_ptr<PixelBuffer>> visibilityBuffers;
     std::vector<std::shared_ptr<PixelBuffer>> deepVisibilityHeadPointerBuffers;
 
@@ -340,31 +340,25 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
         maxViewHeight = maxViewWidth;
     }
 
-    context.viewManager->ForEachView([&](uint64_t v) {
-        auto viewInfo = context.viewManager->Get(v);
-        if (!viewInfo) {
-            return;
-        }
+    for (const auto& viewInfo : context.preparedViews) {
 
         if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-            if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+            if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
                 totalViewPixels += static_cast<uint64_t>(maxViewWidth) * static_cast<uint64_t>(maxViewHeight);
             }
-            return;
+            continue;
         }
 
-        if (!viewInfo->gpu.visibilityBuffer) {
-            return;
-        }
+        if (!viewInfo.visibilityBuffer) continue;
 
         if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
-            maxViewWidth = std::max(maxViewWidth, viewInfo->gpu.visibilityBuffer->GetWidth());
-            maxViewHeight = std::max(maxViewHeight, viewInfo->gpu.visibilityBuffer->GetHeight());
+            maxViewWidth = std::max(maxViewWidth, viewInfo.visibilityBuffer->GetWidth());
+            maxViewHeight = std::max(maxViewHeight, viewInfo.visibilityBuffer->GetHeight());
         }
         else if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
-            auto headPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(v);
+            auto headPointers = viewInfo.deepVisibilityHeadPointers;
             if (!headPointers) {
-                return;
+                continue;
             }
 
             maxViewWidth = std::max(maxViewWidth, headPointers->GetWidth());
@@ -373,73 +367,67 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
                 static_cast<uint64_t>(headPointers->GetHeight());
         }
         else {
-            maxViewWidth = std::max(maxViewWidth, rasterDimension(viewInfo->gpu.visibilityBuffer->GetWidth()));
-            maxViewHeight = std::max(maxViewHeight, rasterDimension(viewInfo->gpu.visibilityBuffer->GetHeight()));
+            maxViewWidth = std::max(maxViewWidth, rasterDimension(viewInfo.visibilityBuffer->GetWidth()));
+            maxViewHeight = std::max(maxViewHeight, rasterDimension(viewInfo.visibilityBuffer->GetHeight()));
         }
-    });
+    }
 
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-    context.viewManager->ForEachView([&](uint64_t v) {
-        auto viewInfo = context.viewManager->Get(v);
-        if (!viewInfo) {
-            return;
-        }
-
-        auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+    for (const auto& viewInfo : context.preparedViews) {
+        auto cameraIndex = viewInfo.cameraBufferIndex;
+        if (cameraIndex >= viewRasterInfo.size()) continue;
         CLodViewRasterInfo info{};
         info.scissorMinX = 0;
         info.scissorMinY = 0;
 
         if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-            if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+            if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
                 info.scissorMaxX = maxViewWidth;
                 info.scissorMaxY = maxViewHeight;
                 info.viewportScaleX = 1.0f;
                 info.viewportScaleY = 1.0f;
             }
             viewRasterInfo[cameraIndex] = info;
-            return;
+            continue;
         }
 
-        if (!viewInfo->gpu.visibilityBuffer) {
-            return;
-        }
+        if (!viewInfo.visibilityBuffer) continue;
 
         if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
             info.visibilityUAVDescriptorIndex =
-                viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
-            info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
-            visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+                viewInfo.visibilityUAVIndex;
+            info.scissorMaxX = viewInfo.visibilityBuffer->GetWidth();
+            info.scissorMaxY = viewInfo.visibilityBuffer->GetHeight();
+            visibilityBuffers.push_back(viewInfo.visibilityBuffer);
         }
         else if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
-            auto headPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(v);
+            auto headPointers = viewInfo.deepVisibilityHeadPointers;
             if (!headPointers) {
                 viewRasterInfo[cameraIndex] = info;
-                return;
+                continue;
             }
 
             info.opaqueVisibilitySRVDescriptorIndex =
-                viewInfo->gpu.visibilityBuffer->GetSRVInfo(0).slot.index;
+                viewInfo.visibilitySRVIndex;
             info.deepVisibilityHeadPointerUAVDescriptorIndex =
                 headPointers->GetUAVShaderVisibleInfo(0).slot.index;
             info.scissorMaxX = headPointers->GetWidth();
             info.scissorMaxY = headPointers->GetHeight();
-            visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+            visibilityBuffers.push_back(viewInfo.visibilityBuffer);
             deepVisibilityHeadPointerBuffers.push_back(std::move(headPointers));
         }
         else {
             info.opaqueVisibilitySRVDescriptorIndex =
-                viewInfo->gpu.visibilityBuffer->GetSRVInfo(0).slot.index;
-            info.scissorMaxX = rasterDimension(viewInfo->gpu.visibilityBuffer->GetWidth());
-            info.scissorMaxY = rasterDimension(viewInfo->gpu.visibilityBuffer->GetHeight());
-            visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+                viewInfo.visibilitySRVIndex;
+            info.scissorMaxX = rasterDimension(viewInfo.visibilityBuffer->GetWidth());
+            info.scissorMaxY = rasterDimension(viewInfo.visibilityBuffer->GetHeight());
+            visibilityBuffers.push_back(viewInfo.visibilityBuffer);
         }
 
         info.viewportScaleX = static_cast<float>(info.scissorMaxX) / static_cast<float>(maxViewWidth);
         info.viewportScaleY = static_cast<float>(info.scissorMaxY) / static_cast<float>(maxViewHeight);
         viewRasterInfo[cameraIndex] = info;
-    });
+    }
 
     m_passWidth = maxViewWidth;
     m_passHeight = maxViewHeight;
@@ -537,11 +525,21 @@ br::render::PreparedRenderIndirectSequence ClusterRasterizationPass::Prepare(
         misc[MiscEnablePunctualLights] = m_getPunctualLightingEnabled ? m_getPunctualLightingEnabled() : 0u;
         misc[MiscEnableGTAO] = m_gtaoEnabled;
     }
-    misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = srv(bindings.histogram);
-    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
-    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.transforms);
-    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.viewInfo);
-    misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = srv(bindings.mapping);
+    // These indices form one table with the descriptor indices embedded in
+    // m_viewRasterInfoBuffer. Keep the table on one descriptor publication.
+    // Resolving the individual tokens against the accepted binding table while
+    // the embedded entries came from the shared publication split that table
+    // and redirected visibility writes.
+    misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] =
+        m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] =
+        m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] =
+        m_compactedVisibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] =
+        m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] =
+        m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
     if (data.phase1VisibilityDiagnostics) {
         const auto compareView = [](std::string_view label, uint32_t frozen, uint32_t live) {
             basic_telemetry::SetGauge(std::string("BasicRenderer.CLod.Phase1.View.") +
@@ -559,13 +557,39 @@ br::render::PreparedRenderIndirectSequence ClusterRasterizationPass::Prepare(
             m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index);
         compareView("Mapping", misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX],
             m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index);
+        const auto validView = std::ranges::find_if(m_viewRasterInfos,
+            [](const CLodViewRasterInfo& info) {
+                return info.visibilityUAVDescriptorIndex != 0xFFFFFFFFu;
+            });
+        if (validView != m_viewRasterInfos.end()) {
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.PrimaryVisibilityDescriptorIndex",
+                static_cast<int64_t>(validView->visibilityUAVDescriptorIndex));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.PrimaryVisibilityWidth",
+                static_cast<int64_t>(validView->scissorMaxX));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.PrimaryVisibilityHeight",
+                static_cast<int64_t>(validView->scissorMaxY));
+        }
     }
     misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     misc[CLOD_RASTER_SINGLE_VIEW_VISIBILITY_UAV_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_COUNTER_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     misc[CLOD_RASTER_SOURCE_GROUP_MISMATCH_DETAILS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
-    if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer && bindings.visibilityBuffers.size() == 1u)
-        misc[CLOD_RASTER_SINGLE_VIEW_VISIBILITY_UAV_DESCRIPTOR_INDEX] = uav(bindings.visibilityBuffers.front());
+    if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer && m_visibilityBuffers.size() == 1u)
+        misc[CLOD_RASTER_SINGLE_VIEW_VISIBILITY_UAV_DESCRIPTOR_INDEX] =
+            m_visibilityBuffers.front()->GetUAVShaderVisibleInfo(0).slot.index;
+    if (data.phase1VisibilityDiagnostics && bindings.visibilityBuffers.size() == 1u) {
+        const auto frozenVisibility = misc[CLOD_RASTER_SINGLE_VIEW_VISIBILITY_UAV_DESCRIPTOR_INDEX];
+        const auto liveVisibility =
+            m_visibilityBuffers.front()->GetUAVShaderVisibleInfo(0).slot.index;
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.View.Visibility.Frozen",
+            static_cast<int64_t>(frozenVisibility));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.View.Visibility.Live",
+            static_cast<int64_t>(liveVisibility));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.PreparedResourceHeapIndex",
+            static_cast<int64_t>(data.resourceHeap.index));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.PreparedResourceHeapGeneration",
+            static_cast<int64_t>(data.resourceHeap.generation));
+    }
     if (bindings.hasTelemetry && IsCLodWorkGraphTelemetryEnabled())
         misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = uav(bindings.telemetry);
     if (bindings.hasMismatch) {

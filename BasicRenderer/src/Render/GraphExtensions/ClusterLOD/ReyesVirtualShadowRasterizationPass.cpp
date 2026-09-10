@@ -149,18 +149,13 @@ void ReyesVirtualShadowRasterizationPass::Update(const UpdateExecutionContext& e
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
     m_shadowConfig = virtualShadowConfig;
 
-    const auto numViews = context.viewManager->GetCameraBufferSize();
+    const auto numViews = context.preparedViewCameraBufferSize;
     std::vector<CLodViewRasterInfo> nextViewRasterInfos(numViews);
 
-    context.viewManager->ForEachView([&](uint64_t viewID) {
-        const auto* viewInfo = context.viewManager->Get(viewID);
-        if (!viewInfo) {
-            return;
-        }
-
-        const auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+    for (const auto& viewInfo : context.preparedViews) {
+        const auto cameraIndex = viewInfo.cameraBufferIndex;
         CLodViewRasterInfo info{};
-        if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+        if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
             info.scissorMinX = 0u;
             info.scissorMinY = 0u;
             info.scissorMaxX = virtualShadowConfig.virtualResolution;
@@ -169,7 +164,7 @@ void ReyesVirtualShadowRasterizationPass::Update(const UpdateExecutionContext& e
             info.viewportScaleY = 1.0f;
         }
         nextViewRasterInfos[cameraIndex] = info;
-    });
+    }
 
     if (m_viewRasterInfos != nextViewRasterInfos) {
         m_viewRasterInfos = std::move(nextViewRasterInfos);

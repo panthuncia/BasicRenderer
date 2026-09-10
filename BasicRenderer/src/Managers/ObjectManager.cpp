@@ -433,6 +433,23 @@ void ObjectManager::SetRendererStateServices(
 	}
 	m_visibilityGenerationBackingPool =
 		std::make_shared<br::render::VersionedGpuBufferBackingPool>();
+	m_skinnedPlacementBackingPool = std::make_shared<br::render::VersionedGpuBufferBackingPool>();
+	m_activeSkinnedPlacementBackingPool = std::make_shared<br::render::VersionedGpuBufferBackingPool>();
+	PublishSkinnedPlacementSourceVersionLocked();
+	const auto registerPlacementResolver = [&](ResourceIdentifier identifier, std::uint64_t variant,
+		const std::shared_ptr<Resource>& bootstrap) {
+		m_graphBufferResolvers.emplace(identifier,
+			std::make_shared<PublishedStateResourceResolver>(source,
+				br::render::PublishedResourceKey{
+					br::render::PublishedFragmentKind::DrawRecords,
+					br::render::PublishedResourceUsage::ShaderResource, 0, 0, variant },
+				bootstrap));
+		m_resources.erase(identifier);
+	};
+	registerPlacementResolver(Builtin::SkinnedAssemblyPlacements,
+		br::render::kObjectSkinnedPlacementVariant, m_skinnedAssemblyPlacements);
+	registerPlacementResolver(Builtin::ActiveSkinnedAssemblyPlacements,
+		br::render::kObjectActiveSkinnedPlacementVariant, m_activeSkinnedAssemblyPlacements);
 	// Establish the initial immutable cut before the renderer begins consuming
 	// graph state. No mutation can race service initialization.
 	SealDesiredBufferStateLocked();
@@ -453,19 +470,21 @@ std::uint64_t ObjectManager::SealDesiredBufferStateLocked() {
 			(cut.fingerprint << 6u) + (cut.fingerprint >> 2u);
 	}
 	cut.visibility = m_visibilityGenerationJournal.CaptureDesired();
+	cut.skinnedPlacements = m_skinnedPlacementJournal.CaptureDesired();
+	cut.activeSkinnedPlacements = m_activeSkinnedPlacementJournal.CaptureDesired();
 	cut.coveredMutationGeneration =
 		m_objectBufferMutationGeneration.load(std::memory_order_acquire);
 	cut.residentTransformCount = static_cast<std::uint32_t>(
 		GetResidentInstanceTransformCount());
-	cut.skinnedPlacements = m_skinnedAssemblyPlacements;
-	cut.activeSkinnedPlacements = m_activeSkinnedAssemblyPlacements;
-	cut.activeSkinnedPlacementResidentSize = m_activeSkinnedAssemblyPlacements
-		? static_cast<std::uint32_t>(m_activeSkinnedAssemblyPlacements->ResidentSize()) : 0u;
 	cut.placementRecords = m_publishedSkinnedPlacementRecords;
 	cut.activePlacementEntries = m_publishedActiveSkinnedPlacementEntries;
 	const auto visibilityRevision =
 		(std::max<std::uint64_t>)(cut.visibility.writeSequence, 1u);
 	cut.fingerprint ^= visibilityRevision + 0x9e3779b97f4a7c15ull +
+		(cut.fingerprint << 6u) + (cut.fingerprint >> 2u);
+	cut.fingerprint ^= cut.skinnedPlacements.writeSequence + 0x9e3779b97f4a7c15ull +
+		(cut.fingerprint << 6u) + (cut.fingerprint >> 2u);
+	cut.fingerprint ^= cut.activeSkinnedPlacements.writeSequence + 0x9e3779b97f4a7c15ull +
 		(cut.fingerprint << 6u) + (cut.fingerprint >> 2u);
 	cut.fingerprint ^= cut.coveredMutationGeneration + 0x9e3779b97f4a7c15ull +
 		(cut.fingerprint << 6u) + (cut.fingerprint >> 2u);
@@ -632,14 +651,52 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 			m_visibilityGenerationSubmittedVersion = results[resultIndex].version;
 		}
 	}
+	const auto publishPlacementVersion = [&](const br::render::VersionedGpuBufferJournal::Capture& capture,
+		std::uint64_t variant, std::uint32_t stride, std::string_view debugName,
+		const std::shared_ptr<br::render::VersionedGpuBufferBackingPool>& backingPool,
+		br::render::ArtifactVersionID& submittedVersion) {
+		const auto revision = (std::max<std::uint64_t>)(capture.writeSequence, 1u);
+		if (submittedVersion.revision == revision) return true;
+		auto input = std::make_shared<br::render::VersionedGpuBufferBuildInput>();
+		input->uploadService = m_uploadService;
+		input->debugName = std::string(debugName);
+		input->writeSequence = capture.writeSequence;
+		input->elementStride = stride;
+		input->elementCount = capture.elementCount;
+		input->capacity = capture.capacity;
+		input->catalogOwner = br::render::PublishedFragmentKind::DrawRecords;
+		input->catalogUsage = br::render::PublishedResourceUsage::ShaderResource;
+		input->catalogVariant = variant;
+		input->previous = capture.previous;
+		input->backingPool = backingPool;
+		input->writes = capture.writes;
+		input->image = capture.image;
+		input->journalBaseSequence = capture.journalBaseSequence;
+		const auto request = m_rendererStateRequests->SubmitLatest({
+			{ br::render::ArtifactKind::BufferVersion, 0x4f424a4255460000ull, variant },
+			revision, {},
+			br::render::ArtifactPayload::Make<br::render::VersionedGpuBufferBuildInput>(std::move(input)),
+			(revision << 8u) ^ variant });
+		if (!request) return false;
+		submittedVersion = request.version;
+		return true;
+	};
+	if (!publishPlacementVersion(snapshotCut->skinnedPlacements,
+			br::render::kObjectSkinnedPlacementVariant, sizeof(SkinnedAssemblyPlacementGPU),
+			"Published::SkinnedAssemblyPlacements", m_skinnedPlacementBackingPool,
+			m_skinnedPlacementSubmittedVersion) ||
+		!publishPlacementVersion(snapshotCut->activeSkinnedPlacements,
+			br::render::kObjectActiveSkinnedPlacementVariant,
+			sizeof(br::render::PublishedActiveSkinnedPlacement),
+			"Published::ActiveSkinnedAssemblyPlacements", m_activeSkinnedPlacementBackingPool,
+			m_activeSkinnedPlacementSubmittedVersion)) {
+		m_objectBufferGraphDirty.store(true, std::memory_order_release);
+		return m_objectBufferStateRevision;
+	}
 
 	auto rootInput = std::make_shared<br::render::ObjectBufferStateBuildInput>();
 	rootInput->coveredMutationGeneration = coveredMutationGeneration;
 	rootInput->residentTransformCount = snapshotCut->residentTransformCount;
-	rootInput->skinnedPlacements = snapshotCut->skinnedPlacements;
-	rootInput->activeSkinnedPlacements = snapshotCut->activeSkinnedPlacements;
-	rootInput->activeSkinnedPlacementResidentSize =
-		snapshotCut->activeSkinnedPlacementResidentSize;
 	rootInput->placementRecords = snapshotCut->placementRecords;
 	rootInput->activePlacementEntries = snapshotCut->activePlacementEntries;
 	std::vector<br::render::ArtifactRequirement> requirements;
@@ -667,6 +724,22 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 	requirements.push_back(br::render::Exact(
 		m_visibilityGenerationSubmittedVersion,
 		br::render::ArtifactReadiness::UploadSubmitted));
+	const auto appendPlacementRequirement = [&](const br::render::ArtifactVersionID& version,
+		const br::render::VersionedGpuBufferJournal::Capture& capture,
+		std::uint64_t variant, std::uint32_t stride) {
+		rootInput->buffers.push_back({
+			{ br::render::ArtifactKind::BufferVersion, 0x4f424a4255460000ull, variant },
+			(std::max<std::uint64_t>)(capture.writeSequence, 1u), stride, variant });
+		requirements.push_back(br::render::Exact(
+			version, br::render::ArtifactReadiness::UploadSubmitted));
+	};
+	appendPlacementRequirement(m_skinnedPlacementSubmittedVersion,
+		snapshotCut->skinnedPlacements, br::render::kObjectSkinnedPlacementVariant,
+		sizeof(SkinnedAssemblyPlacementGPU));
+	appendPlacementRequirement(m_activeSkinnedPlacementSubmittedVersion,
+		snapshotCut->activeSkinnedPlacements,
+		br::render::kObjectActiveSkinnedPlacementVariant,
+		sizeof(br::render::PublishedActiveSkinnedPlacement));
 	if (fingerprint != m_objectBufferFingerprint) {
 		const auto candidateRevision = m_objectBufferStateRevision + 1u;
 		const auto rootRequest = m_rendererStateRequests->SubmitLatest({
@@ -767,15 +840,29 @@ void ObjectManager::AcknowledgePublishedBufferState(
 				version->backing->backingGeneration, m_graphFramesInFlight);
 		}
 	}
-	const auto visibilityIndex = state->buffers.size() - 1u;
-	const auto visibilityVersion = visibilityIndex < state->versions.size()
-		? state->versions[visibilityIndex] : nullptr;
+	const auto visibilityVersion = state->FindVersion(
+		br::render::kObjectVisibilityGenerationVariant);
 	if (!visibilityVersion) return;
 	m_visibilityGenerationJournal.Acknowledge(visibilityVersion);
 	if (auto pool = visibilityVersion->backingPool.lock(); visibilityVersion->backing) {
 		pool->AcknowledgePublished(
 			visibilityVersion->backing->backingGeneration, m_graphFramesInFlight);
 	}
+	const auto acknowledgePlacement = [&](std::uint64_t variant,
+		br::render::VersionedGpuBufferJournal& journal) {
+		const auto version = state->FindVersion(variant);
+		if (!version) return false;
+		journal.Acknowledge(version);
+		if (auto pool = version->backingPool.lock(); version->backing) {
+			pool->AcknowledgePublished(
+				version->backing->backingGeneration, m_graphFramesInFlight);
+		}
+		return true;
+	};
+	if (!acknowledgePlacement(br::render::kObjectSkinnedPlacementVariant,
+			m_skinnedPlacementJournal) ||
+		!acknowledgePlacement(br::render::kObjectActiveSkinnedPlacementVariant,
+			m_activeSkinnedPlacementJournal)) return;
 
 	m_activeObjectBufferStateRevision.store(published->drawRecords.revision, std::memory_order_release);
 	m_lastBufferStatePublicationRetirementEpoch =
@@ -2461,6 +2548,16 @@ void ObjectManager::PublishSkinnedPlacementSourceVersionLocked() {
 		}
 	}
 	m_publishedActiveSkinnedPlacementEntries = std::move(activePlacementEntries);
+	const auto placementBytes = std::as_bytes(std::span(*m_publishedSkinnedPlacementRecords));
+	m_skinnedPlacementJournal.ReplaceImage(placementBytes,
+		m_publishedSkinnedPlacementRecords->size(),
+		(std::max<std::size_t>)(1u, m_publishedSkinnedPlacementRecords->size()));
+	static_assert(sizeof(br::render::PublishedActiveSkinnedPlacement) ==
+		sizeof(SortedUnsignedIntBuffer::ActiveDrawSetEntry));
+	const auto activeBytes = std::as_bytes(std::span(*m_publishedActiveSkinnedPlacementEntries));
+	m_activeSkinnedPlacementJournal.ReplaceImage(activeBytes,
+		m_publishedActiveSkinnedPlacementEntries->size(),
+		(std::max<std::size_t>)(1u, m_publishedActiveSkinnedPlacementEntries->size()));
 	m_objectBufferGraphDirty.store(true, std::memory_order_release);
 	basic_telemetry::AddCounter("SARP.AsyncState.ObjectPlacementSnapshot.Published");
 	basic_telemetry::Record("SARP.AsyncState.ObjectPlacementSnapshot.BuildNs",

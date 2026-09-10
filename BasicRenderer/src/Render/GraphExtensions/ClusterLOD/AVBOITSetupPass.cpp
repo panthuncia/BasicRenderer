@@ -130,16 +130,10 @@ void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
 	m_integratedTransmittanceTexture->EnsureVirtualDescriptorSlotsAllocated();
     m_zeroTransmittanceSliceTexture->EnsureVirtualDescriptorSlotsAllocated();
 
-    if (context.viewManager) {
-        context.viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewID) {
-            const View* view = context.viewManager->Get(viewID);
-            if (!view) {
-                return;
-            }
-
-            m_config.viewNearDepth = view->cameraInfo.zNear;
-            m_config.viewFarDepth = view->cameraInfo.zFar;
-        });
+    for (const auto& view : context.preparedViews) if (view.primary) {
+        m_config.viewNearDepth = view.cameraInfo.zNear;
+        m_config.viewFarDepth = view.cameraInfo.zFar;
+        break;
     }
 
     BUFFER_UPLOAD(&m_config, sizeof(m_config), org::runtime::UploadTarget::FromShared(m_configBuffer), 0);

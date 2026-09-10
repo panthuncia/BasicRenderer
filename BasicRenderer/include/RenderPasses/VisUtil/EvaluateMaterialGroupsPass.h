@@ -11,7 +11,6 @@
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/MaterialManager.h"
-#include "Managers/MeshManager.h"
 #include "Render/RenderContext.h"
 #include "Render/MaterialStateArtifacts.h"
 #include "Render/IndirectCommand.h"
@@ -81,15 +80,7 @@ public:
             .with<CLodReyesTessTableTrianglesTag>()
             .build();
 
-        // Retrieve the page pool slab ResourceGroup for render graph tracking.
-        try {
-            auto getter = m_services.settings->getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
-            if (auto* mm = getter()()) {
-                if (auto* pool = mm->GetCLodPagePool()) {
-                    m_slabResourceGroup = pool->GetSlabResourceGroup();
-                }
-            }
-        } catch (...) {}
+        m_slabResourceGroup = m_services.clodSlabResources;
     }
 
     EvaluateMaterialGroupsBindings Declare(org::PassBuilder& builder) {

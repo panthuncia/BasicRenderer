@@ -42,16 +42,15 @@ void PerViewLinearDepthCopyPass::Initialize() {
 void PerViewLinearDepthCopyPass::Update(const UpdateExecutionContext& executionContext) {
     const auto* context = executionContext.hostData->Get<UpdateContext>();
     std::vector<ViewSnapshot> views;
-    context->viewManager->ForEachView([&](uint64_t viewID) {
-        const auto* view = context->viewManager->Get(viewID);
-        if (!view || !view->gpu.visibilityBuffer || !view->gpu.linearDepthMap) return;
-        const auto& projection = view->cameraInfo.unjitteredProjection;
-        views.push_back({view->gpu.visibilityBuffer, view->gpu.linearDepthMap,
-            view->gpu.visibilityBuffer->GetWidth(), view->gpu.visibilityBuffer->GetHeight(),
-            view->flags.primaryCamera,
+    for (const auto& view : context->preparedViews) {
+        if (!view.visibilityBuffer || !view.linearDepthMap) continue;
+        const auto& projection = view.cameraInfo.unjitteredProjection;
+        views.push_back({view.visibilityBuffer, view.linearDepthMap,
+            view.visibilityBuffer->GetWidth(), view.visibilityBuffer->GetHeight(),
+            view.primary,
             {as_uint(DirectX::XMVectorGetZ(projection.r[2])),
                 as_uint(DirectX::XMVectorGetZ(projection.r[3]))}});
-    });
+    }
     m_declaredResourcesChanged = views != m_views;
     m_views = std::move(views);
 }

@@ -627,10 +627,9 @@ private:
 	struct ObjectBufferSnapshotCut {
 		std::vector<br::render::VersionedGpuBufferJournal::Capture> buffers;
 		br::render::VersionedGpuBufferJournal::Capture visibility;
+		br::render::VersionedGpuBufferJournal::Capture skinnedPlacements;
+		br::render::VersionedGpuBufferJournal::Capture activeSkinnedPlacements;
 		std::uint32_t residentTransformCount = 0;
-		std::shared_ptr<DynamicStructuredBuffer<SkinnedAssemblyPlacementGPU>> skinnedPlacements;
-		std::shared_ptr<SortedUnsignedIntBuffer> activeSkinnedPlacements;
-		std::uint32_t activeSkinnedPlacementResidentSize = 0;
 		std::shared_ptr<const std::vector<SkinnedAssemblyPlacementGPU>> placementRecords;
 		std::shared_ptr<const std::vector<br::render::PublishedActiveSkinnedPlacement>> activePlacementEntries;
 		std::uint64_t fingerprint = 0;
@@ -727,6 +726,13 @@ private:
 	br::render::VersionedGpuBufferJournal m_visibilityGenerationJournal{ sizeof(std::uint32_t) };
 	br::render::ArtifactVersionID m_visibilityGenerationSubmittedVersion{};
 	std::shared_ptr<br::render::VersionedGpuBufferBackingPool> m_visibilityGenerationBackingPool;
+	br::render::VersionedGpuBufferJournal m_skinnedPlacementJournal{ sizeof(SkinnedAssemblyPlacementGPU) };
+	br::render::VersionedGpuBufferJournal m_activeSkinnedPlacementJournal{
+		sizeof(br::render::PublishedActiveSkinnedPlacement) };
+	br::render::ArtifactVersionID m_skinnedPlacementSubmittedVersion{};
+	br::render::ArtifactVersionID m_activeSkinnedPlacementSubmittedVersion{};
+	std::shared_ptr<br::render::VersionedGpuBufferBackingPool> m_skinnedPlacementBackingPool;
+	std::shared_ptr<br::render::VersionedGpuBufferBackingPool> m_activeSkinnedPlacementBackingPool;
 	std::uint32_t m_graphFramesInFlight = 1;
 	std::uint64_t m_lastBufferStatePublicationRetirementEpoch = 0;
 	mutable std::mutex m_desiredBufferStateReadyCallbackMutex;

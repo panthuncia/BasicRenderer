@@ -14,6 +14,7 @@
 #include "Interfaces/IResourceProvider.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Render/IndirectCommand.h"
+#include "Render/ITextureStreamingFeedbackService.h"
 #include "Render/MaterialCompileFlagsSlotRegistry.h"
 #include "Render/MaterialStateArtifacts.h"
 #include "Render/VersionedGpuBufferArtifacts.h"
@@ -32,7 +33,7 @@ namespace org { class CopyPass; }
 using org::CopyPass;
 
 // Manages buffers for per-material-compile-flag work (e.g., visibility buffer per-material)
-class MaterialManager : public IResourceProvider, public br::render::IMaterialStateStorage {
+class MaterialManager : public IResourceProvider, public ITextureStreamingFeedbackService {
 public:
 	~MaterialManager();
 	static std::unique_ptr<MaterialManager> CreateUnique() {
@@ -47,21 +48,16 @@ public:
 
 	unsigned int IncrementMaterialUsageCount(Material& material,
 		bool refreshTextureBindings = false, unsigned int count = 1u);
-	br::render::MaterialUsageBatchEntry CaptureMaterialUsage(
+	struct MaterialUsageCapture {
+		br::render::MaterialUsageBatchEntry entry;
+		std::vector<std::shared_ptr<TextureAsset>> textureServiceInputs;
+	};
+	MaterialUsageCapture CaptureMaterialUsage(
 		Material& material, unsigned int count, bool refreshTextureBindings);
 	std::shared_ptr<const br::render::MaterialUsageReservation> ReserveMaterialUsage(
-		const std::vector<br::render::MaterialUsageBatchEntry>& entries);
+		const std::vector<MaterialUsageCapture>& captures);
 	void RegisterMaterialSource(const std::shared_ptr<Material>& material);
-	std::shared_ptr<const br::render::PublishedMaterialUsageBatch> ApplyMaterialUsageBatch(
-		const br::render::MaterialUsageBatchBuildInput& input);
 	bool ApplyMaterialRowArtifact(const br::render::MaterialRowArtifact& row);
-	bool ApplyRow(const br::render::MaterialRowArtifact& row) override {
-		return ApplyMaterialRowArtifact(row);
-	}
-	std::shared_ptr<const br::render::PublishedMaterialUsageBatch> ApplyUsageBatch(
-		const br::render::MaterialUsageBatchBuildInput& input) override {
-		return ApplyMaterialUsageBatch(input);
-	}
 	void DecrementMaterialUsageCount(const Material& material);
 	void InitializeTextureStreaming(TextureFactory& textureFactory, uint32_t framesInFlight);
 	void ShutdownTextureStreaming();
@@ -72,7 +68,7 @@ public:
 		if (m_textureStreamingManager)
 			m_textureStreamingManager->AcknowledgePublishedImageTable(published);
 	}
-	std::shared_ptr<RenderPass> CreateTextureStreamingFeedbackReadbackPass();
+	std::shared_ptr<RenderPass> CreateTextureStreamingFeedbackReadbackPass() override;
 	void SetTextureStreamingFeedbackSuppressed(bool suppressed) { m_textureStreamingFeedbackSuppressed = suppressed; }
 	MaterialTextureStreamingStats GetMaterialTextureStreamingStats() const;
 	MaterialTextureStreamingReadinessStats GetMaterialTextureStreamingReadinessStats() const;
@@ -102,7 +98,8 @@ public:
 	br::render::ArtifactVersionHandle DesiredPublishedStateHandle() const {
 		return m_materialStateHandle;
 	}
-	bool TryActivatePublishedMaterialState();
+	bool TryActivatePublishedMaterialState(
+		const std::shared_ptr<const br::render::PublishedRendererState>& published);
 	void SetRendererStateServices(br::render::RendererStateRequestService* requests,
 		org::runtime::IUploadService* uploads) {
 		m_rendererStateRequests = requests;
@@ -163,6 +160,8 @@ private:
 	std::vector<unsigned int> m_freeMaterialSlots;
 	mutable std::recursive_mutex m_materialMutationMutex;
 	std::vector<unsigned int> m_materialUsageCounts = { };
+	std::unordered_map<std::uint32_t, std::uint64_t> m_pendingMaterialUsageCounts;
+	std::unordered_set<std::uint32_t> m_materialReservationOwnedIDs;
 	std::unordered_map <unsigned int, unsigned int> m_materialIDSlotMapping;
 	struct MaterialGpuUploadSignature {
 		PerMaterialCB materialData = {};

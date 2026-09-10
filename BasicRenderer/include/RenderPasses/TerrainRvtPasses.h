@@ -13,7 +13,6 @@
 #include <spdlog/spdlog.h>
 
 #include "Render/BuiltinResources.h"
-#include "Managers/MeshManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
@@ -22,9 +21,9 @@
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "Render/ProducerPassServices.h"
 #include "Render/TerrainRvtTelemetry.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
-#include "Resources/Buffers/PagePool.h"
 #include "Resources/Resolvers/ECSResourceResolver.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Resources/components.h"
@@ -274,7 +273,7 @@ struct TerrainRvtMarkVisibilityMaterialPagesBindings {
 class TerrainRvtMarkVisibilityMaterialPagesPass final : public org::TypedRenderGraphPass<TerrainRvtMarkVisibilityMaterialPagesPass,
     br::render::PreparedComputeDispatch, TerrainRvtMarkVisibilityMaterialPagesBindings> {
 public:
-    TerrainRvtMarkVisibilityMaterialPagesPass()
+    explicit TerrainRvtMarkVisibilityMaterialPagesPass(ProducerPassServices& services)
     {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -293,14 +292,7 @@ public:
             .with<CLodExtensionTypeTag>(visBufferTag)
             .with<VisibleClustersCounterTag>()
             .build();
-        try {
-            auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
-            if (auto* meshManager = getter()()) {
-                if (auto* pool = meshManager->GetCLodPagePool()) {
-                    m_slabResourceGroup = pool->GetSlabResourceGroup();
-                }
-            }
-        } catch (...) {}
+        m_slabResourceGroup = services.clodSlabResources;
     }
 
     TerrainRvtMarkVisibilityMaterialPagesBindings Declare(org::PassBuilder& b)

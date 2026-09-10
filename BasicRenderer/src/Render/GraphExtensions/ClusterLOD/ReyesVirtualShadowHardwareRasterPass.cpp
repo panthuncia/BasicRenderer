@@ -118,18 +118,13 @@ void ReyesVirtualShadowHardwareRasterPass::Update(const UpdateExecutionContext& 
     m_bucketFlags.reserve(context.preparedRasterBucketFlags.size());
     for (const auto flags : context.preparedRasterBucketFlags) m_bucketFlags.push_back(static_cast<uint32_t>(flags));
 
-    const auto numViews = context.viewManager->GetCameraBufferSize();
+    const auto numViews = context.preparedViewCameraBufferSize;
     std::vector<CLodViewRasterInfo> nextViewRasterInfos(numViews);
 
-    context.viewManager->ForEachView([&](uint64_t viewID) {
-        const auto* viewInfo = context.viewManager->Get(viewID);
-        if (!viewInfo) {
-            return;
-        }
-
-        const auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+    for (const auto& viewInfo : context.preparedViews) {
+        const auto cameraIndex = viewInfo.cameraBufferIndex;
         CLodViewRasterInfo info{};
-        if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+        if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
             info.scissorMinX = 0u;
             info.scissorMinY = 0u;
             info.scissorMaxX = virtualShadowConfig.virtualResolution;
@@ -138,7 +133,7 @@ void ReyesVirtualShadowHardwareRasterPass::Update(const UpdateExecutionContext& 
             info.viewportScaleY = 1.0f;
         }
         nextViewRasterInfos[cameraIndex] = info;
-    });
+    }
 
     m_passWidth = virtualShadowConfig.virtualResolution;
     m_passHeight = virtualShadowConfig.virtualResolution;

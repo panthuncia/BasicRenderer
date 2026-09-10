@@ -3,8 +3,8 @@
 #include "Render/RenderGraph/RenderGraph.h"
 
 #include "Factories/TextureFactory.h"
-#include "Managers/MaterialManager.h"
 #include "Managers/ReadbackManager.h"
+#include "Render/ITextureStreamingFeedbackService.h"
 #include "Render/Runtime/IUploadService.h"
 
 // Registers "system" passes that live outside the RenderGraph, while keeping the graph
@@ -20,11 +20,11 @@ public:
 	RenderGraphIOExtension(TextureFactory* textureFactory,
 		org::runtime::IUploadService* uploadService,
 		br::ReadbackManager* readbackManager,
-		MaterialManager* materialManager)
+		ITextureStreamingFeedbackService* textureStreamingFeedback)
 		: m_textureFactory(textureFactory),
 		m_uploadService(uploadService),
 		m_readbackManager(readbackManager),
-		m_materialManager(materialManager) {
+		m_textureStreamingFeedback(textureStreamingFeedback) {
 	}
 
 	void OnRegistryReset(ResourceRegistry* reg) override {
@@ -90,8 +90,8 @@ public:
 	void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
 		(void)rg;
 
-		if (m_materialManager) {
-			if (auto readback = m_materialManager->CreateTextureStreamingFeedbackReadbackPass()) {
+		if (m_textureStreamingFeedback) {
+			if (auto readback = m_textureStreamingFeedback->CreateTextureStreamingFeedbackReadbackPass()) {
 				outPasses.push_back(
 					RenderGraph::ExternalPassDesc::Copy("Material::TextureStreamingReadback", readback)
 						.At(RenderGraph::ExternalInsertPoint::After("MenuRenderPass"))
@@ -104,5 +104,5 @@ private:
 	TextureFactory* m_textureFactory = nullptr; // non-owning
 	org::runtime::IUploadService* m_uploadService = nullptr; // non-owning
 	br::ReadbackManager* m_readbackManager = nullptr; // non-owning
-	MaterialManager* m_materialManager = nullptr; // non-owning
+	ITextureStreamingFeedbackService* m_textureStreamingFeedback = nullptr; // renderer-owned service
 };

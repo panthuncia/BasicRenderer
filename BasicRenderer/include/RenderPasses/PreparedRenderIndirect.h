@@ -58,9 +58,14 @@ inline void RecordPreparedRenderIndirectSequence(
     pass.depth = data.hasDepth ? &data.depth : nullptr;
     pass.width = data.width; pass.height = data.height; pass.debugName = data.debugName;
     commands.BeginPass(pass);
-    // The recording envelope binds the accepted frame's shared bindless heaps
-    // before any pass records. Do not replace them with preparation-time handles:
-    // delayed frames can otherwise record against a newer heap publication.
+    // Bind the heap against which preparation resolved the bindless indices.
+    // The shared heap is immutable for the retained publication, and the packet
+    // owns that publication through its prepared dependencies. Relying on the
+    // list envelope here silently paired these indices with another execution
+    // context's heap and redirected phase-1 visibility writes.
+    if (data.resourceHeap.valid())
+        commands.SetDescriptorHeaps(data.resourceHeap,
+            data.samplerHeap.valid() ? std::optional{data.samplerHeap} : std::nullopt);
     commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
     for (const auto& step : data.steps) {
         commands.BindLayout(recording.ResolveLayout(step.program.program));

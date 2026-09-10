@@ -13,7 +13,6 @@
 #include "Resources/Buffers/Buffer.h"
 #include "ShaderBuffers.h"
 
-inline constexpr const char* CLodStreamingMeshManagerGetterSettingName = "getMeshManager";
 inline constexpr const char* CLodStreamingCpuUploadBudgetSettingName = "clodStreamingCpuUploadBudgetRequests";
 inline constexpr const char* CLodStreamingEnableDirectStorageSettingName = "clodStreamingEnableDirectStorage";
 inline constexpr const char* CLodDisableReyesRasterizationSettingName = "clodDisableReyesRasterization";

@@ -296,8 +296,23 @@ struct CLodWorkGraphTelemetryCounters {
         visibilityWrites > pixelInvocations;
 }
 
+// Detect the partial failure mode where indirect mesh work produces a normal
+// triangle count but only the first few pixel waves appear to run. Keep this
+// deliberately conservative: sub-pixel geometry can legitimately produce
+// fewer invocations than triangles, but fewer than one invocation per 64
+// emitted triangles at this workload size is a pipeline failure, not ordinary
+// coverage variation.
+[[nodiscard]] constexpr bool CLodRasterPipelineSeverelyUndercovered(
+    uint32_t outputTriangles, uint32_t pixelInvocations) noexcept {
+    constexpr uint32_t minimumTriangleSample = 4096u;
+    return outputTriangles >= minimumTriangleSample &&
+        static_cast<uint64_t>(pixelInvocations) * 64u < outputTriangles;
+}
+
 static_assert(CLodRasterPipelineCollapsed(10u, 10u, 0u, 0u, 0u, 0u));
 static_assert(!CLodRasterPipelineCollapsed(10u, 10u, 10u, 20u, 100u, 80u));
+static_assert(CLodRasterPipelineSeverelyUndercovered(1'000'000u, 5'000u));
+static_assert(!CLodRasterPipelineSeverelyUndercovered(1'000'000u, 20'000u));
 
 inline constexpr uint32_t CLodVsmAttributionClipmapCapacity = 22u;
 

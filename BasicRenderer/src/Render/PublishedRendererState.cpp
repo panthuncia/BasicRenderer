@@ -290,6 +290,9 @@ PublishedStateFragment& PublishedRendererState::Fragment(PublishedFragmentKind k
     case PublishedFragmentKind::ActiveDrawLists: return activeDrawLists;
     case PublishedFragmentKind::IndirectWorkloads: return indirectWorkloads;
     case PublishedFragmentKind::Grass: return grass;
+    case PublishedFragmentKind::Views: return views;
+    case PublishedFragmentKind::Poses: return poses;
+    case PublishedFragmentKind::Lights: return lights;
     case PublishedFragmentKind::Count: break;
     }
     throw std::out_of_range("published renderer fragment kind");

@@ -1096,10 +1096,9 @@ void TerrainManager::ProcessPendingUpdates()
 	}
 }
 
-bool TerrainManager::TryActivatePublishedTerrainState()
+bool TerrainManager::TryActivatePublishedTerrainState(
+	const std::shared_ptr<const br::render::PublishedRendererState>& published)
 {
-	const auto source = br::render::PublishedStateSource::ProcessSource();
-	const auto published = source ? source->Load() : nullptr;
 	const auto terrain = published
 		? published->terrain.payload.Get<br::render::PublishedTerrainState>() : nullptr;
 	if (!terrain || terrain->terrainGeneration != m_terrainGeneration ||

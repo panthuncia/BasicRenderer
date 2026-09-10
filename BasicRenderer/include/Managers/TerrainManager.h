@@ -13,6 +13,7 @@
 #include "Resources/ResourceGroup.h"
 #include "Resources/Texture.h"
 #include "Render/AsyncStateGraph.h"
+#include "Render/PublishedRendererState.h"
 #include "Render/VersionedGpuBufferArtifacts.h"
 
 class TextureFactory;
@@ -109,7 +110,8 @@ public:
 		m_rendererStateRequests = requests;
 		m_uploadService = uploads;
 	}
-	bool TryActivatePublishedTerrainState();
+	bool TryActivatePublishedTerrainState(
+		const std::shared_ptr<const br::render::PublishedRendererState>& published);
 
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
     std::vector<ResourceIdentifier> GetSupportedKeys() override;

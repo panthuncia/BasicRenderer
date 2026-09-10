@@ -10,20 +10,15 @@
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "ShaderBuffers.h"
+#include "Render/WindPaletteService.h"
 
 class Skeleton; // base skeleton asset or instance
 namespace org { class BufferView; }
 using org::BufferView;
 
-class SkeletonManager : public IResourceProvider {
+class SkeletonManager : public IResourceProvider, public br::render::IWindPaletteService {
 public:
-	struct TransientWindRegion {
-		uint32_t transformBaseMatrices = 0;
-		uint32_t previousTransformBaseMatrices = 0;
-		uint32_t inverseSkinBaseMatrices = 0;
-		uint32_t capacityMatrices = 0;
-		bool valid = false;
-	};
+	using TransientWindRegion = br::render::TransientWindRegion;
 	struct ActiveInstanceView {
 		Skeleton* skeleton = nullptr;
 		uint32_t instanceSlot = 0xFFFFFFFFu;
@@ -55,8 +50,8 @@ public:
     void UpdateAllDirtyInstances();
 	std::vector<ActiveInstanceView> GetActiveInstanceViews() const;
 	uint64_t GetActiveInstanceRevision() const noexcept { return m_activeInstanceRevision; }
-	TransientWindRegion ReserveTransientWindRegion(uint32_t matrixCapacity);
-	void EnsureTransientWindInstanceSlots(uint32_t drawRecordCapacity);
+	TransientWindRegion ReserveTransientWindRegion(uint32_t matrixCapacity) override;
+	void EnsureTransientWindInstanceSlots(uint32_t drawRecordCapacity) override;
 
     // IResourceProvider
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;

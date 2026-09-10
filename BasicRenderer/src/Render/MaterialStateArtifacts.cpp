@@ -7,29 +7,31 @@
 #include <BasicTelemetry/Telemetry.h>
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace br::render {
 namespace {
 
-ArtifactBuildResult BuildMaterialRow(const ArtifactBuildContext& context,
-    IMaterialStateStorage& storage) {
+ArtifactBuildResult BuildMaterialRow(const ArtifactBuildContext& context) {
     const auto input = context.input.Get<MaterialRowInput>();
     if (!input || input->materialID != context.key.primaryID ||
         input->sourceRevision != context.revision) {
         return ArtifactBuildResult::Failure("material-row immutable input identity mismatch");
     }
-    auto row = std::make_shared<MaterialRowArtifact>();
-    row->materialID = input->materialID;
-    row->materialSlot = input->materialSlot;
-    row->sourceRevision = input->sourceRevision;
-    row->base = input->base;
-    row->evaluation = input->evaluation;
-    row->openPbr = input->openPbr;
+    const auto row = input->reservation ? input->reservation->Row() : nullptr;
+    if (!row || row->materialID != input->materialID ||
+        row->materialSlot != input->materialSlot ||
+        row->sourceRevision != input->sourceRevision) {
+        return ArtifactBuildResult::Failure("material-row reservation identity mismatch");
+    }
     auto result = ArtifactBuildResult::Ready(
         ArtifactPayload::Make<MaterialRowArtifact>(row));
+    const auto reservation = input->reservation;
     result.acceptance = { TaskLane::Streaming, TaskDomain::MaterialAcceptance,
-        [&storage, row](const ArtifactSnapshot&) {
-            (void)storage.ApplyRow(*row);
+        [reservation](const ArtifactSnapshot&) {
+            if (!reservation->Commit()) {
+                throw std::runtime_error("material-row reservation commit failed");
+            }
         } };
     return result;
 }
@@ -102,20 +104,18 @@ void RegisterMaterialStateProducer(AsyncStateGraph& graph) {
         "MaterialStateArtifact::Build", BuildMaterialState });
 }
 
-void RegisterMaterialRowProducer(AsyncStateGraph& graph, IMaterialStateStorage& storage) {
+void RegisterMaterialRowProducer(AsyncStateGraph& graph) {
     graph.RegisterProducer(ArtifactKind::Material, {
         TaskLane::Streaming, TaskDomain::MaterialAcceptance,
         "MaterialRowArtifact::Build",
-        [&storage](const ArtifactBuildContext& context) {
-            return BuildMaterialRow(context, storage);
-        } });
+        BuildMaterialRow });
 }
 
-void RegisterMaterialUsageBatchProducer(AsyncStateGraph& graph, IMaterialStateStorage& storage) {
+void RegisterMaterialUsageBatchProducer(AsyncStateGraph& graph) {
     graph.RegisterProducer(ArtifactKind::MaterialUsageBatch, {
         TaskLane::Streaming, TaskDomain::MaterialAcceptance,
         "MaterialStateArtifact::AdmitUsageBatch",
-        [&storage](const ArtifactBuildContext& context) {
+        [](const ArtifactBuildContext& context) {
             const auto input = context.input.Get<MaterialUsageBatchBuildInput>();
             if (!input) return ArtifactBuildResult::Failure(
                 "material usage batch immutable input missing");
@@ -134,11 +134,20 @@ void RegisterMaterialUsageBatchProducer(AsyncStateGraph& graph, IMaterialStateSt
                     }
                 }
             }
-            auto result = storage.ApplyUsageBatch(*input);
-            return result
-                ? ArtifactBuildResult::Ready(
-                    ArtifactPayload::Make<PublishedMaterialUsageBatch>(std::move(result)))
-                : ArtifactBuildResult::Failure("material usage batch admission failed");
+            if (!input->reservation || !input->reservation->Result()) {
+                return ArtifactBuildResult::Failure("material usage batch reservation missing");
+            }
+            auto result = ArtifactBuildResult::Ready(
+                ArtifactPayload::Make<PublishedMaterialUsageBatch>(
+                    input->reservation->Result()));
+            const auto reservation = input->reservation;
+            result.acceptance = { TaskLane::Streaming, TaskDomain::MaterialAcceptance,
+                [reservation](const ArtifactSnapshot&) {
+                    if (!reservation->Commit()) {
+                        throw std::runtime_error("material usage reservation commit failed");
+                    }
+                } };
+            return result;
         }
     });
 }

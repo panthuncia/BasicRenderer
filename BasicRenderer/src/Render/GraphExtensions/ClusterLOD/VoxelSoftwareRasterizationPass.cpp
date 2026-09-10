@@ -242,43 +242,37 @@ void VoxelSoftwareRasterizationPass::Update(const UpdateExecutionContext& execut
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
     std::vector<std::shared_ptr<PixelBuffer>> nextVisibilityBuffers;
-    auto numViews = context.viewManager->GetCameraBufferSize();
+    auto numViews = context.preparedViewCameraBufferSize;
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
 
-    context.viewManager->ForEachView([&](uint64_t v) {
-        auto viewInfo = context.viewManager->Get(v);
-        if (!viewInfo) {
-            return;
-        }
-
-        auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+    for (const auto& viewInfo : context.preparedViews) {
+        auto cameraIndex = viewInfo.cameraBufferIndex;
+        if (cameraIndex >= viewRasterInfo.size()) continue;
         CLodViewRasterInfo info{};
         info.scissorMinX = 0;
         info.scissorMinY = 0;
 
         if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-            if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+            if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
                 info.scissorMaxX = virtualShadowConfig.virtualResolution;
                 info.scissorMaxY = virtualShadowConfig.virtualResolution;
                 info.viewportScaleX = 1.0f;
                 info.viewportScaleY = 1.0f;
             }
             viewRasterInfo[cameraIndex] = info;
-            return;
+            continue;
         }
 
-        if (viewInfo->gpu.visibilityBuffer == nullptr) {
-            return;
-        }
+        if (!viewInfo.visibilityBuffer) continue;
 
-        info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityUAVIndex;
-        info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
-        info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
+        info.visibilityUAVDescriptorIndex = viewInfo.visibilityUAVIndex;
+        info.scissorMaxX = viewInfo.visibilityBuffer->GetWidth();
+        info.scissorMaxY = viewInfo.visibilityBuffer->GetHeight();
         info.viewportScaleX = 1.0f;
         info.viewportScaleY = 1.0f;
         viewRasterInfo[cameraIndex] = info;
-        nextVisibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
-    });
+        nextVisibilityBuffers.push_back(viewInfo.visibilityBuffer);
+    }
 
     m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
     BUFFER_UPLOAD(

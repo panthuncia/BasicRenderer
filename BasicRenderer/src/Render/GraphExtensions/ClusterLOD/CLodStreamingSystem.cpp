@@ -989,13 +989,6 @@ CLodStreamingSystem::CLodStreamingSystem() {
     MarkStreamingActiveGroupsBitsDirty();
 
     try {
-        auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
-        m_getMeshManager = getter();
-    }
-    catch (...) {
-    }
-
-    try {
         auto getFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
         // Shadow-page dependencies are transient: unlike load requests, a
         // dropped frame may never be regenerated after its page becomes
@@ -1171,7 +1164,7 @@ CLodStreamingSystem::~CLodStreamingSystem() {
 void CLodStreamingSystem::ShutdownGraphResources() {
     StopStreamingService();
 
-    if (MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr) {
+    if (ICLodGeometryStorage* meshManager = m_geometryStorage) {
         ClearStreamingUploadFunction(meshManager);
     }
     for (auto& slot : m_readbackStagingSlots) {
@@ -1191,8 +1184,8 @@ void CLodStreamingSystem::QuiesceGraphResourceAccess() {
 
 void CLodStreamingSystem::Shutdown() {
     const bool wasAlreadyQuitting = m_streamingServiceStop.load(std::memory_order_acquire);
-    if (!wasAlreadyQuitting && m_getMeshManager) {
-        if (MeshManager* meshManager = m_getMeshManager()) {
+    if (!wasAlreadyQuitting && m_geometryStorage) {
+        if (ICLodGeometryStorage* meshManager = m_geometryStorage) {
             const auto [pendingLaunches, pendingUploads] = meshManager->GetPendingCLodDirectStorageCounts();
             if (pendingLaunches != 0u || pendingUploads != 0u) {
                 spdlog::warn(
@@ -1245,7 +1238,7 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
         releaseBufferBacking(m_parallelSortState->reduceScanArgs);
     }
 
-    if (MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr) {
+    if (ICLodGeometryStorage* meshManager = m_geometryStorage) {
         ClearStreamingUploadFunction(meshManager);
     }
     // The rematerialized bitsets have undefined contents. Re-upload the
@@ -1303,10 +1296,7 @@ void CLodStreamingSystem::ResetStreamingStateForShutdown() {
         releaseBufferBacking(m_parallelSortState->countScatterArgs);
         releaseBufferBacking(m_parallelSortState->reduceScanArgs);
     }
-    MeshManager* meshManager = nullptr;
-    if (m_getMeshManager) {
-        meshManager = m_getMeshManager();
-    }
+    ICLodGeometryStorage* meshManager = m_geometryStorage;
 
     if (meshManager != nullptr) {
         ClearStreamingUploadFunction(meshManager);
@@ -1521,7 +1511,7 @@ void CLodStreamingSystem::ResetStreamingStateForShutdown() {
 
 void CLodStreamingSystem::Initialize(RenderGraph& rg) {
     StopStreamingService();
-    MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr;
+    ICLodGeometryStorage* meshManager = m_geometryStorage;
     if (meshManager != nullptr) {
         ClearStreamingUploadFunction(meshManager);
     }
@@ -1569,7 +1559,7 @@ void CLodStreamingSystem::StopStreamingService() {
     m_streamingDrainScheduled.store(false, std::memory_order_release);
 }
 
-void CLodStreamingSystem::ClearStreamingUploadFunction(MeshManager* meshManager) {
+void CLodStreamingSystem::ClearStreamingUploadFunction(ICLodGeometryStorage* meshManager) {
     if (meshManager == nullptr) {
         return;
     }
@@ -1585,7 +1575,7 @@ void CLodStreamingSystem::ClearStreamingUploadFunction(MeshManager* meshManager)
     }
 }
 
-void CLodStreamingSystem::InstallStreamingUploadFunction(MeshManager* meshManager) {
+void CLodStreamingSystem::InstallStreamingUploadFunction(ICLodGeometryStorage* meshManager) {
     if (meshManager == nullptr || m_uploadStream == nullptr) {
         return;
     }
@@ -1736,12 +1726,10 @@ void CLodStreamingSystem::RunStreamingServiceWork() {
         MarkStreamingNonResidentBitsDirtyAll();
         MarkStreamingActiveGroupsBitsDirty();
     }
-    MeshManager* meshManager = nullptr;
+    ICLodGeometryStorage* meshManager = nullptr;
     {
         ZoneScopedN("CLodStreamingSystem::RunStreamingServiceWork::GetMeshManager");
-        if (m_getMeshManager) {
-            meshManager = m_getMeshManager();
-        }
+        meshManager = m_geometryStorage;
     }
     if (m_uploadStream == nullptr) {
         return;
@@ -2036,8 +2024,8 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
             .PreferQueue(QueueKind::Graphics));
 
     CLodDirectStorageLaunchInputs launchInputs{};
-    if (m_getMeshManager) {
-        if (MeshManager* meshManager = m_getMeshManager()) {
+    if (m_geometryStorage) {
+        if (ICLodGeometryStorage* meshManager = m_geometryStorage) {
             if (PagePool* pool = meshManager->GetCLodPagePool()) {
                 auto slabGroup = pool->GetSlabResourceGroup();
                 if (auto pageTable = pool->GetPageTableBuffer()) {
@@ -3167,7 +3155,7 @@ uint32_t CLodStreamingSystem::QueueLoadRequestWithParents(
     return queuedCount;
 }
 
-void CLodStreamingSystem::InitializePageLru(MeshManager* meshManager) {
+void CLodStreamingSystem::InitializePageLru(ICLodGeometryStorage* meshManager) {
     ZoneScopedN("CLodStreamingSystem::InitializePageLru");
 
     if (m_pageLruInitialized || !meshManager) return;
@@ -3221,13 +3209,13 @@ void CLodStreamingSystem::InitializePageLru(MeshManager* meshManager) {
 }
 
 CLodPageLRU& CLodStreamingSystem::PageLruForPage(uint32_t page) {
-    MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr;
+    ICLodGeometryStorage* meshManager = m_geometryStorage;
     PagePool* pool = meshManager != nullptr ? meshManager->GetCLodPagePool() : nullptr;
     return m_pageLrus[pool != nullptr ? pool->GetPageSizeClassIndex(page) : 0u];
 }
 
 const CLodPageLRU& CLodStreamingSystem::PageLruForPage(uint32_t page) const {
-    MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr;
+    ICLodGeometryStorage* meshManager = m_geometryStorage;
     PagePool* pool = meshManager != nullptr ? meshManager->GetCLodPagePool() : nullptr;
     return m_pageLrus[pool != nullptr ? pool->GetPageSizeClassIndex(page) : 0u];
 }
@@ -3240,7 +3228,7 @@ uint32_t CLodStreamingSystem::TotalPageLruSize() const {
     return total;
 }
 
-void CLodStreamingSystem::EnsurePageTrackingCapacity(MeshManager* meshManager) {
+void CLodStreamingSystem::EnsurePageTrackingCapacity(ICLodGeometryStorage* meshManager) {
     if (meshManager == nullptr) {
         return;
     }
@@ -3270,7 +3258,7 @@ void CLodStreamingSystem::EnsurePageTrackingCapacity(MeshManager* meshManager) {
     }
 }
 
-void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager) {
+void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, ICLodGeometryStorage* meshManager) {
     ReleaseGroupResidency(groupIndex, meshManager, false);
 }
 
@@ -3370,7 +3358,7 @@ void CLodStreamingSystem::LogPageOverwriteInvariant(
         delayTicks);
 }
 
-void CLodStreamingSystem::PrefetchChildGroupLayouts(uint32_t parentGroupIndex, MeshManager* meshManager) {
+void CLodStreamingSystem::PrefetchChildGroupLayouts(uint32_t parentGroupIndex, ICLodGeometryStorage* meshManager) {
     if (meshManager == nullptr) {
         return;
     }
@@ -4505,7 +4493,7 @@ bool CLodStreamingSystem::IsPhysicalPagePinnedStorage(uint32_t page) const {
     return page < m_pagePinnedStorage.size() && m_pagePinnedStorage[page] != 0u;
 }
 
-void CLodStreamingSystem::RetirePhysicalPage(uint32_t page, MeshManager* meshManager, bool pinned) {
+void CLodStreamingSystem::RetirePhysicalPage(uint32_t page, ICLodGeometryStorage* meshManager, bool pinned) {
     if (page == ~0u || page >= m_pageState.size()) {
         return;
     }
@@ -4611,7 +4599,7 @@ void CLodStreamingSystem::RetirePhysicalPage(uint32_t page, MeshManager* meshMan
     (void)meshManager;
 }
 
-void CLodStreamingSystem::DrainRetiredPhysicalPages(MeshManager* meshManager) {
+void CLodStreamingSystem::DrainRetiredPhysicalPages(ICLodGeometryStorage* meshManager) {
     ZoneScopedN("CLodStreamingSystem::DrainRetiredPhysicalPages");
     if (m_pageState.empty() || m_retiringPhysicalPages.empty()) {
         return;
@@ -4668,7 +4656,7 @@ void CLodStreamingSystem::DrainRetiredPhysicalPages(MeshManager* meshManager) {
     }
 }
 
-void CLodStreamingSystem::ReleaseGroupResidency(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries) {
+void CLodStreamingSystem::ReleaseGroupResidency(uint32_t groupIndex, ICLodGeometryStorage* meshManager, bool clearPageMapEntries) {
     EvictPrefetchedChildLayoutsForOwner(groupIndex);
     m_pendingResidencyCommitGroups.erase(groupIndex);
     m_pendingResidencyUploadFenceByGroup.erase(groupIndex);
@@ -4820,7 +4808,7 @@ bool CLodStreamingSystem::TryGetCachedParentGroup(uint32_t groupIndex, uint32_t&
     uint32_t cachedParent = m_parentGroupByGroup[groupIndex];
     if (cachedParent == kUnknownParent) {
         cachedParent = kNoParent;
-        if (MeshManager* meshManager = m_getMeshManager ? m_getMeshManager() : nullptr) {
+        if (ICLodGeometryStorage* meshManager = m_geometryStorage) {
             uint32_t parent = 0u;
             if (meshManager->TryGetCLodParentGroup(groupIndex, parent) && parent != groupIndex) {
                 cachedParent = parent;
@@ -4909,7 +4897,7 @@ bool CLodStreamingSystem::IsPhysicalPageEvictable(uint32_t page) const {
     return true;
 }
 
-bool CLodStreamingSystem::EvictPhysicalPage(uint32_t page, MeshManager* meshManager) {
+bool CLodStreamingSystem::EvictPhysicalPage(uint32_t page, ICLodGeometryStorage* meshManager) {
     if (!IsPhysicalPageEvictable(page)) {
         return false;
     }
@@ -4936,7 +4924,7 @@ bool CLodStreamingSystem::EvictPhysicalPage(uint32_t page, MeshManager* meshMana
 
 std::vector<uint32_t> CLodStreamingSystem::PopFreePages(
     std::span<const uint32_t> pageSizeBytes,
-    MeshManager* meshManager,
+    ICLodGeometryStorage* meshManager,
     PagePopFailureStats* outStats) {
     ZoneScopedN("CLodStreamingSystem::PopFreePages");
     const uint32_t count = static_cast<uint32_t>(pageSizeBytes.size());
@@ -5165,7 +5153,7 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(
 }
 
 CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForGroup(
-    uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, MeshManager* meshManager) {
+    uint32_t groupIndex, const MeshManager::CLodGroupStreamingInfo& info, ICLodGeometryStorage* meshManager) {
     return PreAllocatePagesForGroup(
         groupIndex,
         info.groupsBase,
@@ -5184,7 +5172,7 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
     uint32_t groupsBase,
     std::span<const uint32_t> meshPageIndices,
     std::span<const uint32_t> meshPageBlobSizes,
-    MeshManager* meshManager,
+    ICLodGeometryStorage* meshManager,
     bool buildMeshPageKeys) {
     ZoneScopedN("CLodStreamingSystem::PreAllocatePagesForGroup");
 
@@ -5407,7 +5395,7 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
     return result;
 }
 
-bool CLodStreamingSystem::AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages, MeshManager* meshManager) {
+bool CLodStreamingSystem::AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages, ICLodGeometryStorage* meshManager) {
     for (uint32_t seg = 0; seg < pages.segmentCount; ++seg) {
         const uint32_t page = seg < pages.pagesBySegment.size() ? pages.pagesBySegment[seg] : ~0u;
         const uint64_t meshPageKey = seg < pages.meshPageKeys.size() ? pages.meshPageKeys[seg] : kInvalidCLodMeshPageKey;
@@ -5529,7 +5517,7 @@ bool CLodStreamingSystem::AssignPagesToGroup(uint32_t groupIndex, const PreAlloc
     return true;
 }
 
-void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& pages, MeshManager* meshManager) {
+void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& pages, ICLodGeometryStorage* meshManager) {
     for (uint32_t seg = 0; seg < pages.segmentCount; ++seg) {
         uint32_t page = pages.pagesBySegment[seg];
         if (page == ~0u) continue;
@@ -5705,7 +5693,7 @@ bool CLodStreamingSystem::ValidateRenderableCompletion(
     return true;
 }
 
-void CLodStreamingSystem::CommitPendingResidencyPromotions(MeshManager* meshManager) {
+void CLodStreamingSystem::CommitPendingResidencyPromotions(ICLodGeometryStorage* meshManager) {
     ZoneScopedN("CLodStreamingSystem::CommitPendingResidencyPromotions");
 
     if (m_pendingResidencyCommitGroups.empty()) {
@@ -5905,7 +5893,7 @@ void CLodStreamingSystem::CommitPendingResidencyPromotions(MeshManager* meshMana
     }
 }
 
-void CLodStreamingSystem::ReconcileStaleDiskIoRequests(MeshManager* meshManager) {
+void CLodStreamingSystem::ReconcileStaleDiskIoRequests(ICLodGeometryStorage* meshManager) {
     ZoneScopedN("CLodStreamingSystem::ReconcileStaleDiskIoRequests");
 
     if (meshManager == nullptr || m_streamingRequestsInProgressCount == 0u) {
@@ -6041,7 +6029,7 @@ bool CLodStreamingSystem::PromoteGroupPagesAfterUploadDrain(uint32_t groupIndex)
     return !waitingForSharedPendingPage;
 }
 
-void CLodStreamingSystem::ForceGroupNonResident(uint32_t groupIndex, MeshManager* meshManager, bool clearPageMapEntries) {
+void CLodStreamingSystem::ForceGroupNonResident(uint32_t groupIndex, ICLodGeometryStorage* meshManager, bool clearPageMapEntries) {
     SetGroupResidentBit(groupIndex, false);
     ReleaseGroupResidency(groupIndex, meshManager, clearPageMapEntries);
     m_pendingResidencyCommitGroups.erase(groupIndex);
@@ -6049,7 +6037,7 @@ void CLodStreamingSystem::ForceGroupNonResident(uint32_t groupIndex, MeshManager
 
 void CLodStreamingSystem::ForceGroupAndDescendantsNonResident(
     uint32_t groupIndex,
-    MeshManager* meshManager,
+    ICLodGeometryStorage* meshManager,
     bool clearPageMapEntries) {
     if (meshManager == nullptr) {
         ForceGroupNonResident(groupIndex, meshManager, clearPageMapEntries);
@@ -6094,7 +6082,7 @@ void CLodStreamingSystem::ForceGroupAndDescendantsNonResident(
     }
 }
 
-bool CLodStreamingSystem::IsGroupSelectedParentResident(uint32_t groupIndex, MeshManager* meshManager) const {
+bool CLodStreamingSystem::IsGroupSelectedParentResident(uint32_t groupIndex, ICLodGeometryStorage* meshManager) const {
     if (meshManager == nullptr) {
         return true;
     }
@@ -6114,7 +6102,7 @@ bool CLodStreamingSystem::IsGroupSelectedParentResident(uint32_t groupIndex, Mes
 
 bool CLodStreamingSystem::IsGroupSelectedParentResidentOrCommitReady(
     uint32_t groupIndex,
-    MeshManager* meshManager) const {
+    ICLodGeometryStorage* meshManager) const {
     if (IsGroupSelectedParentResident(groupIndex, meshManager) ||
         meshManager == nullptr) {
         return true;
@@ -6135,7 +6123,7 @@ bool CLodStreamingSystem::IsGroupSelectedParentResidentOrCommitReady(
 
 uint32_t CLodStreamingSystem::SelectedAncestorDepth(
     uint32_t groupIndex,
-    MeshManager* meshManager) const {
+    ICLodGeometryStorage* meshManager) const {
     if (meshManager == nullptr) {
         return 0u;
     }
@@ -6276,7 +6264,7 @@ bool CLodStreamingSystem::PublishPendingStreamingStorageGpuResizeLocked() {
 }
 
 void CLodStreamingSystem::InitializeActiveRange(
-    MeshManager* meshManager,
+    ICLodGeometryStorage* meshManager,
     uint32_t begin,
     uint32_t count,
     uint32_t& initializedGroups,
@@ -6467,7 +6455,7 @@ void CLodStreamingSystem::ObserveUploadBatchTickets() {
     TracyPlot("CLodAsyncUpload.ReplayedBatches", static_cast<int64_t>(m_replayedUploadBatchCount));
 }
 
-void CLodStreamingSystem::RebuildStreamingDomainFromSnapshot(MeshManager* meshManager) {
+void CLodStreamingSystem::RebuildStreamingDomainFromSnapshot(ICLodGeometryStorage* meshManager) {
     ZoneScopedN("CLodStreamingSystem::RebuildStreamingDomainFromSnapshot");
     if (meshManager == nullptr) {
         return;
@@ -6533,12 +6521,10 @@ void CLodStreamingSystem::RebuildStreamingDomainFromSnapshot(MeshManager* meshMa
 
 void CLodStreamingSystem::ProcessStreamingDomainEvents() {
     ZoneScopedN("CLodStreamingSystem::ProcessStreamingDomainEvents");
-    MeshManager* meshManager = nullptr;
+    ICLodGeometryStorage* meshManager = nullptr;
     {
         ZoneScopedN("CLodStreamingSystem::ProcessStreamingDomainEvents::GetMeshManager");
-        if (m_getMeshManager) {
-            meshManager = m_getMeshManager();
-        }
+        meshManager = m_geometryStorage;
     }
 
     if (meshManager == nullptr) {
@@ -7434,7 +7420,7 @@ void CLodStreamingSystem::WakeReadyCompletionsForParent(
     }
 }
 
-void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager) {
+void CLodStreamingSystem::ApplyDiskStreamingCompletions(ICLodGeometryStorage* meshManager) {
     ZoneScopedN("CLodStreamingSystem::ApplyDiskStreamingCompletions");
 
     if (meshManager == nullptr) {
@@ -8449,12 +8435,10 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
     }
     CLodStreamingOperationStats frameStats{};
 
-    MeshManager* meshManager = nullptr;
+    ICLodGeometryStorage* meshManager = nullptr;
     {
         ZoneScopedN("CLodStreamingSystem::ProcessStreamingRequestsBudgeted::GetMeshManager");
-        if (m_getMeshManager) {
-            meshManager = m_getMeshManager();
-        }
+        meshManager = m_geometryStorage;
     }
 
     const uint64_t armedDirectStorageFence =

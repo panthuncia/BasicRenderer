@@ -157,7 +157,7 @@ void ReyesDeepVisibilityRasterizationPass::Update(const UpdateExecutionContext& 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
 
-    const auto numViews = context.viewManager->GetCameraBufferSize();
+    const auto numViews = context.preparedViewCameraBufferSize;
     std::vector<std::shared_ptr<PixelBuffer>> visibilityBuffers;
     std::vector<std::shared_ptr<PixelBuffer>> deepVisibilityHeadPointerBuffers;
 
@@ -165,53 +165,51 @@ void ReyesDeepVisibilityRasterizationPass::Update(const UpdateExecutionContext& 
     uint32_t maxViewHeight = 1u;
     uint64_t totalViewPixels = 0u;
 
-    context.viewManager->ForEachView([&](uint64_t viewID) {
-        const auto* viewInfo = context.viewManager->Get(viewID);
-        if (!viewInfo || !viewInfo->gpu.visibilityBuffer) {
-            return;
+    for (const auto& viewInfo : context.preparedViews) {
+        if (!viewInfo.visibilityBuffer) {
+            continue;
         }
 
-        auto headPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(viewID);
+        auto headPointers = viewInfo.deepVisibilityHeadPointers;
         if (!headPointers) {
-            return;
+            continue;
         }
 
         maxViewWidth = std::max(maxViewWidth, headPointers->GetWidth());
         maxViewHeight = std::max(maxViewHeight, headPointers->GetHeight());
         totalViewPixels += static_cast<uint64_t>(headPointers->GetWidth()) *
             static_cast<uint64_t>(headPointers->GetHeight());
-    });
+    }
 
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-    context.viewManager->ForEachView([&](uint64_t viewID) {
-        const auto* viewInfo = context.viewManager->Get(viewID);
-        if (!viewInfo || !viewInfo->gpu.visibilityBuffer) {
-            return;
+    for (const auto& viewInfo : context.preparedViews) {
+        if (!viewInfo.visibilityBuffer) {
+            continue;
         }
 
-        const auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+        const auto cameraIndex = viewInfo.cameraBufferIndex;
         CLodViewRasterInfo info{};
         info.scissorMinX = 0u;
         info.scissorMinY = 0u;
 
-        auto headPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(viewID);
+        auto headPointers = viewInfo.deepVisibilityHeadPointers;
         if (!headPointers) {
             viewRasterInfo[cameraIndex] = info;
-            return;
+            continue;
         }
 
-        info.opaqueVisibilitySRVDescriptorIndex = viewInfo->gpu.visibilitySRVIndex;
+        info.opaqueVisibilitySRVDescriptorIndex = viewInfo.visibilitySRVIndex;
         info.deepVisibilityHeadPointerUAVDescriptorIndex =
-            viewInfo->gpu.clodDeepVisibilityHeadPointersUAVIndex;
+            viewInfo.deepVisibilityHeadPointersUAVIndex;
         info.scissorMaxX = headPointers->GetWidth();
         info.scissorMaxY = headPointers->GetHeight();
         info.viewportScaleX = static_cast<float>(info.scissorMaxX) / static_cast<float>(maxViewWidth);
         info.viewportScaleY = static_cast<float>(info.scissorMaxY) / static_cast<float>(maxViewHeight);
 
-        visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+        visibilityBuffers.push_back(viewInfo.visibilityBuffer);
         deepVisibilityHeadPointerBuffers.push_back(std::move(headPointers));
         viewRasterInfo[cameraIndex] = info;
-    });
+    }
 
     const uint64_t maxNodes = totalViewPixels * kDeepVisibilityAverageFragmentsPerPixel;
     m_deepVisibilityNodeCapacity = std::max<uint32_t>(

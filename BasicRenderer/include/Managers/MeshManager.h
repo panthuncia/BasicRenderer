@@ -34,6 +34,8 @@ using org::ResourceGroup;
 namespace org { class BufferView; }
 using org::BufferView;
 class ViewManager;
+class ICLodGeometryStorage;
+class MeshManagerCLodGeometryStorage;
 namespace br::render { class RendererStateRequestService; }
 
 class MeshManager : public IResourceProvider {
@@ -72,7 +74,7 @@ public:
 
 	struct CLodRayTracingResidencySnapshot {
 		std::vector<CLodRayTracingResidentGroup> residentGroups;
-		PagePool* pagePool = nullptr;
+		std::shared_ptr<PagePool> pagePool;
 		uint64_t pagePoolGeneration = 0;
 	};
 
@@ -141,6 +143,7 @@ public:
 	void AddMeshesBulk(const std::vector<std::shared_ptr<Mesh>>& meshes, bool useMeshletReorderedVertices);
 	void SetSkeletonManager(SkeletonManager* manager) { m_skeletonManager = manager; }
 	void SetRendererStateRequestService(br::render::RendererStateRequestService* service);
+	ICLodGeometryStorage& GetCLodGeometryStorage() noexcept;
 	[[nodiscard]] std::optional<br::render::ArtifactVersionHandle>
 		GeometryResidencyVersion() const;
 	std::vector<StaticMeshTemplateRegistration> AddStaticMeshTemplatesBulk(const std::vector<StaticMeshTemplateRequest>& requests);
@@ -265,6 +268,9 @@ public:
 
 	// Access the CLod page pool (may be null if no CLod meshes loaded).
 	PagePool* GetCLodPagePool() const { return m_clodPagePool.get(); }
+	std::shared_ptr<ResourceGroup> GetCLodSlabResourceGroup() const {
+		return m_clodPagePool ? m_clodPagePool->GetSlabResourceGroup() : nullptr;
+	}
 	void SetCLodStreamingUploadFunction(PagePool::UploadFn fn);
 	void SetCLodStreamingWakeFunction(std::function<void()> fn);
 	uint64_t GetActiveMeshletCount() const { return m_activeMeshletCount; }
@@ -551,5 +557,82 @@ private:
 	ViewManager* m_pViewManager;
 
 	// Page pool for CLod streaming
-	std::unique_ptr<PagePool> m_clodPagePool;
+	std::shared_ptr<PagePool> m_clodPagePool;
+	std::unique_ptr<MeshManagerCLodGeometryStorage> m_clodGeometryStorage;
+};
+
+// Narrow renderer-scoped storage and residency service used by CLOD streaming.
+// It deliberately excludes mesh authoring, scene objects, views and resource
+// provider lookup from the streaming worker contract.
+class ICLodGeometryStorage {
+public:
+	virtual ~ICLodGeometryStorage() = default;
+	virtual void GetCLodStreamingDomainSnapshot(MeshManager::CLodStreamingDomainSnapshot&) const = 0;
+	virtual void DrainCLodStreamingDomainEvents(
+		std::vector<MeshManager::CLodStreamingDomainEvent>&, uint64_t&) = 0;
+	virtual bool TryGetCLodParentGroup(uint32_t, uint32_t&) const = 0;
+	virtual void GetCLodChildGroups(uint32_t, std::vector<uint32_t>&) const = 0;
+	virtual MeshManager::CLodStreamingDebugStats GetCLodStreamingDebugStats() const = 0;
+	virtual void ProcessCLodDiskStreamingIO() = 0;
+	virtual void DrainCompletedCLodDiskStreamingGroups(
+		std::vector<MeshManager::CLodDiskStreamingCompletion>&) = 0;
+	virtual bool EvictCLodGroupResidency(uint32_t, bool) = 0;
+	virtual bool CommitCLodGroupResidency(uint32_t, const ClusterLODGroupChunk&,
+		std::span<const uint32_t>, std::span<const GroupPageMapEntry>,
+		std::span<const PagePool::PageAllocation>, uint64_t = 0u) = 0;
+	virtual uint32_t QueueCLodGroupDiskIOBatch(
+		const std::vector<MeshManager::CLodGroupDiskIOBatchRequest>&,
+		std::vector<bool>* = nullptr) = 0;
+	virtual bool QueueCLodGroupDiskIO(uint32_t, const std::vector<bool>& = {},
+		const std::vector<uint32_t>& = {}, uint32_t = 0u,
+		const CLodCache::GroupPayloadLayoutMetadata* = nullptr) = 0;
+	virtual bool TryGetCLodGroupPayloadLayout(uint32_t,
+		CLodCache::GroupPayloadLayoutMetadata&, std::string* = nullptr) = 0;
+	virtual bool IsCLodStreamingDirectStorageEnabled() const = 0;
+	virtual std::pair<std::size_t, std::size_t> GetPendingCLodDirectStorageCounts() const = 0;
+	virtual bool LaunchPendingCLodDirectStorageUploads(rhi::Timeline, uint64_t) = 0;
+	virtual void InvalidateCLodDiskStreamingPipeline() = 0;
+	virtual MeshManager::CLodGroupStreamingInfo GetCLodGroupStreamingInfo(uint32_t) const = 0;
+	virtual PagePool* GetCLodPagePool() const = 0;
+	virtual void SetCLodStreamingUploadFunction(PagePool::UploadFn) = 0;
+	virtual void SetCLodStreamingWakeFunction(std::function<void()>) = 0;
+};
+
+class MeshManagerCLodGeometryStorage final : public ICLodGeometryStorage {
+public:
+	explicit MeshManagerCLodGeometryStorage(MeshManager& owner) : m_owner(owner) {}
+	void GetCLodStreamingDomainSnapshot(MeshManager::CLodStreamingDomainSnapshot& value) const override { m_owner.GetCLodStreamingDomainSnapshot(value); }
+	void DrainCLodStreamingDomainEvents(std::vector<MeshManager::CLodStreamingDomainEvent>& value, uint64_t& generation) override { m_owner.DrainCLodStreamingDomainEvents(value, generation); }
+	bool TryGetCLodParentGroup(uint32_t group, uint32_t& parent) const override { return m_owner.TryGetCLodParentGroup(group, parent); }
+	void GetCLodChildGroups(uint32_t group, std::vector<uint32_t>& children) const override { m_owner.GetCLodChildGroups(group, children); }
+	MeshManager::CLodStreamingDebugStats GetCLodStreamingDebugStats() const override { return m_owner.GetCLodStreamingDebugStats(); }
+	void ProcessCLodDiskStreamingIO() override { m_owner.ProcessCLodDiskStreamingIO(); }
+	void DrainCompletedCLodDiskStreamingGroups(std::vector<MeshManager::CLodDiskStreamingCompletion>& value) override { m_owner.DrainCompletedCLodDiskStreamingGroups(value); }
+	bool EvictCLodGroupResidency(uint32_t group, bool clear) override { return m_owner.EvictCLodGroupResidency(group, clear); }
+	bool CommitCLodGroupResidency(uint32_t group, const ClusterLODGroupChunk& chunk,
+		std::span<const uint32_t> indices, std::span<const GroupPageMapEntry> entries,
+		std::span<const PagePool::PageAllocation> allocations, uint64_t bytes) override {
+		return m_owner.CommitCLodGroupResidency(group, chunk, indices, entries, allocations, bytes);
+	}
+	uint32_t QueueCLodGroupDiskIOBatch(const std::vector<MeshManager::CLodGroupDiskIOBatchRequest>& requests, std::vector<bool>* queued) override { return m_owner.QueueCLodGroupDiskIOBatch(requests, queued); }
+	bool QueueCLodGroupDiskIO(uint32_t group, const std::vector<bool>& fetch,
+		const std::vector<uint32_t>& pages, uint32_t priority,
+		const CLodCache::GroupPayloadLayoutMetadata* layout) override {
+		return m_owner.QueueCLodGroupDiskIO(group, fetch, pages, priority, layout);
+	}
+	bool TryGetCLodGroupPayloadLayout(uint32_t group,
+		CLodCache::GroupPayloadLayoutMetadata& layout, std::string* message) override {
+		return m_owner.TryGetCLodGroupPayloadLayout(group, layout, message);
+	}
+	bool IsCLodStreamingDirectStorageEnabled() const override { return m_owner.IsCLodStreamingDirectStorageEnabled(); }
+	std::pair<std::size_t, std::size_t> GetPendingCLodDirectStorageCounts() const override { return m_owner.GetPendingCLodDirectStorageCounts(); }
+	bool LaunchPendingCLodDirectStorageUploads(rhi::Timeline timeline, uint64_t value) override { return m_owner.LaunchPendingCLodDirectStorageUploads(timeline, value); }
+	void InvalidateCLodDiskStreamingPipeline() override { m_owner.InvalidateCLodDiskStreamingPipeline(); }
+	MeshManager::CLodGroupStreamingInfo GetCLodGroupStreamingInfo(uint32_t group) const override { return m_owner.GetCLodGroupStreamingInfo(group); }
+	PagePool* GetCLodPagePool() const override { return m_owner.GetCLodPagePool(); }
+	void SetCLodStreamingUploadFunction(PagePool::UploadFn fn) override { m_owner.SetCLodStreamingUploadFunction(std::move(fn)); }
+	void SetCLodStreamingWakeFunction(std::function<void()> fn) override { m_owner.SetCLodStreamingWakeFunction(std::move(fn)); }
+
+private:
+	MeshManager& m_owner;
 };

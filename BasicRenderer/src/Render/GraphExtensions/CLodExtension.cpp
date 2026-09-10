@@ -191,20 +191,6 @@ StructuralSchedulingPolicy BuildStructuralSchedulingPolicy(
     };
 }
 
-std::shared_ptr<ResourceGroup> GetSlabResourceGroup()
-{
-    try {
-        auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
-        if (auto* meshManager = getter()()) {
-            if (auto* pool = meshManager->GetCLodPagePool()) {
-                return pool->GetSlabResourceGroup();
-            }
-        }
-    } catch (...) {}
-
-    return nullptr;
-}
-
 template<typename... Tags>
 void SyncTaggedBufferEntity(const std::shared_ptr<Buffer>& buffer, const flecs::entity& typeEntity, bool enabled)
 {
@@ -1705,7 +1691,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     std::string shadowClearDirtyBitsAfterPassName;
     shadowNonRasterableHierarchyPassName = CLodShadowVariant::AppendStructuralPrelude(*this, traits, outPasses);
 
-    std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
+    std::shared_ptr<ResourceGroup> slabGroup = m_options.slabResourceGroup;
     const auto appendHierarchicalCullingPass = [&](uint32_t phaseIndex, const std::string& afterPassName) {
         const bool isPhase1 = phaseIndex == 1u;
         HierarchicalCullingPassInputs cullPassInputs;

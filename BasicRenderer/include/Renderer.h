@@ -260,6 +260,9 @@ private:
     // Most recently accepted immutable logical-frame publication. The render
     // half of the frame never exposes a pointer to mutable m_context.
     std::shared_ptr<const br::render::RendererFrameInputs> m_frameInputs;
+    std::uint64_t m_lightArtifactRevision = 1;
+    std::uint64_t m_lastLightSourceRevision = 0;
+    std::uint64_t m_lastLightViewFamilyRevision = 0;
     ProducerPassServices m_producerServices;
     // Persistent producer state survives graph rebuilds and full/producer
     // recipe switches. It is released only with the renderer/device lifetime.

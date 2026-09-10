@@ -676,7 +676,7 @@ inline void BuildTerrainRvtPipeline(RenderGraph* graph)
     TagPassTechnique(graph, "TerrainRvtClearFeedbackRequestsPass", "Primary Visibility::Terrain RVT");
 }
 
-inline void BuildTerrainRegionMaterialEvaluationPipeline(RenderGraph* graph)
+inline void BuildTerrainRegionMaterialEvaluationPipeline(RenderGraph* graph, ProducerPassServices& services)
 {
     graph->BuildPass<TerrainRegionCounterResetPass>("TerrainRegionCounterResetPass");
     TagPassTechnique(graph, "TerrainRegionCounterResetPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
@@ -692,7 +692,7 @@ inline void BuildTerrainRegionMaterialEvaluationPipeline(RenderGraph* graph)
     TagPassTechnique(graph, "BuildTerrainRegionMaterialIndirectCommandBuildDispatchArgsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
     graph->BuildPass<BuildTerrainRegionMaterialIndirectCommandBufferPass>("BuildTerrainRegionMaterialIndirectCommandBufferPass");
     TagPassTechnique(graph, "BuildTerrainRegionMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
-    graph->BuildPass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass");
+    graph->BuildPass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass", services);
     TagPassTechnique(graph, "EvaluateTerrainRegionMaterialGroupsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 }
 
@@ -795,7 +795,7 @@ void BuildCanonicalSurfacePipeline(
             graph->BuildPass<BuildTerrainRegionMaterialIndirectCommandBufferPass>("BuildTerrainRegionMaterialIndirectCommandBufferPass");
             TagPassTechnique(graph, "BuildTerrainRegionMaterialIndirectCommandBufferPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
 
-            graph->BuildPass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass");
+            graph->BuildPass<EvaluateTerrainRegionMaterialGroupsPass>("EvaluateTerrainRegionMaterialGroupsPass", services);
             TagPassTechnique(graph, "EvaluateTerrainRegionMaterialGroupsPass", "Primary Visibility::GBuffer Construction::Terrain Regions");
         }
 

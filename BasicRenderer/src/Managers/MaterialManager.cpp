@@ -669,21 +669,22 @@ void MaterialManager::RegisterMaterialSource(const std::shared_ptr<Material>& ma
 	m_ingestedMaterialSourcesByID[material->GetMaterialID()] = material;
 }
 
-br::render::MaterialUsageBatchEntry MaterialManager::CaptureMaterialUsage(
+MaterialManager::MaterialUsageCapture MaterialManager::CaptureMaterialUsage(
 	Material& material, unsigned int count, bool refreshTextureBindings) {
 	std::lock_guard mutationLock(m_materialMutationMutex);
 	if (refreshTextureBindings) material.RefreshTextureBindings();
-	br::render::MaterialUsageBatchEntry entry{};
+	MaterialUsageCapture capture{};
+	auto& entry = capture.entry;
 	entry.materialID = material.GetMaterialID();
 	entry.count = count;
 	entry.base = material.GetData();
 	entry.evaluation = BuildMaterialEvalData(material);
 	entry.openPbr = BuildOpenPBRMaterialData(material);
 	entry.compileFlags = material.Technique().compileFlags;
-	entry.textureServiceInputs = CollectMaterialTextureAssets(material);
+	capture.textureServiceInputs = CollectMaterialTextureAssets(material);
 	entry.retainedTextureResources = CollectMaterialTextureResources(material);
-	entry.textureBindings.reserve(entry.textureServiceInputs.size());
-	for (const auto& texture : entry.textureServiceInputs) {
+	entry.textureBindings.reserve(capture.textureServiceInputs.size());
+	for (const auto& texture : capture.textureServiceInputs) {
 		if (!texture) continue;
 		const auto binding = texture->GetPublishedBindingSnapshot();
 		if (texture->GetStreamingTextureID() == 0 || binding.bindingRevision == 0 ||
@@ -694,34 +695,62 @@ br::render::MaterialUsageBatchEntry MaterialManager::CaptureMaterialUsage(
 			texture->GetStreamingTextureID(), binding.bindingRevision, imageIndex,
 			texture->SamplerDescriptorIndex() });
 	}
-	return entry;
+	return capture;
 }
 
 std::shared_ptr<const br::render::MaterialUsageReservation>
 MaterialManager::ReserveMaterialUsage(
-	const std::vector<br::render::MaterialUsageBatchEntry>& entries) {
+	const std::vector<MaterialUsageCapture>& captures) {
+	struct ReservedEntry {
+		br::render::MaterialUsageBatchEntry entry;
+		std::uint32_t slot = 0;
+	};
 	struct ReservedBindings {
 		std::uint32_t materialID = 0;
 		std::vector<std::uint64_t> bindingIDs;
 		std::vector<std::uint32_t> streamingTextureIDs;
 	};
+	auto result = std::make_shared<br::render::PublishedMaterialUsageBatch>();
 	std::vector<ReservedBindings> reserved;
+	std::vector<ReservedEntry> entries;
 	{
 		std::lock_guard mutationLock(m_materialMutationMutex);
-		if (!m_textureStreamingManager) {
-			return std::make_shared<br::render::MaterialUsageReservation>(
-				[](bool) { return true; });
-		}
-		reserved.reserve(entries.size());
-		for (const auto& entry : entries) {
+		std::unordered_set<std::uint32_t> materialIDs;
+		for (const auto& capture : captures) {
+			const auto& entry = capture.entry;
+			if (entry.materialID == 0 || entry.count == 0 ||
+				!materialIDs.insert(entry.materialID).second) return {};
 			const auto existing = m_materialIDSlotMapping.find(entry.materialID);
-			if (existing != m_materialIDSlotMapping.end() &&
+			const auto current = existing != m_materialIDSlotMapping.end() &&
+				existing->second < m_materialUsageCounts.size()
+				? static_cast<std::uint64_t>(m_materialUsageCounts[existing->second]) : 0u;
+			const auto pending = m_pendingMaterialUsageCounts[entry.materialID];
+			if (current + pending + entry.count >
+				(std::numeric_limits<unsigned int>::max)()) return {};
+		}
+		reserved.reserve(captures.size());
+		entries.reserve(captures.size());
+		result->materialSlots.reserve(captures.size());
+		for (const auto& capture : captures) {
+			const auto& entry = capture.entry;
+			const auto existing = m_materialIDSlotMapping.find(entry.materialID);
+			const bool alreadyResident = existing != m_materialIDSlotMapping.end() &&
 				existing->second < m_materialUsageCounts.size() &&
-				m_materialUsageCounts[existing->second] != 0u) continue;
+				m_materialUsageCounts[existing->second] != 0u;
+			if (existing == m_materialIDSlotMapping.end())
+				m_materialReservationOwnedIDs.insert(entry.materialID);
+			const auto slot = GetMaterialSlot(entry.materialID, entry.base);
+			m_pendingMaterialUsageCounts[entry.materialID] += entry.count;
+			entries.push_back({ entry, slot });
+			result->materialSlots.emplace_back(entry.materialID, slot);
 			ReservedBindings material{ .materialID = entry.materialID };
+			if (alreadyResident || !m_textureStreamingManager) {
+				reserved.push_back(std::move(material));
+				continue;
+			}
 			const bool alphaTested =
 				(entry.compileFlags & MaterialCompileFlags::MaterialCompileAlphaTest) != 0u;
-			for (const auto& texture : entry.textureServiceInputs) {
+			for (const auto& texture : capture.textureServiceInputs) {
 				if (!texture || texture->GetStreamingTextureID() == 0u) continue;
 				const auto bindingID = m_textureStreamingManager->RegisterTextureBinding(
 					texture, {}, "material-reservation:" + std::to_string(entry.materialID),
@@ -734,19 +763,65 @@ MaterialManager::ReserveMaterialUsage(
 			}
 			reserved.push_back(std::move(material));
 		}
+		std::ranges::sort(result->materialSlots);
 	}
 	auto weakLifetime = std::weak_ptr<void>(m_reservationLifetime);
 	return std::make_shared<br::render::MaterialUsageReservation>(
-		[this, weakLifetime, reserved = std::move(reserved)](bool commit) mutable {
+		result,
+		[this, weakLifetime, entries = std::move(entries),
+			reserved = std::move(reserved)](bool commit) mutable {
 			if (weakLifetime.expired()) return !commit;
-			std::lock_guard mutationLock(m_materialMutationMutex);
+			std::unique_lock mutationLock(m_materialMutationMutex);
 			if (!commit) {
 				if (m_textureStreamingManager) {
 					for (const auto& material : reserved)
 						m_textureStreamingManager->UnregisterTextureBindings(material.bindingIDs);
 				}
+				for (const auto& reservedEntry : entries) {
+					const auto materialID = reservedEntry.entry.materialID;
+					auto pending = m_pendingMaterialUsageCounts.find(materialID);
+					if (pending != m_pendingMaterialUsageCounts.end()) {
+						pending->second -= reservedEntry.entry.count;
+						if (pending->second == 0) m_pendingMaterialUsageCounts.erase(pending);
+					}
+					const auto mapping = m_materialIDSlotMapping.find(materialID);
+					if (!m_pendingMaterialUsageCounts.contains(materialID) &&
+						mapping != m_materialIDSlotMapping.end() &&
+						mapping->second < m_materialUsageCounts.size() &&
+						m_materialUsageCounts[mapping->second] == 0 &&
+						m_materialReservationOwnedIDs.erase(materialID) != 0) {
+						m_materialUploadSignatures[mapping->second].valid = false;
+						m_freeMaterialSlots.push_back(mapping->second);
+						m_materialIDSlotMapping.erase(mapping);
+					}
+				}
 				basic_telemetry::AddCounter("SARP.Material.UsageReservation.Cancelled");
 				return true;
+			}
+			for (const auto& reservedEntry : entries) {
+				const auto mapping = m_materialIDSlotMapping.find(reservedEntry.entry.materialID);
+				const auto pending = m_pendingMaterialUsageCounts.find(reservedEntry.entry.materialID);
+				if (mapping == m_materialIDSlotMapping.end() || mapping->second != reservedEntry.slot ||
+					pending == m_pendingMaterialUsageCounts.end() ||
+					pending->second < reservedEntry.entry.count ||
+					reservedEntry.slot >= m_materialUsageCounts.size() ||
+					m_materialUsageCounts[reservedEntry.slot] >
+						(std::numeric_limits<unsigned int>::max)() - reservedEntry.entry.count) return false;
+			}
+			for (const auto& reservedEntry : entries) {
+				const auto& entry = reservedEntry.entry;
+				auto pending = m_pendingMaterialUsageCounts.find(entry.materialID);
+				pending->second -= entry.count;
+				if (pending->second == 0) m_pendingMaterialUsageCounts.erase(pending);
+				const bool firstUse = m_materialUsageCounts[reservedEntry.slot] == 0;
+				m_materialUsageCounts[reservedEntry.slot] += entry.count;
+				m_materialReservationOwnedIDs.erase(entry.materialID);
+				if (firstUse) {
+					m_trackedMaterialTextures[entry.materialID] = entry.retainedTextureResources;
+					const auto sourceRevision = ++m_materialRowSourceRevisions[entry.materialID];
+					if (!ApplyMaterialRowArtifact({ entry.materialID, reservedEntry.slot, sourceRevision,
+						entry.base, entry.evaluation, entry.openPbr })) return false;
+				}
 			}
 			for (auto& material : reserved) {
 				if (m_materialTextureStreamingBindingIDs.contains(material.materialID)) {
@@ -760,6 +835,8 @@ MaterialManager::ReserveMaterialUsage(
 					std::move(material.streamingTextureIDs);
 			}
 			basic_telemetry::AddCounter("SARP.Material.UsageReservation.Committed");
+			mutationLock.unlock();
+			(void)CommitGpuVisibleSnapshot(true);
 			return true;
 		});
 }
@@ -768,54 +845,6 @@ MaterialTextureStreamingReadinessStats MaterialManager::GetMaterialTextureStream
 	return m_textureStreamingManager
 		? m_textureStreamingManager->GetTextureStreamingReadinessStats()
 		: MaterialTextureStreamingReadinessStats{};
-}
-
-std::shared_ptr<const br::render::PublishedMaterialUsageBatch>
-MaterialManager::ApplyMaterialUsageBatch(
-	const br::render::MaterialUsageBatchBuildInput& input) {
-	auto result = std::make_shared<br::render::PublishedMaterialUsageBatch>();
-	result->sourceFingerprint = input.sourceFingerprint;
-	result->materialSlots.reserve(input.entries.size());
-	{
-		std::lock_guard mutationLock(m_materialMutationMutex);
-		std::unordered_set<std::uint32_t> materialIDs;
-		for (const auto& entry : input.entries) {
-			if (entry.materialID == 0 || entry.count == 0 ||
-				!materialIDs.insert(entry.materialID).second) return {};
-			const auto existing = m_materialIDSlotMapping.find(entry.materialID);
-			if (existing != m_materialIDSlotMapping.end() &&
-				existing->second < m_materialUsageCounts.size() &&
-				m_materialUsageCounts[existing->second] >
-					(std::numeric_limits<unsigned int>::max)() - entry.count) return {};
-		}
-		if (!input.reservation || !input.reservation->Commit()) return {};
-		for (const auto& entry : input.entries) {
-			const auto existing = m_materialIDSlotMapping.find(entry.materialID);
-			const bool alreadyResident = existing != m_materialIDSlotMapping.end() &&
-				existing->second < m_materialUsageCounts.size() &&
-				m_materialUsageCounts[existing->second] != 0u;
-			const auto slot = alreadyResident
-				? existing->second : GetMaterialSlot(entry.materialID, entry.base);
-			if (slot >= m_materialUsageCounts.size() ||
-				m_materialUsageCounts[slot] > (std::numeric_limits<unsigned int>::max)() - entry.count) {
-				return {};
-			}
-			m_materialUsageCounts[slot] += entry.count;
-			if (!alreadyResident) {
-				m_trackedMaterialTextures[entry.materialID] = entry.retainedTextureResources;
-				const auto sourceRevision = ++m_materialRowSourceRevisions[entry.materialID];
-				ApplyMaterialRowArtifact({ entry.materialID, slot, sourceRevision,
-					entry.base, entry.evaluation, entry.openPbr });
-			}
-			result->materialSlots.emplace_back(entry.materialID, slot);
-		}
-		std::ranges::sort(result->materialSlots);
-	}
-	// Commit owns its own try-lock. Calling it while the admission lock was held
-	// made every worker-side batch silently skip its graph publication request;
-	// progress then depended on an unrelated later caller happening to commit.
-	(void)CommitGpuVisibleSnapshot(true);
-	return result;
 }
 
 bool MaterialManager::ApplyMaterialRowArtifact(const br::render::MaterialRowArtifact& row) {
@@ -1034,6 +1063,27 @@ void MaterialManager::FlushDirtyMaterial(Material& material, bool refreshTexture
 		input->base = materialData;
 		input->evaluation = evalData;
 		input->openPbr = openPBRData;
+		auto row = std::make_shared<br::render::MaterialRowArtifact>();
+		row->materialID = input->materialID;
+		row->materialSlot = input->materialSlot;
+		row->sourceRevision = input->sourceRevision;
+		row->base = input->base;
+		row->evaluation = input->evaluation;
+		row->openPbr = input->openPbr;
+		const auto weakLifetime = std::weak_ptr<void>(m_reservationLifetime);
+		input->reservation = std::make_shared<br::render::MaterialRowReservation>(
+			row, [this, weakLifetime, row](bool commit) {
+				if (weakLifetime.expired()) return !commit;
+				if (!commit) {
+					basic_telemetry::AddCounter("SARP.Material.RowReservation.Cancelled");
+					return true;
+				}
+				const bool applied = ApplyMaterialRowArtifact(*row);
+				basic_telemetry::AddCounter(applied
+					? "SARP.Material.RowReservation.Committed"
+					: "SARP.Material.RowReservation.CommitFailed");
+				return applied;
+			});
 		std::vector<br::render::ArtifactRequirement> bindingRequirements;
 		std::uint64_t fingerprint = 1469598103934665603ull;
 		const auto mix = [&fingerprint](const auto& value) {
@@ -1161,8 +1211,15 @@ void MaterialManager::DecrementMaterialUsageCount(const Material& material) {
 			m_materialUploadSignatures[materialSlot].valid = false;
 			JournalMaterialRow(materialSlot);
 		}
-		m_freeMaterialSlots.push_back(materialSlot);
-		m_materialIDSlotMapping.erase(materialID);
+		// A queued graph admission owns this identity/slot reservation even though
+		// the currently published usage reached zero. Recycle it only when that
+		// reservation commits or is joined and cancelled.
+		if (m_pendingMaterialUsageCounts.contains(materialID)) {
+			m_materialReservationOwnedIDs.insert(materialID);
+		} else {
+			m_freeMaterialSlots.push_back(materialSlot);
+			m_materialIDSlotMapping.erase(materialID);
+		}
 		m_activeMaterialsByID.erase(materialID);
 		m_ingestedMaterialSourcesByID.erase(materialID);
 		m_dirtyMaterialIDSet.erase(materialID);
@@ -1753,9 +1810,8 @@ void MaterialManager::ScheduleGpuVisibleSnapshotCommit(bool forceGraphSnapshot) 
 	if (!submitted) m_snapshotCommitScheduled.store(false, std::memory_order_release);
 }
 
-bool MaterialManager::TryActivatePublishedMaterialState() {
-	const auto source = br::render::PublishedStateSource::ProcessSource();
-	const auto published = source ? source->Load() : nullptr;
+bool MaterialManager::TryActivatePublishedMaterialState(
+	const std::shared_ptr<const br::render::PublishedRendererState>& published) {
 	const auto materialState = published
 		? published->materials.payload.Get<br::render::PublishedMaterialState>() : nullptr;
 	if (!materialState || !materialState->baseTable || !materialState->evalTable ||

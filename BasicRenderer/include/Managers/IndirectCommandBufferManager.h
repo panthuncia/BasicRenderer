@@ -73,7 +73,8 @@ public:
     // selects these values from the object publication owner before scheduling.
     void PublishDesiredState(
         std::optional<br::render::ArtifactRequirement> objectBufferRequirement,
-        std::uint64_t residentDrawRecordCount);
+        std::uint64_t residentDrawRecordCount,
+        const std::shared_ptr<const br::render::PublishedRendererState>& selectedState);
     void SetRendererStateServices(br::render::RendererStateRequestService* requests,
         org::runtime::IUploadService* uploads);
     // End preparation while borrowed request/upload services are still alive.
@@ -131,8 +132,11 @@ private:
 	std::atomic<std::uint64_t> m_admittedRootRevision{ 0 };
 	std::atomic<std::uint64_t> m_publishedRootRevision{ 0 };
 	std::atomic<std::uint64_t> m_lastAdmissionRetirementEpoch{ 0 };
-    bool m_activeObserverInstalled = false;
-    ObjectManager* m_observedObjectManager = nullptr;
+    struct ActiveDrawObserverState {
+        std::mutex mutex;
+        IndirectCommandBufferManager* owner = nullptr;
+    };
+    std::shared_ptr<ActiveDrawObserverState> m_activeDrawObserver;
     std::uint64_t m_desiredMutationRevision = 1;
     std::uint64_t m_consumedMutationRevision = 0;
     std::uint64_t m_lastObjectBufferRevision = 0;

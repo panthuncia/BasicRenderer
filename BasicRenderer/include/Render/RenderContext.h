@@ -10,6 +10,8 @@
 #include "Render/PublishedRendererState.h"
 #include "Render/RasterBucketFlags.h"
 #include "Render/ObjectBufferStateArtifacts.h"
+#include "Render/ViewStateArtifacts.h"
+#include "Render/WindPaletteService.h"
 #include "ShaderBuffers.h"
 
 class Scene;
@@ -30,33 +32,9 @@ namespace br::render {
 class CLodRayTracingSystem;
 }
 
-struct PreparedViewFrameData {
-	uint64_t id = 0;
-	uint32_t cameraBufferIndex = 0;
-	bool primary = false;
-	bool shadow = false;
-	bool cascade = false;
-	Components::LightType lightType = Components::LightType::Directional;
-	std::shared_ptr<PixelBuffer> visibilityBuffer;
-	std::shared_ptr<PixelBuffer> deepVisibilityHeadPointers;
-	uint32_t visibilitySRVIndex = 0xFFFFFFFFu;
-	uint32_t visibilityUAVIndex = 0xFFFFFFFFu;
-	uint32_t deepVisibilityHeadPointersUAVIndex = 0xFFFFFFFFu;
-};
+using PreparedViewFrameData = br::render::PreparedViewFrameData;
 
 using PreparedActiveDrawEntry = br::render::PublishedActiveSkinnedPlacement;
-
-// Transitional object publication selected before graph update. CPU records
-// are copied; resource identities are retained so declarations can freeze their
-// exact backing versions for the accepted frame.
-struct PreparedObjectFrameData {
-	uint32_t residentTransformCount = 0;
-	std::shared_ptr<DynamicStructuredBuffer<SkinnedAssemblyPlacementGPU>> skinnedPlacements;
-	std::shared_ptr<SortedUnsignedIntBuffer> activeSkinnedPlacements;
-	uint32_t activeSkinnedPlacementResidentSize = 0;
-	std::shared_ptr<const std::vector<SkinnedAssemblyPlacementGPU>> placementRecords;
-	std::shared_ptr<const std::vector<PreparedActiveDrawEntry>> activePlacementEntries;
-};
 
 struct RenderContext {
 	std::shared_ptr<const br::render::PublishedRendererState> publishedRendererState;
@@ -65,8 +43,6 @@ struct RenderContext {
 	ObjectManager* objectManager;
 	MeshManager* meshManager;
 	IndirectCommandBufferManager* indirectCommandBufferManager;
-	ViewManager* viewManager;
-    LightManager* lightManager;
 	EnvironmentManager* environmentManager;
 	MaterialManager* materialManager;
 	br::render::CLodRayTracingSystem* clodRayTracingSystem = nullptr;
@@ -75,7 +51,7 @@ struct RenderContext {
 	std::vector<PreparedViewFrameData> preparedViews;
 	uint32_t preparedViewCameraBufferSize = 0;
 	uint64_t preparedViewResourceLayoutRevision = 0;
-	PreparedObjectFrameData preparedObjects;
+	uint32_t preparedLightPagePoolSize = 0;
 	uint32_t preparedRasterBucketCount = 0;
 	std::vector<MaterialRasterFlags> preparedRasterBucketFlags;
 
@@ -108,8 +84,6 @@ struct UpdateContext {
 	ObjectManager* objectManager = nullptr;
 	MeshManager* meshManager = nullptr;
 	IndirectCommandBufferManager* indirectCommandBufferManager = nullptr;
-	ViewManager* viewManager = nullptr;
-	LightManager* lightManager = nullptr;
 	EnvironmentManager* environmentManager = nullptr;
 	MaterialManager* materialManager = nullptr;
 	// Ordered ray-tracing build/trace service. The typed reflections pass captures
@@ -122,8 +96,8 @@ struct UpdateContext {
 	std::vector<PreparedViewFrameData> preparedViews;
 	uint32_t preparedViewCameraBufferSize = 0;
 	uint64_t preparedViewResourceLayoutRevision = 0;
-	PreparedObjectFrameData preparedObjects;
-	SkeletonManager* skeletonManager = nullptr;
+	uint32_t preparedLightPagePoolSize = 0;
+	br::render::IWindPaletteService* windPaletteService = nullptr;
 	rhi::DescriptorHeap textureDescriptorHeap;
 	rhi::DescriptorHeap samplerDescriptorHeap;
 	rhi::DescriptorHeapHandle rtvHeap{};

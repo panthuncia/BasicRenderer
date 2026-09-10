@@ -52,17 +52,9 @@ void ClearDeepVisibilityPass::Update(const UpdateExecutionContext& executionCont
     }
 
     std::vector<std::shared_ptr<PixelBuffer>> headPointerTextures;
-    context.viewManager->ForEachView([&](uint64_t viewID) {
-        auto* view = context.viewManager->Get(viewID);
-        if (!view || !view->gpu.visibilityBuffer) {
-            return;
-        }
-
-        auto headPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(viewID);
-        if (headPointers) {
-            headPointerTextures.push_back(std::move(headPointers));
-        }
-    });
+    for (const auto& view : context.preparedViews)
+        if (view.visibilityBuffer && view.deepVisibilityHeadPointers)
+            headPointerTextures.push_back(view.deepVisibilityHeadPointers);
 
     m_declaredResourcesChanged = m_headPointerTextures != headPointerTextures;
     m_headPointerTextures = std::move(headPointerTextures);

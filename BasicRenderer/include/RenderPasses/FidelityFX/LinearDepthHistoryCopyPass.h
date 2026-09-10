@@ -2,14 +2,14 @@
 
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Render/RenderContext.h"
-#include "Managers/ViewManager.h"
+#include "Render/DepthHistoryService.h"
 #include <vector>
 
 class LinearDepthHistoryCopyPass
     : public org::TypedRenderGraphPass<LinearDepthHistoryCopyPass> {
 public:
-    explicit LinearDepthHistoryCopyPass(ViewManager* viewManager)
-        : m_viewManager(viewManager) {
+    explicit LinearDepthHistoryCopyPass(br::render::IDepthHistoryService* historyService)
+        : m_historyService(historyService) {
     }
 
     void Declare(org::PassBuilder& builder) {
@@ -20,11 +20,11 @@ public:
     }
 
     org::EmptyPassFrameData Prepare(const org::PassPrepareContext& preparation) {
-        if (m_viewManager) preparation.Reserve(m_viewManager->ReserveDepthHistoryPublication());
+        if (m_historyService) preparation.Reserve(m_historyService->ReserveDepthHistoryPublication());
         return {};
     }
     static void Record(const org::EmptyPassFrameData&, org::PassRecordContext&) {}
 
 private:
-    ViewManager* m_viewManager = nullptr;
+    br::render::IDepthHistoryService* m_historyService = nullptr;
 };

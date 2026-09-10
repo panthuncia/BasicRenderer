@@ -1,4 +1,5 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapSetupPass.h"
+#include "Render/LightStateArtifacts.h"
 
 #include <array>
 #include <bit>
@@ -231,37 +232,21 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     bool currentDirectionalLightDirectionValid = false;
     uint32_t activeClipmapCount = 0u;
 
-    if (updateContext && updateContext->viewManager) {
-        bool foundPrimaryCamera = false;
-        updateContext->viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewId) {
-            if (foundPrimaryCamera) {
-                return;
-            }
+    if (updateContext) {
+        for (const auto& view : updateContext->preparedViews) {
+            if (!view.primary) continue;
+            compactMainCamera.positionWorldSpace = view.cameraInfo.positionWorldSpace;
+            compactMainCamera.viewInverse = view.cameraInfo.viewInverse;
+            compactMainCamera.projectionInverse = view.cameraInfo.projectionInverse;
+            break;
+        }
 
-            const View* view = updateContext->viewManager->Get(viewId);
-            if (!view) {
-                return;
-            }
-
-            foundPrimaryCamera = true;
-            compactMainCamera.positionWorldSpace = view->cameraInfo.positionWorldSpace;
-            compactMainCamera.viewInverse = view->cameraInfo.viewInverse;
-            compactMainCamera.projectionInverse = view->cameraInfo.projectionInverse;
-        });
-
-        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-        auto lightQuery = ecsWorld.query_builder<const Components::Light, const Components::LightViewInfo>().build();
-
-        bool foundDirectionalShadow = false;
-        lightQuery.each([&](flecs::entity, const Components::Light& light, const Components::LightViewInfo& lightViewInfo) {
-            if (foundDirectionalShadow || !light.lightInfo.shadowCaster || light.type != Components::LightType::Directional) {
-                return;
-            }
-
-            foundDirectionalShadow = true;
-            DirectX::XMStoreFloat3(
-                &currentDirectionalLightDirection,
-                DirectX::XMVector3Normalize(light.lightInfo.dirWorldSpace));
+        const auto publishedLights = updateContext->publishedRendererState
+            ? updateContext->publishedRendererState->lights.payload
+                .Get<br::render::PublishedLightTableState>() : nullptr;
+        if (publishedLights && !publishedLights->directionalShadows.empty()) {
+            const auto& lightViewInfo = publishedLights->directionalShadows.front();
+            currentDirectionalLightDirection = lightViewInfo.direction;
             currentDirectionalLightDirectionValid = true;
             const uint32_t clipmapCount = std::min<uint32_t>(
                 static_cast<uint32_t>(lightViewInfo.viewIDs.size()),
@@ -288,13 +273,15 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 			uint32_t reclassifiedClipmapCount = 0u;
 
             for (uint32_t clipmapIndex = 0; clipmapIndex < clipmapCount; ++clipmapIndex) {
-                const View* view = updateContext->viewManager->Get(lightViewInfo.viewIDs[clipmapIndex]);
-                if (!view) {
+                const auto viewIt = std::ranges::find(updateContext->preparedViews,
+                    lightViewInfo.viewIDs[clipmapIndex], &PreparedViewFrameData::id);
+                if (viewIt == updateContext->preparedViews.end()) {
                     continue;
                 }
+                const auto& view = *viewIt;
 
-                const float orthoWidth = ExtractOrthographicWidth(view->cameraInfo.unjitteredProjection);
-                const float orthoHeight = ExtractOrthographicHeight(view->cameraInfo.unjitteredProjection);
+                const float orthoWidth = ExtractOrthographicWidth(view.cameraInfo.unjitteredProjection);
+                const float orthoHeight = ExtractOrthographicHeight(view.cameraInfo.unjitteredProjection);
                 const float virtualShadowResolutionFloat = static_cast<float>(virtualShadowResolution);
 				const bool dynamicSkinnedClipmap = dynamicClipmapOverride >= 0
 					? clipmapIndex < clampedOverride
@@ -308,21 +295,21 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 
                 auto& clipmapInfo = clipmapInfos[clipmapIndex];
                 const int64_t pageOffsetX =
-                    clipmapIndex < lightViewInfo.virtualShadowUnwrappedPageOffsetX.size()
-                    ? lightViewInfo.virtualShadowUnwrappedPageOffsetX[clipmapIndex]
+                    clipmapIndex < lightViewInfo.unwrappedPageOffsetX.size()
+                    ? lightViewInfo.unwrappedPageOffsetX[clipmapIndex]
                     : 0;
                 const int64_t pageOffsetY =
-                    clipmapIndex < lightViewInfo.virtualShadowUnwrappedPageOffsetY.size()
-                    ? lightViewInfo.virtualShadowUnwrappedPageOffsetY[clipmapIndex]
+                    clipmapIndex < lightViewInfo.unwrappedPageOffsetY.size()
+                    ? lightViewInfo.unwrappedPageOffsetY[clipmapIndex]
                     : 0;
-                clipmapInfo.worldOriginX = view->cameraInfo.positionWorldSpace.x;
-                clipmapInfo.worldOriginY = view->cameraInfo.positionWorldSpace.y;
-                clipmapInfo.worldOriginZ = view->cameraInfo.positionWorldSpace.z;
+                clipmapInfo.worldOriginX = view.cameraInfo.positionWorldSpace.x;
+                clipmapInfo.worldOriginY = view.cameraInfo.positionWorldSpace.y;
+                clipmapInfo.worldOriginZ = view.cameraInfo.positionWorldSpace.z;
                 clipmapInfo.texelWorldSize = std::max(orthoWidth, orthoHeight) / std::max(virtualShadowResolutionFloat, 1.0f);
                 clipmapInfo.pageOffsetX = WrapPageOffset(pageOffsetX, virtualShadowPageTableResolution);
                 clipmapInfo.pageOffsetY = WrapPageOffset(pageOffsetY, virtualShadowPageTableResolution);
                 clipmapInfo.pageTableLayer = clipmapIndex;
-                clipmapInfo.shadowCameraBufferIndex = view->gpu.cameraBufferIndex;
+                clipmapInfo.shadowCameraBufferIndex = view.cameraBufferIndex;
                 clipmapInfo.clipLevel = clipmapIndex;
 				const uint32_t previousDynamicFlag = g_previousClipmapInfosValid
 					? g_previousClipmapInfos[clipmapIndex].flags & CLodVirtualShadowClipmapDynamicSkinnedFlag
@@ -344,9 +331,9 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                     static_cast<int32_t>(pageOffsetX);
                 clipmapInfo.unwrappedPageOffsetY =
                     static_cast<int32_t>(pageOffsetY);
-                clipmapInfo.depthNear = view->cameraInfo.zNear;
+                clipmapInfo.depthNear = view.cameraInfo.zNear;
                 clipmapInfo.depthRange = std::max(
-                    view->cameraInfo.zFar - view->cameraInfo.zNear,
+                    view.cameraInfo.zFar - view.cameraInfo.zNear,
                     1.0e-6f);
 
                 auto& markData = markClipmapData[clipmapIndex];
@@ -364,12 +351,12 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                     clipmapInfo.unwrappedPageOffsetX;
                 markData.unwrappedPageOffsetY =
                     clipmapInfo.unwrappedPageOffsetY;
-                markData.shadowViewProjection = view->cameraInfo.viewProjection;
+                markData.shadowViewProjection = view.cameraInfo.viewProjection;
 
-                compactShadowCameras[clipmapIndex].view = view->cameraInfo.view;
-                compactShadowCameras[clipmapIndex].projection = view->cameraInfo.jitteredProjection;
-                compactShadowCameras[clipmapIndex].viewProjection = view->cameraInfo.viewProjection;
-                compactShadowCameras[clipmapIndex].isOrtho = view->cameraInfo.isOrtho;
+                compactShadowCameras[clipmapIndex].view = view.cameraInfo.view;
+                compactShadowCameras[clipmapIndex].projection = view.cameraInfo.jitteredProjection;
+                compactShadowCameras[clipmapIndex].viewProjection = view.cameraInfo.viewProjection;
+                compactShadowCameras[clipmapIndex].isOrtho = view.cameraInfo.isOrtho;
                 if (g_previousClipmapInfosValid && IsClipmapValid(g_previousClipmapInfos[clipmapIndex])) {
                     clipmapInfo.clearOffsetX = ClampClearOffset(
                         pageOffsetX - g_previousClipmapPageOffsetX[clipmapIndex],
@@ -395,7 +382,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 				g_clodSkinnedShadowOneShotInvalidationCount.fetch_add(
 					reclassifiedClipmapCount, std::memory_order_relaxed);
 			}
-        });
+        }
     }
 
     if (currentDirectionalLightDirectionValid &&

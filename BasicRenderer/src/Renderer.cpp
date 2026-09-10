@@ -33,6 +33,9 @@
 #include "Render/RenderContext.h"
 #include "Render/VersionedGpuBufferArtifacts.h"
 #include "Render/TextureImageTableArtifacts.h"
+#include "Render/ViewStateArtifacts.h"
+#include "Render/PoseStateArtifacts.h"
+#include "Render/LightStateArtifacts.h"
 #include "Telemetry/NvPerfIntegration.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Render/PassBuilders.h"
@@ -783,6 +786,9 @@ void Renderer::Initialize(
     br::render::RegisterObjectBufferStateProducer(*m_asyncStateGraph);
     br::render::RegisterStaticStateProducers(*m_asyncStateGraph);
     br::render::RegisterGeometryResidencyStateProducer(*m_asyncStateGraph);
+	br::render::RegisterViewStateProducer(*m_asyncStateGraph);
+	br::render::RegisterPoseStateProducer(*m_asyncStateGraph);
+	br::render::RegisterLightStateProducer(*m_asyncStateGraph);
     m_asyncStateGraph->SetReadyCallback([this](const br::render::ArtifactSnapshot& artifact) {
         if (m_rendererStateRequests) m_rendererStateRequests->OnArtifactReady(artifact);
     });
@@ -844,9 +850,9 @@ void Renderer::Initialize(
 
         m_pReadbackManager->RequestReadback(std::move(texture), std::move(outputFile), std::move(callback), cubemap);
     });
-    m_pMaterialManager = MaterialManager::CreateUnique();
-	br::render::RegisterMaterialRowProducer(*m_asyncStateGraph, *m_pMaterialManager);
-	br::render::RegisterMaterialUsageBatchProducer(*m_asyncStateGraph, *m_pMaterialManager);
+	m_pMaterialManager = MaterialManager::CreateUnique();
+	br::render::RegisterMaterialRowProducer(*m_asyncStateGraph);
+	br::render::RegisterMaterialUsageBatchProducer(*m_asyncStateGraph);
     m_pMaterialManager->SetRendererStateServices(
         m_rendererStateRequests.get(),
         currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr);
@@ -871,8 +877,16 @@ void Renderer::Initialize(
 		m_rendererStateRequests.get(),
 		currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr);
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
-	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
-	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
+	m_pLightManager->SetShadowViewService(m_pViewManager.get());
+	m_pViewManager->SetEvents({
+        .onCreated = [this](const View& view) {
+            m_pIndirectCommandBufferManager->CreateBuffersForView(
+                view.id, view.flags.primaryCamera);
+        },
+        .onDestroyed = [this](uint64_t viewID) {
+            m_pIndirectCommandBufferManager->UnregisterBuffers(viewID);
+        },
+    });
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pIndirectCommandBufferManager->AttachActiveDrawSource(*m_pObjectManager);
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
@@ -2159,9 +2173,6 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
         return AppendScene(scene);
         });
-    settingsManager.registerSetting<std::function<MeshManager*()>>("getMeshManager", [this]() -> MeshManager* {
-        return m_pMeshManager.get();
-        });
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("enableRayTracedReflections", m_rayTracedReflections);
     settingsManager.registerSetting<float>("rayTracedReflectionMaxDistance", 100.0f);
@@ -3236,11 +3247,13 @@ void Renderer::Update(float elapsedSeconds) {
         }
 		if (m_pMaterialManager) {
 			BT_ZONE_SCOPE("Renderer::Update::CommitPublishedRendererState::ActivateMaterials");
-			(void)m_pMaterialManager->TryActivatePublishedMaterialState();
+			(void)m_pMaterialManager->TryActivatePublishedMaterialState(
+				m_context.publishedRendererState);
 		}
 		if (m_pTerrainManager) {
 			BT_ZONE_SCOPE("Renderer::Update::CommitPublishedRendererState::ActivateTerrain");
-			(void)m_pTerrainManager->TryActivatePublishedTerrainState();
+			(void)m_pTerrainManager->TryActivatePublishedTerrainState(
+				m_context.publishedRendererState);
 		}
     });
 
@@ -3275,11 +3288,11 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.objectManager = m_pObjectManager.get();
     updateData.meshManager = m_pMeshManager.get();
     updateData.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
-    updateData.viewManager = m_pViewManager.get();
-    updateData.lightManager = m_pLightManager.get();
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
     updateData.clodRayTracingSystem = m_clodRayTracingSystem;
+    updateData.preparedLightPagePoolSize = m_pLightManager
+        ? m_pLightManager->GetLightPagePoolSize() : 0u;
     const auto publishedMaterialState = updateData.publishedRendererState
         ? updateData.publishedRendererState->materials.payload
             .Get<br::render::PublishedMaterialState>()
@@ -3301,7 +3314,7 @@ void Renderer::Update(float elapsedSeconds) {
         }
         basic_telemetry::AddCounter("SARP.FrameInputs.BootstrapRasterBucketFallback");
     }
-    updateData.skeletonManager = m_pSkeletonManager.get();
+    updateData.windPaletteService = m_pSkeletonManager.get();
     updateData.textureDescriptorHeap = m_context.textureDescriptorHeap;
     updateData.samplerDescriptorHeap = m_context.samplerDescriptorHeap;
     updateData.rtvHeap = rtvHeap->GetHandle();
@@ -3337,42 +3350,86 @@ void Renderer::Update(float elapsedSeconds) {
     renderSnapshot.globalPSOFlags = updateData.globalPSOFlags;
     renderSnapshot.deltaTime = updateData.deltaTime;
     renderSnapshot.preparedViews.clear();
-    if (updateData.viewManager) {
-        updateData.preparedViewCameraBufferSize = updateData.viewManager->GetCameraBufferSize();
-        updateData.preparedViewResourceLayoutRevision = updateData.viewManager->GetResourceLayoutRevision();
-        updateData.viewManager->ForEachView([&](uint64_t viewID) {
-            const auto* view = updateData.viewManager->Get(viewID);
+    auto desiredViewFamily = std::make_shared<br::render::ViewFamilyBuildInput>();
+    br::render::ArtifactVersionHandle desiredViewFamilyHandle;
+    if (m_pViewManager) {
+        desiredViewFamily->revision = m_pViewManager->GetPublicationRevision();
+        desiredViewFamily->cameraBufferSize = m_pViewManager->GetCameraBufferSize();
+        if (auto cameraBuffer = m_pViewManager->ProvideResource(Builtin::CameraBuffer))
+            desiredViewFamily->retainedResources.push_back(std::move(cameraBuffer));
+        if (auto cullingBuffer = m_pViewManager->ProvideResource(Builtin::CullingCameraBuffer))
+            desiredViewFamily->retainedResources.push_back(std::move(cullingBuffer));
+        m_pViewManager->ForEachView([&](uint64_t viewID) {
+            auto* view = m_pViewManager->Get(viewID);
             if (!view) return;
-            renderSnapshot.preparedViews.push_back({
+            if (view->gpu.visibilityBuffer && !view->gpu.clodDeepVisibilityHeadPointers) {
+                (void)m_pViewManager->EnsureCLodDeepVisibilityHeadPointers(viewID);
+                view = m_pViewManager->Get(viewID);
+                if (!view) return;
+            }
+            desiredViewFamily->views.push_back({
                 .id = view->id,
                 .cameraBufferIndex = view->gpu.cameraBufferIndex,
                 .primary = view->flags.primaryCamera,
                 .shadow = view->flags.shadow,
                 .cascade = view->flags.cascaded,
                 .lightType = view->lightType,
+                .cameraInfo = view->cameraInfo,
                 .visibilityBuffer = view->gpu.visibilityBuffer,
                 .deepVisibilityHeadPointers = view->gpu.clodDeepVisibilityHeadPointers,
+                .linearDepthMap = view->gpu.linearDepthMap,
+                .depthHistory = {
+                    view->gpu.lastFrameLinearDepthMap,
+                    view->gpu.depthHistoryEpoch,
+                    view->gpu.lastFrameLinearDepthValid
+                        ? view->gpu.lastDepthProducerSubmissionID : 0 },
+                .linearDepthSRVIndices = view->gpu.linearDepthSRVIndices,
+                .depthBufferArrayIndex = view->cameraInfo.depthBufferArrayIndex,
                 .visibilitySRVIndex = view->gpu.visibilitySRVIndex,
                 .visibilityUAVIndex = view->gpu.visibilityUAVIndex,
                 .deepVisibilityHeadPointersUAVIndex = view->gpu.clodDeepVisibilityHeadPointersUAVIndex,
             });
+            if (view->gpu.visibilityBuffer)
+                desiredViewFamily->retainedResources.push_back(view->gpu.visibilityBuffer);
+            if (view->gpu.clodDeepVisibilityHeadPointers)
+                desiredViewFamily->retainedResources.push_back(view->gpu.clodDeepVisibilityHeadPointers);
+            if (view->gpu.linearDepthMap)
+                desiredViewFamily->retainedResources.push_back(view->gpu.linearDepthMap);
+            if (view->gpu.lastFrameLinearDepthMap)
+                desiredViewFamily->retainedResources.push_back(view->gpu.lastFrameLinearDepthMap);
         });
+        desiredViewFamily->resourceLayoutRevision = m_pViewManager->GetResourceLayoutRevision();
+        if (m_rendererStateRequests) {
+            const auto revision = (std::max<std::uint64_t>)(
+                desiredViewFamily->revision, 1u);
+            auto viewRequest = m_rendererStateRequests->SubmitLatest({
+                { br::render::ArtifactKind::ViewFamily, 0, 0 }, revision, {},
+                br::render::ArtifactPayload::Make<br::render::ViewFamilyBuildInput>(desiredViewFamily),
+                revision });
+            if (viewRequest) desiredViewFamilyHandle = viewRequest.Handle();
+        }
     }
+    const auto publishedViews = updateData.publishedRendererState
+        ? updateData.publishedRendererState->views.payload.Get<br::render::PublishedViewFamilyState>()
+        : nullptr;
+    if (publishedViews) {
+        renderSnapshot.preparedViews = publishedViews->views;
+        updateData.preparedViewCameraBufferSize = publishedViews->cameraBufferSize;
+        updateData.preparedViewResourceLayoutRevision = publishedViews->resourceLayoutRevision;
+        basic_telemetry::AddCounter("SARP.FrameInputs.PublishedViewFamilySelection");
+    } else {
+        renderSnapshot.preparedViews = desiredViewFamily->views;
+        updateData.preparedViewCameraBufferSize = desiredViewFamily->cameraBufferSize;
+        updateData.preparedViewResourceLayoutRevision = desiredViewFamily->resourceLayoutRevision;
+        basic_telemetry::AddCounter("SARP.FrameInputs.BootstrapViewFamilyFallback");
+    }
+    basic_telemetry::SetGauge("SARP.FrameInputs.ViewFamily.ViewCount",
+        static_cast<std::int64_t>(renderSnapshot.preparedViews.size()));
 	const auto publishedObjects = updateData.publishedRendererState
 		? updateData.publishedRendererState->drawRecords.payload
 			.Get<br::render::PublishedObjectBufferState>()
 		: nullptr;
 	if (publishedObjects) {
-		updateData.preparedObjects.residentTransformCount =
-			publishedObjects->residentTransformCount;
-		updateData.preparedObjects.skinnedPlacements = publishedObjects->skinnedPlacements;
-		updateData.preparedObjects.activeSkinnedPlacements =
-			publishedObjects->activeSkinnedPlacements;
-		updateData.preparedObjects.activeSkinnedPlacementResidentSize =
-			publishedObjects->activeSkinnedPlacementResidentSize;
-		updateData.preparedObjects.placementRecords = publishedObjects->placementRecords;
-		updateData.preparedObjects.activePlacementEntries =
-			publishedObjects->activePlacementEntries;
 		basic_telemetry::AddCounter("SARP.FrameInputs.PublishedObjectSelection");
 		basic_telemetry::SetGauge("SARP.FrameInputs.ObjectSnapshot.PlacementCount",
 			publishedObjects->placementRecords
@@ -3384,9 +3441,86 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.preparedViews = renderSnapshot.preparedViews;
     renderSnapshot.preparedViewCameraBufferSize = updateData.preparedViewCameraBufferSize;
     renderSnapshot.preparedViewResourceLayoutRevision = updateData.preparedViewResourceLayoutRevision;
-	renderSnapshot.preparedObjects = updateData.preparedObjects;
+    renderSnapshot.preparedLightPagePoolSize = updateData.preparedLightPagePoolSize;
     renderSnapshot.preparedRasterBucketCount = updateData.preparedRasterBucketCount;
     renderSnapshot.preparedRasterBucketFlags = updateData.preparedRasterBucketFlags;
+
+    if (m_pLightManager && m_rendererStateRequests) {
+        auto desiredLights = std::make_shared<br::render::LightTableBuildInput>();
+        const auto lightSourceRevision = (std::max<std::uint64_t>)(
+            m_pLightManager->GetPublicationRevision(), 1u);
+        const auto lightViewRevision = desiredViewFamily->revision;
+        if (lightSourceRevision != m_lastLightSourceRevision ||
+            lightViewRevision != m_lastLightViewFamilyRevision) {
+            ++m_lightArtifactRevision;
+            m_lastLightSourceRevision = lightSourceRevision;
+            m_lastLightViewFamilyRevision = lightViewRevision;
+        }
+        desiredLights->revision = m_lightArtifactRevision;
+        desiredLights->lightCount = m_pLightManager->GetNumLights();
+        desiredLights->lightPagePoolSize = m_pLightManager->GetLightPagePoolSize();
+        auto& lightWorld = RendererECSManager::GetInstance().GetWorld();
+        auto directionalLights = lightWorld.query_builder<const Components::Light,
+            const Components::LightViewInfo>().build();
+        directionalLights.each([&](flecs::entity, const Components::Light& light,
+            const Components::LightViewInfo& viewInfo) {
+            if (!light.lightInfo.shadowCaster || light.type != Components::LightType::Directional) return;
+            br::render::PublishedDirectionalShadowLight shadow{};
+            DirectX::XMStoreFloat3(&shadow.direction,
+                DirectX::XMVector3Normalize(light.lightInfo.dirWorldSpace));
+            shadow.viewIDs = viewInfo.viewIDs;
+            shadow.unwrappedPageOffsetX.assign(viewInfo.virtualShadowUnwrappedPageOffsetX.begin(),
+                viewInfo.virtualShadowUnwrappedPageOffsetX.end());
+            shadow.unwrappedPageOffsetY.assign(viewInfo.virtualShadowUnwrappedPageOffsetY.begin(),
+                viewInfo.virtualShadowUnwrappedPageOffsetY.end());
+            desiredLights->directionalShadows.push_back(std::move(shadow));
+        });
+        for (const auto& key : m_pLightManager->GetSupportedKeys()) {
+            if (auto resource = m_pLightManager->ProvideResource(key))
+                desiredLights->retainedResources.push_back(std::move(resource));
+        }
+        std::vector<br::render::ArtifactRequirement> lightRequirements;
+        if (desiredViewFamilyHandle) {
+            lightRequirements.push_back(br::render::Exact(desiredViewFamilyHandle));
+        }
+        (void)m_rendererStateRequests->SubmitLatest({
+            { br::render::ArtifactKind::LightTable, 0, 0 }, desiredLights->revision,
+            std::move(lightRequirements),
+            br::render::ArtifactPayload::Make<br::render::LightTableBuildInput>(desiredLights),
+            desiredLights->revision });
+    }
+    if (updateData.publishedRendererState &&
+        updateData.publishedRendererState->lights.payload.Get<br::render::PublishedLightTableState>())
+        basic_telemetry::AddCounter("SARP.FrameInputs.PublishedLightTableSelection");
+
+    // Snapshot active skeleton membership and immutable base-skeleton data into
+    // the state graph. Accepted frames can now outlive later manager mutations.
+    if (m_pSkeletonManager && m_rendererStateRequests) {
+        auto desiredPoses = std::make_shared<br::render::PoseStateBuildInput>();
+        desiredPoses->activeInstanceRevision = (std::max<std::uint64_t>)(
+            m_pSkeletonManager->GetActiveInstanceRevision(), 1u);
+        for (const auto& instance : m_pSkeletonManager->GetActiveInstanceViews()) {
+            if (!instance.skeleton) continue;
+            desiredPoses->activeInstances.push_back({
+                .baseSkeleton = instance.skeleton->GetBaseSkeletonShared(),
+                .instanceSlot = instance.instanceSlot,
+                .transformOffsetMatrices = instance.transformOffsetMatrices,
+                .inverseSkinOffsetMatrices = instance.inverseSkinOffsetMatrices,
+                .boneCount = instance.boneCount,
+            });
+        }
+        for (const auto& key : m_pSkeletonManager->GetSupportedKeys()) {
+            if (auto resource = m_pSkeletonManager->ProvideResource(key))
+                desiredPoses->retainedResources.push_back(std::move(resource));
+        }
+        (void)m_rendererStateRequests->SubmitLatest({
+            { br::render::ArtifactKind::PoseState, 0, 0 }, desiredPoses->activeInstanceRevision, {},
+            br::render::ArtifactPayload::Make<br::render::PoseStateBuildInput>(desiredPoses),
+            desiredPoses->activeInstanceRevision });
+    }
+    if (updateData.publishedRendererState &&
+        updateData.publishedRendererState->poses.payload.Get<br::render::PublishedPoseState>())
+        basic_telemetry::AddCounter("SARP.FrameInputs.PublishedPoseSelection");
     auto immutableUpdate = std::make_shared<const UpdateContext>(updateData);
     m_frameInputs = std::make_shared<const br::render::RendererFrameInputs>(
         std::move(immutableUpdate),
@@ -3413,7 +3547,8 @@ void Renderer::Update(float elapsedSeconds) {
         if (m_pIndirectCommandBufferManager && m_pObjectManager) {
 			m_pIndirectCommandBufferManager->PublishDesiredState(
 				m_pObjectManager->DesiredBufferStateRequirement(),
-				m_pObjectManager->GetResidentInstanceDrawRecordCount());
+				m_pObjectManager->GetResidentInstanceDrawRecordCount(),
+				m_context.publishedRendererState);
         }
     });
 
@@ -3475,6 +3610,15 @@ void Renderer::Update(float elapsedSeconds) {
                     const auto capture = [&](const char* label, const char* anchor, ResourceIdentifier id) {
                         captureResource(label, anchor, currentRenderGraph->RequestResourcePtr(id, true));
                     };
+                    // Preserve the visibility target at the two phase-1 producer
+                    // boundaries as well as at its first material consumer.  The
+                    // fixed benchmark camera expects phase 1 to cover the scene;
+                    // shader invocation counts alone did not catch descriptor-table
+                    // mismatches that discarded almost every raster write.
+                    capture("visibility-after-phase1-hw", "CLodOpaque::RasterizeClustersPass1",
+                        Builtin::PrimaryCamera::VisibilityTexture);
+                    capture("visibility-after-phase1-sw", "CLodOpaque::SoftwareRasterizeClustersPass1",
+                        Builtin::PrimaryCamera::VisibilityTexture);
                     capture("visibility", "MaterialHistogramPass", Builtin::PrimaryCamera::VisibilityTexture);
                     capture("material-counts", "BuildMaterialIndirectCommandBufferPass", "Builtin::VisUtil::MaterialPixelCountBuffer");
                     capture("material-offsets", "BuildMaterialIndirectCommandBufferPass", "Builtin::VisUtil::MaterialOffsetBuffer");
@@ -5392,11 +5536,9 @@ void Renderer::Render() {
             m_context.outputResolution = { outputRes.x, outputRes.y };
             m_context.clodRayTracingSupported = deviceManager.GetCLodRayTracingSupported();
             m_context.rayTracedReflectionsEnabled = m_rayTracedReflections && m_context.clodRayTracingSupported;
-            m_context.viewManager = m_pViewManager.get();
             m_context.objectManager = m_pObjectManager.get();
             m_context.meshManager = m_pMeshManager.get();
             m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
-            m_context.lightManager = m_pLightManager.get();
             m_context.environmentManager = m_pEnvironmentManager.get();
             m_context.materialManager = m_pMaterialManager.get();
             m_context.clodRayTracingSystem = m_clodRayTracingSystem.get();
@@ -5910,7 +6052,8 @@ std::shared_ptr<Scene> Renderer::AppendScene(std::shared_ptr<Scene> scene) {
 	if (m_pIndirectCommandBufferManager && m_pObjectManager) {
 		m_pIndirectCommandBufferManager->PublishDesiredState(
 			m_pObjectManager->DesiredBufferStateRequirement(),
-			m_pObjectManager->GetResidentInstanceDrawRecordCount());
+			m_pObjectManager->GetResidentInstanceDrawRecordCount(),
+			m_context.publishedRendererState);
 	}
 
 	m_warnedNullScene = false;
@@ -6018,6 +6161,7 @@ void Renderer::RegisterPipelineExtensions() {
     if (!m_producerPersistentState->clodStreaming) m_producerPersistentState->clodStreaming = std::make_shared<CLodStreamingSystem>();
     if (!m_producerPersistentState->virtualShadowCasters) m_producerPersistentState->virtualShadowCasters = std::make_shared<VirtualShadowCasterRegistry>();
     auto clodStreamingSystem = m_producerPersistentState->clodStreaming;
+    clodStreamingSystem->SetGeometryStorage(&m_pMeshManager->GetCLodGeometryStorage());
     auto virtualShadowCasters = m_producerPersistentState->virtualShadowCasters;
     br::pipeline::PipelineBuildContext extensionContext(
         *currentRenderGraph,
@@ -6063,7 +6207,9 @@ void Renderer::RegisterPipelineExtensions() {
                         .voxelRasterWorkCapacity = voxelRasterWorkCapacity,
                         .streamingSystem = clodStreamingSystem,
                         .virtualShadowCasters = virtualShadowCasters,
-                        .persistentState = m_producerPersistentState }),
+                        .persistentState = m_producerPersistentState,
+                        .slabResourceGroup = m_pMeshManager
+                            ? m_pMeshManager->GetCLodSlabResourceGroup() : nullptr }),
                 extensionId);
         });
     // Recipe extensions may register resources consumed by technique extensions
@@ -6216,6 +6362,8 @@ void Renderer::CreateRenderGraph() {
     m_producerServices.settings = &SettingsManager::GetInstance();
     m_producerServices.ecs = &RendererECSManager::GetInstance();
     m_producerServices.renderContext = &m_context;
+    m_producerServices.clodSlabResources = m_pMeshManager
+        ? m_pMeshManager->GetCLodSlabResourceGroup() : nullptr;
     br::pipeline::PipelineBuildContext buildContext(
         *newGraph,
         m_pipelineRecipe.Bindings(),
@@ -6321,7 +6469,7 @@ void Renderer::CreateRenderGraph() {
                 BuildTerrainRvtPipeline(newGraph.get());
                 break;
             case TerrainRegionMaterialEvaluation:
-                BuildTerrainRegionMaterialEvaluationPipeline(newGraph.get());
+                BuildTerrainRegionMaterialEvaluationPipeline(newGraph.get(), m_producerServices);
                 break;
             case MaterialEvaluation:
                 BuildMaterialEvaluationPipeline(newGraph.get(), m_producerServices, terrainRvtEnabled);

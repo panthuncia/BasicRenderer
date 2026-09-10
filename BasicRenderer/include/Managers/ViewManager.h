@@ -9,13 +9,13 @@
 #include <flecs.h>
 
 #include "OpenRenderGraph/OpenRenderGraph.h"
+#include "Render/DepthHistoryService.h"
+#include "Render/ShadowViewService.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Scene/Components.h"
 #include "ShaderBuffers.h"
-#include "Managers/IndirectCommandBufferManager.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 
-class IndirectCommandBufferManager;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 namespace org { class PixelBuffer; }
@@ -61,6 +61,7 @@ struct ViewResources {
     std::shared_ptr<PixelBuffer> lastFrameLinearDepthMap = nullptr;
     bool lastFrameLinearDepthValid = false;
     uint64_t depthHistoryEpoch = 0;
+    uint64_t lastDepthProducerSubmissionID = 0;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
     std::shared_ptr<PixelBuffer> clodDeepVisibilityHeadPointers = nullptr;
     // Descriptor indices are published atomically with their retained view
@@ -122,7 +123,9 @@ struct ViewEvents {
 	std::function<void(const View&)> onVisibilityBufferAttached;
 };
 
-class ViewManager : public IResourceProvider {
+class ViewManager : public IResourceProvider,
+                    public br::render::IDepthHistoryService,
+                    public br::render::IShadowViewService {
 public:
     static std::unique_ptr<ViewManager> CreateUnique() {
         return std::unique_ptr<ViewManager>(new ViewManager());
@@ -131,9 +134,6 @@ public:
         return std::shared_ptr<ViewManager>(new ViewManager());
     }
     ~ViewManager();
-
-    // Inject IndirectCommandBufferManager
-    void SetIndirectCommandBufferManager(IndirectCommandBufferManager* manager);
 
     // Create a new view (camera or light), returns viewID
     uint64_t CreateView(const CameraInfo& cameraInfo,
@@ -154,10 +154,23 @@ public:
     // Update camera matrices/params
     void UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo);
 
+    uint64_t CreateShadowView(const CameraInfo& cameraInfo,
+        const ViewFlags& flags, const ViewCreationParams& params) override {
+        return CreateView(cameraInfo, flags, params);
+    }
+    void UpdateShadowView(uint64_t viewID, const CameraInfo& cameraInfo) override {
+        UpdateCamera(viewID, cameraInfo);
+    }
+    void DestroyShadowView(uint64_t viewID) override { DestroyView(viewID); }
+    uint32_t ShadowViewCameraBufferIndex(uint64_t viewID) const override;
+
 	uint32_t GetCameraBufferSize() const { return static_cast<uint32_t>(m_cameraBuffer->Size()); }
     uint64_t GetResourceLayoutRevision() const { return m_resourceLayoutRevision; }
+    uint64_t GetPublicationRevision() const noexcept {
+        return m_publicationRevision.load(std::memory_order_acquire);
+    }
     void MarkDepthHistoryValid(uint64_t viewID);
-    std::shared_ptr<const org::PreparedLifecycleEffect> ReserveDepthHistoryPublication();
+	std::shared_ptr<const org::PreparedLifecycleEffect> ReserveDepthHistoryPublication() override;
 
     // Access
     View* Get(uint64_t viewID);
@@ -210,8 +223,8 @@ private:
     std::shared_ptr<ResourceGroup> m_lastFrameLinearDepthGroup;
     std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> m_lastFrameLinearDepthBySource;
 
-    IndirectCommandBufferManager* m_indirectManager = nullptr;
     uint64_t m_resourceLayoutRevision = 1u;
+    std::atomic_uint64_t m_publicationRevision{1};
 
     std::mutex m_cameraUpdateMutex;
     ViewEvents m_events;

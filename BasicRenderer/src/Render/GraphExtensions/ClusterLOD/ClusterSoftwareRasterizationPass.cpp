@@ -418,11 +418,18 @@ ClusterSoftwareRasterFrameData ClusterSoftwareRasterizationPass::Prepare(
     constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_WORK_RECORDS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_INDIRECT_ARGS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     constants[CLOD_RASTER_DYNAMIC_WIND_VISIBLE_MEMBERSHIP_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
-    constants[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = srv(bindings.histogram);
-    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
-    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.transforms);
-    constants[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.viewInfo);
-    constants[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = srv(bindings.mapping);
+    // The view-info buffer embeds bindless output indices; resolve the complete
+    // raster table from the same immutable shared-heap publication.
+    constants[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] =
+        m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] =
+        m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] =
+        m_compactedVisibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] =
+        m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    constants[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] =
+        m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
     if (bindings.virtualShadow) {
         const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
         constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =

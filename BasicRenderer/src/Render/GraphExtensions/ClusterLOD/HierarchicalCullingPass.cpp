@@ -92,7 +92,10 @@ bool BytesEqual(const T& left, const T& right)
     return std::memcmp(&left, &right, sizeof(T)) == 0;
 }
 
-std::vector<uint64_t> CollectDeclaredDrawSetResourceIds(RenderPhase renderPhase, bool clodOnlyWorkloads)
+std::vector<uint64_t> CollectDeclaredDrawSetResourceIds(
+    const std::shared_ptr<const br::render::PublishedRendererState>& state,
+    RenderPhase renderPhase,
+    bool clodOnlyWorkloads)
 {
     std::vector<uint64_t> resourceIds;
     br::render::PublishedResourceQuery query{};
@@ -102,8 +105,6 @@ std::vector<uint64_t> CollectDeclaredDrawSetResourceIds(RenderPhase renderPhase,
     constexpr std::uint64_t clodBit = 1ull << 63u;
     if (clodOnlyWorkloads) query.requiredVariantMask = clodBit;
     else query.forbiddenVariantMask = clodBit;
-    const auto source = br::render::PublishedStateSource::ProcessSource();
-    const auto state = source ? source->Load() : nullptr;
     const auto resources = state && state->resourceCatalog ? state->resourceCatalog->FindAll(query)
                                                            : br::render::PublishedResourceCatalog::ResourceList{};
     for (const auto& resource : resources) if (resource) resourceIds.push_back(resource->GetGlobalResourceID());
@@ -826,12 +827,13 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
 
     {
         ZoneScopedN("HierarchicalCullingPass::CheckDeclaredDrawSetRevision");
-        const auto source = br::render::PublishedStateSource::ProcessSource();
-        const uint64_t drawSetRevision = source ? source->Epoch() : 0u;
+        const uint64_t drawSetRevision = context.publishedRendererState
+            ? context.publishedRendererState->activeDrawLists.revision : 0u;
         if (drawSetRevision != m_lastDrawSetDeclarationRevision) {
             ZoneScopedN("HierarchicalCullingPass::CollectDeclaredDrawSets");
             m_lastDrawSetDeclarationRevision = drawSetRevision;
-            const std::vector<uint64_t> currentDrawSetResourceIds = CollectDeclaredDrawSetResourceIds(m_renderPhase, m_clodOnlyWorkloads);
+            const std::vector<uint64_t> currentDrawSetResourceIds = CollectDeclaredDrawSetResourceIds(
+                context.publishedRendererState, m_renderPhase, m_clodOnlyWorkloads);
             if (currentDrawSetResourceIds != m_declaredDrawSetResourceIds) {
                 m_declaredDrawSetResourceIds = currentDrawSetResourceIds;
                 m_declaredResourcesChanged = true;
@@ -851,9 +853,7 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
     bool rebuildViewTables = false;
     {
         ZoneScopedN("HierarchicalCullingPass::CheckViewResourceRevision");
-        const uint64_t viewResourceRevision = context.viewManager
-            ? context.viewManager->GetResourceLayoutRevision()
-            : m_lastViewResourceLayoutRevision + 1u;
+        const uint64_t viewResourceRevision = context.preparedViewResourceLayoutRevision;
         rebuildViewTables = viewResourceRevision != m_lastViewResourceLayoutRevision;
         if (rebuildViewTables) {
             m_lastViewResourceLayoutRevision = viewResourceRevision;
@@ -866,44 +866,42 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         if (rebuildViewTables || m_cachedViewRasterInfo.empty()) {
             ZoneScopedN("HierarchicalCullingPass::RebuildViewRasterInfo");
             m_visibilityBuffers.clear();
-            auto numViews = context.viewManager->GetCameraBufferSize();
+            const auto numViews = context.preparedViewCameraBufferSize;
             std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
             std::vector<std::pair<uint32_t, std::shared_ptr<PixelBuffer>>> visibilityBuffersByCameraIndex;
             const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
-            context.viewManager->ForEachView([&](uint64_t v) {
-                auto viewInfo = context.viewManager->Get(v);
-                if (!viewInfo) {
-                    return;
+            for (const auto& viewInfo : context.preparedViews) {
+                const auto cameraIndex = viewInfo.cameraBufferIndex;
+                if (cameraIndex >= viewRasterInfo.size()) {
+                    continue;
                 }
-
-                auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
                 CLodViewRasterInfo info{};
                 info.scissorMinX = 0;
                 info.scissorMinY = 0;
 
                 if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
-                    if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+                    if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
                         info.scissorMaxX = virtualShadowConfig.virtualResolution;
                         info.scissorMaxY = virtualShadowConfig.virtualResolution;
                         info.viewportScaleX = 1.0f;
                         info.viewportScaleY = 1.0f;
                     }
                     viewRasterInfo[cameraIndex] = info;
-                    return;
+                    continue;
                 }
 
-                if (viewInfo->gpu.visibilityBuffer != nullptr) {
-                    info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityUAVIndex;
-                    info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
-                    info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
+                if (viewInfo.visibilityBuffer != nullptr) {
+                    info.visibilityUAVDescriptorIndex = viewInfo.visibilityUAVIndex;
+                    info.scissorMaxX = viewInfo.visibilityBuffer->GetWidth();
+                    info.scissorMaxY = viewInfo.visibilityBuffer->GetHeight();
                     info.viewportScaleX = 1.0f;
                     info.viewportScaleY = 1.0f;
                     viewRasterInfo[cameraIndex] = info;
                     if (UsesWorkGraphSWRaster(m_workGraphMode)) {
-                        visibilityBuffersByCameraIndex.emplace_back(cameraIndex, viewInfo->gpu.visibilityBuffer);
+                        visibilityBuffersByCameraIndex.emplace_back(cameraIndex, viewInfo.visibilityBuffer);
                     }
                 }
-            });
+            }
 
             std::sort(
                 visibilityBuffersByCameraIndex.begin(),
@@ -958,41 +956,36 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
                 viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
             }
 
-            context.viewManager->ForEachView([&](uint64_t viewID) {
-                const auto* view = context.viewManager->Get(viewID);
-                if (!view) {
-                    return;
-                }
-
-                const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
+            for (const auto& view : context.preparedViews) {
+                const uint32_t cameraBufferIndex = view.cameraBufferIndex;
                 if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
-                    return;
+                    continue;
                 }
 
                 const auto linearDepthMap =
-                    !useHistoryDepth || view->gpu.lastFrameLinearDepthValid
-                    ? view->gpu.linearDepthMap
+                    !useHistoryDepth || static_cast<bool>(view.depthHistory)
+                    ? view.linearDepthMap
                     : nullptr;
                 if (!linearDepthMap) {
-                    return;
+                    continue;
                 }
 
                 uint32_t slice = 0;
-                if (view->cameraInfo.depthBufferArrayIndex >= 0) {
-                    slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
+                if (view.depthBufferArrayIndex >= 0) {
+                    slice = static_cast<uint32_t>(view.depthBufferArrayIndex);
                 }
 
                 const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
                 if (maxSlices == 0) {
-                    return;
+                    continue;
                 }
 
                 slice = (std::min)(slice, maxSlices - 1);
                 viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
-                if (slice < view->gpu.linearDepthSRVIndices.size())
+                if (slice < view.linearDepthSRVIndices.size())
                     viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex =
-                        view->gpu.linearDepthSRVIndices[slice];
-            });
+                        view.linearDepthSRVIndices[slice];
+            }
 
             m_cachedViewDepthSrvIndices = std::move(viewDepthSrvIndices);
             m_hasUploadedViewDepthSrvIndices = true;

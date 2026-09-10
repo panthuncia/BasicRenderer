@@ -26,9 +26,6 @@ ArtifactBuildResult BuildObjectBufferState(const ArtifactBuildContext& context) 
     state->buffers = input->buffers;
     state->coveredMutationGeneration = input->coveredMutationGeneration;
     state->residentTransformCount = input->residentTransformCount;
-    state->skinnedPlacements = input->skinnedPlacements;
-    state->activeSkinnedPlacements = input->activeSkinnedPlacements;
-    state->activeSkinnedPlacementResidentSize = input->activeSkinnedPlacementResidentSize;
     state->placementRecords = input->placementRecords;
     state->activePlacementEntries = input->activePlacementEntries;
 
@@ -69,6 +66,15 @@ void RegisterObjectBufferStateProducer(AsyncStateGraph& graph) {
     graph.RegisterProducer(ArtifactKind::DrawRecordPage, {
         TaskLane::FrameCritical, TaskDomain::GraphPublication,
         "ObjectBufferStateArtifact::Build", BuildObjectBufferState });
+}
+
+std::shared_ptr<const PublishedGpuBufferVersion> PublishedObjectBufferState::FindVersion(
+    std::uint64_t catalogVariant) const {
+    const auto expected = std::ranges::find(buffers, catalogVariant,
+        &ObjectBufferDependencyDTO::catalogVariant);
+    if (expected == buffers.end()) return {};
+    const auto index = static_cast<std::size_t>(std::distance(buffers.begin(), expected));
+    return index < versions.size() ? versions[index] : nullptr;
 }
 
 } // namespace br::render

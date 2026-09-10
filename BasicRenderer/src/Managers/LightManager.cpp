@@ -7,6 +7,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/ViewManager.h"
+#include "Render/ShadowViewService.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
@@ -142,7 +143,8 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
     viewInfo.lightBufferIndex = lightIndex;
     viewInfo.lightBufferView = lightBufferView;
     
-	return { viewInfo, planes };
+    m_publicationRevision.fetch_add(1, std::memory_order_release);
+    return { viewInfo, planes };
 }
 
 
@@ -163,6 +165,7 @@ void LightManager::RemoveLight(flecs::entity light) {
 
 	RemoveLightViewInfo(light);
 	light.remove<Components::LightViewInfo>();
+	m_publicationRevision.fetch_add(1, std::memory_order_release);
 }
 
 unsigned int LightManager::GetNumLights() {
@@ -196,8 +199,8 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 		ViewCreationParams viewParams{};
 		viewParams.parentEntityID = entityId;
 		viewParams.lightType = Components::LightType::Point;
-		auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace(), viewParams);
-		m_pointViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
+		auto renderView = m_shadowViews->CreateShadowView(camera, ViewFlags::ShadowFace(), viewParams);
+		m_pointViewInfo->Add(m_shadowViews->ShadowViewCameraBufferIndex(renderView));
 		viewInfo.viewIDs.push_back(renderView);
 	}	
 	
@@ -228,8 +231,8 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	ViewCreationParams viewParams{};
 	viewParams.parentEntityID = entityId;
 	viewParams.lightType = Components::LightType::Spot;
-	auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace(), viewParams);
-	m_spotViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
+	auto renderView = m_shadowViews->CreateShadowView(camera, ViewFlags::ShadowFace(), viewParams);
+	m_spotViewInfo->Add(m_shadowViews->ShadowViewCameraBufferIndex(renderView));
 	viewInfo.viewIDs.push_back(renderView);
 
 	viewInfo.projectionMatrix = Components::Matrix(camera.unjitteredProjection);
@@ -321,8 +324,8 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		viewParams.parentEntityID = entityId;
 		viewParams.lightType = Components::LightType::Directional;
 		viewParams.cascadeIndex = i;
-		auto renderView = m_pViewManager->CreateView(cameraInfo, ViewFlags::ShadowCascade(), viewParams);
-		m_directionalViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
+		auto renderView = m_shadowViews->CreateShadowView(cameraInfo, ViewFlags::ShadowCascade(), viewParams);
+		m_directionalViewInfo->Add(m_shadowViews->ShadowViewCameraBufferIndex(renderView));
 		viewInfo.viewIDs.push_back(renderView);
 	}
 	return { viewInfo, cascadePlanes };
@@ -346,12 +349,7 @@ void LightManager::RebuildDirectionalLightViewInfoBuffer(std::optional<uint64_t>
 
 		viewInfo.viewInfoBufferIndex = m_directionalViewInfo->Size();
 		for (uint64_t viewId : viewInfo.viewIDs) {
-			const View* view = m_pViewManager->Get(viewId);
-			if (!view) {
-				continue;
-			}
-
-			m_directionalViewInfo->Add(view->gpu.cameraBufferIndex);
+			m_directionalViewInfo->Add(m_shadowViews->ShadowViewCameraBufferIndex(viewId));
 		}
 
 		light.lightInfo.shadowViewInfoIndex = static_cast<int>(viewInfo.viewInfoBufferIndex);
@@ -361,6 +359,7 @@ void LightManager::RebuildDirectionalLightViewInfoBuffer(std::optional<uint64_t>
 
 
 void LightManager::UpdateLightViewInfo(flecs::entity light) {
+	m_publicationRevision.fetch_add(1, std::memory_order_release);
 	//auto projectionMatrix = light.get<Components::ProjectionMatrix>();
 	auto viewInfo = light.get<Components::LightViewInfo>();
 	auto& renderViewIds = viewInfo.viewIDs;
@@ -400,7 +399,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 				static_cast<float>(viewInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResY))
 			};
 			info.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(info.depthResX), static_cast<uint16_t>(info.depthResY));
-			m_pViewManager->UpdateCamera(renderViewIds[i], info);
+			m_shadowViews->UpdateShadowView(renderViewIds[i], info);
 		}
 		break;
 	}
@@ -430,7 +429,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		};
 		camera.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(camera.depthResX), static_cast<uint16_t>(camera.depthResY));
 
-		m_pViewManager->UpdateCamera(renderViewIds[0], camera);
+		m_shadowViews->UpdateShadowView(renderViewIds[0], camera);
 		break;
 	}
 	case Components::LightType::Directional: {
@@ -499,7 +498,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			};
 			info.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(info.depthResX), static_cast<uint16_t>(info.depthResY));
 			info.isOrtho = true; // Directional lights use orthographic projection for shadows.
-			m_pViewManager->UpdateCamera(renderViewIds[i], info);
+			m_shadowViews->UpdateShadowView(renderViewIds[i], info);
 		}
 		lightViewInfoChanged = true;
 		UpdateLightBufferView(viewInfo.lightBufferView.get(), lightInfo.lightInfo);
@@ -527,20 +526,20 @@ void LightManager::RemoveLightViewInfo(flecs::entity light) {
 	case Components::LightType::Point: {
 		const auto& views = viewInfo->viewIDs;
 		for (size_t i = 0; i < views.size(); i++) {
-			m_pViewManager->DestroyView(views[i]);
+			m_shadowViews->DestroyShadowView(views[i]);
 		}
 		break;
 	}
 	case Components::LightType::Spot: {
 		for (const auto viewID : viewInfo->viewIDs) {
-			m_pViewManager->DestroyView(viewID);
+			m_shadowViews->DestroyShadowView(viewID);
 		}
 		break;
 	}
 	case Components::LightType::Directional: {
 		const auto& views = viewInfo->viewIDs;
 		for (size_t i = 0; i < views.size(); i++) {
-			m_pViewManager->DestroyView(views[i]);
+			m_shadowViews->DestroyShadowView(views[i]);
 		}
 		RebuildDirectionalLightViewInfoBuffer(light.id());
 		break;
@@ -555,13 +554,14 @@ void LightManager::SetCurrentCamera(flecs::entity camera) {
 }
 
 
-void LightManager::SetViewManager(ViewManager* viewManager) {
-	m_pViewManager = viewManager;
+void LightManager::SetShadowViewService(br::render::IShadowViewService* service) {
+	m_shadowViews = service;
 }
 
 void LightManager::UpdateLightBufferView(BufferView* view, const LightInfo& data) {
 	std::lock_guard<std::mutex> lock(m_lightUpdateMutex);
 	m_lightBuffer->UpdateView(view, &data);
+	m_publicationRevision.fetch_add(1, std::memory_order_release);
 }
 
 std::shared_ptr<Resource> LightManager::ProvideResource(ResourceIdentifier const& key) {

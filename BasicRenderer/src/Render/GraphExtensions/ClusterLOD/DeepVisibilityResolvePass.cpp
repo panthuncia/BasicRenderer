@@ -156,11 +156,10 @@ void DeepVisibilityResolvePass::Update(const UpdateExecutionContext& executionCo
     m_globalPsoFlags = context.globalPSOFlags;
 
     std::shared_ptr<PixelBuffer> primaryHeadPointers;
-    context.viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewID) {
-        if (!primaryHeadPointers) {
-            primaryHeadPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(viewID);
-        }
-    });
+    for (const auto& view : context.preparedViews) if (view.primary) {
+        primaryHeadPointers = view.deepVisibilityHeadPointers;
+        break;
+    }
 
     m_declaredResourcesChanged = m_primaryHeadPointerTexture != primaryHeadPointers;
     m_primaryHeadPointerTexture = std::move(primaryHeadPointers);

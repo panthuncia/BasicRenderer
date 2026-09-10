@@ -10,6 +10,9 @@
 #include "Render/ObjectBufferStateArtifacts.h"
 #include "Render/GeometryResidencyStateArtifacts.h"
 #include "Render/MaterialStateArtifacts.h"
+#include "Render/ViewStateArtifacts.h"
+#include "Render/PoseStateArtifacts.h"
+#include "Render/LightStateArtifacts.h"
 #include "Resources/Resolvers/PublishedStateResourceResolver.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Utilities/TripleGenerationMailbox.h"
@@ -348,6 +351,10 @@ int main() {
         });
         RegisterObjectBufferStateProducer(objects);
         const ArtifactKey bufferKey{ArtifactKind::BufferVersion, 0xee10, 1};
+        const ArtifactKey placementKey{ArtifactKind::BufferVersion, 0xee10,
+            kObjectSkinnedPlacementVariant};
+        const ArtifactKey activePlacementKey{ArtifactKind::BufferVersion, 0xee10,
+            kObjectActiveSkinnedPlacementVariant};
         const ArtifactKey rootKey{ArtifactKind::DrawRecordPage, 0xee10, 0};
         const auto bufferPayload = [](std::uint64_t revision) {
             auto version = std::make_shared<PublishedGpuBufferVersion>();
@@ -359,6 +366,8 @@ int main() {
             return ArtifactPayload::Make<RendererStateFragmentArtifact>(fragment);
         };
         Check(objects.Request(bufferKey, 1, {}, bufferPayload(1), 1));
+        Check(objects.Request(placementKey, 1, {}, bufferPayload(1), 2));
+        Check(objects.Request(activePlacementKey, 1, {}, bufferPayload(1), 3));
         objects.WaitIdle();
         const auto firstBuffer = objects.Snapshot(bufferKey);
         auto input = std::make_shared<ObjectBufferStateBuildInput>();
@@ -369,8 +378,14 @@ int main() {
             std::make_shared<const std::vector<PublishedActiveSkinnedPlacement>>(
                 std::vector<PublishedActiveSkinnedPlacement>{{2, 7}});
         input->buffers.push_back({bufferKey, 1, sizeof(std::uint32_t), kObjectDrawRecordVariant});
+        input->buffers.push_back({placementKey, 1, sizeof(std::uint32_t),
+            kObjectSkinnedPlacementVariant});
+        input->buffers.push_back({activePlacementKey, 1, sizeof(std::uint32_t),
+            kObjectActiveSkinnedPlacementVariant});
         Check(objects.Request(rootKey, 1,
-            {Exact(firstBuffer.Version(), ArtifactReadiness::UploadSubmitted)},
+            {Exact(firstBuffer.Version(), ArtifactReadiness::UploadSubmitted),
+             Exact(objects.Snapshot(placementKey).Version(), ArtifactReadiness::UploadSubmitted),
+             Exact(objects.Snapshot(activePlacementKey).Version(), ArtifactReadiness::UploadSubmitted)},
             ArtifactPayload::Make<ObjectBufferStateBuildInput>(input), 17));
         objects.WaitIdle();
         const auto firstRoot = objects.Snapshot(rootKey);
@@ -383,7 +398,9 @@ int main() {
         const auto fragment = retainedRoot.payload.Get<RendererStateFragmentArtifact>();
         const auto state = fragment->fragment.payload.Get<PublishedObjectBufferState>();
         Check(state && state->coveredMutationGeneration == 17);
-        Check(state->versions.size() == 1 && state->versions[0]->revision == 1);
+        Check(state->versions.size() == 3 && state->versions[0]->revision == 1);
+        Check(state->FindVersion(kObjectSkinnedPlacementVariant) == state->versions[1]);
+        Check(state->FindVersion(kObjectActiveSkinnedPlacementVariant) == state->versions[2]);
         Check(state->placementRecords == input->placementRecords &&
             state->activePlacementEntries == input->activePlacementEntries &&
             state->activePlacementEntries->front().drawRecordIndex == 2 &&
@@ -395,8 +412,14 @@ int main() {
         nextInput->activePlacementEntries =
             std::make_shared<const std::vector<PublishedActiveSkinnedPlacement>>();
         nextInput->buffers.push_back({bufferKey, 2, sizeof(std::uint32_t), kObjectDrawRecordVariant});
+        nextInput->buffers.push_back({placementKey, 1, sizeof(std::uint32_t),
+            kObjectSkinnedPlacementVariant});
+        nextInput->buffers.push_back({activePlacementKey, 1, sizeof(std::uint32_t),
+            kObjectActiveSkinnedPlacementVariant});
         Check(objects.Request(rootKey, 2,
-            {Exact(objects.Snapshot(bufferKey).Version(), ArtifactReadiness::UploadSubmitted)},
+            {Exact(objects.Snapshot(bufferKey).Version(), ArtifactReadiness::UploadSubmitted),
+             Exact(objects.Snapshot(placementKey).Version(), ArtifactReadiness::UploadSubmitted),
+             Exact(objects.Snapshot(activePlacementKey).Version(), ArtifactReadiness::UploadSubmitted)},
             ArtifactPayload::Make<ObjectBufferStateBuildInput>(nextInput), 18));
         objects.WaitIdle();
         const auto nextRoot = objects.Snapshot(rootKey);
@@ -2259,6 +2282,7 @@ int main() {
         std::atomic_uint32_t cancels{ 0 };
         {
             auto reservation = std::make_shared<MaterialUsageReservation>(
+                std::make_shared<PublishedMaterialUsageBatch>(),
                 [&](bool commit) {
                     (commit ? commits : cancels).fetch_add(1, std::memory_order_relaxed);
                     return true;
@@ -2270,6 +2294,7 @@ int main() {
         Check(cancels.load(std::memory_order_relaxed) == 0);
         {
             auto reservation = std::make_shared<MaterialUsageReservation>(
+                std::make_shared<PublishedMaterialUsageBatch>(),
                 [&](bool commit) {
                     (commit ? commits : cancels).fetch_add(1, std::memory_order_relaxed);
                     return true;
@@ -2280,6 +2305,7 @@ int main() {
 
         commits.store(0, std::memory_order_relaxed);
         auto reservation = std::make_shared<MaterialUsageReservation>(
+            std::make_shared<PublishedMaterialUsageBatch>(),
             [&](bool commit) {
                 Check(commit);
                 commits.fetch_add(1, std::memory_order_relaxed);
@@ -2290,6 +2316,62 @@ int main() {
             committers.emplace_back([reservation] { Check(reservation->Commit()); });
         }
         for (auto& committer : committers) committer.join();
+        Check(commits.load(std::memory_order_relaxed) == 1);
+
+        RegisterMaterialUsageBatchProducer(graph);
+        auto admitted = std::make_shared<PublishedMaterialUsageBatch>();
+        admitted->sourceFingerprint = 0xabcdu;
+        admitted->materialSlots = { { 17u, 3u }, { 29u, 4u } };
+        commits.store(0, std::memory_order_relaxed);
+        auto graphReservation = std::make_shared<MaterialUsageReservation>(admitted,
+            [&](bool commit) {
+                Check(commit);
+                commits.fetch_add(1, std::memory_order_relaxed);
+                return true;
+            });
+        auto input = std::make_shared<MaterialUsageBatchBuildInput>();
+        input->sourceFingerprint = admitted->sourceFingerprint;
+        input->reservation = graphReservation;
+        const ArtifactKey batchKey{ ArtifactKind::MaterialUsageBatch, 0xfa11u, 0 };
+        const auto batchRequest = graph.Request(batchKey, 1, {},
+            ArtifactPayload::Make<MaterialUsageBatchBuildInput>(std::move(input)),
+            admitted->sourceFingerprint);
+        Check(batchRequest);
+        graph.WaitIdle();
+        const auto batchSnapshot = graph.Snapshot(batchRequest.version);
+        const auto publishedBatch = batchSnapshot.payload.Get<PublishedMaterialUsageBatch>();
+        Check(ArtifactReachedMilestone(batchSnapshot.readiness, ArtifactReadiness::CpuReady));
+        Check(publishedBatch && publishedBatch->materialSlots == admitted->materialSlots);
+        Check(commits.load(std::memory_order_relaxed) == 1);
+
+        RegisterMaterialRowProducer(graph);
+        auto row = std::make_shared<MaterialRowArtifact>();
+        row->materialID = 17u;
+        row->materialSlot = 3u;
+        row->sourceRevision = 7u;
+        commits.store(0, std::memory_order_relaxed);
+        auto rowReservation = std::make_shared<MaterialRowReservation>(row,
+            [&](bool commit) {
+                Check(commit);
+                commits.fetch_add(1, std::memory_order_relaxed);
+                return true;
+            });
+        auto rowInput = std::make_shared<MaterialRowInput>();
+        rowInput->materialID = row->materialID;
+        rowInput->materialSlot = row->materialSlot;
+        rowInput->sourceRevision = row->sourceRevision;
+        rowInput->reservation = rowReservation;
+        const ArtifactKey rowKey{ ArtifactKind::Material, row->materialID, 0 };
+        const auto rowRequest = graph.Request(rowKey, row->sourceRevision, {},
+            ArtifactPayload::Make<MaterialRowInput>(std::move(rowInput)), 0x7711u);
+        Check(rowRequest);
+        graph.WaitIdle();
+        const auto rowSnapshot = graph.Snapshot(rowRequest.version);
+        const auto publishedRow = rowSnapshot.payload.Get<MaterialRowArtifact>();
+        Check(ArtifactReachedMilestone(rowSnapshot.readiness, ArtifactReadiness::CpuReady));
+        Check(publishedRow && publishedRow->materialID == row->materialID &&
+            publishedRow->materialSlot == row->materialSlot &&
+            publishedRow->sourceRevision == row->sourceRevision);
         Check(commits.load(std::memory_order_relaxed) == 1);
     }
 
@@ -2358,6 +2440,120 @@ int main() {
         state = root ? root->fragment.payload.Get<PublishedGeometryResidencyState>() : nullptr;
         Check(state && state->activeRanges.size() == 3);
         Check(state->maxTraversalDepth == 9 && state->maxGroupIndex == 43);
+
+        // A residency publication owns the geometry storage version whose
+        // physical page indices it exposes. Use an aliasing shared pointer so
+        // this test can verify lifetime without constructing GPU resources.
+        auto storageSentinel = std::make_shared<int>(42);
+        std::weak_ptr<int> weakStorage = storageSentinel;
+        std::shared_ptr<PagePool> pagePoolLease(
+            storageSentinel, reinterpret_cast<PagePool*>(storageSentinel.get()));
+        GeometryResidencyDeltaInput retainedInput{
+            GeometryResidencyDeltaKind::AddOrReplace, { 50, 1, 4, {} }, {}};
+        retainedInput.pagePool = pagePoolLease;
+        retainedInput.storageGeneration = 77;
+        auto retained = request(6, std::move(retainedInput), fifth.Handle());
+        Check(retained);
+        pagePoolLease.reset();
+        storageSentinel.reset();
+        graph.WaitIdle();
+        snapshot = graph.Snapshot(retained.version);
+        root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        state = root ? root->fragment.payload.Get<PublishedGeometryResidencyState>() : nullptr;
+        Check(state && state->pagePool && state->storageGeneration == 77);
+        Check(!weakStorage.expired());
+    }
+
+    {
+        RegisterViewStateProducer(graph);
+        const ArtifactAddress key{ ArtifactKind::ViewFamily, 1u, 0u };
+        auto firstInput = std::make_shared<ViewFamilyBuildInput>();
+        firstInput->revision = 11;
+        firstInput->cameraBufferSize = 4;
+        firstInput->resourceLayoutRevision = 11;
+        firstInput->views.push_back({ .id = 17, .cameraBufferIndex = 3, .primary = true });
+        const auto first = graph.Request(key, 11, {},
+            ArtifactPayload::Make<ViewFamilyBuildInput>(firstInput), 11);
+        Check(first);
+        graph.WaitIdle();
+        auto snapshot = graph.Snapshot(first.version);
+        auto root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        auto family = root ? root->fragment.payload.Get<PublishedViewFamilyState>() : nullptr;
+        Check(family && family->views.size() == 1 && family->views.front().id == 17);
+
+        auto secondInput = std::make_shared<ViewFamilyBuildInput>(*firstInput);
+        secondInput->revision = 12;
+        secondInput->resourceLayoutRevision = 12;
+        secondInput->views.front().id = 23;
+        const auto second = graph.Request(key, 12, {},
+            ArtifactPayload::Make<ViewFamilyBuildInput>(secondInput), 12);
+        Check(second);
+        graph.WaitIdle();
+        snapshot = graph.Snapshot(second.version);
+        root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        family = root ? root->fragment.payload.Get<PublishedViewFamilyState>() : nullptr;
+        Check(family && family->resourceLayoutRevision == 12 &&
+            family->views.front().id == 23);
+        snapshot = graph.Snapshot(first.version);
+        root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        family = root ? root->fragment.payload.Get<PublishedViewFamilyState>() : nullptr;
+        Check(family && family->views.front().id == 17);
+    }
+
+    {
+        RegisterPoseStateProducer(graph);
+        const ArtifactAddress key{ ArtifactKind::PoseState, 1u, 0u };
+        auto input = std::make_shared<PoseStateBuildInput>();
+        input->activeInstanceRevision = 7;
+        input->activeInstances.push_back({ .instanceSlot = 9, .boneCount = 42 });
+        const auto request = graph.Request(key, 7, {},
+            ArtifactPayload::Make<PoseStateBuildInput>(input), 7);
+        Check(request);
+        graph.WaitIdle();
+        const auto snapshot = graph.Snapshot(request.version);
+        const auto root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        const auto poses = root ? root->fragment.payload.Get<PublishedPoseState>() : nullptr;
+        Check(poses && poses->activeInstanceRevision == 7 &&
+            poses->activeInstances.front().instanceSlot == 9);
+    }
+
+    {
+        RegisterLightStateProducer(graph);
+        const ArtifactAddress viewKey{ ArtifactKind::ViewFamily, 2u, 0u };
+        auto viewInput = std::make_shared<ViewFamilyBuildInput>();
+        viewInput->revision = 21;
+        viewInput->resourceLayoutRevision = 4;
+        viewInput->views.push_back({ .id = 91, .cameraBufferIndex = 2 });
+        const auto selectedViews = graph.Request(viewKey, 21, {},
+            ArtifactPayload::Make<ViewFamilyBuildInput>(viewInput), 21);
+        Check(selectedViews);
+
+        const ArtifactAddress key{ ArtifactKind::LightTable, 1u, 0u };
+        auto input = std::make_shared<LightTableBuildInput>();
+        input->revision = 5;
+        input->lightCount = 3;
+        const auto request = graph.Request(key, 5,
+            { Exact(selectedViews.Handle()) },
+            ArtifactPayload::Make<LightTableBuildInput>(input), 5);
+        Check(request);
+        graph.WaitIdle();
+        const auto snapshot = graph.Snapshot(request.version);
+        const auto root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        const auto lights = root ? root->fragment.payload.Get<PublishedLightTableState>() : nullptr;
+        Check(lights && lights->revision == 5 && lights->lightCount == 3 &&
+            lights->viewFamilyRevision == 21);
+
+        auto newerViewInput = std::make_shared<ViewFamilyBuildInput>(*viewInput);
+        newerViewInput->revision = 22;
+        newerViewInput->views.front().id = 92;
+        Check(graph.Request(viewKey, 22, {},
+            ArtifactPayload::Make<ViewFamilyBuildInput>(newerViewInput), 22));
+        graph.WaitIdle();
+        const auto retainedLight = graph.Snapshot(request.version);
+        const auto retainedRoot = retainedLight.payload.Get<RendererStateFragmentArtifact>();
+        const auto retainedState = retainedRoot
+            ? retainedRoot->fragment.payload.Get<PublishedLightTableState>() : nullptr;
+        Check(retainedState && retainedState->viewFamilyRevision == 21);
     }
 
     graph.Shutdown();

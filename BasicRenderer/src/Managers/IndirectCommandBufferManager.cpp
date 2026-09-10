@@ -34,9 +34,12 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 void IndirectCommandBufferManager::Shutdown() {
     BT_ZONE_SCOPE("IndirectCommandBufferManager::Shutdown");
     m_stopping.store(true, std::memory_order_release);
-    if (m_observedObjectManager) m_observedObjectManager->SetActiveDrawSetMutationCallback({});
+    if (m_activeDrawObserver) {
+        std::lock_guard observerLock(m_activeDrawObserver->mutex);
+        m_activeDrawObserver->owner = nullptr;
+    }
     if (m_buildScope.Valid()) m_buildScope.CancelAndWait();
-    m_observedObjectManager = nullptr;
+    m_activeDrawObserver.reset();
     m_rendererStateRequests = nullptr;
     m_uploadService = nullptr;
 }
@@ -145,26 +148,31 @@ void IndirectCommandBufferManager::SetRendererStateServices(
 }
 
 void IndirectCommandBufferManager::AttachActiveDrawSource(ObjectManager& objectManager) {
-	if (!m_activeObserverInstalled) {
-		m_activeObserverInstalled = true;
-		m_observedObjectManager = &objectManager;
-		objectManager.SetActiveDrawSetMutationCallback(
-			[this](const DrawWorkloadKey& workloadKey, bool replace,
-				std::uint64_t revision,
-				std::shared_ptr<const std::vector<SortedUnsignedIntBuffer::ActiveDrawSetEntry>> entries) {
-				OnActiveDrawSetMutation(
+	if (m_activeDrawObserver) return;
+	auto observer = std::make_shared<ActiveDrawObserverState>();
+	observer->owner = this;
+	m_activeDrawObserver = observer;
+	objectManager.SetActiveDrawSetMutationCallback(
+		[weakObserver = std::weak_ptr<ActiveDrawObserverState>(observer)](
+			const DrawWorkloadKey& workloadKey, bool replace,
+			std::uint64_t revision,
+			std::shared_ptr<const std::vector<SortedUnsignedIntBuffer::ActiveDrawSetEntry>> entries) {
+			const auto retainedObserver = weakObserver.lock();
+			if (!retainedObserver) return;
+			std::lock_guard observerLock(retainedObserver->mutex);
+			if (retainedObserver->owner) {
+				retainedObserver->owner->OnActiveDrawSetMutation(
 					workloadKey, replace, revision, std::move(entries));
-			});
-	}
+			}
+		});
 }
 
 void IndirectCommandBufferManager::PublishDesiredState(
 	std::optional<br::render::ArtifactRequirement> objectBufferRequirement,
-	std::uint64_t residentDrawRecordCount) {
+	std::uint64_t residentDrawRecordCount,
+	const std::shared_ptr<const br::render::PublishedRendererState>& publishedState) {
     BT_ZONE_SCOPE("IndirectCommandBufferManager::PublishDesiredState");
     if (!m_rendererStateRequests || !m_uploadService) return;
-	const auto publishedSource = br::render::PublishedStateSource::ProcessSource();
-	const auto publishedState = publishedSource ? publishedSource->Load() : nullptr;
 	if (publishedState) {
 		std::lock_guard desiredLock(m_desiredMutex);
 		const auto indirect = publishedState->indirectWorkloads.payload

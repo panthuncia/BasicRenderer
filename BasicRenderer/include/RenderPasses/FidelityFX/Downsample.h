@@ -79,7 +79,7 @@ public:
 
     void Update(const UpdateExecutionContext& executionContext) override {
         auto* updateContext = executionContext.hostData->Get<UpdateContext>();
-        if (!updateContext || !updateContext->viewManager) {
+        if (!updateContext) {
             if (!m_activeDepthMaps.empty()) {
                 m_activeDepthMaps.clear();
                 m_declaredResourcesChanged = true;
@@ -90,7 +90,7 @@ public:
             return;
         }
 
-        auto activeDepthMaps = CollectActiveDepthMaps(*updateContext->viewManager);
+        auto activeDepthMaps = CollectActiveDepthMaps(updateContext->preparedViews);
         m_declaredResourcesChanged = !HaveSameActiveDepthMaps(m_activeDepthMaps, activeDepthMaps);
         for (const auto& [resourceID, map] : activeDepthMaps) {
             const auto previous = m_perMapInfo.find(resourceID);
@@ -180,19 +180,16 @@ private:
 	PipelineState downsampleArrayPSO;
     bool m_declaredResourcesChanged = true;
 
-    static std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> CollectActiveDepthMaps(ViewManager& viewManager)
+    static std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> CollectActiveDepthMaps(
+        const std::vector<PreparedViewFrameData>& views)
     {
         std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> activeDepthMaps;
 
-        viewManager.ForEachView([&](uint64_t viewID) {
-            auto* view = viewManager.Get(viewID);
-            if (!view || !view->gpu.linearDepthMap) {
-                return;
-            }
-
-            const uint64_t resourceID = view->gpu.linearDepthMap->GetGlobalResourceID();
-            activeDepthMaps[resourceID] = view->gpu.linearDepthMap;
-        });
+        for (const auto& view : views) {
+            if (!view.linearDepthMap) continue;
+            const uint64_t resourceID = view.linearDepthMap->GetGlobalResourceID();
+            activeDepthMaps[resourceID] = view.linearDepthMap;
+        }
 
         return activeDepthMaps;
     }
