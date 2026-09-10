@@ -11,7 +11,14 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class ReyesDicePass final : public org::TypedRenderGraphPass<ReyesDicePass, br::render::PreparedComputeIndirect> {
+struct ReyesDiceBindings {
+    org::ResourceBindingToken queue, counter, readOffset, tessConfigs, indirectArgs, telemetry;
+    uint32_t capacity = 0, phase = 0;
+    bool hasReadOffset = false;
+};
+
+class ReyesDicePass final : public org::TypedRenderGraphPass<ReyesDicePass,
+    br::render::PreparedComputeIndirect, ReyesDiceBindings> {
 public:
     ReyesDicePass(
         std::shared_ptr<Buffer> diceQueueBuffer,
@@ -23,9 +30,9 @@ public:
         uint32_t maxDiceQueueEntries,
         uint32_t phaseIndex);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
+    ReyesDiceBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeIndirect Prepare(const ReyesDiceBindings&, const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesDiceBindings&, const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_diceQueueBuffer;
@@ -33,7 +40,6 @@ private:
     std::shared_ptr<Buffer> m_diceQueueReadOffsetBuffer;
     std::shared_ptr<Buffer> m_tessTableConfigsBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_maxDiceQueueEntries = 0u;
     uint32_t m_phaseIndex = 0u;

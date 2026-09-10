@@ -17,7 +17,15 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesVirtualShadowRasterizationPass final : public org::TypedRenderGraphPass<ReyesVirtualShadowRasterizationPass, br::render::PreparedComputeIndirect>, public IDynamicDeclaredResources {
+struct ReyesVirtualShadowRasterBindings {
+    org::ResourceBindingToken visible, transforms, diceQueue, diceCounter, work, workCounter;
+    org::ResourceBindingToken tessConfigs, tessVertices, tessTriangles, indirectArgs, telemetry, viewInfo;
+    org::ResourceBindingToken pageTable, physicalPages, dynamicPages, clipmapInfo;
+    uint32_t phase = 0, pageTableResolution = 0, virtualResolution = 0;
+};
+
+class ReyesVirtualShadowRasterizationPass final : public org::TypedRenderGraphPass<ReyesVirtualShadowRasterizationPass,
+    br::render::PreparedComputeIndirect, ReyesVirtualShadowRasterBindings>, public IDynamicDeclaredResources {
 public:
     ReyesVirtualShadowRasterizationPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -39,11 +47,12 @@ public:
         std::string_view resourceName,
         uint32_t phaseIndex);
 
-    void Declare(org::PassBuilder& builder);
+    ReyesVirtualShadowRasterBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording);
+    br::render::PreparedComputeIndirect Prepare(const ReyesVirtualShadowRasterBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesVirtualShadowRasterBindings&, const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -67,6 +76,7 @@ private:
     uint32_t m_phaseIndex = 0u;
     std::vector<CLodViewRasterInfo> m_viewRasterInfos;
     bool m_declaredResourcesChanged = true;
+    CLodVirtualShadowResolutionConfig m_shadowConfig{};
     PipelineState m_pso;
     std::shared_ptr<rhi::CommandSignaturePtr> m_commandSignature;
 };

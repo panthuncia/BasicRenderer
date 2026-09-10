@@ -18,7 +18,15 @@ enum class ReyesClassifyMode : uint32_t
     ShadowCoarseLargeOnly = 2u,
 };
 
-class ReyesClassifyPass final : public org::TypedRenderGraphPass<ReyesClassifyPass, br::render::PreparedComputeIndirect> {
+struct ReyesClassifyBindings {
+    org::ResourceBindingToken visible, visibleCounter, readBaseCounter, fullClusters, fullCounter;
+    org::ResourceBindingToken ownedClusters, ownedCounter, ownershipBitset, indirectArgs, telemetry;
+    uint32_t fullCapacity = 0, ownedCapacity = 0, phase = 0, mode = 0;
+    bool hasReadBaseCounter = false, hasOwnershipBitset = false;
+};
+
+class ReyesClassifyPass final : public org::TypedRenderGraphPass<ReyesClassifyPass,
+    br::render::PreparedComputeIndirect, ReyesClassifyBindings> {
 public:
     ReyesClassifyPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -36,9 +44,10 @@ public:
         uint32_t phaseIndex,
         ReyesClassifyMode classifyMode = ReyesClassifyMode::Default);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
+    ReyesClassifyBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeIndirect Prepare(const ReyesClassifyBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesClassifyBindings&, const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -52,7 +61,6 @@ private:
     uint32_t m_ownedClusterCapacity = 0u;
     std::shared_ptr<Buffer> m_ownershipBitsetBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_phaseIndex = 0u;
     ReyesClassifyMode m_classifyMode = ReyesClassifyMode::Default;

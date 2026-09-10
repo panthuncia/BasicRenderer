@@ -266,7 +266,13 @@ private:
     PipelineState m_pso;
 };
 
-class TerrainRvtMarkVisibilityMaterialPagesPass final : public org::TypedRenderGraphPass<TerrainRvtMarkVisibilityMaterialPagesPass, br::render::PreparedComputeDispatch> {
+struct TerrainRvtMarkVisibilityMaterialPagesBindings {
+    org::ResourceBindingToken visibleClusters, visibleCount;
+    uint32_t visibleCapacity = 0;
+};
+
+class TerrainRvtMarkVisibilityMaterialPagesPass final : public org::TypedRenderGraphPass<TerrainRvtMarkVisibilityMaterialPagesPass,
+    br::render::PreparedComputeDispatch, TerrainRvtMarkVisibilityMaterialPagesBindings> {
 public:
     TerrainRvtMarkVisibilityMaterialPagesPass()
     {
@@ -297,11 +303,14 @@ public:
         } catch (...) {}
     }
 
-    void Declare(org::PassBuilder& b)
+    TerrainRvtMarkVisibilityMaterialPagesBindings Declare(org::PassBuilder& b)
     {
+        RefreshResourcePointers();
         b.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-        b.WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
-        b.WithShaderResource(ECSResourceResolver(m_visibleClustersCounterQuery));
+        TerrainRvtMarkVisibilityMaterialPagesBindings bindings{
+            b.BindShaderResource(m_visibleClustersResource),
+            b.BindShaderResource(m_visibleClustersCounterResource),
+            m_visibleClusterCapacity};
         if (m_slabResourceGroup) {
             b.WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
         }
@@ -324,6 +333,7 @@ public:
                 Builtin::Terrain::RvtCounters,
                 Builtin::Terrain::RvtStats)
             .WithConstantBuffer(Builtin::PerFrameBuffer);
+        return bindings;
     }
 
     void Initialize()
@@ -331,7 +341,9 @@ public:
         RefreshResourcePointers();
     }
 
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation)
+    br::render::PreparedComputeDispatch Prepare(
+        const TerrainRvtMarkVisibilityMaterialPagesBindings& bindings,
+        const org::PassPrepareContext& preparation) const
     {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
 
@@ -344,9 +356,11 @@ public:
         auto program = preparation.CaptureProgramBinding(m_pso);
         data.program = program.program;
         data.descriptorIndices = std::move(program.descriptorIndices);
-        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterSRVIndex;
-        data.constants[VISBUF_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClusterCounterSRVIndex;
-        data.groupsX = (std::max(m_visibleClusterCapacity, 1u) + 63u) / 64u;
+        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.visibleClusters, {org::BindlessViewKind::ShaderResource}).index;
+        data.constants[VISBUF_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.visibleCount, {org::BindlessViewKind::ShaderResource}).index;
+        data.groupsX = (std::max(bindings.visibleCapacity, 1u) + 63u) / 64u;
         return data;
     }
 
@@ -357,20 +371,21 @@ public:
         m_slabResourceGroup.reset();
     }
 
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const TerrainRvtMarkVisibilityMaterialPagesBindings&,
+        const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeDispatch(data, recording);
     }
 
 private:
     void RefreshResourcePointers()
     {
-        m_visibleClusterSRVIndex = 0xFFFFFFFFu;
-        m_visibleClusterCounterSRVIndex = 0xFFFFFFFFu;
+        m_visibleClustersResource.reset();
+        m_visibleClustersCounterResource.reset();
         m_visibleClusterCapacity = 0u;
         m_visibleClustersQuery.each([&](flecs::entity e) {
             auto& res = e.get<Components::Resource>();
             if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock()); resource) {
-                m_visibleClusterSRVIndex = resource->GetSRVInfo(0).slot.index;
+                m_visibleClustersResource = std::move(resource);
             }
             const auto capacity = e.get<CLodVisibleClusterCapacity>();
             m_visibleClusterCapacity = capacity.maxVisibleClusters;
@@ -378,7 +393,7 @@ private:
         m_visibleClustersCounterQuery.each([&](flecs::entity e) {
             if (const auto res = e.try_get<Components::Resource>(); res) {
                 if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    m_visibleClusterCounterSRVIndex = resource->GetSRVInfo(0).slot.index;
+                    m_visibleClustersCounterResource = std::move(resource);
                 }
             }
         });
@@ -388,8 +403,8 @@ private:
     flecs::query<> m_visibleClustersQuery;
     flecs::query<> m_visibleClustersCounterQuery;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
-    uint32_t m_visibleClusterSRVIndex = 0xFFFFFFFFu;
-    uint32_t m_visibleClusterCounterSRVIndex = 0xFFFFFFFFu;
+    std::shared_ptr<GloballyIndexedResource> m_visibleClustersResource;
+    std::shared_ptr<GloballyIndexedResource> m_visibleClustersCounterResource;
     uint32_t m_visibleClusterCapacity = 0u;
 };
 

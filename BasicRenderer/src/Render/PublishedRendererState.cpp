@@ -285,6 +285,7 @@ PublishedStateFragment& PublishedRendererState::Fragment(PublishedFragmentKind k
     case PublishedFragmentKind::TextureImages: return textureImages;
     case PublishedFragmentKind::Terrain: return terrain;
     case PublishedFragmentKind::Geometry: return geometry;
+    case PublishedFragmentKind::GeometryResidency: return geometryResidency;
     case PublishedFragmentKind::DrawRecords: return drawRecords;
     case PublishedFragmentKind::ActiveDrawLists: return activeDrawLists;
     case PublishedFragmentKind::IndirectWorkloads: return indirectWorkloads;

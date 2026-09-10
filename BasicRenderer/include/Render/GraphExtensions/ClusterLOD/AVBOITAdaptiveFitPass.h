@@ -8,15 +8,22 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class AVBOITAdaptiveFitPass final : public org::TypedRenderGraphPass<AVBOITAdaptiveFitPass, br::render::PreparedComputeDispatch> {
+struct AVBOITAdaptiveFitBindings {
+    org::ResourceBindingToken config, state;
+};
+
+class AVBOITAdaptiveFitPass final : public org::TypedRenderGraphPass<AVBOITAdaptiveFitPass,
+    br::render::PreparedComputeDispatch, AVBOITAdaptiveFitBindings> {
 public:
     AVBOITAdaptiveFitPass(
         std::shared_ptr<Buffer> configBuffer,
         std::shared_ptr<Buffer> fitStateBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    AVBOITAdaptiveFitBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITAdaptiveFitBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const AVBOITAdaptiveFitBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

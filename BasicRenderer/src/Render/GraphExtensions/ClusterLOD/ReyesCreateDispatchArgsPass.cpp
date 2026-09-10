@@ -27,16 +27,20 @@ ReyesCreateDispatchArgsPass::ReyesCreateDispatchArgsPass(
         "CLod.ReyesCreateDispatchArgs.PSO");
 }
 
-void ReyesCreateDispatchArgsPass::Declare(org::PassBuilder& builder)
+ReyesCreateDispatchArgsBindings ReyesCreateDispatchArgsPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_sourceCounterBuffer)
-        .WithUnorderedAccess(m_indirectArgsBuffer);
+    ReyesCreateDispatchArgsBindings bindings{builder.BindShaderResource(m_sourceCounterBuffer),
+        builder.BindUnorderedAccess(m_indirectArgsBuffer)};
     if (m_sourceBaseCounterBuffer) {
-        builder.WithShaderResource(m_sourceBaseCounterBuffer);
+        bindings.sourceBaseCounter = builder.BindShaderResource(m_sourceBaseCounterBuffer);
+        bindings.hasSourceBaseCounter = true;
     }
 
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    bindings.threadsPerGroup = m_threadsPerGroup;
+    bindings.maxWorkItemCount = m_maxWorkItemCount;
+    return bindings;
 }
 
 void ReyesCreateDispatchArgsPass::Initialize()
@@ -54,7 +58,8 @@ void ReyesCreateDispatchArgsPass::ShutdownPass()
 {
 }
 
-br::render::PreparedComputeDispatch ReyesCreateDispatchArgsPass::Prepare(const org::PassPrepareContext& preparation)
+br::render::PreparedComputeDispatch ReyesCreateDispatchArgsPass::Prepare(
+    const ReyesCreateDispatchArgsBindings& bindings, const org::PassPrepareContext& preparation) const
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     auto payload = m_pso.GetPayload();
@@ -65,16 +70,17 @@ br::render::PreparedComputeDispatch ReyesCreateDispatchArgsPass::Prepare(const o
     auto program = preparation.CaptureProgramBinding(std::move(payload));
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_COUNTER_DESCRIPTOR_INDEX] = m_sourceCounterBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_OUTPUT_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_THREADS_PER_GROUP] = m_threadsPerGroup;
-    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_sourceBaseCounterBuffer
-        ? m_sourceBaseCounterBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
-    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_MAX_WORK_ITEM_COUNT] = m_maxWorkItemCount;
+    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_COUNTER_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.sourceCounter, {org::BindlessViewKind::ShaderResource}).index;
+    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_OUTPUT_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.indirectArgs, {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_THREADS_PER_GROUP] = bindings.threadsPerGroup;
+    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX] = bindings.hasSourceBaseCounter
+        ? preparation.ResolveView(bindings.sourceBaseCounter, {org::BindlessViewKind::ShaderResource}).index : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_CREATE_DISPATCH_ARGS_MAX_WORK_ITEM_COUNT] = bindings.maxWorkItemCount;
     data.groupsX = 1;
     return data;
 }
 
-void ReyesCreateDispatchArgsPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void ReyesCreateDispatchArgsPass::Record(const ReyesCreateDispatchArgsBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

@@ -6,6 +6,7 @@
 #include <rhi.h>
 
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "Interfaces/IDynamicDeclaredResources.h"
 
 namespace org { class Buffer; }
 using org::Buffer;
@@ -22,7 +23,25 @@ struct RasterBucketCompactAndArgsPreparedData {
     bool enabled = false;
 };
 
-class RasterBucketCompactAndArgsPass : public org::TypedRenderGraphPass<RasterBucketCompactAndArgsPass, RasterBucketCompactAndArgsPreparedData> {
+struct RasterBucketCompactAndArgsBindings {
+    org::ResourceBindingToken visibleClusters, visibleTransforms, visibleCount, compactedBaseCount, readBaseCount;
+    org::ResourceBindingToken indirectCommand, histogram, offsets, writeCursor, compactedClusters;
+    org::ResourceBindingToken compactedTransforms, indirectArgs, sortedMapping, reyesOwnership, telemetry;
+    uint32_t numBuckets = 0;
+    uint32_t maxVisibleClusters = 0;
+    bool enabled = false;
+    bool appendToExisting = false;
+    bool readReverse = false;
+    bool buildSoftwareRasterDispatch = false;
+    bool hasReadBaseCount = false;
+    bool hasReyesOwnership = false;
+    bool hasTelemetry = false;
+    bool telemetryEnabled = false;
+};
+
+class RasterBucketCompactAndArgsPass : public org::TypedRenderGraphPass<RasterBucketCompactAndArgsPass,
+    RasterBucketCompactAndArgsPreparedData, RasterBucketCompactAndArgsBindings>,
+    public IDynamicDeclaredResources {
 public:
     RasterBucketCompactAndArgsPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -46,10 +65,13 @@ public:
         bool buildSoftwareRasterDispatch = false,
         bool runWhenComputeSWRasterEnabledOnly = false);
 
-    void Declare(org::PassBuilder& builder);
-    RasterBucketCompactAndArgsPreparedData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const RasterBucketCompactAndArgsPreparedData&, org::PassRecordContext&);
+    RasterBucketCompactAndArgsBindings Declare(org::PassBuilder& builder);
+    RasterBucketCompactAndArgsPreparedData Prepare(const RasterBucketCompactAndArgsBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const RasterBucketCompactAndArgsBindings&,
+        const RasterBucketCompactAndArgsPreparedData&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
+    bool DeclaredResourcesChanged() const override;
 
 private:
     using PreparedData = RasterBucketCompactAndArgsPreparedData;
@@ -78,4 +100,7 @@ private:
     bool m_readReverse = false;
     bool m_buildSoftwareRasterDispatch = false;
     bool m_runWhenComputeSWRasterEnabledOnly = false;
+    uint32_t m_numBuckets = 0;
+    bool m_enabled = false;
+    bool m_declaredResourcesChanged = true;
 };

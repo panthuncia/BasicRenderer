@@ -13,7 +13,13 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesSeedPatchesPass final : public org::TypedRenderGraphPass<ReyesSeedPatchesPass, br::render::PreparedComputeIndirect> {
+struct ReyesSeedPatchesBindings {
+    org::ResourceBindingToken visible, owned, ownedCounter, splitQueue, splitCounter, splitOverflow, indirectArgs;
+    uint32_t capacity = 0, phase = 0;
+};
+
+class ReyesSeedPatchesPass final : public org::TypedRenderGraphPass<ReyesSeedPatchesPass,
+    br::render::PreparedComputeIndirect, ReyesSeedPatchesBindings> {
 public:
     ReyesSeedPatchesPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -27,9 +33,10 @@ public:
         uint32_t maxSplitQueueEntries,
         uint32_t phaseIndex);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
+    ReyesSeedPatchesBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeIndirect Prepare(const ReyesSeedPatchesBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesSeedPatchesBindings&, const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
 
 private:
@@ -40,7 +47,6 @@ private:
     std::shared_ptr<Buffer> m_splitQueueCounterBuffer;
     std::shared_ptr<Buffer> m_splitQueueOverflowBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     uint32_t m_maxSplitQueueEntries = 0u;
     uint32_t m_phaseIndex = 0u;

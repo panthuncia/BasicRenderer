@@ -861,6 +861,12 @@ void CLodExtension::InitializeCoreResources()
 
     m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase1"));
+    if (traits.rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer) {
+        m_rasterBucketsIndirectArgsBuffer->GetECSEntity()
+            .set<Components::Resource>({ m_rasterBucketsIndirectArgsBuffer })
+            .add<CLodPrimaryPhase1RasterIndirectArgsTag>()
+            .add<CLodExtensionTypeTag>(typeEntity);
+    }
 
     m_rasterBucketsIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase2"));
@@ -1900,8 +1906,11 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     !isPhase1)));
     };
     const auto phaseFeedsPrimaryVisibility = [&](uint32_t phaseIndex) {
-        return traits.rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer &&
-            (!enablePhase2OcclusionReplay || phaseIndex == 2u);
+        (void)phaseIndex;
+        // Both phases contribute to the same visibility result. Phase 2 is an
+        // incremental occlusion replay and is commonly empty in a stable
+        // scene; it cannot be the sole ordering edge to visibility consumers.
+        return traits.rasterOutputKind == CLodRasterOutputKind::VisibilityBuffer;
     };
     const auto appendFixedRasterPass = [&](uint32_t phaseIndex, bool updateShadowClearDirtyBitsAfter) -> std::string {
         const bool isPhase1 = phaseIndex == 1u;

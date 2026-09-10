@@ -35,15 +35,16 @@ AVBOITIntegratePass::AVBOITIntegratePass(
         "CLod.AVBOITIntegrate.PSO");
 }
 
-void AVBOITIntegratePass::Declare(org::PassBuilder& builder)
+AVBOITIntegrateBindings AVBOITIntegratePass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_configBuffer);
-    builder.WithShaderResource(m_fitStateBuffer);
+    AVBOITIntegrateBindings bindings{
+        builder.BindShaderResource(m_configBuffer),
+        builder.BindShaderResource(m_fitStateBuffer),
+        builder.BindUnorderedAccess(m_occupancyTexture) };
 
     builder.WithUnorderedAccess(
         Builtin::DebugVisualization,
-        m_occupancyTexture,
         m_coverageTexture,
         m_occupancySliceMaskTexture,
         m_scalarExtinctionTexture,
@@ -52,6 +53,7 @@ void AVBOITIntegratePass::Declare(org::PassBuilder& builder)
         m_zeroTransmittanceSliceTexture);
 
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    return bindings;
 }
 
 void AVBOITIntegratePass::Update(const UpdateExecutionContext& executionContext)
@@ -65,7 +67,8 @@ bool AVBOITIntegratePass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-br::render::PreparedComputeDispatch AVBOITIntegratePass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch AVBOITIntegratePass::Prepare(
+    const AVBOITIntegrateBindings& bindings, const org::PassPrepareContext& preparation) const {
     br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_fitStateBuffer || !m_occupancyTexture || !m_coverageTexture ||
         !m_occupancySliceMaskTexture || !m_scalarExtinctionTexture || !m_chromaticExtinctionTexture ||
@@ -83,15 +86,19 @@ br::render::PreparedComputeDispatch AVBOITIntegratePass::Prepare(const org::Pass
     data.descriptorIndices = std::move(program.descriptorIndices);
 
     auto& misc = data.constants;
-    misc[CLOD_AVBOIT_VBOIT_INTEGRATE_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_AVBOIT_VBOIT_INTEGRATE_FIT_STATE_DESCRIPTOR_INDEX] = m_fitStateBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_AVBOIT_VBOIT_INTEGRATE_CONFIG_DESCRIPTOR_INDEX] =
+        preparation.ResolveView(bindings.config, {org::BindlessViewKind::ShaderResource}).index;
+    misc[CLOD_AVBOIT_VBOIT_INTEGRATE_FIT_STATE_DESCRIPTOR_INDEX] =
+        preparation.ResolveView(bindings.state, {org::BindlessViewKind::ShaderResource}).index;
 
-    const uint32_t groupCountX = (m_occupancyTexture->GetWidth() + 7u) / 8u;
-    const uint32_t groupCountY = (m_occupancyTexture->GetHeight() + 7u) / 8u;
+    const auto& occupancy = preparation.Describe(bindings.occupancy);
+    const uint32_t groupCountX = (occupancy.texture.width + 7u) / 8u;
+    const uint32_t groupCountY = (occupancy.texture.height + 7u) / 8u;
     data.groupsX = groupCountX; data.groupsY = groupCountY; data.groupsZ = 1u;
     return data;
 }
 
-void AVBOITIntegratePass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void AVBOITIntegratePass::Record(const AVBOITIntegrateBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

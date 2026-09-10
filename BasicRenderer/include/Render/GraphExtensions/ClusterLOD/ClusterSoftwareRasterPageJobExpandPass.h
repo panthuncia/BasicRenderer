@@ -36,7 +36,15 @@ struct ClusterPageJobExpandFrameData {
     std::array<org::PreparedResourceReference, 3> barriers;
 };
 
-class ClusterSoftwareRasterPageJobExpandPass : public org::TypedRenderGraphPass<ClusterSoftwareRasterPageJobExpandPass, ClusterPageJobExpandFrameData> {
+struct ClusterPageJobExpandBindings {
+    org::ResourceBindingToken compactedVisibleClusters, compactedVisibleClusterTransformIndices;
+    org::ResourceBindingToken histogram, indirectArgs, viewRasterInfo, pageTable, clipmapInfo;
+    std::array<org::ResourceBindingToken, 2> pageJobRecords, pageJobCounts;
+    org::ResourceBindingToken clusterTags, stats;
+};
+
+class ClusterSoftwareRasterPageJobExpandPass : public org::TypedRenderGraphPass<ClusterSoftwareRasterPageJobExpandPass,
+    ClusterPageJobExpandFrameData, ClusterPageJobExpandBindings> {
 public:
     ClusterSoftwareRasterPageJobExpandPass(
         std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
@@ -119,7 +127,7 @@ public:
             "CLod_SoftwarePageJobExpandClearUintPSO");
     }
 
-    void Declare(org::PassBuilder& declaration)
+    ClusterPageJobExpandBindings Declare(org::PassBuilder& declaration)
     {
         declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         auto* builder = &declaration;
@@ -159,9 +167,25 @@ public:
         if (m_slabResourceGroup) {
             builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
         }
+        ClusterPageJobExpandBindings bindings{
+            builder->BindShaderResource(m_compactedVisibleClustersBuffer),
+            builder->BindShaderResource(m_compactedVisibleClusterTransformIndicesBuffer),
+            builder->BindShaderResource(m_rasterBucketsHistogramBuffer),
+            builder->BindIndirectArguments(m_rasterBucketsIndirectArgsBuffer),
+            builder->BindShaderResource(m_viewRasterInfoBuffer),
+            builder->BindUnorderedAccess(m_virtualShadowPageTableTexture),
+            builder->BindShaderResource(m_virtualShadowClipmapInfoBuffer)};
+        for (uint32_t i = 0; i < 2; ++i) {
+            bindings.pageJobRecords[i] = builder->BindUnorderedAccess(m_pageJobRecordsBuffers[i]);
+            bindings.pageJobCounts[i] = builder->BindUnorderedAccess(m_pageJobCountBuffers[i]);
+        }
+        bindings.clusterTags = builder->BindUnorderedAccess(m_pageJobClusterTagsBuffer);
+        bindings.stats = builder->BindUnorderedAccess(m_virtualShadowStatsBuffer);
+        return bindings;
     }
 
-    ClusterPageJobExpandFrameData Prepare(const org::PassPrepareContext& preparation) {
+    ClusterPageJobExpandFrameData Prepare(const ClusterPageJobExpandBindings& declared,
+        const org::PassPrepareContext& preparation) const {
         ClusterPageJobExpandFrameData data{};
         if (m_runWhenComputeSWRasterEnabledOnly &&
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
@@ -177,37 +201,44 @@ public:
         const auto& context = *preparation.preparationData->Get<UpdateContext>();
         const auto signature = preparation.CaptureCommandSignature(m_commandSignature);
         const auto clear = preparation.CaptureProgramBinding(m_clearPso);
-        const auto appendClear = [&](const std::shared_ptr<Buffer>& buffer, uint32_t value, uint32_t count) {
+        const auto srv = [&](org::ResourceBindingToken token) {
+            return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index;
+        };
+        const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) {
+            return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index;
+        };
+        const auto appendClear = [&](org::ResourceBindingToken token, uint32_t value, uint32_t count) {
             br::render::PreparedComputeDispatch dispatch{};
             dispatch.resourceHeap = context.textureDescriptorHeap.GetHandle();
             dispatch.samplerHeap = context.samplerDescriptorHeap.GetHandle();
             dispatch.program = clear.program;
             dispatch.descriptorIndices = clear.descriptorIndices;
-            dispatch.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = buffer->GetUAVShaderVisibleInfo(0).slot.index;
+            dispatch.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = uav(token);
             dispatch.constants[CLOD_CLEAR_UINT_BUFFER_VALUE] = value;
             dispatch.constants[CLOD_CLEAR_UINT_BUFFER_COUNT] = count;
             dispatch.groupsX = (count + 63u) / 64u;
             data.clears.push_back(std::move(dispatch));
         };
         for (uint32_t i = 0; i < m_pageJobCountBuffers.size(); ++i) {
-            appendClear(m_pageJobCountBuffers[i], 0u, 1u);
-            data.barriers[i] = preparation.CaptureResource(m_pageJobCountBuffers[i]->GetGlobalResourceID());
+            appendClear(declared.pageJobCounts[i], 0u, 1u);
+            data.barriers[i] = preparation.CaptureResource(declared.pageJobCounts[i]);
         }
-        appendClear(m_pageJobClusterTagsBuffer, 0xFFFFFFFFu,
+        appendClear(declared.clusterTags, 0xFFFFFFFFu,
             static_cast<uint32_t>(m_pageJobClusterTagsBuffer->GetSize() / sizeof(uint32_t)));
-        data.barriers[2] = preparation.CaptureResource(m_pageJobClusterTagsBuffer->GetGlobalResourceID());
+        data.barriers[2] = preparation.CaptureResource(declared.clusterTags);
         uint32_t misc[NumMiscUintRootConstants] = {};
-        misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = srv(declared.histogram);
+        misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(declared.compactedVisibleClusters);
         misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] =
-            m_compactedVisibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_PAGE_JOB_CLUSTER_TAGS_DESCRIPTOR_INDEX] = m_pageJobClusterTagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            srv(declared.compactedVisibleClusterTransformIndices);
+        misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = srv(declared.viewRasterInfo);
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
+            uav(declared.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = srv(declared.clipmapInfo);
+        misc[CLOD_RASTER_PAGE_JOB_CLUSTER_TAGS_DESCRIPTOR_INDEX] = uav(declared.clusterTags);
         misc[CLOD_RASTER_PAGE_JOB_RECORD_CAPACITY] = m_pageJobRecordCapacity;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_STATS_DESCRIPTOR_INDEX] =
-            m_virtualShadowStatsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uav(declared.stats);
 
         uint32_t pageJobFlags = 0u;
         pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_ENABLED;
@@ -225,7 +256,7 @@ public:
             return data;
         }
 
-        const auto arguments = preparation.CaptureResource(m_rasterBucketsIndirectArgsBuffer->GetGlobalResourceID());
+        const auto arguments = preparation.CaptureResource(declared.indirectArgs);
         const std::array bindings{
             preparation.CaptureProgramBinding(m_rigidPso),
             preparation.CaptureProgramBinding(m_doubleSidedPso),
@@ -236,8 +267,8 @@ public:
             const auto flags = context.preparedRasterBucketFlags.at(i);
             const uint32_t variantIndex = (flags & MaterialRasterFlagsSkinned) ? 1u : 0u;
             const bool doubleSided = (flags & MaterialRasterFlagsDoubleSided) != 0;
-            misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
-            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
+            misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = uav(declared.pageJobRecords[variantIndex]);
+            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = uav(declared.pageJobCounts[variantIndex]);
             const auto& binding = bindings[variantIndex * 2u + (doubleSided ? 1u : 0u)];
             br::render::PreparedComputeIndirect dispatch{};
             dispatch.resourceHeap = context.textureDescriptorHeap.GetHandle();
@@ -253,7 +284,8 @@ public:
         return data;
     }
 
-    static void Record(const ClusterPageJobExpandFrameData& data, org::PassRecordContext& recording) {
+    static void Record(const ClusterPageJobExpandBindings&, const ClusterPageJobExpandFrameData& data,
+        org::PassRecordContext& recording) {
         if (data.clears.empty()) return;
         for (const auto& clear : data.clears)
             br::render::RecordPreparedComputeDispatch(clear, recording);

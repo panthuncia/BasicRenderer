@@ -32,7 +32,15 @@ struct ReyesShadowHardwareFrameData {
     uint32_t width = 1, height = 1;
 };
 
-class ReyesVirtualShadowHardwareRasterPass final : public org::TypedRenderGraphPass<ReyesVirtualShadowHardwareRasterPass, ReyesShadowHardwareFrameData>, public IDynamicDeclaredResources {
+struct ReyesShadowHardwareBindings {
+    org::ResourceBindingToken visible, histogram, indirectArgs, packedWork, compactedIndices, work, diceQueue;
+    org::ResourceBindingToken tessConfigs, tessVertices, tessTriangles, pageTable, physicalPages, dynamicPages, clipmapInfo, telemetry, viewInfo;
+    uint32_t width = 1, height = 1, pageTableResolution = 0, virtualResolution = 0;
+    std::vector<uint32_t> bucketFlags;
+};
+
+class ReyesVirtualShadowHardwareRasterPass final : public org::TypedRenderGraphPass<ReyesVirtualShadowHardwareRasterPass,
+    ReyesShadowHardwareFrameData, ReyesShadowHardwareBindings>, public IDynamicDeclaredResources {
 public:
     ReyesVirtualShadowHardwareRasterPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -53,11 +61,12 @@ public:
         std::shared_ptr<ResourceGroup> slabResourceGroup);
     ~ReyesVirtualShadowHardwareRasterPass();
 
-    void Declare(org::PassBuilder& builder);
+    ReyesShadowHardwareBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    ReyesShadowHardwareFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const ReyesShadowHardwareFrameData& data, org::PassRecordContext& recording);
+    ReyesShadowHardwareFrameData Prepare(const ReyesShadowHardwareBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesShadowHardwareBindings&, const ReyesShadowHardwareFrameData& data, org::PassRecordContext& recording);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -83,4 +92,6 @@ private:
     uint32_t m_passWidth = 1u;
     uint32_t m_passHeight = 1u;
     bool m_declaredResourcesChanged = true;
+    CLodVirtualShadowResolutionConfig m_shadowConfig{};
+    std::vector<uint32_t> m_bucketFlags;
 };

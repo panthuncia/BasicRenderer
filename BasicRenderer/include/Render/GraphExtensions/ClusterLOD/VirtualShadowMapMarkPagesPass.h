@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <array>
 #include <vector>
 
@@ -29,7 +30,16 @@ using org::PixelBuffer;
         bool receiverUint2 = false;
     };
 
-class VirtualShadowMapMarkPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapMarkPagesPass, VirtualShadowMarkFrameData> {
+struct VirtualShadowMapMarkPagesBindings {
+    org::ResourceBindingToken tileWork, tileCount, indirectArgs, clipmapData;
+    org::ResourceBindingToken mask, list, count;
+    std::optional<org::ResourceBindingToken> receiverMask;
+    uint32_t activeClipmapCount = 0;
+    uint32_t receiverSubpageMode = 0;
+};
+
+class VirtualShadowMapMarkPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapMarkPagesPass,
+    VirtualShadowMarkFrameData, VirtualShadowMapMarkPagesBindings> {
 public:
     VirtualShadowMapMarkPagesPass(
         std::shared_ptr<Buffer> tileWorkBuffer,
@@ -41,10 +51,12 @@ public:
         std::shared_ptr<Buffer> markedBlocksCountBuffer,
         std::shared_ptr<Buffer> receiverSubpageMaskBuffer);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapMarkPagesBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    VirtualShadowMarkFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const VirtualShadowMarkFrameData&, org::PassRecordContext&);
+    VirtualShadowMarkFrameData Prepare(const VirtualShadowMapMarkPagesBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapMarkPagesBindings&,
+        const VirtualShadowMarkFrameData&, org::PassRecordContext&);
 
 private:
 

@@ -42,7 +42,7 @@ enum class PublishedResourceUsage : std::uint8_t {
 };
 
 enum class PublishedFragmentKind : std::uint8_t {
-    Materials, TextureImages, Terrain, Geometry, DrawRecords, ActiveDrawLists, IndirectWorkloads,
+    Materials, TextureImages, Terrain, Geometry, GeometryResidency, DrawRecords, ActiveDrawLists, IndirectWorkloads,
     Grass, Count
 };
 
@@ -142,6 +142,7 @@ struct PublishedRendererState {
     PublishedStateFragment textureImages;
     PublishedStateFragment terrain;
     PublishedStateFragment geometry;
+    PublishedStateFragment geometryResidency;
     PublishedStateFragment drawRecords;
     PublishedStateFragment activeDrawLists;
     PublishedStateFragment indirectWorkloads;

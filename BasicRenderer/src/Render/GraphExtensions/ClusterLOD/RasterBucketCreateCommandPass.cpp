@@ -32,37 +32,48 @@ RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
         "CLod_RasterBucketsCreateCommandPSO");
 }
 
-void RasterBucketCreateCommandPass::Declare(org::PassBuilder& builder) {
-    builder.WithShaderResource(m_visibleClustersCounterBuffer)
-        .WithUnorderedAccess(m_histogramIndirectCommand);
+RasterBucketCreateCommandBindings RasterBucketCreateCommandPass::Declare(org::PassBuilder& builder) {
+    RasterBucketCreateCommandBindings bindings{builder.BindShaderResource(m_visibleClustersCounterBuffer),
+        builder.BindUnorderedAccess(m_histogramIndirectCommand)};
     if (m_patchReplayNodeInputs) {
-        builder.WithShaderResource(m_occlusionReplayStateBuffer)
-            .WithUnorderedAccess(m_occlusionNodeGpuInputsBuffer);
+        bindings.replayState = builder.BindShaderResource(m_occlusionReplayStateBuffer);
+        bindings.nodeInputs = builder.BindUnorderedAccess(m_occlusionNodeGpuInputsBuffer);
     }
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    bindings.numBuckets = m_numBuckets;
+    bindings.visibleCapacity = m_visibleClustersCapacity;
+    bindings.enabled = m_enabled;
+    bindings.patchReplay = m_patchReplayNodeInputs;
+    return bindings;
 }
 
 
-br::render::PreparedComputeDispatch RasterBucketCreateCommandPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch RasterBucketCreateCommandPass::Prepare(
+    const RasterBucketCreateCommandBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const uint32_t numBuckets = context->preparedRasterBucketCount;
+    const bool enabled = !m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)());
     br::render::PreparedComputeDispatch data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
     data.program = preparation.CaptureProgram(m_pso);
     data.descriptorIndices = CaptureResourceDescriptorIndices(m_pso.GetResourceDescriptorSlots());
-    data.constants[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
-    data.constants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_patchReplayNodeInputs ? m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    data.constants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context->materialManager->GetRasterBucketCount();
-    data.constants[CLOD_CREATE_VISIBLE_CLUSTERS_CAPACITY] = m_visibleClustersCapacity;
-    data.groupsX = (!m_runWhenComputeSWRasterEnabledOnly
-        || CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) ? 1u : 0u;
+    data.constants[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.visibleCount, {org::BindlessViewKind::ShaderResource}).index;
+    data.constants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.indirectCommand, {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = bindings.patchReplay ? preparation.ResolveView(bindings.replayState, {org::BindlessViewKind::ShaderResource}).index : 0xFFFFFFFFu;
+    data.constants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = bindings.patchReplay ? preparation.ResolveView(bindings.nodeInputs, {org::BindlessViewKind::UnorderedAccess}).index : 0xFFFFFFFFu;
+    data.constants[CLOD_CREATE_NUM_RASTER_BUCKETS] = numBuckets;
+    data.constants[CLOD_CREATE_VISIBLE_CLUSTERS_CAPACITY] = bindings.visibleCapacity;
+    data.groupsX = enabled ? 1u : 0u;
     return data;
 }
 
 void RasterBucketCreateCommandPass::Update(const UpdateExecutionContext& executionContext) {
-    (void)executionContext;
+    const auto* context = executionContext.hostData->Get<UpdateContext>();
+    m_numBuckets = context->preparedRasterBucketCount;
+    m_enabled = !m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)());
 }
 

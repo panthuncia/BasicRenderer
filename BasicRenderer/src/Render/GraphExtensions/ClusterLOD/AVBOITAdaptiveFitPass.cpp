@@ -20,14 +20,14 @@ AVBOITAdaptiveFitPass::AVBOITAdaptiveFitPass(
         "CLod.AVBOITAdaptiveFit.PSO");
 }
 
-void AVBOITAdaptiveFitPass::Declare(org::PassBuilder& builder)
+AVBOITAdaptiveFitBindings AVBOITAdaptiveFitPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_fitStateBuffer)
-        .WithUnorderedAccess(m_configBuffer);
+    return {builder.BindUnorderedAccess(m_configBuffer), builder.BindShaderResource(m_fitStateBuffer)};
 }
 
-br::render::PreparedComputeDispatch AVBOITAdaptiveFitPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch AVBOITAdaptiveFitPass::Prepare(
+    const AVBOITAdaptiveFitBindings& bindings, const org::PassPrepareContext& preparation) const {
     br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_fitStateBuffer) {
         return {};
@@ -44,14 +44,15 @@ br::render::PreparedComputeDispatch AVBOITAdaptiveFitPass::Prepare(const org::Pa
 
     auto& misc = data.constants;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_CONFIG_DESCRIPTOR_INDEX] =
-        m_configBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        preparation.ResolveView(bindings.config, {org::BindlessViewKind::UnorderedAccess}).index;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_STATE_DESCRIPTOR_INDEX] =
-        m_fitStateBuffer->GetSRVInfo(0).slot.index;
+        preparation.ResolveView(bindings.state, {org::BindlessViewKind::ShaderResource}).index;
 
     data.groupsX = 1u; data.groupsY = 1u; data.groupsZ = 1u;
     return data;
 }
 
-void AVBOITAdaptiveFitPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void AVBOITAdaptiveFitPass::Record(const AVBOITAdaptiveFitBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

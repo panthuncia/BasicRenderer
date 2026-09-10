@@ -706,7 +706,8 @@ void CLodRayTracingSystem::EnsureRayTracingPipeline(rhi::Device device, const Ra
     m_stats.rayPipelineReady = true;
 }
 
-void CLodRayTracingSystem::ExecuteTraceRays(rhi::Device device, rhi::CommandList commandList, PixelBuffer& output, uint32_t width, uint32_t height) {
+void CLodRayTracingSystem::ExecuteTraceRays(rhi::Device device, rhi::CommandList commandList,
+    PixelBuffer& output, uint32_t outputUAVIndex, uint32_t width, uint32_t height) {
     if (!device || !commandList || !HasRayTracingPipeline() || !m_shaderTableBuffer || width == 0u || height == 0u) {
         return;
     }
@@ -719,7 +720,7 @@ void CLodRayTracingSystem::ExecuteTraceRays(rhi::Device device, rhi::CommandList
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_RT_TLAS_DESCRIPTOR_INDEX] = m_tlasSrvSlot.index;
-    rootConstants[CLOD_RT_REFLECTION_OUTPUT_DESCRIPTOR_INDEX] = output.GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_RT_REFLECTION_OUTPUT_DESCRIPTOR_INDEX] = outputUAVIndex;
     commandList.PushConstants(
         rhi::ShaderStage::AllRayTracing,
         0,

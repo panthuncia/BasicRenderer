@@ -4,6 +4,7 @@
 #include "Render/PipelineState.h"
 #include "Render/ShaderAPI.h"
 #include "ShaderBuffers.h"
+#include <BasicTelemetry/Telemetry.h>
 
 #include <array>
 #include <memory>
@@ -26,6 +27,7 @@ struct PreparedRenderIndirectSequence {
     bool hasDepth = false;
     uint32_t width = 1, height = 1;
     const char* debugName = nullptr;
+    bool phase1VisibilityDiagnostics = false;
     std::vector<Step> steps;
 };
 
@@ -37,17 +39,28 @@ inline void RecordPreparedRenderIndirectSequence(
     // no render-pass or root-signature commands.
     if (data.steps.empty()) return;
     auto& commands = recording.Commands();
+    if (data.phase1VisibilityDiagnostics) {
+        const auto arguments = recording.Resolve(data.arguments).GetHandle();
+        const auto firstPipeline = recording.Resolve(data.steps.front().program.program);
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.RecordedSteps",
+            static_cast<int64_t>(data.steps.size()));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.RecordedArgumentResourceIndex",
+            static_cast<int64_t>(arguments.index));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.RecordedArgumentResourceGeneration",
+            static_cast<int64_t>(arguments.generation));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.RecordedFirstPipelineIndex",
+            static_cast<int64_t>(firstPipeline.index));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1.RecordedFirstPipelineGeneration",
+            static_cast<int64_t>(firstPipeline.generation));
+    }
     rhi::PassBeginInfo pass{};
     pass.colors = {data.colors.data(), data.colorCount};
     pass.depth = data.hasDepth ? &data.depth : nullptr;
     pass.width = data.width; pass.height = data.height; pass.debugName = data.debugName;
     commands.BeginPass(pass);
-    // Admission binds the execution-slot descriptor snapshot. Preparation-time
-    // handles are optional legacy data and must never replace it with an invalid
-    // handle (for example when the frame request was captured before admission).
-    if (data.resourceHeap.valid())
-        commands.SetDescriptorHeaps(data.resourceHeap,
-            data.samplerHeap.valid() ? std::optional{data.samplerHeap} : std::nullopt);
+    // The recording envelope binds the accepted frame's shared bindless heaps
+    // before any pass records. Do not replace them with preparation-time handles:
+    // delayed frames can otherwise record against a newer heap publication.
     commands.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
     for (const auto& step : data.steps) {
         commands.BindLayout(recording.ResolveLayout(step.program.program));

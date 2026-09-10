@@ -17,7 +17,13 @@ enum class ReyesReplayMergeKind
     Dice
 };
 
-class ReyesReplayMergePass final : public org::TypedRenderGraphPass<ReyesReplayMergePass, br::render::PreparedComputeIndirect> {
+struct ReyesReplayMergeBindings {
+    org::ResourceBindingToken source, sourceCounter, dest, destCounter, destOverflow, indirectArgs, telemetry;
+    uint32_t capacity = 0;
+};
+
+class ReyesReplayMergePass final : public org::TypedRenderGraphPass<ReyesReplayMergePass,
+    br::render::PreparedComputeIndirect, ReyesReplayMergeBindings> {
 public:
     ReyesReplayMergePass(
         ReyesReplayMergeKind kind,
@@ -30,10 +36,11 @@ public:
         std::shared_ptr<Buffer> telemetryBuffer,
         uint32_t destQueueCapacity);
 
-    void Declare(org::PassBuilder& builder);
+    ReyesReplayMergeBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
+    br::render::PreparedComputeIndirect Prepare(const ReyesReplayMergeBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesReplayMergeBindings&, const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     ReyesReplayMergeKind m_kind = ReyesReplayMergeKind::Split;
@@ -43,7 +50,6 @@ private:
     std::shared_ptr<Buffer> m_destQueueCounterBuffer;
     std::shared_ptr<Buffer> m_destQueueOverflowBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_destQueueCapacity = 0u;
     PipelineState m_pso;

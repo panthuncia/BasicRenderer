@@ -66,7 +66,7 @@ ReyesVirtualShadowHardwareRasterPass::ReyesVirtualShadowHardwareRasterPass(
 
 ReyesVirtualShadowHardwareRasterPass::~ReyesVirtualShadowHardwareRasterPass() = default;
 
-void ReyesVirtualShadowHardwareRasterPass::Declare(org::PassBuilder& declaration) {
+ReyesShadowHardwareBindings ReyesVirtualShadowHardwareRasterPass::Declare(org::PassBuilder& declaration) {
     declaration.PreferQueue(org::QueueKind::Graphics);
     auto* builder = &declaration;
     builder->WithShaderResource(
@@ -82,26 +82,10 @@ void ReyesVirtualShadowHardwareRasterPass::Declare(org::PassBuilder& declaration
             Builtin::Shadows::CLodDirectionalPageViewInfo,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
-            Builtin::SkeletonResources::SkinningInstanceInfo,
-            m_visibleClustersBuffer,
-            m_rasterBucketsHistogramBuffer,
-            m_packedRasterWorkGroupsBuffer,
-            m_compactedRasterWorkIndicesBuffer,
-            m_rasterWorkBuffer,
-            m_diceQueueBuffer,
-            m_tessTableConfigsBuffer,
-            m_tessTableVerticesBuffer,
-            m_tessTableTrianglesBuffer,
-            m_viewRasterInfoBuffer,
-            m_virtualShadowClipmapInfoBuffer)
+            Builtin::SkeletonResources::SkinningInstanceInfo)
 		.WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
-        .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .WithUnorderedAccess(
-            m_virtualShadowPageTableTexture,
-            m_virtualShadowPhysicalPagesTexture,
-            m_virtualShadowDynamicPagesTexture,
-            Builtin::Shadows::CLodStats,
-            m_telemetryBuffer)
+            Builtin::Shadows::CLodStats)
         .IsGeometryPass();
 
     if (m_slabResourceGroup) {
@@ -109,12 +93,30 @@ void ReyesVirtualShadowHardwareRasterPass::Declare(org::PassBuilder& declaration
     }
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    ReyesShadowHardwareBindings bindings{
+        builder->BindShaderResource(m_visibleClustersBuffer), builder->BindShaderResource(m_rasterBucketsHistogramBuffer),
+        builder->BindIndirectArguments(m_rasterBucketsIndirectArgsBuffer), builder->BindShaderResource(m_packedRasterWorkGroupsBuffer),
+        builder->BindShaderResource(m_compactedRasterWorkIndicesBuffer), builder->BindShaderResource(m_rasterWorkBuffer),
+        builder->BindShaderResource(m_diceQueueBuffer), builder->BindShaderResource(m_tessTableConfigsBuffer),
+        builder->BindShaderResource(m_tessTableVerticesBuffer), builder->BindShaderResource(m_tessTableTrianglesBuffer),
+        builder->BindUnorderedAccess(m_virtualShadowPageTableTexture), builder->BindUnorderedAccess(m_virtualShadowPhysicalPagesTexture),
+        builder->BindUnorderedAccess(m_virtualShadowDynamicPagesTexture), builder->BindShaderResource(m_virtualShadowClipmapInfoBuffer),
+        builder->BindUnorderedAccess(m_telemetryBuffer), builder->BindShaderResource(m_viewRasterInfoBuffer)};
+    bindings.width = m_passWidth; bindings.height = m_passHeight;
+    bindings.pageTableResolution = m_shadowConfig.pageTableResolution;
+    bindings.virtualResolution = m_shadowConfig.virtualResolution;
+    bindings.bucketFlags = m_bucketFlags;
+    return bindings;
 }
 
 void ReyesVirtualShadowHardwareRasterPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
+    m_shadowConfig = virtualShadowConfig;
+    m_bucketFlags.clear();
+    m_bucketFlags.reserve(context.preparedRasterBucketFlags.size());
+    for (const auto flags : context.preparedRasterBucketFlags) m_bucketFlags.push_back(static_cast<uint32_t>(flags));
 
     const auto numViews = context.viewManager->GetCameraBufferSize();
     std::vector<CLodViewRasterInfo> nextViewRasterInfos(numViews);
@@ -160,39 +162,41 @@ bool ReyesVirtualShadowHardwareRasterPass::DeclaredResourcesChanged() const {
     return m_declaredResourcesChanged;
 }
 
-ReyesShadowHardwareFrameData ReyesVirtualShadowHardwareRasterPass::Prepare(const org::PassPrepareContext& preparation) {
+ReyesShadowHardwareFrameData ReyesVirtualShadowHardwareRasterPass::Prepare(
+    const ReyesShadowHardwareBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto& context = *preparation.preparationData->Get<UpdateContext>();
     ReyesShadowHardwareFrameData data{};
-    data.width = m_passWidth;
-    data.height = m_passHeight;
+    data.width = bindings.width;
+    data.height = bindings.height;
     data.resourceHeap = context.textureDescriptorHeap.GetHandle();
     data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
     data.signature = preparation.CaptureCommandSignature(m_rasterizationCommandSignature);
-    data.arguments = preparation.CaptureResource(m_rasterBucketsIndirectArgsBuffer->GetGlobalResourceID());
-    const auto virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
-    data.constants[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_REYES_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.arguments = preparation.CaptureResource(bindings.indirectArgs);
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index; };
+    data.constants[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = srv(bindings.histogram);
+    data.constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
+    data.constants[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.viewInfo);
+    data.constants[CLOD_RASTER_REYES_TELEMETRY_DESCRIPTOR_INDEX] = uav(bindings.telemetry);
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
-        m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        uav(bindings.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = srv(bindings.clipmapInfo);
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] =
-        m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        uav(bindings.physicalPages);
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] =
-        m_virtualShadowDynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
+        uav(bindings.dynamicPages);
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = bindings.pageTableResolution;
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowConfig.virtualResolution;
-    data.constants[CLOD_RASTER_REYES_PACKED_RASTER_WORK_GROUPS_DESCRIPTOR_INDEX] = m_packedRasterWorkGroupsBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_REYES_COMPACTED_RASTER_WORK_INDICES_DESCRIPTOR_INDEX] = m_compactedRasterWorkIndicesBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_REYES_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_RASTER_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
-    for (uint32_t i = 0; i < context.preparedRasterBucketCount; ++i) {
-        const auto flags = context.preparedRasterBucketFlags.at(i);
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = bindings.virtualResolution;
+    data.constants[CLOD_RASTER_REYES_PACKED_RASTER_WORK_GROUPS_DESCRIPTOR_INDEX] = srv(bindings.packedWork);
+    data.constants[CLOD_RASTER_REYES_COMPACTED_RASTER_WORK_INDICES_DESCRIPTOR_INDEX] = srv(bindings.compactedIndices);
+    data.constants[CLOD_RASTER_REYES_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.work);
+    data.constants[CLOD_RASTER_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = srv(bindings.diceQueue);
+    data.constants[CLOD_RASTER_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = srv(bindings.tessConfigs);
+    data.constants[CLOD_RASTER_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = srv(bindings.tessVertices);
+    data.constants[CLOD_RASTER_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = srv(bindings.tessTriangles);
+    for (uint32_t i = 0; i < bindings.bucketFlags.size(); ++i) {
+        const auto flags = static_cast<MaterialRasterFlags>(bindings.bucketFlags[i]);
         const auto* pso = PSOManager::GetInstance().TryGetClusterLODVirtualShadowReyesRasterPSO(flags);
         if (!pso) continue;
         auto binding = preparation.CaptureProgramBinding(*pso);
@@ -202,7 +206,8 @@ ReyesShadowHardwareFrameData ReyesVirtualShadowHardwareRasterPass::Prepare(const
     return data;
 }
 
-void ReyesVirtualShadowHardwareRasterPass::Record(const ReyesShadowHardwareFrameData& data, org::PassRecordContext& recording) {
+void ReyesVirtualShadowHardwareRasterPass::Record(const ReyesShadowHardwareBindings&,
+    const ReyesShadowHardwareFrameData& data, org::PassRecordContext& recording) {
     auto& commands = recording.Commands();
     rhi::PassBeginInfo pass{};
     pass.width = data.width;

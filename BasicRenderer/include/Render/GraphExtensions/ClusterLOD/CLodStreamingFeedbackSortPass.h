@@ -20,7 +20,14 @@ struct StreamingFeedbackSortFrameData {
     std::array<std::array<unsigned int, NumMiscUintRootConstants>, 2> constants;
 };
 
-class CLodStreamingFeedbackSortPass final : public org::TypedRenderGraphPass<CLodStreamingFeedbackSortPass, StreamingFeedbackSortFrameData> {
+struct StreamingFeedbackSortBindings {
+    org::ResourceBindingToken requestCounter;
+    std::array<org::ResourceBindingToken, 7> uavs;
+    org::ResourceBindingToken countScatterUav, reduceScanUav, countScatterIndirect, reduceScanIndirect;
+};
+
+class CLodStreamingFeedbackSortPass final : public org::TypedRenderGraphPass<CLodStreamingFeedbackSortPass,
+    StreamingFeedbackSortFrameData, StreamingFeedbackSortBindings> {
 public:
     CLodStreamingFeedbackSortPass(
         std::shared_ptr<Buffer> requestKeys,
@@ -34,9 +41,11 @@ public:
         std::shared_ptr<Buffer> countScatterArgs,
         std::shared_ptr<Buffer> reduceScanArgs);
 
-    void Declare(org::PassBuilder& builder);
-    StreamingFeedbackSortFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const StreamingFeedbackSortFrameData& data, org::PassRecordContext& recording);
+    StreamingFeedbackSortBindings Declare(org::PassBuilder& builder);
+    StreamingFeedbackSortFrameData Prepare(const StreamingFeedbackSortBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const StreamingFeedbackSortBindings&,
+        const StreamingFeedbackSortFrameData& data, org::PassRecordContext& recording);
 
 private:
     PipelineState m_setupPso;

@@ -51,33 +51,37 @@ ReyesSeedPatchesPass::ReyesSeedPatchesPass(
     m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
-void ReyesSeedPatchesPass::Declare(org::PassBuilder& builder)
+ReyesSeedPatchesBindings ReyesSeedPatchesPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_visibleClustersBuffer, m_ownedClustersBuffer, m_ownedClustersCounterBuffer)
-        .WithUnorderedAccess(m_splitQueueBuffer, m_splitQueueCounterBuffer, m_splitQueueOverflowBuffer);
-    m_indirectArgumentsBinding = builder.BindIndirectArguments(m_indirectArgsBuffer);
     if (m_slabResourceGroup) {
         builder.WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
+    return {builder.BindShaderResource(m_visibleClustersBuffer), builder.BindShaderResource(m_ownedClustersBuffer),
+        builder.BindShaderResource(m_ownedClustersCounterBuffer), builder.BindUnorderedAccess(m_splitQueueBuffer),
+        builder.BindUnorderedAccess(m_splitQueueCounterBuffer), builder.BindUnorderedAccess(m_splitQueueOverflowBuffer),
+        builder.BindIndirectArguments(m_indirectArgsBuffer), m_maxSplitQueueEntries, m_phaseIndex};
 }
 
-br::render::PreparedComputeIndirect ReyesSeedPatchesPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeIndirect ReyesSeedPatchesPass::Prepare(
+    const ReyesSeedPatchesBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     br::render::PreparedComputeIndirect data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.commandSignature = preparation.CaptureCommandSignature(m_commandSignature);
-    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
+    data.argumentsReference = preparation.CaptureResource(bindings.indirectArgs);
     auto program = preparation.CaptureProgramBinding(m_pso);
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_REYES_SEED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_SEED_OWNED_CLUSTERS_DESCRIPTOR_INDEX] = m_ownedClustersBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_SEED_OWNED_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_ownedClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_DESCRIPTOR_INDEX] = m_splitQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_splitQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_splitQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_REYES_SEED_QUEUE_CAPACITY] = m_maxSplitQueueEntries; data.constants[CLOD_REYES_SEED_PHASE_INDEX] = m_phaseIndex;
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index; };
+    data.constants[CLOD_REYES_SEED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
+    data.constants[CLOD_REYES_SEED_OWNED_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.owned);
+    data.constants[CLOD_REYES_SEED_OWNED_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.ownedCounter);
+    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_DESCRIPTOR_INDEX] = uav(bindings.splitQueue);
+    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = uav(bindings.splitCounter);
+    data.constants[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = uav(bindings.splitOverflow);
+    data.constants[CLOD_REYES_SEED_QUEUE_CAPACITY] = bindings.capacity; data.constants[CLOD_REYES_SEED_PHASE_INDEX] = bindings.phase;
     return data;
 }
 
@@ -86,6 +90,7 @@ void ReyesSeedPatchesPass::Update(const UpdateExecutionContext& executionContext
     (void)executionContext;
 }
 
-void ReyesSeedPatchesPass::Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+void ReyesSeedPatchesPass::Record(const ReyesSeedPatchesBindings&,
+    const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeIndirect(data, recording);
 }

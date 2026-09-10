@@ -25,18 +25,19 @@ AVBOITResolvePass::AVBOITResolvePass(
         "CLod.AVBOITResolve.PSO");
 }
 
-void AVBOITResolvePass::Declare(org::PassBuilder& builder)
+AVBOITResolveBindings AVBOITResolvePass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(
-            m_configBuffer,
-            m_accumulationTexture,
-            m_normalizationTexture,
-            m_shadingExtinctionTexture)
-        .WithUnorderedAccess(Builtin::Color::HDRColorTarget);
+    builder.WithUnorderedAccess(Builtin::Color::HDRColorTarget);
+    return {
+        builder.BindShaderResource(m_configBuffer),
+        builder.BindShaderResource(m_accumulationTexture),
+        builder.BindShaderResource(m_normalizationTexture),
+        builder.BindShaderResource(m_shadingExtinctionTexture) };
 }
 
-br::render::PreparedComputeDispatch AVBOITResolvePass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch AVBOITResolvePass::Prepare(
+    const AVBOITResolveBindings& bindings, const org::PassPrepareContext& preparation) const {
     br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_accumulationTexture || !m_normalizationTexture || !m_shadingExtinctionTexture) {
         return {};
@@ -52,19 +53,23 @@ br::render::PreparedComputeDispatch AVBOITResolvePass::Prepare(const org::PassPr
     data.descriptorIndices = std::move(program.descriptorIndices);
 
     auto& misc = data.constants;
-    misc[CLOD_AVBOIT_VBOIT_RESOLVE_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_AVBOIT_VBOIT_RESOLVE_ACCUMULATION_DESCRIPTOR_INDEX] = m_accumulationTexture->GetSRVInfo(0).slot.index;
+    misc[CLOD_AVBOIT_VBOIT_RESOLVE_CONFIG_DESCRIPTOR_INDEX] =
+        preparation.ResolveView(bindings.config, {org::BindlessViewKind::ShaderResource}).index;
+    misc[CLOD_AVBOIT_VBOIT_RESOLVE_ACCUMULATION_DESCRIPTOR_INDEX] =
+        preparation.ResolveView(bindings.accumulation, {org::BindlessViewKind::ShaderResource}).index;
     misc[CLOD_AVBOIT_VBOIT_RESOLVE_NORMALIZATION_DESCRIPTOR_INDEX] =
-        m_normalizationTexture->GetSRVInfo(0).slot.index;
+        preparation.ResolveView(bindings.normalization, {org::BindlessViewKind::ShaderResource}).index;
     misc[CLOD_AVBOIT_VBOIT_RESOLVE_SHADING_EXTINCTION_DESCRIPTOR_INDEX] =
-        m_shadingExtinctionTexture->GetSRVInfo(0).slot.index;
+        preparation.ResolveView(bindings.extinction, {org::BindlessViewKind::ShaderResource}).index;
 
-    const uint32_t groupCountX = (m_accumulationTexture->GetWidth() + 7u) / 8u;
-    const uint32_t groupCountY = (m_accumulationTexture->GetHeight() + 7u) / 8u;
+    const auto& accumulation = preparation.Describe(bindings.accumulation);
+    const uint32_t groupCountX = (accumulation.texture.width + 7u) / 8u;
+    const uint32_t groupCountY = (accumulation.texture.height + 7u) / 8u;
     data.groupsX = groupCountX; data.groupsY = groupCountY; data.groupsZ = 1u;
     return data;
 }
 
-void AVBOITResolvePass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void AVBOITResolvePass::Record(const AVBOITResolveBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

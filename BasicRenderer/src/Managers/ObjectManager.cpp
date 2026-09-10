@@ -290,6 +290,10 @@ ObjectManager::ObjectManager() {
 	m_instanceDrawRecordBuffers = DynamicBuffer::CreateShared(sizeof(InstanceDrawRecordCB), 10000, "instanceDrawRecordBuffers<InstanceDrawRecordCB>");
 	m_skinnedAssemblyPlacements = DynamicStructuredBuffer<SkinnedAssemblyPlacementGPU>::CreateShared(1024, "skinnedAssemblyPlacements");
 	m_activeSkinnedAssemblyPlacements = SortedUnsignedIntBuffer::CreateActiveDrawSetShared(1024, "activeSkinnedAssemblyPlacements");
+	m_publishedSkinnedPlacementRecords =
+		std::make_shared<const std::vector<SkinnedAssemblyPlacementGPU>>();
+	m_publishedActiveSkinnedPlacementEntries =
+		std::make_shared<const std::vector<br::render::PublishedActiveSkinnedPlacement>>();
 	m_masterIndirectCommandsBuffer = DynamicBuffer::CreateShared(sizeof(DispatchMeshIndirectCommand), 10000, "masterIndirectCommandsBuffer<IndirectCommand>");
 
 	m_normalMatrixBuffer = DynamicBuffer::CreateShared(sizeof(DirectX::XMFLOAT4X4), 10000, "normalMatrixBuffer");
@@ -451,12 +455,27 @@ std::uint64_t ObjectManager::SealDesiredBufferStateLocked() {
 	cut.visibility = m_visibilityGenerationJournal.CaptureDesired();
 	cut.coveredMutationGeneration =
 		m_objectBufferMutationGeneration.load(std::memory_order_acquire);
+	cut.residentTransformCount = static_cast<std::uint32_t>(
+		GetResidentInstanceTransformCount());
+	cut.skinnedPlacements = m_skinnedAssemblyPlacements;
+	cut.activeSkinnedPlacements = m_activeSkinnedAssemblyPlacements;
+	cut.activeSkinnedPlacementResidentSize = m_activeSkinnedAssemblyPlacements
+		? static_cast<std::uint32_t>(m_activeSkinnedAssemblyPlacements->ResidentSize()) : 0u;
+	cut.placementRecords = m_publishedSkinnedPlacementRecords;
+	cut.activePlacementEntries = m_publishedActiveSkinnedPlacementEntries;
 	const auto visibilityRevision =
 		(std::max<std::uint64_t>)(cut.visibility.writeSequence, 1u);
 	cut.fingerprint ^= visibilityRevision + 0x9e3779b97f4a7c15ull +
 		(cut.fingerprint << 6u) + (cut.fingerprint >> 2u);
+	cut.fingerprint ^= cut.coveredMutationGeneration + 0x9e3779b97f4a7c15ull +
+		(cut.fingerprint << 6u) + (cut.fingerprint >> 2u);
 	m_objectBufferSnapshotMailbox.Publish(++m_objectBufferSnapshotGeneration);
 	basic_telemetry::AddCounter("SARP.VersionedBuffer.Object.SnapshotCutsSealed");
+	basic_telemetry::SetGauge("SARP.AsyncState.ObjectPlacementSnapshot.PlacementCount",
+		static_cast<std::int64_t>(cut.placementRecords ? cut.placementRecords->size() : 0u));
+	basic_telemetry::SetGauge("SARP.AsyncState.ObjectPlacementSnapshot.ActivePlacementCount",
+		static_cast<std::int64_t>(cut.activePlacementEntries
+			? cut.activePlacementEntries->size() : 0u));
 	basic_telemetry::SetGauge("SARP.VersionedBuffer.Object.MutationCoverageCaptured",
 		static_cast<std::int64_t>(cut.coveredMutationGeneration));
 	return m_objectBufferSnapshotGeneration;
@@ -616,6 +635,13 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 
 	auto rootInput = std::make_shared<br::render::ObjectBufferStateBuildInput>();
 	rootInput->coveredMutationGeneration = coveredMutationGeneration;
+	rootInput->residentTransformCount = snapshotCut->residentTransformCount;
+	rootInput->skinnedPlacements = snapshotCut->skinnedPlacements;
+	rootInput->activeSkinnedPlacements = snapshotCut->activeSkinnedPlacements;
+	rootInput->activeSkinnedPlacementResidentSize =
+		snapshotCut->activeSkinnedPlacementResidentSize;
+	rootInput->placementRecords = snapshotCut->placementRecords;
+	rootInput->activePlacementEntries = snapshotCut->activePlacementEntries;
 	std::vector<br::render::ArtifactRequirement> requirements;
 	for (std::size_t bindingIndex = 0; bindingIndex < m_graphBufferBindings.size(); ++bindingIndex) {
 		const auto& binding = m_graphBufferBindings[bindingIndex];
@@ -2420,6 +2446,27 @@ ObjectManager::MaterializedStaticImportTransaction ObjectManager::MaterializeSta
 	return transaction;
 }
 
+void ObjectManager::PublishSkinnedPlacementSourceVersionLocked() {
+	const auto snapshotStart = basic_telemetry::NowNs();
+	m_publishedSkinnedPlacementRecords =
+		std::make_shared<const std::vector<SkinnedAssemblyPlacementGPU>>(
+			m_skinnedAssemblyPlacementCPU.begin(), m_skinnedAssemblyPlacementCPU.end());
+	auto activePlacementEntries =
+		std::make_shared<std::vector<br::render::PublishedActiveSkinnedPlacement>>();
+	if (m_activeSkinnedAssemblyPlacements) {
+		const auto activeEntries = m_activeSkinnedAssemblyPlacements->SnapshotActiveEntries();
+		activePlacementEntries->reserve(activeEntries.size());
+		for (const auto& entry : activeEntries) {
+			activePlacementEntries->push_back({ entry.drawRecordIndex, entry.generation });
+		}
+	}
+	m_publishedActiveSkinnedPlacementEntries = std::move(activePlacementEntries);
+	m_objectBufferGraphDirty.store(true, std::memory_order_release);
+	basic_telemetry::AddCounter("SARP.AsyncState.ObjectPlacementSnapshot.Published");
+	basic_telemetry::Record("SARP.AsyncState.ObjectPlacementSnapshot.BuildNs",
+		basic_telemetry::NowNs() - snapshotStart);
+}
+
 void ObjectManager::PublishSkinnedAssemblyPlacements(MaterializedStaticImportTransaction& transaction) {
 	if (transaction.skinnedAssemblyPlacements.empty()) return;
 	std::vector<SortedUnsignedIntBuffer::ActiveDrawSetEntry> activeEntries;
@@ -2446,6 +2493,7 @@ void ObjectManager::PublishSkinnedAssemblyPlacements(MaterializedStaticImportTra
 	m_skinnedAssemblyPlacements->ReplaceData(m_skinnedAssemblyPlacementCPU);
 	m_activeSkinnedAssemblyPlacements->AppendActiveEntries(activeEntries);
 	m_activeSkinnedAssemblyPlacements->SetLiveSize(m_activeSkinnedAssemblyPlacements->LiveSize() + activeEntries.size());
+	PublishSkinnedPlacementSourceVersionLocked();
 	spdlog::info("Skinned assembly placements: published={} total={} activeEntries={}.",
 		activeEntries.size(), m_skinnedAssemblyPlacementCPU.size(), m_activeSkinnedAssemblyPlacements->Size());
 }
@@ -3157,6 +3205,7 @@ std::vector<Components::ObjectDrawInfo> ObjectManager::PublishStaticImportPacket
 			m_skinnedAssemblyPlacements->ReplaceData(m_skinnedAssemblyPlacementCPU);
 			m_activeSkinnedAssemblyPlacements->AppendActiveEntries(activePlacements);
 			m_activeSkinnedAssemblyPlacements->SetLiveSize(m_activeSkinnedAssemblyPlacements->LiveSize() + activePlacements.size());
+			PublishSkinnedPlacementSourceVersionLocked();
 			spdlog::info("Skinned assembly placements: published={} total={} activeEntries={}.", activePlacements.size(), m_skinnedAssemblyPlacementCPU.size(), m_activeSkinnedAssemblyPlacements->Size());
 		}
 	}
@@ -3715,6 +3764,7 @@ ObjectManager::StaticObjectRemovalResult ObjectManager::RemoveStaticObjectsBulk(
 				});
 				m_activeSkinnedAssemblyPlacements->AssignActiveSnapshot(std::move(entries));
 			}
+			PublishSkinnedPlacementSourceVersionLocked();
 			spdlog::info("Skinned assembly placements: invalidated={} live={} activeEntries={} staleEstimate={}.",
 				invalidated, m_activeSkinnedAssemblyPlacements->LiveSize(),
 				m_activeSkinnedAssemblyPlacements->Size(), m_activeSkinnedAssemblyPlacements->ActiveTombstoneEstimate());

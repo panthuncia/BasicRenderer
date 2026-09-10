@@ -18,7 +18,6 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Managers/ObjectManager.h"
-#include "Managers/MaterialManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/IndirectStateArtifacts.h"
@@ -145,10 +144,7 @@ void IndirectCommandBufferManager::SetRendererStateServices(
 	// that the renderer has never consumed.
 }
 
-void IndirectCommandBufferManager::PublishDesiredState(
-	ObjectManager& objectManager, MaterialManager& materialManager) {
-    BT_ZONE_SCOPE("IndirectCommandBufferManager::PublishDesiredState");
-    if (!m_rendererStateRequests || !m_uploadService) return;
+void IndirectCommandBufferManager::AttachActiveDrawSource(ObjectManager& objectManager) {
 	if (!m_activeObserverInstalled) {
 		m_activeObserverInstalled = true;
 		m_observedObjectManager = &objectManager;
@@ -160,7 +156,13 @@ void IndirectCommandBufferManager::PublishDesiredState(
 					workloadKey, replace, revision, std::move(entries));
 			});
 	}
-	const auto objectBufferRequirement = objectManager.DesiredBufferStateRequirement();
+}
+
+void IndirectCommandBufferManager::PublishDesiredState(
+	std::optional<br::render::ArtifactRequirement> objectBufferRequirement,
+	std::uint64_t residentDrawRecordCount) {
+    BT_ZONE_SCOPE("IndirectCommandBufferManager::PublishDesiredState");
+    if (!m_rendererStateRequests || !m_uploadService) return;
 	const auto publishedSource = br::render::PublishedStateSource::ProcessSource();
 	const auto publishedState = publishedSource ? publishedSource->Load() : nullptr;
 	if (publishedState) {
@@ -217,7 +219,6 @@ void IndirectCommandBufferManager::PublishDesiredState(
 	}
 	const auto materialRevision = publishedState
 		? publishedState->materials.revision : 0u;
-    const auto residentDrawRecordCount = objectManager.GetResidentInstanceDrawRecordCount();
     bool changed = false;
     {
         std::lock_guard lock(m_desiredMutex);

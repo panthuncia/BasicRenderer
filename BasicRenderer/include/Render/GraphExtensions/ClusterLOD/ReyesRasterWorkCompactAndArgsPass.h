@@ -17,7 +17,13 @@ struct ReyesCompactFrameData {
     org::PreparedResourceReference cursorBarrier, compactedBarrier, packedBarrier;
 };
 
-class ReyesRasterWorkCompactAndArgsPass final : public org::TypedRenderGraphPass<ReyesRasterWorkCompactAndArgsPass, ReyesCompactFrameData> {
+struct ReyesRasterWorkCompactBindings {
+    org::ResourceBindingToken work, counter, indirectCommand, histogram, offsets, cursor, compacted, packed, indirectArgs;
+    uint32_t numBuckets = 0;
+};
+
+class ReyesRasterWorkCompactAndArgsPass final : public org::TypedRenderGraphPass<ReyesRasterWorkCompactAndArgsPass,
+    ReyesCompactFrameData, ReyesRasterWorkCompactBindings> {
 public:
     ReyesRasterWorkCompactAndArgsPass(
         std::shared_ptr<Buffer> rasterWorkBuffer,
@@ -30,9 +36,10 @@ public:
         std::shared_ptr<Buffer> packedRasterWorkGroupsBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    ReyesCompactFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const ReyesCompactFrameData& data, org::PassRecordContext& recording);
+    ReyesRasterWorkCompactBindings Declare(org::PassBuilder& builder);
+    ReyesCompactFrameData Prepare(const ReyesRasterWorkCompactBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesRasterWorkCompactBindings&, const ReyesCompactFrameData& data, org::PassRecordContext& recording);
     void Update(const UpdateExecutionContext& executionContext) override;
 
 private:
@@ -51,4 +58,5 @@ private:
     std::shared_ptr<Buffer> m_compactedRasterWorkIndicesBuffer;
     std::shared_ptr<Buffer> m_packedRasterWorkGroupsBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    uint32_t m_numBuckets = 0;
 };

@@ -32,7 +32,7 @@ namespace org { class CopyPass; }
 using org::CopyPass;
 
 // Manages buffers for per-material-compile-flag work (e.g., visibility buffer per-material)
-class MaterialManager : public IResourceProvider {
+class MaterialManager : public IResourceProvider, public br::render::IMaterialStateStorage {
 public:
 	~MaterialManager();
 	static std::unique_ptr<MaterialManager> CreateUnique() {
@@ -45,10 +45,23 @@ public:
 	unsigned int AcquireRasterBucket(MaterialRasterFlags rasterFlags, unsigned int count = 1u);
 	void ReleaseRasterBucket(MaterialRasterFlags rasterFlags);
 
-	unsigned int IncrementMaterialUsageCount(Material& material, TextureFactory* textureFactory = nullptr, unsigned int count = 1u);
+	unsigned int IncrementMaterialUsageCount(Material& material,
+		bool refreshTextureBindings = false, unsigned int count = 1u);
+	br::render::MaterialUsageBatchEntry CaptureMaterialUsage(
+		Material& material, unsigned int count, bool refreshTextureBindings);
+	std::shared_ptr<const br::render::MaterialUsageReservation> ReserveMaterialUsage(
+		const std::vector<br::render::MaterialUsageBatchEntry>& entries);
+	void RegisterMaterialSource(const std::shared_ptr<Material>& material);
 	std::shared_ptr<const br::render::PublishedMaterialUsageBatch> ApplyMaterialUsageBatch(
 		const br::render::MaterialUsageBatchBuildInput& input);
 	bool ApplyMaterialRowArtifact(const br::render::MaterialRowArtifact& row);
+	bool ApplyRow(const br::render::MaterialRowArtifact& row) override {
+		return ApplyMaterialRowArtifact(row);
+	}
+	std::shared_ptr<const br::render::PublishedMaterialUsageBatch> ApplyUsageBatch(
+		const br::render::MaterialUsageBatchBuildInput& input) override {
+		return ApplyMaterialUsageBatch(input);
+	}
 	void DecrementMaterialUsageCount(const Material& material);
 	void InitializeTextureStreaming(TextureFactory& textureFactory, uint32_t framesInFlight);
 	void ShutdownTextureStreaming();
@@ -125,8 +138,11 @@ private:
 	void UpdateMaterialTextureUsage(const Material& material, int delta);
 	void RefreshMaterialTextureUsage(const Material& material);
 	void TrackMaterialTextureAssets(const Material& material, int delta);
+	void TrackMaterialTextureAssets(std::uint32_t materialID,
+		const std::vector<std::shared_ptr<TextureAsset>>& textureAssets,
+		bool alphaTested, int delta);
 	bool MaterialTextureAssetBindingsChanged(const Material& material) const;
-	void FlushDirtyMaterial(Material& material, TextureFactory* textureFactory = nullptr);
+	void FlushDirtyMaterial(Material& material, bool refreshTextureBindings = false);
 	void EnsureMaterialBufferCapacity(unsigned int requiredSlots);
 	void EnsureCompileFlagsBufferCapacity(unsigned int requiredSlots);
 	std::vector<std::shared_ptr<Resource>> CollectActiveMaterialTextureResources() const;
@@ -135,9 +151,11 @@ private:
 	std::array<std::shared_ptr<PublishedStateResourceResolver>, 3> m_materialTableResolvers;
 	std::unordered_map<uint32_t, std::vector<std::shared_ptr<Resource>>> m_trackedMaterialTextures;
 	std::unordered_map<uint32_t, Material*> m_activeMaterialsByID;
+	std::unordered_map<uint32_t, std::weak_ptr<Material>> m_ingestedMaterialSourcesByID;
 	std::unordered_map<uint32_t, std::vector<uint64_t>> m_materialTextureStreamingBindingIDs;
 	std::unordered_map<uint32_t, std::vector<uint32_t>> m_materialTextureStreamingTextureIDs;
 	std::unordered_map<uint32_t, std::uint64_t> m_materialRowSourceRevisions;
+	std::shared_ptr<void> m_reservationLifetime = std::make_shared<int>(0);
 	bool m_textureStreamingFeedbackSuppressed = false;
 	MaterialCompileFlagsSlotRegistry m_compileFlagsRegistry;
 

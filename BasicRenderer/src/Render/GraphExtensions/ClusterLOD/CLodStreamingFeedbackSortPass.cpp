@@ -75,24 +75,22 @@ CLodStreamingFeedbackSortPass::CLodStreamingFeedbackSortPass(
         "CLod.StreamingFeedbackSort.Scatter.PSO");
 }
 
-void CLodStreamingFeedbackSortPass::Declare(org::PassBuilder& declaration) {
+StreamingFeedbackSortBindings CLodStreamingFeedbackSortPass::Declare(org::PassBuilder& declaration) {
     declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    auto* builder = &declaration;
-    builder->WithShaderResource(m_requestCounter)
-        .WithUnorderedAccess(
-            m_requestKeys,
-            m_requests,
-            m_keyScratch,
-            m_payloadScratch,
-            m_sumTable,
-            m_reduceTable,
-            m_constants,
-            m_countScatterArgs,
-            m_reduceScanArgs)
-        .WithIndirectArguments(m_countScatterArgs, m_reduceScanArgs);
+    StreamingFeedbackSortBindings bindings;
+    bindings.requestCounter = declaration.BindShaderResource(m_requestCounter);
+    const std::shared_ptr<Buffer> uavs[] = {m_requestKeys, m_requests, m_keyScratch, m_payloadScratch,
+        m_sumTable, m_reduceTable, m_constants};
+    for (size_t i = 0; i < std::size(uavs); ++i) bindings.uavs[i] = declaration.BindUnorderedAccess(uavs[i]);
+    bindings.countScatterUav = declaration.BindUnorderedAccess(m_countScatterArgs);
+    bindings.reduceScanUav = declaration.BindUnorderedAccess(m_reduceScanArgs);
+    bindings.countScatterIndirect = declaration.BindIndirectArguments(m_countScatterArgs);
+    bindings.reduceScanIndirect = declaration.BindIndirectArguments(m_reduceScanArgs);
+    return bindings;
 }
 
-StreamingFeedbackSortFrameData CLodStreamingFeedbackSortPass::Prepare(const org::PassPrepareContext& preparation) {
+StreamingFeedbackSortFrameData CLodStreamingFeedbackSortPass::Prepare(
+    const StreamingFeedbackSortBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     StreamingFeedbackSortFrameData data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
@@ -101,33 +99,35 @@ StreamingFeedbackSortFrameData CLodStreamingFeedbackSortPass::Prepare(const org:
     data.programs = {preparation.CaptureProgramBinding(m_setupPso), preparation.CaptureProgramBinding(m_countPso),
         preparation.CaptureProgramBinding(m_reducePso), preparation.CaptureProgramBinding(m_scanPso),
         preparation.CaptureProgramBinding(m_scanAddPso), preparation.CaptureProgramBinding(m_scatterPso)};
-    const std::shared_ptr<Buffer> uav[] = {m_requestKeys, m_requests, m_keyScratch, m_payloadScratch, m_sumTable, m_reduceTable, m_constants};
-    for (size_t i = 0; i < std::size(uav); ++i)
-        data.uavResources[i] = preparation.CaptureResource(uav[i]->GetGlobalResourceID());
-    data.indirectResources = {preparation.CaptureResource(m_countScatterArgs->GetGlobalResourceID()),
-        preparation.CaptureResource(m_reduceScanArgs->GetGlobalResourceID())};
-    auto constants = [&](const std::shared_ptr<Buffer>& sourceKeys, const std::shared_ptr<Buffer>& destKeys,
-        const std::shared_ptr<Buffer>& sourcePayloads, const std::shared_ptr<Buffer>& destPayloads, uint32_t iteration) {
+    for (size_t i = 0; i < bindings.uavs.size(); ++i)
+        data.uavResources[i] = preparation.CaptureResource(bindings.uavs[i]);
+    data.indirectResources = {preparation.CaptureResource(bindings.countScatterIndirect),
+        preparation.CaptureResource(bindings.reduceScanIndirect)};
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index; };
+    auto constants = [&](org::ResourceBindingToken sourceKeys, org::ResourceBindingToken destKeys,
+        org::ResourceBindingToken sourcePayloads, org::ResourceBindingToken destPayloads, uint32_t iteration) {
         std::array<unsigned int, NumMiscUintRootConstants> c{};
-        c[CLOD_STREAMING_SORT_REQUEST_COUNTER_DESCRIPTOR_INDEX] = m_requestCounter->GetSRVInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_CONSTANTS_DESCRIPTOR_INDEX] = m_constants->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_COUNT_SCATTER_ARGS_DESCRIPTOR_INDEX] = m_countScatterArgs->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_REDUCE_SCAN_ARGS_DESCRIPTOR_INDEX] = m_reduceScanArgs->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_SOURCE_KEYS_DESCRIPTOR_INDEX] = sourceKeys->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_DEST_KEYS_DESCRIPTOR_INDEX] = destKeys->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_SUM_TABLE_DESCRIPTOR_INDEX] = m_sumTable->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_REDUCE_TABLE_DESCRIPTOR_INDEX] = m_reduceTable->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_SOURCE_PAYLOADS_DESCRIPTOR_INDEX] = sourcePayloads->GetUAVShaderVisibleInfo(0).slot.index;
-        c[CLOD_STREAMING_SORT_DEST_PAYLOADS_DESCRIPTOR_INDEX] = destPayloads->GetUAVShaderVisibleInfo(0).slot.index;
+        c[CLOD_STREAMING_SORT_REQUEST_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.requestCounter);
+        c[CLOD_STREAMING_SORT_CONSTANTS_DESCRIPTOR_INDEX] = uav(bindings.uavs[6]);
+        c[CLOD_STREAMING_SORT_COUNT_SCATTER_ARGS_DESCRIPTOR_INDEX] = uav(bindings.countScatterUav);
+        c[CLOD_STREAMING_SORT_REDUCE_SCAN_ARGS_DESCRIPTOR_INDEX] = uav(bindings.reduceScanUav);
+        c[CLOD_STREAMING_SORT_SOURCE_KEYS_DESCRIPTOR_INDEX] = uav(sourceKeys);
+        c[CLOD_STREAMING_SORT_DEST_KEYS_DESCRIPTOR_INDEX] = uav(destKeys);
+        c[CLOD_STREAMING_SORT_SUM_TABLE_DESCRIPTOR_INDEX] = uav(bindings.uavs[4]);
+        c[CLOD_STREAMING_SORT_REDUCE_TABLE_DESCRIPTOR_INDEX] = uav(bindings.uavs[5]);
+        c[CLOD_STREAMING_SORT_SOURCE_PAYLOADS_DESCRIPTOR_INDEX] = uav(sourcePayloads);
+        c[CLOD_STREAMING_SORT_DEST_PAYLOADS_DESCRIPTOR_INDEX] = uav(destPayloads);
         c[CLOD_STREAMING_SORT_ITERATION_INDEX] = iteration; c[CLOD_STREAMING_SORT_REQUEST_CAPACITY] = CLodStreamingRequestCapacity;
         return c;
     };
-    data.constants[0] = constants(m_requestKeys, m_keyScratch, m_requests, m_payloadScratch, 0);
-    data.constants[1] = constants(m_keyScratch, m_requestKeys, m_payloadScratch, m_requests, 0);
+    data.constants[0] = constants(bindings.uavs[0], bindings.uavs[2], bindings.uavs[1], bindings.uavs[3], 0);
+    data.constants[1] = constants(bindings.uavs[2], bindings.uavs[0], bindings.uavs[3], bindings.uavs[1], 0);
     return data;
 }
 
-void CLodStreamingFeedbackSortPass::Record(const StreamingFeedbackSortFrameData& data, org::PassRecordContext& recording) {
+void CLodStreamingFeedbackSortPass::Record(const StreamingFeedbackSortBindings&,
+    const StreamingFeedbackSortFrameData& data, org::PassRecordContext& recording) {
     auto& commands = recording.Commands();
     br::render::BindPreparedDescriptorHeaps(commands, data.resourceHeap, data.samplerHeap);
     const auto uavBarrier = [&] {

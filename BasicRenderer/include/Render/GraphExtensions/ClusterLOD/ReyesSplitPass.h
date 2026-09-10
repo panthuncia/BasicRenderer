@@ -21,7 +21,19 @@ struct ReyesSplitFrameData {
     std::array<org::PreparedResourceReference, 2> outputCounters;
 };
 
-class ReyesSplitPass final : public org::TypedRenderGraphPass<ReyesSplitPass, ReyesSplitFrameData> {
+struct ReyesSplitBindings {
+    org::ResourceBindingToken visible, inputQueue, inputCounter, outputQueue, outputCounter, outputOverflow;
+    org::ResourceBindingToken diceQueue, diceCounter, diceOverflow, tessConfigs, tessVertices, tessTriangles;
+    org::ResourceBindingToken shadowClipmap, shadowDirty, shadowNonRasterable, indirectArgs, telemetry, viewDepthIndices;
+    org::ResourceBindingToken replayQueue, replayCounter, replayOverflow;
+    uint32_t capacity = 0, maxPassCount = 0, phase = 0, coarseTargetBits = 0;
+    bool hasShadowClipmap = false, hasShadowDirty = false, hasShadowNonRasterable = false;
+    bool hasViewDepth = false, hasReplayQueue = false, hasReplayCounter = false, hasReplayOverflow = false;
+    bool useAabbOcclusion = false;
+};
+
+class ReyesSplitPass final : public org::TypedRenderGraphPass<ReyesSplitPass,
+    ReyesSplitFrameData, ReyesSplitBindings> {
 public:
     ReyesSplitPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -50,9 +62,9 @@ public:
         std::shared_ptr<Buffer> replaySplitQueueCounterBuffer = nullptr,
         std::shared_ptr<Buffer> replaySplitQueueOverflowBuffer = nullptr);
 
-    void Declare(org::PassBuilder& builder);
-    ReyesSplitFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const ReyesSplitFrameData&, org::PassRecordContext&);
+    ReyesSplitBindings Declare(org::PassBuilder& builder);
+    ReyesSplitFrameData Prepare(const ReyesSplitBindings&, const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesSplitBindings&, const ReyesSplitFrameData&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;

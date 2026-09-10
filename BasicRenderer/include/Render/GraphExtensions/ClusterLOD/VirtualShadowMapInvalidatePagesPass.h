@@ -15,7 +15,15 @@ namespace org { class DynamicBuffer; }
 using org::DynamicBuffer;
 class VirtualShadowInvalidationQueue;
 
-class VirtualShadowMapInvalidatePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapInvalidatePagesPass, br::render::PreparedComputePipelineSequence> {
+struct VirtualShadowMapInvalidatePagesBindings {
+    org::ResourceBindingToken inputs, inputCount, clipmapInfo, bounds;
+    org::ResourceBindingToken pageTable, dirtyFlags, pageMetadata, pageViewInfo, stats;
+    uint32_t pendingInputCount = 0, pendingBoundsCount = 0;
+    bool invalidateAllActiveClipmaps = false;
+};
+
+class VirtualShadowMapInvalidatePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapInvalidatePagesPass,
+    br::render::PreparedComputePipelineSequence, VirtualShadowMapInvalidatePagesBindings> {
 public:
     VirtualShadowMapInvalidatePagesPass(
         std::shared_ptr<Buffer> invalidationInputsBuffer,
@@ -29,10 +37,12 @@ public:
         std::shared_ptr<Buffer> statsBuffer,
         std::shared_ptr<VirtualShadowInvalidationQueue> extensionInvalidations = nullptr);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapInvalidatePagesBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
+    br::render::PreparedComputePipelineSequence Prepare(const VirtualShadowMapInvalidatePagesBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapInvalidatePagesBindings&,
+        const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
 
 private:
     PipelineState m_pso;

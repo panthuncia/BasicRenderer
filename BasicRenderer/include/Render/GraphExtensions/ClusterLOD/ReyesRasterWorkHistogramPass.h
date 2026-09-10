@@ -17,7 +17,13 @@ struct ReyesHistogramFrameData {
     org::PreparedResourceReference histogramBarrier;
 };
 
-class ReyesRasterWorkHistogramPass final : public org::TypedRenderGraphPass<ReyesRasterWorkHistogramPass, ReyesHistogramFrameData> {
+struct ReyesRasterWorkHistogramBindings {
+    org::ResourceBindingToken work, counter, indirectArgs, histogram;
+    uint32_t numBuckets = 0;
+};
+
+class ReyesRasterWorkHistogramPass final : public org::TypedRenderGraphPass<ReyesRasterWorkHistogramPass,
+    ReyesHistogramFrameData, ReyesRasterWorkHistogramBindings> {
 public:
     ReyesRasterWorkHistogramPass(
         std::shared_ptr<Buffer> rasterWorkBuffer,
@@ -25,9 +31,10 @@ public:
         std::shared_ptr<Buffer> histogramIndirectCommand,
         std::shared_ptr<Buffer> histogramBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    ReyesHistogramFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const ReyesHistogramFrameData& data, org::PassRecordContext& recording);
+    ReyesRasterWorkHistogramBindings Declare(org::PassBuilder& builder);
+    ReyesHistogramFrameData Prepare(const ReyesRasterWorkHistogramBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesRasterWorkHistogramBindings&, const ReyesHistogramFrameData& data, org::PassRecordContext& recording);
     void Update(const UpdateExecutionContext& executionContext) override;
 
 private:
@@ -44,4 +51,5 @@ private:
     std::shared_ptr<Buffer> m_rasterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_histogramBuffer;
+    uint32_t m_numBuckets = 0;
 };

@@ -23,14 +23,13 @@ AVBOITDepthWarpPass::AVBOITDepthWarpPass(
         "CLod.AVBOITDepthWarp.PSO");
 }
 
-void AVBOITDepthWarpPass::Declare(org::PassBuilder& builder)
+AVBOITDepthWarpBindings AVBOITDepthWarpPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_configBuffer, m_occupancyHistogramBuffer)
-        .WithUnorderedAccess(m_depthWarpLUTBuffer);
+    return {builder.BindShaderResource(m_configBuffer), builder.BindShaderResource(m_occupancyHistogramBuffer), builder.BindUnorderedAccess(m_depthWarpLUTBuffer)};
 }
 
-br::render::PreparedComputeDispatch AVBOITDepthWarpPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch AVBOITDepthWarpPass::Prepare(const AVBOITDepthWarpBindings& bindings, const org::PassPrepareContext& preparation) const {
     br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_occupancyHistogramBuffer || !m_depthWarpLUTBuffer) {
         return {};
@@ -46,9 +45,9 @@ br::render::PreparedComputeDispatch AVBOITDepthWarpPass::Prepare(const org::Pass
     data.descriptorIndices = std::move(program.descriptorIndices);
 
     auto& misc = data.constants;
-    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_HISTOGRAM_DESCRIPTOR_INDEX] = m_occupancyHistogramBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_DESCRIPTOR_INDEX] = m_depthWarpLUTBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_CONFIG_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.config, {org::BindlessViewKind::ShaderResource}).index;
+    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_HISTOGRAM_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.histogram, {org::BindlessViewKind::ShaderResource}).index;
+    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.lut, {org::BindlessViewKind::UnorderedAccess}).index;
 
     const uint32_t groupCountX =
         (CLodAVBOITDepthWarpLUTResolution + 63u) / 64u;
@@ -56,6 +55,6 @@ br::render::PreparedComputeDispatch AVBOITDepthWarpPass::Prepare(const org::Pass
     return data;
 }
 
-void AVBOITDepthWarpPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void AVBOITDepthWarpPass::Record(const AVBOITDepthWarpBindings&, const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

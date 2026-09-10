@@ -11,16 +11,25 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapNonRasterableHierarchyPass final : public org::TypedRenderGraphPass<VirtualShadowMapNonRasterableHierarchyPass, br::render::PreparedComputeDispatchSequence> {
+struct VirtualShadowMapNonRasterableHierarchyBindings {
+    org::ResourceBindingToken pageTable;
+    org::ResourceBindingToken hierarchy;
+    org::ResourceBindingToken clipmapInfo;
+};
+
+class VirtualShadowMapNonRasterableHierarchyPass final : public org::TypedRenderGraphPass<VirtualShadowMapNonRasterableHierarchyPass,
+    br::render::PreparedComputeDispatchSequence, VirtualShadowMapNonRasterableHierarchyBindings> {
 public:
     VirtualShadowMapNonRasterableHierarchyPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
         std::shared_ptr<PixelBuffer> nonRasterableHierarchyTexture,
         std::shared_ptr<Buffer> clipmapInfoBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatchSequence Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatchSequence&, org::PassRecordContext&);
+    VirtualShadowMapNonRasterableHierarchyBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatchSequence Prepare(const VirtualShadowMapNonRasterableHierarchyBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapNonRasterableHierarchyBindings&,
+        const br::render::PreparedComputeDispatchSequence&, org::PassRecordContext&);
 
 private:
     PipelineState m_pso;

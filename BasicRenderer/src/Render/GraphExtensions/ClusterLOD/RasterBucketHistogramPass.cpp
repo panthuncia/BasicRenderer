@@ -61,34 +61,47 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
 
 RasterBucketHistogramPass::~RasterBucketHistogramPass() = default;
 
-void RasterBucketHistogramPass::Declare(org::PassBuilder& builder) {
+RasterBucketHistogramBindings RasterBucketHistogramPass::Declare(org::PassBuilder& builder) {
+    RasterBucketHistogramBindings bindings{
+        builder.BindShaderResource(m_visibleClustersBuffer), builder.BindShaderResource(m_visibleClustersCounterBuffer),
+        builder.BindIndirectArguments(m_histogramIndirectCommand), builder.BindUnorderedAccess(m_histogramBuffer)};
     builder.WithShaderResource(
-            m_visibleClustersBuffer,
-            m_visibleClustersCounterBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::InstanceDrawRecordBuffer,
             Builtin::PerInstanceTransformBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::Material::TextureStreamingMetadataBuffer)
-        .WithIndirectArguments(m_histogramIndirectCommand)
-    		.WithUnorderedAccess(m_histogramBuffer, Builtin::Material::TextureStreamingFeedbackBuffer);
+        .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer);
     if (m_reyesOwnershipBitsetBuffer) {
-        builder.WithShaderResource(m_reyesOwnershipBitsetBuffer);
+        bindings.reyesOwnership = builder.BindShaderResource(m_reyesOwnershipBitsetBuffer);
     }
     if (m_telemetryBuffer) {
-        builder.WithUnorderedAccess(m_telemetryBuffer);
+        bindings.telemetry = builder.BindUnorderedAccess(m_telemetryBuffer);
     }
     if (m_readBaseCounterBuffer) {
-        builder.WithShaderResource(m_readBaseCounterBuffer);
+        bindings.readBaseCounter = builder.BindShaderResource(m_readBaseCounterBuffer);
     }
 
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    bindings.numBuckets = m_numBuckets;
+    bindings.visibleCapacity = m_visibleClustersCapacity;
+    bindings.enabled = m_enabled && m_numBuckets != 0u;
+    bindings.telemetryEnabled = IsCLodWorkGraphTelemetryEnabled();
+    bindings.readReverse = m_readReverse;
+    bindings.hasReyesOwnership = static_cast<bool>(m_reyesOwnershipBitsetBuffer);
+    bindings.hasTelemetry = static_cast<bool>(m_telemetryBuffer);
+    bindings.hasReadBaseCounter = static_cast<bool>(m_readBaseCounterBuffer);
+    return bindings;
 }
 
 
-RasterBucketHistogramPreparedData RasterBucketHistogramPass::Prepare(const org::PassPrepareContext& preparation) {
+RasterBucketHistogramPreparedData RasterBucketHistogramPass::Prepare(
+    const RasterBucketHistogramBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const uint32_t numBuckets = context->preparedRasterBucketCount;
+    const bool enabled = numBuckets != 0u && (!m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)()));
     PreparedData data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
@@ -97,33 +110,34 @@ RasterBucketHistogramPreparedData RasterBucketHistogramPass::Prepare(const org::
     data.histogramProgram = preparation.CaptureProgram(m_histogramPipeline);
     preparation.Retain(m_histogramCommandSignature);
     data.commandSignature = (*m_histogramCommandSignature)->GetHandle();
-    data.indirectArguments = preparation.CaptureResource(m_histogramIndirectCommand->GetGlobalResourceID());
-    data.histogramResource = preparation.CaptureResource(m_histogramBuffer->GetGlobalResourceID());
+    data.indirectArguments = preparation.CaptureResource(bindings.indirectArguments);
+    data.histogramResource = preparation.CaptureResource(bindings.histogram);
     data.clearDescriptorIndices = CaptureResourceDescriptorIndices(m_clearPipeline.GetResourceDescriptorSlots());
     data.histogramDescriptorIndices = CaptureResourceDescriptorIndices(m_histogramPipeline.GetResourceDescriptorSlots());
     data.clearConstants.resize(NumMiscUintRootConstants);
     data.histogramConstants.resize(NumMiscUintRootConstants);
-    const uint32_t numBuckets = context->materialManager->GetRasterBucketCount();
-    data.enabled = numBuckets != 0u && (!m_runWhenComputeSWRasterEnabledOnly
-        || CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)()));
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index; };
+    data.enabled = enabled;
     data.clearGroups = (numBuckets + 63u) / 64u;
-    data.clearConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.clearConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = uav(bindings.histogram);
     data.clearConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = numBuckets;
     auto& c = data.histogramConstants;
-    c[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer ? m_readBaseCounterBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled() ? m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer ? m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    c[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = bindings.hasReadBaseCounter ? srv(bindings.readBaseCounter) : 0xFFFFFFFFu;
+    c[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.visibleClusters);
+    c[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.visibleCount);
+    c[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = uav(bindings.histogram);
+    c[CLOD_HISTOGRAM_TELEMETRY_DESCRIPTOR_INDEX] = bindings.hasTelemetry && IsCLodWorkGraphTelemetryEnabled() ? uav(bindings.telemetry) : 0xFFFFFFFFu;
+    c[CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = bindings.hasReyesOwnership ? srv(bindings.reyesOwnership) : 0xFFFFFFFFu;
     c[CLOD_HISTOGRAM_NUM_RASTER_BUCKETS] = numBuckets;
-    c[CLOD_HISTOGRAM_READ_MODE_FLAGS] = (m_readReverse ? CLOD_HISTOGRAM_READ_FLAG_REVERSED : 0u)
-        | (m_reyesOwnershipBitsetBuffer ? CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED : 0u);
-    c[CLOD_HISTOGRAM_READ_CAPACITY] = m_visibleClustersCapacity;
+    c[CLOD_HISTOGRAM_READ_MODE_FLAGS] = (bindings.readReverse ? CLOD_HISTOGRAM_READ_FLAG_REVERSED : 0u)
+        | (bindings.hasReyesOwnership ? CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED : 0u);
+    c[CLOD_HISTOGRAM_READ_CAPACITY] = bindings.visibleCapacity;
     return data;
 }
 
-void RasterBucketHistogramPass::Record(const PreparedData& data, org::PassRecordContext& recording) {
+void RasterBucketHistogramPass::Record(const RasterBucketHistogramBindings&,
+    const PreparedData& data, org::PassRecordContext& recording) {
     if (!data.enabled) return;
     auto& commands = recording.Commands();
     commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
@@ -152,17 +166,19 @@ void RasterBucketHistogramPass::Record(const PreparedData& data, org::PassRecord
 }
 
 void RasterBucketHistogramPass::Update(const UpdateExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
+    m_enabled = !m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)());
+    if (!m_enabled) {
         return;
     }
 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
 
-    auto numRasterBuckets = context.preparedRasterBucketCount;
+    m_numBuckets = context.preparedRasterBucketCount;
 
-    if (m_histogramBuffer->GetSize() < static_cast<size_t>(numRasterBuckets) * sizeof(uint32_t)) {
-        m_histogramBuffer->ResizeStructured(numRasterBuckets);
+    if (m_histogramBuffer->GetSize() < static_cast<size_t>(m_numBuckets) * sizeof(uint32_t)) {
+        m_histogramBuffer->ResizeStructured(m_numBuckets);
     }
 
 }

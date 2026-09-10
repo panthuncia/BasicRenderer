@@ -63,7 +63,8 @@ public:
     void ExecuteBlasBuild(rhi::CommandList commandList);
     void ExecuteTlasBuild(rhi::CommandList commandList);
     void EnsureRayTracingPipeline(rhi::Device device, const RayTracingFeatureInfo& rayTracingFeatures);
-    void ExecuteTraceRays(rhi::Device device, rhi::CommandList commandList, PixelBuffer& output, uint32_t width, uint32_t height);
+    void ExecuteTraceRays(rhi::Device device, rhi::CommandList commandList,
+        PixelBuffer& output, uint32_t outputUAVIndex, uint32_t width, uint32_t height);
 
     const Stats& GetStats() const { return m_stats; }
     const MeshManager::CLodRayTracingResidencySnapshot& GetSnapshot() const { return m_snapshot; }

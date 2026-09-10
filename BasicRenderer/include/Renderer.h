@@ -55,6 +55,7 @@
 #include "Render/AsyncStateGraph.h"
 #include "Render/PublishedRendererState.h"
 #include "Render/RendererStateRequestService.h"
+#include "Render/RendererFrameInputs.h"
 
 class DynamicResource;
 namespace org { class ExternalTextureResource; }
@@ -256,6 +257,9 @@ private:
     bool m_shaderReloadRequested = false;
 
     RenderContext m_context;
+    // Most recently accepted immutable logical-frame publication. The render
+    // half of the frame never exposes a pointer to mutable m_context.
+    std::shared_ptr<const br::render::RendererFrameInputs> m_frameInputs;
     ProducerPassServices m_producerServices;
     // Persistent producer state survives graph rebuilds and full/producer
     // recipe switches. It is released only with the renderer/device lifetime.
@@ -445,6 +449,7 @@ private:
     std::shared_ptr<org::runtime::IUploadPolicyService> m_uploadPolicyService = nullptr;
     uint64_t m_lastCLodVisibilityTelemetryRequestFrame = UINT64_MAX;
     bool m_clodTelemetryReadbackPending = false;
+    bool m_clodRasterArgsReadbackPending = false;
     bool m_clodVisibleCounterReadbackPending = false;
     bool m_clodReplayStateReadbackPending = false;
     bool m_loggedCLodVisibilityTelemetryEnabled = false;

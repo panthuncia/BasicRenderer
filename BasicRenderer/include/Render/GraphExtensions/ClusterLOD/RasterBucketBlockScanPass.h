@@ -8,7 +8,14 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class RasterBucketBlockScanPass : public org::TypedRenderGraphPass<RasterBucketBlockScanPass, br::render::PreparedComputeDispatch> {
+struct RasterBucketBlockScanBindings {
+    org::ResourceBindingToken histogram, offsets, blockSums;
+    uint32_t numBuckets = 0;
+    bool enabled = false;
+};
+
+class RasterBucketBlockScanPass : public org::TypedRenderGraphPass<RasterBucketBlockScanPass,
+    br::render::PreparedComputeDispatch, RasterBucketBlockScanBindings> {
 public:
     RasterBucketBlockScanPass(
         std::shared_ptr<Buffer> histogramBuffer,
@@ -16,9 +23,10 @@ public:
         std::shared_ptr<Buffer> blockSumsBuffer,
         bool runWhenComputeSWRasterEnabledOnly = false);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& context) {
+    RasterBucketBlockScanBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const RasterBucketBlockScanBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const RasterBucketBlockScanBindings&, const br::render::PreparedComputeDispatch& data, org::PassRecordContext& context) {
         br::render::RecordPreparedComputeDispatch(data, context);
     }
     void Update(const UpdateExecutionContext& executionContext) override;
@@ -30,4 +38,6 @@ private:
     std::shared_ptr<Buffer> m_offsetsBuffer;
     std::shared_ptr<Buffer> m_blockSumsBuffer;
     bool m_runWhenComputeSWRasterEnabledOnly = false;
+    uint32_t m_numBuckets = 0;
+    bool m_enabled = false;
 };

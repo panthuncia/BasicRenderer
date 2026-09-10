@@ -11,7 +11,14 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapClearPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapClearPagesPass, br::render::PreparedComputeDispatch> {
+struct VirtualShadowMapClearPagesBindings {
+    org::ResourceBindingToken staticPages, dynamicPages, dirtyFlags, pageTable;
+    org::ResourceBindingToken pageMetadata, clipmapInfo, pageViewInfo, stats;
+    bool dynamicContentFilter = false;
+};
+
+class VirtualShadowMapClearPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapClearPagesPass,
+    br::render::PreparedComputeDispatch, VirtualShadowMapClearPagesBindings> {
 public:
     VirtualShadowMapClearPagesPass(
         std::shared_ptr<PixelBuffer> staticPagesTexture,
@@ -23,10 +30,12 @@ public:
         std::shared_ptr<Buffer> pageViewInfoBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapClearPagesBindings Declare(org::PassBuilder& builder);
     void Initialize();
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const VirtualShadowMapClearPagesBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapClearPagesBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
     void ShutdownPass();
 
 private:

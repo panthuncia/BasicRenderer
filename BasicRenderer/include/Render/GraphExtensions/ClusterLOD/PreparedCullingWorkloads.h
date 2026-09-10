@@ -76,9 +76,9 @@ inline std::vector<PreparedCullingWorkload> PrepareCullingWorkloads(
 
             result.push_back({
                 .viewDataIndex = view.cameraBufferIndex,
-                .activeDrawSetIndicesSRVIndex = activeDrawList->GetSRVInfo(0).slot.index,
+                .activeDrawSetIndicesSRVIndex = workload->activeDrawListSRVIndex,
                 .activeDrawCount = workload->count,
-                .drawRecordVisibilityGenerationSRVIndex = published->visibilityGenerations->GetSRVInfo(0).slot.index,
+                .drawRecordVisibilityGenerationSRVIndex = published->visibilityGenerationsSRVIndex,
                 .shadowCasterClass = rasterOutputKind == CLodRasterOutputKind::VirtualShadow
                     ? (workload->key.skinnedShadowCaster ? 2u : 1u)
                     : 0u,

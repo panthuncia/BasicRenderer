@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "Render/PipelineState.h"
@@ -10,7 +11,23 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class ReyesQueueResetPass final : public org::TypedRenderGraphPass<ReyesQueueResetPass, br::render::PreparedComputePipelineSequence> {
+struct ReyesQueueResetBindings {
+    org::ResourceBindingToken fullClusterCounter;
+    org::ResourceBindingToken ownedClusterCounter;
+    std::vector<org::ResourceBindingToken> splitQueueCounters;
+    std::vector<org::ResourceBindingToken> splitQueueOverflowCounters;
+    org::ResourceBindingToken diceQueueCounter;
+    org::ResourceBindingToken diceQueueOverflowCounter;
+    org::ResourceBindingToken telemetry;
+    std::optional<org::ResourceBindingToken> replaySplitQueueCounter;
+    std::optional<org::ResourceBindingToken> replaySplitQueueOverflowCounter;
+    std::optional<org::ResourceBindingToken> replayDiceQueueCounter;
+    std::optional<org::ResourceBindingToken> replayDiceQueueOverflowCounter;
+    std::optional<org::ResourceBindingToken> ownershipBitset;
+};
+
+class ReyesQueueResetPass final : public org::TypedRenderGraphPass<ReyesQueueResetPass,
+    br::render::PreparedComputePipelineSequence, ReyesQueueResetBindings> {
 public:
     ReyesQueueResetPass(
         std::shared_ptr<Buffer> fullClusterCounter,
@@ -28,10 +45,12 @@ public:
         std::shared_ptr<Buffer> replayDiceQueueCounter = nullptr,
         std::shared_ptr<Buffer> replayDiceQueueOverflowCounter = nullptr);
 
-    void Declare(org::PassBuilder& builder);
+    ReyesQueueResetBindings Declare(org::PassBuilder& builder);
     void Initialize();
-    br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
+    br::render::PreparedComputePipelineSequence Prepare(
+        const ReyesQueueResetBindings&, const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesQueueResetBindings&,
+        const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
 
 private:

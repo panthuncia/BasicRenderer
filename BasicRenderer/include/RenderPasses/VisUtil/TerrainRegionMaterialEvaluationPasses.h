@@ -359,7 +359,15 @@ private:
     Resource* m_dispatchArgs = nullptr;
 };
 
-class EvaluateTerrainRegionMaterialGroupsPass : public org::TypedRenderGraphPass<EvaluateTerrainRegionMaterialGroupsPass, br::render::PreparedComputeIndirect> {
+struct EvaluateTerrainRegionMaterialGroupsBindings {
+    org::ResourceBindingToken visibleClusters, reyesDiceQueue;
+    org::ResourceBindingToken reyesTessTableConfigs, reyesTessTableVertices, reyesTessTableTriangles;
+    bool hasReyesDiceQueue = false, hasReyesTessTables = false;
+    uint32_t patchVisibilityIndexBase = 0;
+};
+
+class EvaluateTerrainRegionMaterialGroupsPass : public org::TypedRenderGraphPass<EvaluateTerrainRegionMaterialGroupsPass,
+    br::render::PreparedComputeIndirect, EvaluateTerrainRegionMaterialGroupsBindings> {
 public:
     EvaluateTerrainRegionMaterialGroupsPass() {
         std::vector<DxcDefine> defines;
@@ -412,7 +420,21 @@ public:
         } catch (...) {}
     }
 
-    void Declare(org::PassBuilder& builder) {
+    EvaluateTerrainRegionMaterialGroupsBindings Declare(org::PassBuilder& builder) {
+        RefreshResourcePointers();
+        EvaluateTerrainRegionMaterialGroupsBindings bindings{};
+        bindings.visibleClusters = builder.BindShaderResource(m_visibleClusterResource);
+        if (m_reyesDiceQueueResource) {
+            bindings.reyesDiceQueue = builder.BindShaderResource(m_reyesDiceQueueResource);
+            bindings.hasReyesDiceQueue = true;
+        }
+        if (m_reyesTessTableConfigsResource && m_reyesTessTableVerticesResource && m_reyesTessTableTrianglesResource) {
+            bindings.reyesTessTableConfigs = builder.BindShaderResource(m_reyesTessTableConfigsResource);
+            bindings.reyesTessTableVertices = builder.BindShaderResource(m_reyesTessTableVerticesResource);
+            bindings.reyesTessTableTriangles = builder.BindShaderResource(m_reyesTessTableTrianglesResource);
+            bindings.hasReyesTessTables = true;
+        }
+        bindings.patchVisibilityIndexBase = m_patchVisibilityIndexBase;
         builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         auto* b = &builder;
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
@@ -490,22 +512,22 @@ public:
         b->WithIndirectArguments(
             "Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuffer",
             "Builtin::VisUtil::TerrainRegionActiveCountBuffer");
+        return bindings;
     }
 
     void Initialize() {
         RefreshResourcePointers();
-        RefreshDescriptorIndices();
         m_terrainRegionEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuffer");
         m_activeCount = m_resourceRegistryView->RequestPtr<Resource>("Builtin::VisUtil::TerrainRegionActiveCountBuffer");
     }
 
     void RefreshResourcePointers() {
-        std::vector<GloballyIndexedResource*> visibleClusterResources;
+        std::vector<std::shared_ptr<GloballyIndexedResource>> visibleClusterResources;
         m_visibleClustersQuery.each([&](flecs::entity e) {
             auto& res = e.get<Components::Resource>();
             auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
             if (test) {
-                visibleClusterResources.push_back(test.get());
+                visibleClusterResources.push_back(std::move(test));
             }
             const auto capacity = e.get<CLodVisibleClusterCapacity>();
             m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(capacity.maxVisibleClusters);
@@ -514,80 +536,63 @@ public:
             throw std::runtime_error("EvaluateTerrainRegionMaterialGroupsPass: Expected exactly one visible cluster buffer resource.");
         }
 
-        m_visibleClusterResource = visibleClusterResources[0];
-        m_reyesDiceQueueResource = nullptr;
-        m_reyesTessTableConfigsResource = nullptr;
-        m_reyesTessTableVerticesResource = nullptr;
-        m_reyesTessTableTrianglesResource = nullptr;
+        m_visibleClusterResource = std::move(visibleClusterResources[0]);
+        m_reyesDiceQueueResource.reset();
+        m_reyesTessTableConfigsResource.reset();
+        m_reyesTessTableVerticesResource.reset();
+        m_reyesTessTableTrianglesResource.reset();
 
-        std::vector<GloballyIndexedResource*> reyesDiceQueueResources;
+        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesDiceQueueResources;
         m_reyesDiceQueueQuery.each([&](flecs::entity e) {
             if (const auto res = e.try_get<Components::Resource>(); res) {
                 if (const auto test = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); test) {
-                    reyesDiceQueueResources.push_back(test.get());
+                    reyesDiceQueueResources.push_back(std::move(test));
                 }
             }
         });
         if (reyesDiceQueueResources.size() == 1) {
-            m_reyesDiceQueueResource = reyesDiceQueueResources[0];
+            m_reyesDiceQueueResource = std::move(reyesDiceQueueResources[0]);
         }
 
-        std::vector<GloballyIndexedResource*> reyesTessTableConfigResources;
+        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableConfigResources;
         m_reyesTessTableConfigsQuery.each([&](flecs::entity e) {
             if (const auto res = e.try_get<Components::Resource>(); res) {
                 if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableConfigResources.push_back(resource.get());
+                    reyesTessTableConfigResources.push_back(std::move(resource));
                 }
             }
         });
         if (reyesTessTableConfigResources.size() == 1) {
-            m_reyesTessTableConfigsResource = reyesTessTableConfigResources[0];
+            m_reyesTessTableConfigsResource = std::move(reyesTessTableConfigResources[0]);
         }
 
-        std::vector<GloballyIndexedResource*> reyesTessTableVertexResources;
+        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableVertexResources;
         m_reyesTessTableVerticesQuery.each([&](flecs::entity e) {
             if (const auto res = e.try_get<Components::Resource>(); res) {
                 if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableVertexResources.push_back(resource.get());
+                    reyesTessTableVertexResources.push_back(std::move(resource));
                 }
             }
         });
         if (reyesTessTableVertexResources.size() == 1) {
-            m_reyesTessTableVerticesResource = reyesTessTableVertexResources[0];
+            m_reyesTessTableVerticesResource = std::move(reyesTessTableVertexResources[0]);
         }
 
-        std::vector<GloballyIndexedResource*> reyesTessTableTriangleResources;
+        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableTriangleResources;
         m_reyesTessTableTrianglesQuery.each([&](flecs::entity e) {
             if (const auto res = e.try_get<Components::Resource>(); res) {
                 if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableTriangleResources.push_back(resource.get());
+                    reyesTessTableTriangleResources.push_back(std::move(resource));
                 }
             }
         });
         if (reyesTessTableTriangleResources.size() == 1) {
-            m_reyesTessTableTrianglesResource = reyesTessTableTriangleResources[0];
+            m_reyesTessTableTrianglesResource = std::move(reyesTessTableTriangleResources[0]);
         }
     }
 
-    void RefreshDescriptorIndices() {
-        if (m_visibleClusterResource) {
-            m_visibleClusterBufferSRVIndex = m_visibleClusterResource->GetSRVInfo(0).slot.index;
-        }
-        m_reyesDiceQueueBufferSRVIndex = m_reyesDiceQueueResource
-            ? m_reyesDiceQueueResource->GetSRVInfo(0).slot.index
-            : 0xFFFFFFFFu;
-        m_reyesTessTableConfigsBufferSRVIndex = m_reyesTessTableConfigsResource
-            ? m_reyesTessTableConfigsResource->GetSRVInfo(0).slot.index
-            : 0xFFFFFFFFu;
-        m_reyesTessTableVerticesBufferSRVIndex = m_reyesTessTableVerticesResource
-            ? m_reyesTessTableVerticesResource->GetSRVInfo(0).slot.index
-            : 0xFFFFFFFFu;
-        m_reyesTessTableTrianglesBufferSRVIndex = m_reyesTessTableTrianglesResource
-            ? m_reyesTessTableTrianglesResource->GetSRVInfo(0).slot.index
-            : 0xFFFFFFFFu;
-    }
-
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeIndirect Prepare(const EvaluateTerrainRegionMaterialGroupsBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto& ctx = *preparation.preparationData->Get<UpdateContext>();
         br::render::PreparedComputeIndirect data{};
         data.resourceHeap = ctx.textureDescriptorHeap.GetHandle();
@@ -595,14 +600,18 @@ public:
         auto program = preparation.CaptureProgramBinding(m_pso);
         data.program = program.program;
         data.descriptorIndices = std::move(program.descriptorIndices);
-        RefreshDescriptorIndices();
-        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.visibleClusters, {org::BindlessViewKind::ShaderResource}).index;
         data.constants[VISBUF_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
-        data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
-        data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
-        data.constants[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBufferSRVIndex;
-        data.constants[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBufferSRVIndex;
-        data.constants[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBufferSRVIndex;
+        data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = bindings.hasReyesDiceQueue
+            ? preparation.ResolveView(bindings.reyesDiceQueue, {org::BindlessViewKind::ShaderResource}).index : 0xFFFFFFFFu;
+        data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = bindings.patchVisibilityIndexBase;
+        data.constants[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = bindings.hasReyesTessTables
+            ? preparation.ResolveView(bindings.reyesTessTableConfigs, {org::BindlessViewKind::ShaderResource}).index : 0xFFFFFFFFu;
+        data.constants[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = bindings.hasReyesTessTables
+            ? preparation.ResolveView(bindings.reyesTessTableVertices, {org::BindlessViewKind::ShaderResource}).index : 0xFFFFFFFFu;
+        data.constants[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = bindings.hasReyesTessTables
+            ? preparation.ResolveView(bindings.reyesTessTableTriangles, {org::BindlessViewKind::ShaderResource}).index : 0xFFFFFFFFu;
         data.constants[VISBUF_REYES_USE_NORMAL_MAPS] = CLodReyesUseNormalMaps() ? 1u : 0u;
         data.constants[VISBUF_REYES_TERRAIN_NORMAL_BLEND_AS_UINT] = std::bit_cast<uint32_t>(CLodReyesTerrainNormalBlend());
         data.constants[VISBUF_REYES_TERRAIN_NORMAL_MIP_BIAS] = CLodReyesTerrainNormalMipBias();
@@ -614,7 +623,8 @@ public:
         return data;
     }
 
-    static void Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+    static void Record(const EvaluateTerrainRegionMaterialGroupsBindings&, const br::render::PreparedComputeIndirect& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeIndirect(data, recording);
     }
 
@@ -637,17 +647,12 @@ private:
     flecs::query<> m_reyesTessTableVerticesQuery;
     flecs::query<> m_reyesTessTableTrianglesQuery;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
-    GloballyIndexedResource* m_visibleClusterResource = nullptr;
-    GloballyIndexedResource* m_reyesDiceQueueResource = nullptr;
-    GloballyIndexedResource* m_reyesTessTableConfigsResource = nullptr;
-    GloballyIndexedResource* m_reyesTessTableVerticesResource = nullptr;
-    GloballyIndexedResource* m_reyesTessTableTrianglesResource = nullptr;
-    uint32_t m_visibleClusterBufferSRVIndex = 0;
-    uint32_t m_reyesDiceQueueBufferSRVIndex = 0xFFFFFFFFu;
+    std::shared_ptr<GloballyIndexedResource> m_visibleClusterResource;
+    std::shared_ptr<GloballyIndexedResource> m_reyesDiceQueueResource;
+    std::shared_ptr<GloballyIndexedResource> m_reyesTessTableConfigsResource;
+    std::shared_ptr<GloballyIndexedResource> m_reyesTessTableVerticesResource;
+    std::shared_ptr<GloballyIndexedResource> m_reyesTessTableTrianglesResource;
     uint32_t m_patchVisibilityIndexBase = 0u;
-    uint32_t m_reyesTessTableConfigsBufferSRVIndex = 0xFFFFFFFFu;
-    uint32_t m_reyesTessTableVerticesBufferSRVIndex = 0xFFFFFFFFu;
-    uint32_t m_reyesTessTableTrianglesBufferSRVIndex = 0xFFFFFFFFu;
     Resource* m_terrainRegionEvalCmds = nullptr;
     Resource* m_activeCount = nullptr;
 };

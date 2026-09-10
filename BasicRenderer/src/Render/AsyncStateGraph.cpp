@@ -2240,9 +2240,14 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
 		AdjustExactRecipePins(node.key, node.coalescibleIntent, node.requirements, 1);
 		node.installedWaiterKeys.clear();
 		if (!preparedWaiterKeys.empty()) {
-			node.installedWaiterKeys = std::move(preparedWaiterKeys);
-			for (const auto& dependency : node.installedWaiterKeys)
+			for (const auto& dependency : preparedWaiterKeys) {
+				// An exact predecessor version at this same address is resolved
+				// directly from the immutable archive and never needs a reverse
+				// address wake edge.
+				if (dependency == node.key) continue;
+				node.installedWaiterKeys.push_back(dependency);
 				waiters[dependency].insert(node.key);
+			}
 			node.completedWaiterEdgesPruned = false;
 			return;
 		}
@@ -2251,6 +2256,7 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
 		std::unordered_set<ArtifactKey, ArtifactKey::Hasher> unique;
 		unique.reserve(node.requirements.size() + node.requestedRequirements.size());
 		const auto install = [&](const ArtifactRequirement& requirement) {
+			if (requirement.key == node.key) return;
 			if (!unique.insert(requirement.key).second) return;
 			waiters[requirement.key].insert(node.key);
 			node.installedWaiterKeys.push_back(requirement.key);
@@ -2306,7 +2312,16 @@ struct AsyncStateGraph::Impl : std::enable_shared_from_this<Impl> {
 		for (const auto& requirement : node.requirements) {
 			if (requirement.policy == DependencyPolicy::Optional ||
 				requirement.invalidation == DependencyInvalidationPolicy::LifetimeHold) continue;
-			if (requirement.key == node.key) return { node.key, node.key };
+			if (requirement.key == node.key) {
+				const bool archivedPredecessor =
+					requirement.invalidation == DependencyInvalidationPolicy::ExactSnapshot &&
+					requirement.requiredGeneration != 0 &&
+					requirement.minimumRevision != node.desiredRevision &&
+					versions.contains({ requirement.key, requirement.minimumRevision,
+						requirement.requiredGeneration });
+				if (archivedPredecessor) continue;
+				return { node.key, node.key };
+			}
 			auto root = nodes.find(requirement.key);
 			if (root == nodes.end() || root->second.cycleVisitEpoch == epoch) continue;
 			root->second.cycleVisitEpoch = epoch;

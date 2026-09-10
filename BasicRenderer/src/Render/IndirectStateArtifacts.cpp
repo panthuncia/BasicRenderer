@@ -89,6 +89,8 @@ ArtifactBuildResult BuildIndirectState(const ArtifactBuildContext& context) {
         return ArtifactBuildResult::Failure(
             "indirect workload visibility-generation dependency type mismatch");
     }
+    state->visibilityGenerationsSRVIndex =
+        state->visibilityGenerations->GetSRVInfo(0).slot.index;
 
     for (const auto& workload : input->workloads) {
         const auto logicalCount = workload.logicalEntryCount;
@@ -136,7 +138,8 @@ ArtifactBuildResult BuildIndirectState(const ArtifactBuildContext& context) {
                 dynamicArgs = argumentVersion->resource;
             }
             state->workloads.push_back(PublishedIndirectWorkload{
-                viewID, workload.key, dynamicArgs, activeBuffer, safeCount, capacity,
+                viewID, workload.key, dynamicArgs, activeBuffer,
+                activeBuffer->GetSRVInfo(0).slot.index, safeCount, capacity,
                 workload.activeListRevision });
 
             if (dynamicArgs) {

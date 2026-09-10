@@ -13,7 +13,18 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class DeepVisibilityResolvePass final : public org::TypedRenderGraphPass<DeepVisibilityResolvePass, br::render::PreparedComputeDispatch>, public IDynamicDeclaredResources {
+struct DeepVisibilityResolveBindings {
+    org::ResourceBindingToken headPointers, nodes, counter, overflow, visibleClusters, stats;
+    org::ResourceBindingToken diceQueue, tessConfigs, tessVertices, tessTriangles;
+    uint32_t patchIndexBase = 0, width = 0, height = 0, globalPsoFlags = 0;
+    bool ready = false, shadows = false, punctualLights = false, gtao = false;
+    bool hasDiceQueue = false, hasTessTables = false;
+    bool useNormalMaps = false;
+    float terrainNormalBlend = 0, terrainNormalMipBias = 0, objectNormalMapBlend = 0;
+};
+
+class DeepVisibilityResolvePass final : public org::TypedRenderGraphPass<DeepVisibilityResolvePass,
+    br::render::PreparedComputeDispatch, DeepVisibilityResolveBindings>, public IDynamicDeclaredResources {
 public:
     DeepVisibilityResolvePass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -27,12 +38,13 @@ public:
         std::shared_ptr<Buffer> deepVisibilityStatsBuffer,
         uint32_t patchVisibilityIndexBase);
 
-    void Declare(org::PassBuilder& builder);
+    DeepVisibilityResolveBindings Declare(org::PassBuilder& builder);
     void Initialize();
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording);
+    br::render::PreparedComputeDispatch Prepare(const DeepVisibilityResolveBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const DeepVisibilityResolveBindings&, const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -53,4 +65,5 @@ private:
     std::function<bool()> m_getPunctualLightingEnabled;
     std::function<bool()> m_getShadowsEnabled;
     bool m_gtaoEnabled = true;
+    uint32_t m_renderWidth = 0, m_renderHeight = 0, m_globalPsoFlags = 0;
 };

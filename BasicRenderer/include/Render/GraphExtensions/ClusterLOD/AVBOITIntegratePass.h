@@ -12,7 +12,12 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITIntegratePass final : public org::TypedRenderGraphPass<AVBOITIntegratePass, br::render::PreparedComputeDispatch>, public IDynamicDeclaredResources {
+struct AVBOITIntegrateBindings {
+    org::ResourceBindingToken config, state, occupancy;
+};
+
+class AVBOITIntegratePass final : public org::TypedRenderGraphPass<AVBOITIntegratePass,
+    br::render::PreparedComputeDispatch, AVBOITIntegrateBindings>, public IDynamicDeclaredResources {
 public:
     AVBOITIntegratePass(
         std::shared_ptr<Buffer> configBuffer,
@@ -25,11 +30,13 @@ public:
         std::shared_ptr<PixelBuffer> integratedTransmittanceTexture,
         std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture);
 
-    void Declare(org::PassBuilder& builder);
+    AVBOITIntegrateBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITIntegrateBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const AVBOITIntegrateBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

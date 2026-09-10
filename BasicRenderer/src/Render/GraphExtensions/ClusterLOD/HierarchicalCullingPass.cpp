@@ -294,7 +294,7 @@ void HierarchicalCullingPass::ReloadWorkGraph()
     m_workGraphInitialization->initialized.store(false, std::memory_order_release);
 }
 
-void HierarchicalCullingPass::Declare(org::PassBuilder& builder) {
+HierarchicalCullingBindings HierarchicalCullingPass::Declare(org::PassBuilder& builder) {
     const ResourceState computeReadState{
         rhi::ResourceAccessType::ShaderResource,
         rhi::ResourceLayout::ShaderResource,
@@ -476,9 +476,112 @@ void HierarchicalCullingPass::Declare(org::PassBuilder& builder) {
         builder.WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
 
+    HierarchicalCullingBindings bindings{};
+    bindings.visible = builder.BindUnorderedAccess(m_visibleClustersBuffer);
+    bindings.transforms = builder.BindUnorderedAccess(m_visibleClusterTransformIndicesBuffer);
+    bindings.visibleCounter = builder.BindUnorderedAccess(m_visibleClustersCounterBuffer);
+    bindings.swCounter = builder.BindUnorderedAccess(m_swVisibleClustersCounterBuffer);
+    bindings.histogram = builder.BindUnorderedAccess(m_histogramIndirectCommand);
+    bindings.telemetry = builder.BindUnorderedAccess(m_workGraphTelemetryBuffer);
+    bindings.replay = builder.BindUnorderedAccess(m_occlusionReplayBuffer);
+    bindings.replayState = builder.BindUnorderedAccess(m_occlusionReplayStateBuffer);
+    bindings.nodeInputs = builder.BindUnorderedAccess(m_occlusionNodeGpuInputsBuffer);
+    if (UsesSWClassification(m_workGraphMode)) {
+        bindings.viewRasterInfo = builder.BindShaderResource(m_viewRasterInfoBuffer);
+        bindings.hasSw = bindings.hasViewRasterInfo = true;
+    }
+    if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
+        bindings.viewDepthIndices = builder.BindShaderResource(m_viewDepthSrvIndicesBuffer);
+        bindings.hasViewDepth = true;
+    }
+    if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
+        bindings.shadowPageTable = builder.BindUnorderedAccess(m_shadowPageTableTexture);
+        bindings.shadowActiveMetadata = builder.BindShaderResource(m_shadowActiveBlockMetadataBuffer);
+        bindings.hasVirtualShadow = true;
+        if (m_shadowDirtyHierarchyTexture) {
+            bindings.shadowDirty = builder.BindShaderResource(m_shadowDirtyHierarchyTexture);
+            bindings.hasShadowDirty = true;
+        }
+        if (m_shadowInvalidatedInstancesBitsetBuffer) {
+            bindings.invalidatedInstances = builder.BindShaderResource(m_shadowInvalidatedInstancesBitsetBuffer);
+            bindings.hasInvalidated = true;
+        }
+        if (m_shadowPredictiveInvalidationCandidatesBuffer && m_shadowPredictiveInvalidationCandidateCountBuffer) {
+            bindings.predictiveCandidates = builder.BindUnorderedAccess(m_shadowPredictiveInvalidationCandidatesBuffer);
+            bindings.predictiveCount = builder.BindUnorderedAccess(m_shadowPredictiveInvalidationCandidateCountBuffer);
+            bindings.hasPredictive = true;
+        }
+    }
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
+        bindings.shadowPhysicalPages = builder.BindUnorderedAccess(m_shadowPhysicalPagesTexture);
+        bindings.shadowDynamicPages = builder.BindUnorderedAccess(m_shadowDynamicPhysicalPagesTexture);
+        bindings.shadowDynamicMetadata = builder.BindShaderResource(m_shadowDynamicActiveBlockMetadataBuffer);
+        bindings.hasShadowRaster = true;
+    }
+    if (m_workGraphReyesVisibility) {
+        bindings.reyesDice = builder.BindUnorderedAccess(m_reyesDiceQueueBuffer);
+        bindings.reyesDiceCounter = builder.BindUnorderedAccess(m_reyesDiceQueueCounterBuffer);
+        bindings.reyesOverflow = builder.BindUnorderedAccess(m_reyesDiceQueueOverflowBuffer);
+        bindings.reyesConfigs = builder.BindShaderResource(m_reyesTessTableConfigsBuffer);
+        bindings.reyesVertices = builder.BindShaderResource(m_reyesTessTableVerticesBuffer);
+        bindings.reyesTriangles = builder.BindShaderResource(m_reyesTessTableTrianglesBuffer);
+        bindings.reyesTelemetry = builder.BindUnorderedAccess(m_reyesTelemetryBuffer);
+        bindings.hasReyes = true;
+    }
+    if (m_phase1VisibleClustersCounterBuffer) {
+        bindings.phase1Counter = builder.BindShaderResource(m_phase1VisibleClustersCounterBuffer);
+        bindings.hasPhase1 = true;
+    }
+    if (UsesSWClassification(m_workGraphMode) && m_swWriteBaseCounterBuffer) {
+        bindings.swWriteBase = builder.BindShaderResource(m_swWriteBaseCounterBuffer);
+        bindings.hasSwWriteBase = true;
+    }
+    if (m_voxelRasterWorkCapacity != 0u) {
+        bindings.voxelQueues = {builder.BindUnorderedAccess(m_voxelRasterWorkBuffer),
+            builder.BindUnorderedAccess(m_voxelRasterWorkCounterBuffer),
+            builder.BindUnorderedAccess(m_skinnedVoxelRasterWorkBuffer),
+            builder.BindUnorderedAccess(m_skinnedVoxelRasterWorkCounterBuffer)};
+        bindings.hasVoxelQueues = true;
+    }
+    if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClusterTransformIndicesBuffer && m_pageJobVisibleClustersCounterBuffer) {
+        bindings.pageJobQueues = {builder.BindUnorderedAccess(m_pageJobVisibleClustersBuffer),
+            builder.BindUnorderedAccess(m_pageJobVisibleClustersCounterBuffer),
+            builder.BindUnorderedAccess(m_pageJobVisibleClusterTransformIndicesBuffer)};
+        bindings.hasPageJobQueues = true;
+    }
+
+    const auto uavIndex = [&](const auto& resource) {
+        return builder.DeclaredBindlessIndex(resource,
+            {org::BindlessViewKind::UnorderedAccess});
+    };
+    if (bindings.hasVoxelQueues) {
+        CLodVoxelRasterQueueDescriptors descriptors{};
+        descriptors.rigidWorkRecordsUAVDescriptorIndex = uavIndex(m_voxelRasterWorkBuffer);
+        descriptors.rigidWorkRecordCounterUAVDescriptorIndex = uavIndex(m_voxelRasterWorkCounterBuffer);
+        descriptors.skinnedWorkRecordsUAVDescriptorIndex = uavIndex(m_skinnedVoxelRasterWorkBuffer);
+        descriptors.skinnedWorkRecordCounterUAVDescriptorIndex = uavIndex(m_skinnedVoxelRasterWorkCounterBuffer);
+        descriptors.workRecordCapacity = m_voxelRasterWorkCapacity;
+        m_cachedVoxelQueueDescriptors = descriptors;
+        m_hasCachedVoxelQueueDescriptors = true;
+        BUFFER_UPLOAD(&descriptors, sizeof(descriptors),
+            org::runtime::UploadTarget::FromShared(m_voxelRasterQueueDescriptorsBuffer), 0);
+    }
+    CLodWorkGraphComputePageJobDescriptors pageJobs{};
+    if (bindings.hasPageJobQueues) {
+        pageJobs.visibleClustersUAVDescriptorIndex = uavIndex(m_pageJobVisibleClustersBuffer);
+        pageJobs.visibleClustersCounterUAVDescriptorIndex = uavIndex(m_pageJobVisibleClustersCounterBuffer);
+        pageJobs.visibleClusterTransformIndicesUAVDescriptorIndex =
+            uavIndex(m_pageJobVisibleClusterTransformIndicesBuffer);
+    }
+    m_cachedPageJobDescriptors = pageJobs;
+    m_hasCachedPageJobDescriptors = true;
+    BUFFER_UPLOAD(&pageJobs, sizeof(pageJobs),
+        org::runtime::UploadTarget::FromShared(m_workGraphComputePageJobDescriptorsBuffer), 0);
+
     builder.WithInternalTransition(m_visibleClustersCounterBuffer, computeReadState)
         .WithInternalTransition(m_occlusionReplayStateBuffer, computeReadState)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
+    return bindings;
 }
 
 void HierarchicalCullingPass::Initialize() {
@@ -491,7 +594,7 @@ void HierarchicalCullingPass::Initialize() {
 
 
 br::render::PreparedComputeCommandSequence HierarchicalCullingPass::Prepare(
-    const org::PassPrepareContext& preparation) {
+    const HierarchicalCullingBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* update = preparation.preparationData
         ? preparation.preparationData->Get<UpdateContext>() : nullptr;
     const auto* render = preparation.preparationData
@@ -515,16 +618,21 @@ br::render::PreparedComputeCommandSequence HierarchicalCullingPass::Prepare(
     auto dispatch = [&](uint32_t x, uint32_t y = 1, uint32_t z = 1) {
         preparedCommands.Dispatch(x, y, z);
     };
+    const auto srv = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) {
+        return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource, variant}).index;
+    };
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) {
+        return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index;
+    };
     auto barriers = [&](std::initializer_list<std::shared_ptr<Buffer>> resources,
         rhi::ResourceAccessType beforeAccess, rhi::ResourceAccessType afterAccess) {
         preparedCommands.Barriers(resources, beforeAccess, afterAccess);
     };
-    auto clear = [&](const std::shared_ptr<Buffer>& buffer, uint32_t count = 1u) {
+    auto clear = [&](org::ResourceBindingToken token, const std::shared_ptr<Buffer>& buffer, uint32_t count = 1u) {
         if (!buffer) return;
         bind(m_clearPipelineState);
         uint32_t values[NumMiscUintRootConstants]{};
-        values[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] =
-            buffer->GetUAVShaderVisibleInfo(0).slot.index;
+        values[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = uav(token);
         values[CLOD_CLEAR_UINT_BUFFER_COUNT] = count;
         constants(values);
         dispatch((count + 63u) / 64u);
@@ -533,26 +641,28 @@ br::render::PreparedComputeCommandSequence HierarchicalCullingPass::Prepare(
     };
 
     if (m_isFirstPass && IsCLodWorkGraphTelemetryEnabled())
-        clear(m_workGraphTelemetryBuffer, CLodWorkGraphTelemetryBufferCount);
-    clear(m_pageJobVisibleClustersCounterBuffer);
-    clear(m_voxelRasterWorkCounterBuffer);
-    clear(m_skinnedVoxelRasterWorkCounterBuffer);
+        clear(bindings.telemetry, m_workGraphTelemetryBuffer, CLodWorkGraphTelemetryBufferCount);
+    if (bindings.hasPageJobQueues) clear(bindings.pageJobQueues[1], m_pageJobVisibleClustersCounterBuffer);
+    if (bindings.hasVoxelQueues) {
+        clear(bindings.voxelQueues[1], m_voxelRasterWorkCounterBuffer);
+        clear(bindings.voxelQueues[3], m_skinnedVoxelRasterWorkCounterBuffer);
+    }
     if (m_workGraphReyesVisibility && m_isFirstPass) {
-        clear(m_reyesDiceQueueCounterBuffer);
-        clear(m_reyesDiceQueueOverflowBuffer);
+        clear(bindings.reyesDiceCounter, m_reyesDiceQueueCounterBuffer);
+        clear(bindings.reyesOverflow, m_reyesDiceQueueOverflowBuffer);
     }
 
     uint32_t root[NumMiscUintRootConstants]{};
-    root[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    root[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = uav(bindings.visible);
+    root[CLOD_WG_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = uav(bindings.transforms);
+    root[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = uav(bindings.visibleCounter);
+    root[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = uav(bindings.swCounter);
+    root[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = uav(bindings.histogram);
+    root[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = uav(bindings.telemetry);
     root[CLOD_WG_FORCED_TRAVERSAL_DEPTH_ROOT] = SettingsManager::GetInstance()
         .getSettingGetter<uint32_t>(CLodForceTraversalDepthRootSettingName)();
     if (UsesSWClassification(m_workGraphMode))
-        root[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+        root[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.viewRasterInfo);
 
     uint32_t flags = 0;
     if (IsCLodWorkGraphTelemetryEnabled()) flags |= CLOD_WG_FLAG_TELEMETRY_ENABLED;
@@ -589,44 +699,44 @@ br::render::PreparedComputeCommandSequence HierarchicalCullingPass::Prepare(
         << CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT;
     root[CLOD_WG_PAGE_JOB_FLAGS] = pageJobFlags;
 
-    if (m_shadowPageTableTexture) root[CLOD_WG_VIRTUAL_SHADOW_PAGE_TABLE_UAV_DESCRIPTOR_INDEX] =
-        m_shadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    if (m_shadowPhysicalPagesTexture) root[CLOD_WG_VIRTUAL_SHADOW_PHYSICAL_PAGES_UAV_DESCRIPTOR_INDEX] =
-        m_shadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    if (m_shadowActiveBlockMetadataBuffer) root[CLOD_WG_VIRTUAL_SHADOW_ACTIVE_BLOCK_METADATA_DESCRIPTOR_INDEX] =
-        m_shadowActiveBlockMetadataBuffer->GetSRVInfo(0).slot.index;
-    if (m_shadowDynamicPhysicalPagesTexture) root[CLOD_WG_VIRTUAL_SHADOW_DYNAMIC_PAGES_UAV_DESCRIPTOR_INDEX] =
-        m_shadowDynamicPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    if (m_shadowDynamicActiveBlockMetadataBuffer) root[CLOD_WG_VIRTUAL_SHADOW_DYNAMIC_ACTIVE_BLOCK_METADATA_DESCRIPTOR_INDEX] =
-        m_shadowDynamicActiveBlockMetadataBuffer->GetSRVInfo(0).slot.index;
-    if (m_workGraphReyesVisibility) {
-        root[CLOD_WG_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        root[CLOD_WG_REYES_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_reyesDiceQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        root[CLOD_WG_REYES_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_reyesDiceQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        root[CLOD_WG_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBuffer->GetSRVInfo(0).slot.index;
-        root[CLOD_WG_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBuffer->GetSRVInfo(0).slot.index;
-        root[CLOD_WG_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
-        root[CLOD_WG_REYES_TELEMETRY_DESCRIPTOR_INDEX] = m_reyesTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    if (bindings.hasVirtualShadow) {
+        root[CLOD_WG_VIRTUAL_SHADOW_PAGE_TABLE_UAV_DESCRIPTOR_INDEX] =
+            uav(bindings.shadowPageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+        root[CLOD_WG_VIRTUAL_SHADOW_ACTIVE_BLOCK_METADATA_DESCRIPTOR_INDEX] = srv(bindings.shadowActiveMetadata);
+    }
+    if (bindings.hasShadowRaster) {
+        root[CLOD_WG_VIRTUAL_SHADOW_PHYSICAL_PAGES_UAV_DESCRIPTOR_INDEX] = uav(bindings.shadowPhysicalPages);
+        root[CLOD_WG_VIRTUAL_SHADOW_DYNAMIC_PAGES_UAV_DESCRIPTOR_INDEX] = uav(bindings.shadowDynamicPages);
+        root[CLOD_WG_VIRTUAL_SHADOW_DYNAMIC_ACTIVE_BLOCK_METADATA_DESCRIPTOR_INDEX] = srv(bindings.shadowDynamicMetadata);
+    }
+    if (bindings.hasReyes) {
+        root[CLOD_WG_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = uav(bindings.reyesDice);
+        root[CLOD_WG_REYES_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = uav(bindings.reyesDiceCounter);
+        root[CLOD_WG_REYES_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = uav(bindings.reyesOverflow);
+        root[CLOD_WG_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = srv(bindings.reyesConfigs);
+        root[CLOD_WG_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = srv(bindings.reyesVertices);
+        root[CLOD_WG_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = srv(bindings.reyesTriangles);
+        root[CLOD_WG_REYES_TELEMETRY_DESCRIPTOR_INDEX] = uav(bindings.reyesTelemetry);
         root[CLOD_WG_REYES_DICE_QUEUE_CAPACITY] = m_reyesDiceQueueCapacity;
     }
-    root[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = UsesPerViewDepthMapOcclusion(m_rasterOutputKind)
-        ? m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index : 0u;
+    root[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = uav(bindings.replay);
+    root[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = uav(bindings.replayState);
+    root[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = uav(bindings.nodeInputs);
+    root[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = bindings.hasViewDepth
+        ? srv(bindings.viewDepthIndices) : 0u;
     root[CLOD_WG_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
-    root[CLOD_WG_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX] = m_shadowDirtyHierarchyTexture
-        ? m_shadowDirtyHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index : 0u;
-    root[CLOD_WG_SHADOW_INVALIDATED_INSTANCES_DESCRIPTOR_INDEX] = m_shadowInvalidatedInstancesBitsetBuffer
-        ? m_shadowInvalidatedInstancesBitsetBuffer->GetSRVInfo(0).slot.index : 0u;
-    root[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATES_DESCRIPTOR_INDEX] = m_shadowPredictiveInvalidationCandidatesBuffer
-        ? m_shadowPredictiveInvalidationCandidatesBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0u;
-    root[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATE_COUNT_DESCRIPTOR_INDEX] = m_shadowPredictiveInvalidationCandidateCountBuffer
-        ? m_shadowPredictiveInvalidationCandidateCountBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0u;
-    root[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
-        (m_phase1VisibleClustersCounterBuffer ? m_phase1VisibleClustersCounterBuffer : m_visibleClustersCounterBuffer)->GetSRVInfo(0).slot.index;
-    root[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
-        (m_swWriteBaseCounterBuffer ? m_swWriteBaseCounterBuffer : m_swVisibleClustersCounterBuffer)->GetSRVInfo(0).slot.index;
+    root[CLOD_WG_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX] = bindings.hasShadowDirty
+        ? srv(bindings.shadowDirty, static_cast<uint32_t>(SRVViewType::Texture2DArrayFull)) : 0u;
+    root[CLOD_WG_SHADOW_INVALIDATED_INSTANCES_DESCRIPTOR_INDEX] = bindings.hasInvalidated
+        ? srv(bindings.invalidatedInstances) : 0u;
+    root[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATES_DESCRIPTOR_INDEX] = bindings.hasPredictive
+        ? uav(bindings.predictiveCandidates) : 0u;
+    root[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATE_COUNT_DESCRIPTOR_INDEX] = bindings.hasPredictive
+        ? uav(bindings.predictiveCount) : 0u;
+    root[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = srv(
+        bindings.hasPhase1 ? bindings.phase1Counter : bindings.visibleCounter);
+    root[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = srv(
+        bindings.hasSwWriteBase ? bindings.swWriteBase : bindings.swCounter);
 
     const bool initializeBacking = !m_workGraphInitialization->initialized.load(std::memory_order_acquire);
     if (initializeBacking) preparedCommands.Reserve(m_workGraphInitialization,
@@ -681,10 +791,10 @@ br::render::PreparedComputeCommandSequence HierarchicalCullingPass::Prepare(
     commands.emplace_back(std::move(outputBarriers));
 
     bind(m_createCommandPipelineState);
-    root[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    root[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    root[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index;
-    root[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    root[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.visibleCounter);
+    root[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = uav(bindings.histogram);
+    root[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = srv(bindings.replayState);
+    root[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = uav(bindings.nodeInputs);
     root[CLOD_CREATE_NUM_RASTER_BUCKETS] = render->preparedRasterBucketCount;
     root[CLOD_CREATE_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
     root[CLOD_CREATE_NODE_INPUT_COUNT] = m_workGraphReyesVisibility ? 4u : 2u;
@@ -738,44 +848,6 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         }
     }
 
-    {
-        ZoneScopedN("HierarchicalCullingPass::UpdateDescriptorTables");
-        if (m_voxelRasterWorkCapacity != 0u) {
-            CLodVoxelRasterQueueDescriptors voxelQueueDescriptors{};
-            voxelQueueDescriptors.rigidWorkRecordsUAVDescriptorIndex = m_voxelRasterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            voxelQueueDescriptors.rigidWorkRecordCounterUAVDescriptorIndex = m_voxelRasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            voxelQueueDescriptors.skinnedWorkRecordsUAVDescriptorIndex = m_skinnedVoxelRasterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            voxelQueueDescriptors.skinnedWorkRecordCounterUAVDescriptorIndex = m_skinnedVoxelRasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            voxelQueueDescriptors.workRecordCapacity = m_voxelRasterWorkCapacity;
-            if (!m_hasCachedVoxelQueueDescriptors || !BytesEqual(voxelQueueDescriptors, m_cachedVoxelQueueDescriptors)) {
-                m_cachedVoxelQueueDescriptors = voxelQueueDescriptors;
-                m_hasCachedVoxelQueueDescriptors = true;
-                BUFFER_UPLOAD(
-                    &voxelQueueDescriptors,
-                    sizeof(CLodVoxelRasterQueueDescriptors),
-                    org::runtime::UploadTarget::FromShared(m_voxelRasterQueueDescriptorsBuffer),
-                    0);
-            }
-        }
-
-        CLodWorkGraphComputePageJobDescriptors pageJobDescriptors{};
-        if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClusterTransformIndicesBuffer && m_pageJobVisibleClustersCounterBuffer) {
-            pageJobDescriptors.visibleClustersUAVDescriptorIndex = m_pageJobVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            pageJobDescriptors.visibleClustersCounterUAVDescriptorIndex = m_pageJobVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            pageJobDescriptors.visibleClusterTransformIndicesUAVDescriptorIndex =
-                m_pageJobVisibleClusterTransformIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        }
-        if (!m_hasCachedPageJobDescriptors || !BytesEqual(pageJobDescriptors, m_cachedPageJobDescriptors)) {
-            m_cachedPageJobDescriptors = pageJobDescriptors;
-            m_hasCachedPageJobDescriptors = true;
-            BUFFER_UPLOAD(
-                &pageJobDescriptors,
-                sizeof(CLodWorkGraphComputePageJobDescriptors),
-                org::runtime::UploadTarget::FromShared(m_workGraphComputePageJobDescriptorsBuffer),
-                0);
-        }
-    }
-
     bool rebuildViewTables = false;
     {
         ZoneScopedN("HierarchicalCullingPass::CheckViewResourceRevision");
@@ -821,7 +893,7 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
                 }
 
                 if (viewInfo->gpu.visibilityBuffer != nullptr) {
-                    info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+                    info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityUAVIndex;
                     info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
                     info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
                     info.viewportScaleX = 1.0f;
@@ -917,7 +989,9 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
 
                 slice = (std::min)(slice, maxSlices - 1);
                 viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
-                viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
+                if (slice < view->gpu.linearDepthSRVIndices.size())
+                    viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex =
+                        view->gpu.linearDepthSRVIndices[slice];
             });
 
             m_cachedViewDepthSrvIndices = std::move(viewDepthSrvIndices);

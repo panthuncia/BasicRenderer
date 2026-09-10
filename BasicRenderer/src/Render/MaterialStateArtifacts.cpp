@@ -1,9 +1,10 @@
 #include "Render/MaterialStateArtifacts.h"
 
 #include "Render/PublishedRendererState.h"
+#include "Render/TextureBindingArtifacts.h"
 #include "Render/VersionedGpuBufferArtifacts.h"
 #include "Resources/GloballyIndexedResource.h"
-#include "Managers/MaterialManager.h"
+#include <BasicTelemetry/Telemetry.h>
 
 #include <algorithm>
 
@@ -11,7 +12,7 @@ namespace br::render {
 namespace {
 
 ArtifactBuildResult BuildMaterialRow(const ArtifactBuildContext& context,
-    MaterialManager& manager) {
+    IMaterialStateStorage& storage) {
     const auto input = context.input.Get<MaterialRowInput>();
     if (!input || input->materialID != context.key.primaryID ||
         input->sourceRevision != context.revision) {
@@ -27,8 +28,8 @@ ArtifactBuildResult BuildMaterialRow(const ArtifactBuildContext& context,
     auto result = ArtifactBuildResult::Ready(
         ArtifactPayload::Make<MaterialRowArtifact>(row));
     result.acceptance = { TaskLane::Streaming, TaskDomain::MaterialAcceptance,
-        [&manager, row](const ArtifactSnapshot&) {
-            (void)manager.ApplyMaterialRowArtifact(*row);
+        [&storage, row](const ArtifactSnapshot&) {
+            (void)storage.ApplyRow(*row);
         } };
     return result;
 }
@@ -42,6 +43,7 @@ ArtifactBuildResult BuildMaterialState(const ArtifactBuildContext& context) {
     state->compileFlagSlotsUsed = input->slotsUsed;
     state->activeCompileFlags.reserve(input->activeCompileFlags.size());
     state->activeCompileFlagSlots.reserve(input->activeCompileFlags.size());
+    state->rasterBucketFlags = input->rasterBucketFlags;
     for (const auto& entry : input->activeCompileFlags) {
         if (entry.slot >= input->slotsUsed) continue;
         state->activeCompileFlags.push_back(entry.flags);
@@ -100,27 +102,39 @@ void RegisterMaterialStateProducer(AsyncStateGraph& graph) {
         "MaterialStateArtifact::Build", BuildMaterialState });
 }
 
-void RegisterMaterialRowProducer(AsyncStateGraph& graph, MaterialManager& manager) {
+void RegisterMaterialRowProducer(AsyncStateGraph& graph, IMaterialStateStorage& storage) {
     graph.RegisterProducer(ArtifactKind::Material, {
         TaskLane::Streaming, TaskDomain::MaterialAcceptance,
         "MaterialRowArtifact::Build",
-        [&manager](const ArtifactBuildContext& context) {
-            return BuildMaterialRow(context, manager);
+        [&storage](const ArtifactBuildContext& context) {
+            return BuildMaterialRow(context, storage);
         } });
 }
 
-void RegisterMaterialUsageBatchProducer(AsyncStateGraph& graph, MaterialManager& manager) {
+void RegisterMaterialUsageBatchProducer(AsyncStateGraph& graph, IMaterialStateStorage& storage) {
     graph.RegisterProducer(ArtifactKind::MaterialUsageBatch, {
         TaskLane::Streaming, TaskDomain::MaterialAcceptance,
         "MaterialStateArtifact::AdmitUsageBatch",
-        [&manager](const ArtifactBuildContext& context) {
+        [&storage](const ArtifactBuildContext& context) {
             const auto input = context.input.Get<MaterialUsageBatchBuildInput>();
             if (!input) return ArtifactBuildResult::Failure(
                 "material usage batch immutable input missing");
             if (context.stopRequested && context.stopRequested()) {
                 return ArtifactBuildResult::Cancelled();
             }
-            auto result = manager.ApplyMaterialUsageBatch(*input);
+            for (const auto& entry : input->entries) {
+                for (const auto& expected : entry.textureBindings) {
+                    const auto binding = context.Dependency<PublishedTextureBinding>({
+                        ArtifactKind::TextureBinding, expected.streamingTextureID, 0 });
+                    if (!binding || binding.revision != expected.bindingRevision ||
+                        binding.payload->imageDescriptorIndex != expected.imageDescriptorIndex ||
+                        binding.payload->samplerDescriptorIndex != expected.samplerDescriptorIndex) {
+                        return ArtifactBuildResult::Failure(
+                            "material usage texture-binding closure mismatch");
+                    }
+                }
+            }
+            auto result = storage.ApplyUsageBatch(*input);
             return result
                 ? ArtifactBuildResult::Ready(
                     ArtifactPayload::Make<PublishedMaterialUsageBatch>(std::move(result)))

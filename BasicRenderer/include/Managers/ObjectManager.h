@@ -24,6 +24,7 @@
 #include "Materials/TechniqueDescriptor.h"
 #include "Render/Runtime/BufferUploadPolicy.h"
 #include "Render/VersionedGpuBufferArtifacts.h"
+#include "Render/ObjectBufferStateArtifacts.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Utilities/TripleGenerationMailbox.h"
 
@@ -606,6 +607,7 @@ public:
 
 private:
 	void PublishSkinnedAssemblyPlacements(MaterializedStaticImportTransaction& transaction);
+	void PublishSkinnedPlacementSourceVersionLocked();
 	std::uint32_t AllocateSkinnedAssemblyPlacement(SkinnedAssemblyPlacementGPU placement);
 	void FreeSkinnedAssemblyPlacement(std::uint32_t placementIndex);
 	ObjectManager();
@@ -625,6 +627,12 @@ private:
 	struct ObjectBufferSnapshotCut {
 		std::vector<br::render::VersionedGpuBufferJournal::Capture> buffers;
 		br::render::VersionedGpuBufferJournal::Capture visibility;
+		std::uint32_t residentTransformCount = 0;
+		std::shared_ptr<DynamicStructuredBuffer<SkinnedAssemblyPlacementGPU>> skinnedPlacements;
+		std::shared_ptr<SortedUnsignedIntBuffer> activeSkinnedPlacements;
+		std::uint32_t activeSkinnedPlacementResidentSize = 0;
+		std::shared_ptr<const std::vector<SkinnedAssemblyPlacementGPU>> placementRecords;
+		std::shared_ptr<const std::vector<br::render::PublishedActiveSkinnedPlacement>> activePlacementEntries;
 		std::uint64_t fingerprint = 0;
 		std::uint64_t coveredMutationGeneration = 0;
 	};
@@ -696,6 +704,9 @@ private:
 	std::vector<SkinnedAssemblyPlacementGPU> m_skinnedAssemblyPlacementCPU;
 	std::vector<std::uint32_t> m_freeSkinnedAssemblyPlacementIndices;
 	std::vector<std::uint8_t> m_skinnedAssemblyPlacementFree;
+	std::shared_ptr<const std::vector<SkinnedAssemblyPlacementGPU>> m_publishedSkinnedPlacementRecords;
+	std::shared_ptr<const std::vector<br::render::PublishedActiveSkinnedPlacement>>
+		m_publishedActiveSkinnedPlacementEntries;
 	std::vector<GraphBufferBinding> m_graphBufferBindings;
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<PublishedStateResourceResolver>,
 		ResourceIdentifier::Hasher> m_graphBufferResolvers;

@@ -10,7 +10,8 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITEarlyDepthBuildPass final : public org::TypedRenderGraphPass<AVBOITEarlyDepthBuildPass, br::render::PreparedComputeDispatch> {
+struct AVBOITEarlyDepthBuildBindings { org::ResourceBindingToken config, zeroSlice, commands, count; };
+class AVBOITEarlyDepthBuildPass final : public org::TypedRenderGraphPass<AVBOITEarlyDepthBuildPass, br::render::PreparedComputeDispatch, AVBOITEarlyDepthBuildBindings> {
 public:
     AVBOITEarlyDepthBuildPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -18,10 +19,10 @@ public:
         std::shared_ptr<Buffer> tileCommandsBuffer,
         std::shared_ptr<Buffer> tileCountBuffer);
 
-    void Declare(org::PassBuilder& builder);
+    AVBOITEarlyDepthBuildBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITEarlyDepthBuildBindings&, const org::PassPrepareContext&) const;
+    static void Record(const AVBOITEarlyDepthBuildBindings&, const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

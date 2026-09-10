@@ -44,8 +44,12 @@ struct DebugSkeletonFrameData {
     std::vector<DrawRange> ranges;
 };
 
+struct DebugSkeletonBindings {
+    org::ResourceBindingToken lines, perFrame, camera;
+};
+
 class DebugSkeletonPass final
-    : public org::TypedRenderGraphPass<DebugSkeletonPass, DebugSkeletonFrameData> {
+    : public org::TypedRenderGraphPass<DebugSkeletonPass, DebugSkeletonFrameData, DebugSkeletonBindings> {
 public:
     DebugSkeletonPass()
     {
@@ -59,22 +63,28 @@ public:
             .build();
     }
 
-    void Declare(org::PassBuilder& declaration)
+    DebugSkeletonBindings Declare(org::PassBuilder& declaration)
     {
         auto* builder = &declaration;
-        builder->WithShaderResource(Builtin::CameraBuffer, m_lineBuffer)
-            .WithRenderTarget(Builtin::Backbuffer);
-        builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+        builder->WithRenderTarget(Builtin::Backbuffer);
+        return {builder->BindShaderResource(m_lineBuffer),
+            builder->BindConstantBuffer(Builtin::PerFrameBuffer),
+            builder->BindShaderResource(Builtin::CameraBuffer)};
     }
 
-    DebugSkeletonFrameData Prepare(const org::PassPrepareContext& preparation)
+    void Update(const UpdateExecutionContext&) override
     {
         BuildLines();
-        DebugSkeletonFrameData data{};
-        if (m_drawRanges.empty()) return data;
-
+        if (m_drawRanges.empty()) return;
         m_lineBuffer->ReplaceData(std::move(m_lines));
         m_lines.clear();
+    }
+
+    DebugSkeletonFrameData Prepare(const DebugSkeletonBindings& bindings,
+        const org::PassPrepareContext& preparation) const
+    {
+        DebugSkeletonFrameData data{};
+        if (m_drawRanges.empty()) return data;
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         data.resourceHeap = context->textureDescriptorHeap.GetHandle();
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
@@ -83,18 +93,18 @@ public:
         data.outputResolution = context->outputResolution;
         data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
         data.program = preparation.CaptureProgramBinding(m_pso, m_resourceDescriptorBindings);
-        data.lineResource = preparation.CaptureResource(m_lineBuffer->GetGlobalResourceID());
+        data.lineResource = preparation.CaptureResource(bindings.lines);
         data.constants = {
-            m_lineBuffer->GetSRVInfo(0).slot.index,
-            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PerFrameBuffer)->GetCBVInfo().slot.index,
-            m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index };
+            preparation.ResolveView(bindings.lines, {org::BindlessViewKind::ShaderResource}).index,
+            preparation.ResolveView(bindings.perFrame, {org::BindlessViewKind::ConstantBuffer}).index,
+            preparation.ResolveView(bindings.camera, {org::BindlessViewKind::ShaderResource}).index };
         data.ranges.reserve(m_drawRanges.size());
         for (const auto& range : m_drawRanges)
             data.ranges.push_back({range.lineOffset, range.lineCount});
         return data;
     }
 
-    static void Record(const DebugSkeletonFrameData& data, org::PassRecordContext& recording)
+    static void Record(const DebugSkeletonBindings&, const DebugSkeletonFrameData& data, org::PassRecordContext& recording)
     {
         if (data.ranges.empty()) return;
         auto& commandList = recording.Commands();

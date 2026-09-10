@@ -16,7 +16,15 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesPatchRasterizationPass final : public org::TypedRenderGraphPass<ReyesPatchRasterizationPass, br::render::PreparedComputeIndirect>, public IDynamicDeclaredResources {
+struct ReyesPatchRasterBindings {
+    org::ResourceBindingToken visible, transforms, diceQueue, diceCounter, work, workCounter;
+    org::ResourceBindingToken tessConfigs, tessVertices, tessTriangles, viewRasterInfo, indirectArgs, telemetry;
+    uint32_t phase = 0, patchIndexBase = 0;
+    bool enabled = false;
+};
+
+class ReyesPatchRasterizationPass final : public org::TypedRenderGraphPass<ReyesPatchRasterizationPass,
+    br::render::PreparedComputeIndirect, ReyesPatchRasterBindings>, public IDynamicDeclaredResources {
 public:
     ReyesPatchRasterizationPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -36,11 +44,12 @@ public:
         uint32_t phaseIndex,
         uint32_t patchVisibilityIndexBase);
 
-    void Declare(org::PassBuilder& builder);
+    ReyesPatchRasterBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
+    br::render::PreparedComputeIndirect Prepare(const ReyesPatchRasterBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesPatchRasterBindings&, const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -54,7 +63,6 @@ private:
     std::shared_ptr<Buffer> m_tessTableTrianglesBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     uint32_t m_maxDiceQueueEntries = 0u;

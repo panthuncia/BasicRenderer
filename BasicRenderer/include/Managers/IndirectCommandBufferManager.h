@@ -19,7 +19,6 @@ using org::DynamicGloballyIndexedResource;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 class ObjectManager;
-class MaterialManager;
 class SortedUnsignedIntBuffer;
 namespace org::runtime { class IUploadService; }
 namespace br::render { class RendererStateRequestService; }
@@ -67,7 +66,14 @@ public:
     void UpdateBuffersForWorkloads(std::span<const WorkloadCountUpdate> updates);
     void RequestWorkloadCount(const DrawWorkloadKey& workloadKey, unsigned int numDraws);
     void RequestWorkloadCounts(std::span<const WorkloadCountUpdate> updates);
-    void PublishDesiredState(ObjectManager& objectManager, MaterialManager& materialManager);
+    // Ingestion-time subscription. The object store pushes immutable active-list
+    // journal changes through this boundary; artifact builds never query it.
+    void AttachActiveDrawSource(ObjectManager& objectManager);
+    // Captured publication inputs for one desired-state revision. The caller
+    // selects these values from the object publication owner before scheduling.
+    void PublishDesiredState(
+        std::optional<br::render::ArtifactRequirement> objectBufferRequirement,
+        std::uint64_t residentDrawRecordCount);
     void SetRendererStateServices(br::render::RendererStateRequestService* requests,
         org::runtime::IUploadService* uploads);
     // End preparation while borrowed request/upload services are still alive.

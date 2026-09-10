@@ -10,7 +10,8 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITSparseClearPass final : public org::TypedRenderGraphPass<AVBOITSparseClearPass, br::render::PreparedComputeDispatch> {
+struct AVBOITSparseClearBindings { org::ResourceBindingToken config, occupancy; };
+class AVBOITSparseClearPass final : public org::TypedRenderGraphPass<AVBOITSparseClearPass, br::render::PreparedComputeDispatch, AVBOITSparseClearBindings> {
 public:
     AVBOITSparseClearPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -20,9 +21,9 @@ public:
         std::shared_ptr<PixelBuffer> chromaticExtinctionTexture,
         std::shared_ptr<PixelBuffer> zeroTransmittanceSliceTexture);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    AVBOITSparseClearBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITSparseClearBindings&, const org::PassPrepareContext&) const;
+    static void Record(const AVBOITSparseClearBindings&, const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

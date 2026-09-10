@@ -10,7 +10,12 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITOccupancyHistogramPass final : public org::TypedRenderGraphPass<AVBOITOccupancyHistogramPass, br::render::PreparedComputeDispatch> {
+struct AVBOITOccupancyHistogramBindings {
+    org::ResourceBindingToken config, occupancy, sliceMask, histogram;
+};
+
+class AVBOITOccupancyHistogramPass final : public org::TypedRenderGraphPass<AVBOITOccupancyHistogramPass,
+    br::render::PreparedComputeDispatch, AVBOITOccupancyHistogramBindings> {
 public:
     AVBOITOccupancyHistogramPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -18,10 +23,12 @@ public:
         std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
         std::shared_ptr<Buffer> occupancyHistogramBuffer);
 
-    void Declare(org::PassBuilder& builder);
+    AVBOITOccupancyHistogramBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITOccupancyHistogramBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const AVBOITOccupancyHistogramBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

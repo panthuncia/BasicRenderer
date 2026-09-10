@@ -157,23 +157,28 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
         "CLod.VirtualShadow.Setup.PSO");
 }
 
-void VirtualShadowMapSetupPass::Declare(org::PassBuilder& builder)
+VirtualShadowMapSetupBindings VirtualShadowMapSetupPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
     builder.WithUnorderedAccess(
-        m_clipmapInfoBuffer,
-        m_pageTableTexture,
-        m_pageMetadataBuffer,
-        m_allocationCountBuffer,
-        m_dirtyPageFlagsBuffer,
-        m_markClipmapDataBuffer,
         m_compactMainCameraBuffer,
-        m_compactShadowCameraBuffer,
-        m_statsBuffer,
-        m_runtimeStateBuffer,
-        m_fallbackCandidateCountBuffer);
+        m_compactShadowCameraBuffer);
 
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    const uint32_t packedFlags =
+        ((m_resetResources ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES_BIT) |
+        ((m_resetReasonForced ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_FORCED_BIT) |
+        ((m_resetReasonNoPreviousState ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE_BIT) |
+        ((m_resetReasonStructureMismatch ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH_BIT) |
+        ((m_resetReasonLightDirectionChanged ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED_BIT) |
+        ((SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName)() ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_ENABLED_BIT) |
+        ((m_feedbackRecoveryRefresh ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_FEEDBACK_RECOVERY_REFRESH_BIT);
+    return {builder.BindUnorderedAccess(m_pageTableTexture), builder.BindUnorderedAccess(m_pageMetadataBuffer),
+        builder.BindUnorderedAccess(m_allocationCountBuffer), builder.BindUnorderedAccess(m_dirtyPageFlagsBuffer),
+        builder.BindUnorderedAccess(m_clipmapInfoBuffer), builder.BindUnorderedAccess(m_markClipmapDataBuffer),
+        builder.BindUnorderedAccess(m_statsBuffer), builder.BindUnorderedAccess(m_runtimeStateBuffer),
+        builder.BindUnorderedAccess(m_fallbackCandidateCountBuffer), packedFlags,
+        SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName)()};
 }
 
 void VirtualShadowMapSetupPass::Initialize() {}
@@ -479,7 +484,8 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 
 
 
-br::render::PreparedComputeDispatch VirtualShadowMapSetupPass::Prepare(const org::PassPrepareContext& preparation)
+br::render::PreparedComputeDispatch VirtualShadowMapSetupPass::Prepare(
+    const VirtualShadowMapSetupBindings& bindings, const org::PassPrepareContext& preparation) const
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = GetVirtualShadowResolutionConfig();
@@ -497,28 +503,21 @@ br::render::PreparedComputeDispatch VirtualShadowMapSetupPass::Prepare(const org
         ((config.maxPhysicalPages & CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT_MASK) << CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT_SHIFT);
     const uint32_t packedConfig1 = (CLodVirtualShadowDirtyWordCount(config.maxPhysicalPages) &
         CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT_MASK) << CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT_SHIFT;
-    const uint32_t packedFlags =
-        ((m_resetResources ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES_BIT) |
-        ((m_resetReasonForced ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_FORCED_BIT) |
-        ((m_resetReasonNoPreviousState ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE_BIT) |
-        ((m_resetReasonStructureMismatch ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH_BIT) |
-        ((m_resetReasonLightDirectionChanged ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED_BIT) |
-        ((SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName)() ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_ENABLED_BIT) |
-        ((m_feedbackRecoveryRefresh ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_FEEDBACK_RECOVERY_REFRESH_BIT);
     auto& c = data.constants;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_ALLOCATION_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index; };
+    c[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_DESCRIPTOR_INDEX] = uav(bindings.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+    c[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_METADATA_DESCRIPTOR_INDEX] = uav(bindings.pageMetadata);
+    c[CLOD_VIRTUAL_SHADOW_SETUP_ALLOCATION_COUNT_DESCRIPTOR_INDEX] = uav(bindings.allocationCount);
+    c[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_FLAGS_DESCRIPTOR_INDEX] = uav(bindings.dirtyFlags);
     c[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_CONFIG0] = packedConfig0;
     c[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_CONFIG1] = packedConfig1;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_FLAGS] = packedFlags;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_RUNTIME_STATE_DESCRIPTOR_INDEX] = m_runtimeStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_SCALE_AS_UINT] = std::bit_cast<uint32_t>(SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName)());
-    c[CLOD_VIRTUAL_SHADOW_SETUP_FALLBACK_CANDIDATE_COUNT_DESCRIPTOR_INDEX] = m_fallbackCandidateCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    c[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX] = uav(bindings.stats);
+    c[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX] = uav(bindings.clipmapInfo);
+    c[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_FLAGS] = bindings.packedFlags;
+    c[CLOD_VIRTUAL_SHADOW_SETUP_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = uav(bindings.markClipmapData);
+    c[CLOD_VIRTUAL_SHADOW_SETUP_RUNTIME_STATE_DESCRIPTOR_INDEX] = uav(bindings.runtimeState);
+    c[CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_SCALE_AS_UINT] = std::bit_cast<uint32_t>(bindings.autoBiasScale);
+    c[CLOD_VIRTUAL_SHADOW_SETUP_FALLBACK_CANDIDATE_COUNT_DESCRIPTOR_INDEX] = uav(bindings.fallbackCandidateCount);
     data.groupsX = (config.pageTableResolution + 7u) / 8u;
     data.groupsY = data.groupsX;
     data.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount;
@@ -527,6 +526,7 @@ br::render::PreparedComputeDispatch VirtualShadowMapSetupPass::Prepare(const org
 
 void VirtualShadowMapSetupPass::ShutdownPass() {}
 
-void VirtualShadowMapSetupPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void VirtualShadowMapSetupPass::Record(const VirtualShadowMapSetupBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

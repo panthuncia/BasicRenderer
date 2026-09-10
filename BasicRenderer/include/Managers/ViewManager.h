@@ -63,6 +63,13 @@ struct ViewResources {
     uint64_t depthHistoryEpoch = 0;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
     std::shared_ptr<PixelBuffer> clodDeepVisibilityHeadPointers = nullptr;
+    // Descriptor indices are published atomically with their retained view
+    // resources. Frame declarations retain the resources while GPU tables use
+    // these matching immutable bindless indices.
+    uint32_t visibilitySRVIndex = 0xFFFFFFFFu;
+    uint32_t visibilityUAVIndex = 0xFFFFFFFFu;
+    uint32_t clodDeepVisibilityHeadPointersUAVIndex = 0xFFFFFFFFu;
+    std::vector<uint32_t> linearDepthSRVIndices;
 };
 
 struct View {

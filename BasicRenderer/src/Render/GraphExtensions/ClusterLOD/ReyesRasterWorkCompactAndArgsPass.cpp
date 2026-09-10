@@ -68,27 +68,21 @@ ReyesRasterWorkCompactAndArgsPass::ReyesRasterWorkCompactAndArgsPass(
         *m_compactionCommandSignature);
 }
 
-void ReyesRasterWorkCompactAndArgsPass::Declare(org::PassBuilder& declaration) {
+ReyesRasterWorkCompactBindings ReyesRasterWorkCompactAndArgsPass::Declare(org::PassBuilder& declaration) {
     declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    auto* builder = &declaration;
-    builder->WithShaderResource(
-            m_rasterWorkBuffer,
-            m_rasterWorkCounterBuffer,
-            m_offsetsBuffer)
-        .WithUnorderedAccess(
-            m_histogramBuffer,
-            m_writeCursorBuffer,
-            m_compactedRasterWorkIndicesBuffer,
-            m_packedRasterWorkGroupsBuffer,
-            m_indirectArgsBuffer)
-        .WithIndirectArguments(m_indirectCommand)
-        .WithConstantBuffer(Builtin::PerFrameBuffer);
+    declaration.WithConstantBuffer(Builtin::PerFrameBuffer);
+    return {declaration.BindShaderResource(m_rasterWorkBuffer), declaration.BindShaderResource(m_rasterWorkCounterBuffer),
+        declaration.BindIndirectArguments(m_indirectCommand), declaration.BindUnorderedAccess(m_histogramBuffer),
+        declaration.BindShaderResource(m_offsetsBuffer), declaration.BindUnorderedAccess(m_writeCursorBuffer),
+        declaration.BindUnorderedAccess(m_compactedRasterWorkIndicesBuffer), declaration.BindUnorderedAccess(m_packedRasterWorkGroupsBuffer),
+        declaration.BindUnorderedAccess(m_indirectArgsBuffer), m_numBuckets};
 }
 
-ReyesCompactFrameData ReyesRasterWorkCompactAndArgsPass::Prepare(const org::PassPrepareContext& preparation) {
+ReyesCompactFrameData ReyesRasterWorkCompactAndArgsPass::Prepare(
+    const ReyesRasterWorkCompactBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto& context = *preparation.preparationData->Get<UpdateContext>();
     ReyesCompactFrameData data{};
-    const auto numBuckets = context.preparedRasterBucketCount;
+    const auto numBuckets = bindings.numBuckets;
     if (numBuckets == 0u) return data;
     const auto capture = [&](auto& dispatch, const PipelineState& pipeline) {
         dispatch.resourceHeap = context.textureDescriptorHeap.GetHandle();
@@ -98,34 +92,37 @@ ReyesCompactFrameData ReyesRasterWorkCompactAndArgsPass::Prepare(const org::Pass
         dispatch.descriptorIndices = std::move(binding.descriptorIndices);
     };
     capture(data.clear, m_clearPipeline);
-    data.clear.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index; };
+    data.clear.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = uav(bindings.cursor);
     data.clear.constants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
     data.clear.constants[CLOD_CLEAR_UINT_BUFFER_COUNT] = numBuckets;
     data.clear.groupsX = (numBuckets + 63u) / 64u;
     capture(data.compact, m_pso);
     data.compact.commandSignature = preparation.CaptureCommandSignature(m_compactionCommandSignature);
-    data.compact.argumentsReference = preparation.CaptureResource(m_indirectCommand->GetGlobalResourceID());
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_WORK_COUNTER_DESCRIPTOR_INDEX] = m_rasterWorkCounterBuffer->GetSRVInfo(0).slot.index;
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetSRVInfo(0).slot.index;
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_COMPACTED_WORK_INDICES_DESCRIPTOR_INDEX] = m_compactedRasterWorkIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.compact.constants[CLOD_REYES_RASTER_BUCKET_PACKED_WORK_GROUPS_DESCRIPTOR_INDEX] = m_packedRasterWorkGroupsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.compact.argumentsReference = preparation.CaptureResource(bindings.indirectCommand);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_WORK_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.work);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_WORK_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.counter);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_HISTOGRAM_DESCRIPTOR_INDEX] = uav(bindings.histogram);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_OFFSETS_DESCRIPTOR_INDEX] = srv(bindings.offsets);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_WRITE_CURSOR_DESCRIPTOR_INDEX] = uav(bindings.cursor);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_COMPACTED_WORK_INDICES_DESCRIPTOR_INDEX] = uav(bindings.compacted);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_INDIRECT_ARGS_DESCRIPTOR_INDEX] = uav(bindings.indirectArgs);
+    data.compact.constants[CLOD_REYES_RASTER_BUCKET_PACKED_WORK_GROUPS_DESCRIPTOR_INDEX] = uav(bindings.packed);
     data.compact.constants[CLOD_REYES_RASTER_BUCKET_NUM_BUCKETS] = numBuckets;
     data.pack = data.compact;
     capture(data.pack, m_packPipeline);
     capture(data.finalize, m_finalizePackPipeline);
     data.finalize.constants = data.compact.constants;
     data.finalize.groupsX = (numBuckets + 63u) / 64u;
-    data.cursorBarrier = preparation.CaptureResource(m_writeCursorBuffer->GetGlobalResourceID());
-    data.compactedBarrier = preparation.CaptureResource(m_compactedRasterWorkIndicesBuffer->GetGlobalResourceID());
-    data.packedBarrier = preparation.CaptureResource(m_packedRasterWorkGroupsBuffer->GetGlobalResourceID());
+    data.cursorBarrier = preparation.CaptureResource(bindings.cursor);
+    data.compactedBarrier = preparation.CaptureResource(bindings.compacted);
+    data.packedBarrier = preparation.CaptureResource(bindings.packed);
     return data;
 }
 
-void ReyesRasterWorkCompactAndArgsPass::Record(const ReyesCompactFrameData& data, org::PassRecordContext& recording) {
+void ReyesRasterWorkCompactAndArgsPass::Record(const ReyesRasterWorkCompactBindings&,
+    const ReyesCompactFrameData& data, org::PassRecordContext& recording) {
     if (data.clear.groupsX == 0) return;
     br::render::RecordPreparedComputeDispatch(data.clear, recording);
     br::render::RecordPreparedComputeUavBarrier(data.cursorBarrier, recording);
@@ -139,12 +136,12 @@ void ReyesRasterWorkCompactAndArgsPass::Record(const ReyesCompactFrameData& data
 void ReyesRasterWorkCompactAndArgsPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    auto numBuckets = context.preparedRasterBucketCount;
+    m_numBuckets = context.preparedRasterBucketCount;
 
-    if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
-        m_writeCursorBuffer->ResizeStructured(numBuckets);
+    if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(m_numBuckets) * sizeof(uint32_t)) {
+        m_writeCursorBuffer->ResizeStructured(m_numBuckets);
     }
-    if (m_indirectArgsBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(RasterizeClustersCommand)) {
-        m_indirectArgsBuffer->ResizeStructured(numBuckets);
+    if (m_indirectArgsBuffer->GetSize() < static_cast<size_t>(m_numBuckets) * sizeof(RasterizeClustersCommand)) {
+        m_indirectArgsBuffer->ResizeStructured(m_numBuckets);
     }
 }

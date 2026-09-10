@@ -8,6 +8,8 @@
 #include "Render/TextureImageTableArtifacts.h"
 #include "Render/StaticStateArtifacts.h"
 #include "Render/ObjectBufferStateArtifacts.h"
+#include "Render/GeometryResidencyStateArtifacts.h"
+#include "Render/MaterialStateArtifacts.h"
 #include "Resources/Resolvers/PublishedStateResourceResolver.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Utilities/TripleGenerationMailbox.h"
@@ -361,6 +363,11 @@ int main() {
         const auto firstBuffer = objects.Snapshot(bufferKey);
         auto input = std::make_shared<ObjectBufferStateBuildInput>();
         input->coveredMutationGeneration = 17;
+        input->placementRecords = std::make_shared<const std::vector<SkinnedAssemblyPlacementGPU>>(
+            std::vector<SkinnedAssemblyPlacementGPU>(3));
+        input->activePlacementEntries =
+            std::make_shared<const std::vector<PublishedActiveSkinnedPlacement>>(
+                std::vector<PublishedActiveSkinnedPlacement>{{2, 7}});
         input->buffers.push_back({bufferKey, 1, sizeof(std::uint32_t), kObjectDrawRecordVariant});
         Check(objects.Request(rootKey, 1,
             {Exact(firstBuffer.Version(), ArtifactReadiness::UploadSubmitted)},
@@ -377,8 +384,16 @@ int main() {
         const auto state = fragment->fragment.payload.Get<PublishedObjectBufferState>();
         Check(state && state->coveredMutationGeneration == 17);
         Check(state->versions.size() == 1 && state->versions[0]->revision == 1);
+        Check(state->placementRecords == input->placementRecords &&
+            state->activePlacementEntries == input->activePlacementEntries &&
+            state->activePlacementEntries->front().drawRecordIndex == 2 &&
+            state->activePlacementEntries->front().generation == 7);
         auto nextInput = std::make_shared<ObjectBufferStateBuildInput>();
         nextInput->coveredMutationGeneration = 18;
+        nextInput->placementRecords = std::make_shared<const std::vector<SkinnedAssemblyPlacementGPU>>(
+            std::vector<SkinnedAssemblyPlacementGPU>(1));
+        nextInput->activePlacementEntries =
+            std::make_shared<const std::vector<PublishedActiveSkinnedPlacement>>();
         nextInput->buffers.push_back({bufferKey, 2, sizeof(std::uint32_t), kObjectDrawRecordVariant});
         Check(objects.Request(rootKey, 2,
             {Exact(objects.Snapshot(bufferKey).Version(), ArtifactReadiness::UploadSubmitted)},
@@ -390,6 +405,7 @@ int main() {
             ->fragment.payload.Get<PublishedObjectBufferState>();
         Check(nextState->coveredMutationGeneration == 18 && nextState->versions[0]->revision == 2);
         Check(state->versions[0]->revision == 1);
+        Check(state->placementRecords->size() == 3 && state->activePlacementEntries->size() == 1);
         objects.Shutdown();
     }
 
@@ -2236,6 +2252,112 @@ int main() {
         }
         Check(capacity.Available() == 1);
         capacity.Shutdown();
+    }
+
+    {
+        std::atomic_uint32_t commits{ 0 };
+        std::atomic_uint32_t cancels{ 0 };
+        {
+            auto reservation = std::make_shared<MaterialUsageReservation>(
+                [&](bool commit) {
+                    (commit ? commits : cancels).fetch_add(1, std::memory_order_relaxed);
+                    return true;
+                });
+            Check(reservation->Commit());
+            Check(reservation->Commit());
+        }
+        Check(commits.load(std::memory_order_relaxed) == 1);
+        Check(cancels.load(std::memory_order_relaxed) == 0);
+        {
+            auto reservation = std::make_shared<MaterialUsageReservation>(
+                [&](bool commit) {
+                    (commit ? commits : cancels).fetch_add(1, std::memory_order_relaxed);
+                    return true;
+                });
+        }
+        Check(commits.load(std::memory_order_relaxed) == 1);
+        Check(cancels.load(std::memory_order_relaxed) == 1);
+
+        commits.store(0, std::memory_order_relaxed);
+        auto reservation = std::make_shared<MaterialUsageReservation>(
+            [&](bool commit) {
+                Check(commit);
+                commits.fetch_add(1, std::memory_order_relaxed);
+                return true;
+            });
+        std::vector<std::thread> committers;
+        for (unsigned index = 0; index != 8; ++index) {
+            committers.emplace_back([reservation] { Check(reservation->Commit()); });
+        }
+        for (auto& committer : committers) committer.join();
+        Check(commits.load(std::memory_order_relaxed) == 1);
+    }
+
+    {
+        RegisterGeometryResidencyStateProducer(graph);
+        const ArtifactAddress key{ ArtifactKind::GeometryResidency, 0xfeedu, 0 };
+        const auto request = [&](std::uint64_t revision,
+            GeometryResidencyDeltaInput value, ArtifactVersionHandle predecessor = {}) {
+            std::vector<ArtifactRequirement> requirements;
+            if (predecessor) requirements.push_back(Exact(predecessor));
+            auto input = std::make_shared<const GeometryResidencyDeltaInput>(std::move(value));
+            return graph.Request(key, revision, std::move(requirements),
+                ArtifactPayload::Make<GeometryResidencyDeltaInput>(std::move(input)), revision);
+        };
+        auto first = request(1, { GeometryResidencyDeltaKind::AddOrReplace,
+            { 10, 4, 3, {} }, {} });
+        Check(first);
+        graph.WaitIdle();
+        graph.MarkPublished(first.version);
+        graph.WaitIdle();
+        auto second = request(2, { GeometryResidencyDeltaKind::AddOrReplace,
+            { 20, 8, 7, {} }, {} }, first.Handle());
+        Check(second);
+        graph.WaitIdle();
+        graph.MarkPublished(second.version);
+        graph.WaitIdle();
+        auto snapshot = graph.Snapshot(second.version);
+        auto root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        auto state = root
+            ? root->fragment.payload.Get<PublishedGeometryResidencyState>() : nullptr;
+        Check(state && state->activeRanges.size() == 2);
+        Check(state->maxTraversalDepth == 7 && state->maxGroupIndex == 28);
+
+        auto third = request(3, { GeometryResidencyDeltaKind::Remove,
+            { 20, 8, 7, {} }, {} }, second.Handle());
+        Check(third);
+        graph.WaitIdle();
+        snapshot = graph.Snapshot(third.version);
+        root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        state = root ? root->fragment.payload.Get<PublishedGeometryResidencyState>() : nullptr;
+        Check(state && state->activeRanges.size() == 1);
+        Check(state->activeRanges.front().groupsBase == 10);
+        Check(state->maxTraversalDepth == 3 && state->maxGroupIndex == 14);
+
+        // The exact predecessor remains immutable while a successor is live.
+        snapshot = graph.Snapshot(second.version);
+        root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        state = root ? root->fragment.payload.Get<PublishedGeometryResidencyState>() : nullptr;
+        Check(state && state->activeRanges.size() == 2 && state->maxTraversalDepth == 7);
+
+        // Queue multiple deltas before their predecessors publish. Promotion
+        // must resolve each exact archived predecessor without losing history.
+        auto fourth = request(4, { GeometryResidencyDeltaKind::AddOrReplace,
+            { 30, 2, 5, {} }, {} }, third.Handle());
+        auto fifth = request(5, { GeometryResidencyDeltaKind::AddOrReplace,
+            { 40, 3, 9, {} }, {} }, fourth.Handle());
+        Check(fourth && fifth);
+        graph.MarkPublished(third.version);
+        graph.WaitIdle();
+        graph.MarkPublished(fourth.version);
+        graph.WaitIdle();
+        graph.MarkPublished(fifth.version);
+        graph.WaitIdle();
+        snapshot = graph.Snapshot(fifth.version);
+        root = snapshot.payload.Get<RendererStateFragmentArtifact>();
+        state = root ? root->fragment.payload.Get<PublishedGeometryResidencyState>() : nullptr;
+        Check(state && state->activeRanges.size() == 3);
+        Check(state->maxTraversalDepth == 9 && state->maxGroupIndex == 43);
     }
 
     graph.Shutdown();

@@ -25,14 +25,14 @@ AVBOITOccupancyRemapPass::AVBOITOccupancyRemapPass(
         "CLod.AVBOITOccupancyRemap.PSO");
 }
 
-void AVBOITOccupancyRemapPass::Declare(org::PassBuilder& builder)
+AVBOITOccupancyRemapBindings AVBOITOccupancyRemapPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_configBuffer, m_depthWarpLUTBuffer)
-        .WithUnorderedAccess(m_occupancyTexture, m_occupancySliceMaskTexture);
+    builder.WithUnorderedAccess(m_occupancySliceMaskTexture);
+    return {builder.BindShaderResource(m_configBuffer), builder.BindShaderResource(m_depthWarpLUTBuffer), builder.BindUnorderedAccess(m_occupancyTexture)};
 }
 
-br::render::PreparedComputeDispatch AVBOITOccupancyRemapPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch AVBOITOccupancyRemapPass::Prepare(const AVBOITOccupancyRemapBindings& bindings, const org::PassPrepareContext& preparation) const {
     br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_occupancyTexture || !m_occupancySliceMaskTexture || !m_depthWarpLUTBuffer) {
         return {};
@@ -48,11 +48,12 @@ br::render::PreparedComputeDispatch AVBOITOccupancyRemapPass::Prepare(const org:
     data.descriptorIndices = std::move(program.descriptorIndices);
 
     auto& misc = data.constants;
-    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_CONFIG_DESCRIPTOR_INDEX] = m_configBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_DESCRIPTOR_INDEX] = m_depthWarpLUTBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_CONFIG_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.config, {org::BindlessViewKind::ShaderResource}).index;
+    misc[CLOD_AVBOIT_VBOIT_DEPTH_WARP_LUT_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.lut, {org::BindlessViewKind::ShaderResource}).index;
 
-    const uint32_t groupCountX = (m_occupancyTexture->GetWidth() + 7u) / 8u;
-    const uint32_t groupCountY = (m_occupancyTexture->GetHeight() + 7u) / 8u;
+    const auto& occupancy = preparation.Describe(bindings.occupancy);
+    const uint32_t groupCountX = (occupancy.texture.width + 7u) / 8u;
+    const uint32_t groupCountY = (occupancy.texture.height + 7u) / 8u;
     if (groupCountX == 0u || groupCountY == 0u) {
         return {};
     }
@@ -61,6 +62,6 @@ br::render::PreparedComputeDispatch AVBOITOccupancyRemapPass::Prepare(const org:
     return data;
 }
 
-void AVBOITOccupancyRemapPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void AVBOITOccupancyRemapPass::Record(const AVBOITOccupancyRemapBindings&, const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

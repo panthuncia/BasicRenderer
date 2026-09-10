@@ -12,7 +12,15 @@ namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 class VirtualShadowCasterRegistry;
 
-class VirtualShadowMapSetupPass final : public org::TypedRenderGraphPass<VirtualShadowMapSetupPass, br::render::PreparedComputeDispatch> {
+struct VirtualShadowMapSetupBindings {
+    org::ResourceBindingToken pageTable, pageMetadata, allocationCount, dirtyFlags;
+    org::ResourceBindingToken clipmapInfo, markClipmapData, stats, runtimeState, fallbackCandidateCount;
+    uint32_t packedFlags = 0;
+    float autoBiasScale = 0.0f;
+};
+
+class VirtualShadowMapSetupPass final : public org::TypedRenderGraphPass<VirtualShadowMapSetupPass,
+    br::render::PreparedComputeDispatch, VirtualShadowMapSetupBindings> {
 public:
     VirtualShadowMapSetupPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
@@ -29,11 +37,13 @@ public:
         std::shared_ptr<VirtualShadowCasterRegistry> virtualShadowCasters,
         bool forceResetResources);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapSetupBindings Declare(org::PassBuilder& builder);
     void Initialize();
     void Update(const UpdateExecutionContext& executionContext) override;
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const VirtualShadowMapSetupBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapSetupBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
     void ShutdownPass();
 
 private:

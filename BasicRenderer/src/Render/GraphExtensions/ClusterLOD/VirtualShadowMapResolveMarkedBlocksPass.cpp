@@ -39,21 +39,15 @@ VirtualShadowMapResolveMarkedBlocksPass::VirtualShadowMapResolveMarkedBlocksPass
         "CLod.VirtualShadow.ResolveMarkedBlocks.PSO");
 }
 
-void VirtualShadowMapResolveMarkedBlocksPass::Declare(org::PassBuilder& builder)
+VirtualShadowMapResolveMarkedBlocksBindings VirtualShadowMapResolveMarkedBlocksPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(
-            m_markedBlocksMaskBuffer,
-            m_markedBlocksListBuffer,
-            m_markedBlocksCountBuffer,
-            m_markClipmapDataBuffer)
-        .WithUnorderedAccess(
-            m_allocationRequestsBuffer,
-            m_allocationCountBuffer,
-            m_pageTableTexture,
-            m_dirtyPageFlagsBuffer,
-            m_directionalPageViewInfoBuffer,
-            m_statsBuffer);
+    return {builder.BindShaderResource(m_markedBlocksMaskBuffer), builder.BindShaderResource(m_markedBlocksListBuffer),
+        builder.BindShaderResource(m_markedBlocksCountBuffer), builder.BindUnorderedAccess(m_allocationRequestsBuffer),
+        builder.BindUnorderedAccess(m_allocationCountBuffer), builder.BindShaderResource(m_markClipmapDataBuffer),
+        builder.BindUnorderedAccess(m_pageTableTexture), builder.BindUnorderedAccess(m_dirtyPageFlagsBuffer),
+        builder.BindUnorderedAccess(m_directionalPageViewInfoBuffer), builder.BindUnorderedAccess(m_statsBuffer),
+        m_activeClipmapCount};
 }
 
 void VirtualShadowMapResolveMarkedBlocksPass::Initialize() {}
@@ -68,7 +62,8 @@ void VirtualShadowMapResolveMarkedBlocksPass::Update(const UpdateExecutionContex
 
 
 
-br::render::PreparedComputeDispatch VirtualShadowMapResolveMarkedBlocksPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch VirtualShadowMapResolveMarkedBlocksPass::Prepare(
+    const VirtualShadowMapResolveMarkedBlocksBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
     auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
@@ -76,17 +71,19 @@ br::render::PreparedComputeDispatch VirtualShadowMapResolveMarkedBlocksPass::Pre
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_MASK_DESCRIPTOR_INDEX] = m_markedBlocksMaskBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_LIST_DESCRIPTOR_INDEX] = m_markedBlocksListBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_COUNT_DESCRIPTOR_INDEX] = m_markedBlocksCountBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_ACTIVE_CLIPMAP_COUNT] = m_activeClipmapCount;
-    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index; };
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_MASK_DESCRIPTOR_INDEX] = srv(bindings.mask);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_LIST_DESCRIPTOR_INDEX] = srv(bindings.list);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_COUNT_DESCRIPTOR_INDEX] = srv(bindings.count);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_REQUESTS_DESCRIPTOR_INDEX] = uav(bindings.requests);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_REQUEST_COUNT_DESCRIPTOR_INDEX] = uav(bindings.requestCount);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_PAGE_TABLE_DESCRIPTOR_INDEX] = uav(bindings.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_DIRTY_FLAGS_DESCRIPTOR_INDEX] = uav(bindings.dirtyFlags);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = uav(bindings.pageViewInfo);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_STATS_DESCRIPTOR_INDEX] = uav(bindings.stats);
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_ACTIVE_CLIPMAP_COUNT] = bindings.activeClipmapCount;
+    data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_CLIPMAP_DATA_DESCRIPTOR_INDEX] = srv(bindings.clipmapData);
     data.constants[CLOD_VIRTUAL_SHADOW_RESOLVE_MARKED_BLOCKS_MAX_REQUEST_COUNT] = config.maxAllocationRequests;
     data.groupsX = (CLodVirtualShadowMaxMarkedBlockCount + 63u) / 64u;
     return data;
@@ -94,6 +91,7 @@ br::render::PreparedComputeDispatch VirtualShadowMapResolveMarkedBlocksPass::Pre
 
 void VirtualShadowMapResolveMarkedBlocksPass::ShutdownPass() {}
 
-void VirtualShadowMapResolveMarkedBlocksPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void VirtualShadowMapResolveMarkedBlocksPass::Record(const VirtualShadowMapResolveMarkedBlocksBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

@@ -35,15 +35,16 @@ VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(
         "CLod.VirtualShadow.ClearDirtyBits.PSO");
 }
 
-void VirtualShadowMapClearDirtyBitsPass::Declare(org::PassBuilder& builder)
+VirtualShadowMapClearDirtyBitsBindings VirtualShadowMapClearDirtyBitsPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithUnorderedAccess(
-        m_pageTableTexture,
-        m_dirtyFlagsBuffer,
-        m_statsBuffer);
-
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    return {
+        builder.BindUnorderedAccess(m_pageTableTexture),
+        builder.BindUnorderedAccess(m_dirtyFlagsBuffer),
+        builder.BindUnorderedAccess(m_statsBuffer),
+        CLodVSMRasterModeUsesLargeClusterPageJob(
+            SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)())};
 }
 
 void VirtualShadowMapClearDirtyBitsPass::Initialize()
@@ -52,7 +53,8 @@ void VirtualShadowMapClearDirtyBitsPass::Initialize()
 
 
 
-br::render::PreparedComputeDispatch VirtualShadowMapClearDirtyBitsPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch VirtualShadowMapClearDirtyBitsPass::Prepare(
+    const VirtualShadowMapClearDirtyBitsBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
     auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
@@ -60,12 +62,14 @@ br::render::PreparedComputeDispatch VirtualShadowMapClearDirtyBitsPass::Prepare(
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.pageTable,
+        {org::BindlessViewKind::UnorderedAccess, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull)}).index;
     data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
-    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_COMPLETE_EMPTY_ADMITTED_PAGES] = CLodVSMRasterModeUsesLargeClusterPageJob(
-        SettingsManager::GetInstance().getSettingGetter<CLodVSMRasterMode>(CLodVSMRasterModeSettingName)()) ? 1u : 0u;
-    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.stats,
+        {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_COMPLETE_EMPTY_ADMITTED_PAGES] = bindings.completeEmptyAdmittedPages ? 1u : 0u;
+    data.constants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_DIRTY_FLAGS_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.dirtyFlags,
+        {org::BindlessViewKind::UnorderedAccess}).index;
     data.groupsX = (config.pageTableResolution + 7u) / 8u; data.groupsY = data.groupsX; data.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount;
     return data;
 }
@@ -74,6 +78,7 @@ void VirtualShadowMapClearDirtyBitsPass::ShutdownPass()
 {
 }
 
-void VirtualShadowMapClearDirtyBitsPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void VirtualShadowMapClearDirtyBitsPass::Record(const VirtualShadowMapClearDirtyBitsBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

@@ -48,7 +48,7 @@ static const uint CLOD_RASTER_INIT_FAILURE_MESHLET_OOB = 2u;
 static const uint CLOD_RASTER_INIT_FAILURE_INVALID_OUTPUT_COUNTS = 3u;
 
 #ifndef CLOD_RASTER_MESH_TELEMETRY
-#define CLOD_RASTER_MESH_TELEMETRY 0
+#define CLOD_RASTER_MESH_TELEMETRY 1
 #endif
 
 void CLodRasterTelemetryAdd(uint counterIndex, uint value)
@@ -1448,6 +1448,12 @@ void ClusterLODBucketMSMain(
     out indices uint3 outputTriangles[MS_MESHLET_SIZE],
     out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
 {
+    if (uGroupThreadID == 0u)
+    {
+        // Keep the dispatch-entry probe ahead of every frame-data read. This
+        // separates missing ExecuteIndirect work from invalid frozen bindings.
+        CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_GROUPS, 1u);
+    }
     // From command signature
     uint baseOffset = IndirectCommandSignatureRootConstant0;
     uint dispatchX = IndirectCommandSignatureRootConstant1;
@@ -1495,7 +1501,6 @@ void ClusterLODBucketMSMain(
 
     if (uGroupThreadID == 0u)
     {
-        CLodRasterTelemetryAdd(WG_COUNTER_RASTER_MESH_SHADER_GROUPS, 1u);
 #if defined(PSO_SKINNED)
         CLodRasterTelemetryAdd(
             WG_COUNTER_RASTER_MESH_SHADER_SKINNED_GROUPS,

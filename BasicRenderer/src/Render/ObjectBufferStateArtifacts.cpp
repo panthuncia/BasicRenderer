@@ -25,6 +25,12 @@ ArtifactBuildResult BuildObjectBufferState(const ArtifactBuildContext& context) 
     root->fragment.revision = context.revision;
     state->buffers = input->buffers;
     state->coveredMutationGeneration = input->coveredMutationGeneration;
+    state->residentTransformCount = input->residentTransformCount;
+    state->skinnedPlacements = input->skinnedPlacements;
+    state->activeSkinnedPlacements = input->activeSkinnedPlacements;
+    state->activeSkinnedPlacementResidentSize = input->activeSkinnedPlacementResidentSize;
+    state->placementRecords = input->placementRecords;
+    state->activePlacementEntries = input->activePlacementEntries;
 
     for (const auto& expected : input->buffers) {
         if (!variants.insert(expected.catalogVariant).second) {

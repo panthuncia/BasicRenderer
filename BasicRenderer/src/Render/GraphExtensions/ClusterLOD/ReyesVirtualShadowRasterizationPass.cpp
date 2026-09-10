@@ -81,22 +81,11 @@ ReyesVirtualShadowRasterizationPass::ReyesVirtualShadowRasterizationPass(
         *m_commandSignature);
 }
 
-void ReyesVirtualShadowRasterizationPass::Declare(org::PassBuilder& declaration)
+ReyesVirtualShadowRasterBindings ReyesVirtualShadowRasterizationPass::Declare(org::PassBuilder& declaration)
 {
     declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
     auto* builder = &declaration;
     builder->WithShaderResource(
-            m_visibleClustersBuffer,
-            m_visibleClusterTransformIndicesBuffer,
-            m_diceQueueBuffer,
-            m_diceQueueCounterBuffer,
-            m_rasterWorkBuffer,
-            m_rasterWorkCounterBuffer,
-            m_tessTableConfigsBuffer,
-            m_tessTableVerticesBuffer,
-            m_tessTableTrianglesBuffer,
-            m_viewRasterInfoBuffer,
-            m_virtualShadowClipmapInfoBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::InstanceDrawRecordBuffer,
@@ -137,17 +126,20 @@ void ReyesVirtualShadowRasterizationPass::Declare(org::PassBuilder& declaration)
             Builtin::Terrain::RvtRequestList,
             Builtin::Terrain::RvtCounters,
             Builtin::Terrain::RvtStats)
-        .WithIndirectArguments(m_indirectArgsBuffer)
-        .WithUnorderedAccess(
-            m_telemetryBuffer,
-            m_virtualShadowPageTableTexture,
-            m_virtualShadowPhysicalPagesTexture,
-            m_virtualShadowDynamicPagesTexture)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
 
     if (m_slabResourceGroup) {
         builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
+    return {builder->BindShaderResource(m_visibleClustersBuffer), builder->BindShaderResource(m_visibleClusterTransformIndicesBuffer),
+        builder->BindShaderResource(m_diceQueueBuffer), builder->BindShaderResource(m_diceQueueCounterBuffer),
+        builder->BindShaderResource(m_rasterWorkBuffer), builder->BindShaderResource(m_rasterWorkCounterBuffer),
+        builder->BindShaderResource(m_tessTableConfigsBuffer), builder->BindShaderResource(m_tessTableVerticesBuffer),
+        builder->BindShaderResource(m_tessTableTrianglesBuffer), builder->BindIndirectArguments(m_indirectArgsBuffer),
+        builder->BindUnorderedAccess(m_telemetryBuffer), builder->BindShaderResource(m_viewRasterInfoBuffer),
+        builder->BindUnorderedAccess(m_virtualShadowPageTableTexture), builder->BindUnorderedAccess(m_virtualShadowPhysicalPagesTexture),
+        builder->BindUnorderedAccess(m_virtualShadowDynamicPagesTexture), builder->BindShaderResource(m_virtualShadowClipmapInfoBuffer),
+        m_phaseIndex, m_shadowConfig.pageTableResolution, m_shadowConfig.virtualResolution};
 }
 
 void ReyesVirtualShadowRasterizationPass::Update(const UpdateExecutionContext& executionContext)
@@ -155,6 +147,7 @@ void ReyesVirtualShadowRasterizationPass::Update(const UpdateExecutionContext& e
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
+    m_shadowConfig = virtualShadowConfig;
 
     const auto numViews = context.viewManager->GetCameraBufferSize();
     std::vector<CLodViewRasterInfo> nextViewRasterInfos(numViews);
@@ -198,47 +191,49 @@ bool ReyesVirtualShadowRasterizationPass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-br::render::PreparedComputeIndirect ReyesVirtualShadowRasterizationPass::Prepare(const org::PassPrepareContext& preparation)
+br::render::PreparedComputeIndirect ReyesVirtualShadowRasterizationPass::Prepare(
+    const ReyesVirtualShadowRasterBindings& bindings, const org::PassPrepareContext& preparation) const
 {
     br::render::PreparedComputeIndirect data{};
     const auto& context = *preparation.preparationData->Get<UpdateContext>();
     data.resourceHeap = context.textureDescriptorHeap.GetHandle();
     data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
-    const auto virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
     auto binding = preparation.CaptureProgramBinding(m_pso);
     data.program = binding.program;
     data.descriptorIndices = std::move(binding.descriptorIndices);
-    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] =
-        m_visibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_PHASE_INDEX] = m_phaseIndex;
-    data.constants[CLOD_REYES_PATCH_RASTER_WORK_COUNTER_DESCRIPTOR_INDEX] = m_rasterWorkCounterBuffer->GetSRVInfo(0).slot.index;
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index; };
+    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
+    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.transforms);
+    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.diceCounter);
+    data.constants[CLOD_REYES_PATCH_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.work);
+    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX] = srv(bindings.diceQueue);
+    data.constants[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX] = srv(bindings.viewInfo);
+    data.constants[CLOD_REYES_PATCH_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = uav(bindings.telemetry);
+    data.constants[CLOD_REYES_PATCH_RASTER_PHASE_INDEX] = bindings.phase;
+    data.constants[CLOD_REYES_PATCH_RASTER_WORK_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.workCounter);
     data.constants[CLOD_REYES_PATCH_RASTER_PATCH_INDEX_BASE] = 0u;
-    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
+    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = srv(bindings.tessConfigs);
+    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = srv(bindings.tessVertices);
+    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = srv(bindings.tessTriangles);
 
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
-        m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        uav(bindings.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = srv(bindings.clipmapInfo);
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] =
-        m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        uav(bindings.physicalPages);
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] =
-        m_virtualShadowDynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
+        uav(bindings.dynamicPages);
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = bindings.pageTableResolution;
     data.constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowConfig.virtualResolution;
+    data.constants[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = bindings.virtualResolution;
 
     data.commandSignature = preparation.CaptureCommandSignature(m_commandSignature);
-    data.argumentsReference = preparation.CaptureResource(m_indirectArgsBuffer->GetGlobalResourceID());
+    data.argumentsReference = preparation.CaptureResource(bindings.indirectArgs);
     return data;
 }
 
-void ReyesVirtualShadowRasterizationPass::Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+void ReyesVirtualShadowRasterizationPass::Record(const ReyesVirtualShadowRasterBindings&,
+    const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeIndirect(data, recording);
 }

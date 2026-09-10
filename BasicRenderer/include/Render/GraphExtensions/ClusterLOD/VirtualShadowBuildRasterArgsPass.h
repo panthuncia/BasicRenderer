@@ -16,7 +16,12 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class VirtualShadowBuildRasterArgsPass : public org::TypedRenderGraphPass<VirtualShadowBuildRasterArgsPass, br::render::PreparedComputeDispatch> {
+struct VirtualShadowBuildRasterArgsBindings {
+    org::ResourceBindingToken histogram, offsets, arguments;
+};
+
+class VirtualShadowBuildRasterArgsPass : public org::TypedRenderGraphPass<VirtualShadowBuildRasterArgsPass,
+    br::render::PreparedComputeDispatch, VirtualShadowBuildRasterArgsBindings> {
 public:
     VirtualShadowBuildRasterArgsPass(
         std::shared_ptr<Buffer> histogramBuffer,
@@ -36,12 +41,12 @@ public:
             "CLod_VirtualShadowBuildRasterArgsPSO");
     }
 
-    void Declare(org::PassBuilder& declaration) {
+    VirtualShadowBuildRasterArgsBindings Declare(org::PassBuilder& declaration) {
         declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-        auto* builder = &declaration;
-        builder->WithShaderResource(m_histogramBuffer, m_offsetsBuffer)
-            .WithUnorderedAccess(m_indirectArgsBuffer)
-            .WithConstantBuffer(Builtin::PerFrameBuffer);
+        declaration.WithConstantBuffer(Builtin::PerFrameBuffer);
+        return {declaration.BindShaderResource(m_histogramBuffer),
+            declaration.BindShaderResource(m_offsetsBuffer),
+            declaration.BindUnorderedAccess(m_indirectArgsBuffer)};
     }
 
     void Update(const UpdateExecutionContext& executionContext) override
@@ -59,7 +64,8 @@ public:
         }
     }
 
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch Prepare(const VirtualShadowBuildRasterArgsBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
 
         if (m_runWhenComputeSWRasterEnabledOnly &&
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
@@ -75,15 +81,19 @@ public:
         auto program = preparation.CaptureProgramBinding(m_pso);
         data.program = program.program;
         data.descriptorIndices = std::move(program.descriptorIndices);
-        data.constants[CLOD_VSM_BUILD_ARGS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
-        data.constants[CLOD_VSM_BUILD_ARGS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetSRVInfo(0).slot.index;
-        data.constants[CLOD_VSM_BUILD_ARGS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        data.constants[CLOD_VSM_BUILD_ARGS_HISTOGRAM_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.histogram, {org::BindlessViewKind::ShaderResource}).index;
+        data.constants[CLOD_VSM_BUILD_ARGS_OFFSETS_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.offsets, {org::BindlessViewKind::ShaderResource}).index;
+        data.constants[CLOD_VSM_BUILD_ARGS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.arguments, {org::BindlessViewKind::UnorderedAccess}).index;
         data.constants[CLOD_VSM_BUILD_ARGS_NUM_BUCKETS] = numBuckets;
         data.groupsX = (numBuckets + 63u) / 64u;
         return data;
     }
 
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const VirtualShadowBuildRasterArgsBindings&,
+        const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeDispatch(data, recording);
     }
 

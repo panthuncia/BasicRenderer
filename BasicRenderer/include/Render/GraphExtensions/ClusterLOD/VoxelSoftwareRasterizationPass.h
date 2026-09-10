@@ -27,8 +27,15 @@ struct VoxelRasterFrameData {
     std::array<Step, 2> steps;
 };
 
+struct VoxelRasterBindings {
+    org::ResourceBindingToken visible, transforms, telemetry, viewInfo;
+    std::array<org::ResourceBindingToken, 2> workRecords, workCounters, indirectArgs;
+    org::ResourceBindingToken pageTable, clipmapInfo, physicalPages, dynamicPages;
+    bool hasTelemetry = false, virtualShadow = false;
+};
+
 class VoxelSoftwareRasterizationPass
-    : public org::TypedRenderGraphPass<VoxelSoftwareRasterizationPass, VoxelRasterFrameData>,
+    : public org::TypedRenderGraphPass<VoxelSoftwareRasterizationPass, VoxelRasterFrameData, VoxelRasterBindings>,
       public IDynamicDeclaredResources {
 public:
     VoxelSoftwareRasterizationPass(
@@ -51,11 +58,11 @@ public:
         uint32_t voxelWorkCapacity);
     ~VoxelSoftwareRasterizationPass() override;
 
-    void Declare(org::PassBuilder& builder);
+    VoxelRasterBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    VoxelRasterFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const VoxelRasterFrameData&, org::PassRecordContext&);
+    VoxelRasterFrameData Prepare(const VoxelRasterBindings&, const org::PassPrepareContext& preparation) const;
+    static void Record(const VoxelRasterBindings&, const VoxelRasterFrameData&, org::PassRecordContext&);
 
 private:
     PipelineState m_buildArgsPso;

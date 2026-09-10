@@ -37,26 +37,22 @@ VirtualShadowMapGatherStatsPass::VirtualShadowMapGatherStatsPass(
         "CLod.VirtualShadow.GatherStats.PSO");
 }
 
-void VirtualShadowMapGatherStatsPass::Declare(org::PassBuilder& builder)
+VirtualShadowMapGatherStatsBindings VirtualShadowMapGatherStatsPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(
-            m_pageTableTexture,
-            m_allocationCountBuffer,
-            m_allocationIndirectArgsBuffer,
-            m_pageListHeaderBuffer,
-            m_pageMetadataBuffer,
-            m_clipmapInfoBuffer)
-        .WithUnorderedAccess(m_statsBuffer);
-
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    return {builder.BindShaderResource(m_pageTableTexture), builder.BindShaderResource(m_allocationCountBuffer),
+        builder.BindShaderResource(m_allocationIndirectArgsBuffer), builder.BindShaderResource(m_pageListHeaderBuffer),
+        builder.BindShaderResource(m_pageMetadataBuffer), builder.BindShaderResource(m_clipmapInfoBuffer),
+        builder.BindUnorderedAccess(m_statsBuffer), m_capturePreAllocateState};
 }
 
 void VirtualShadowMapGatherStatsPass::Initialize() {}
 
 
 
-br::render::PreparedComputeDispatch VirtualShadowMapGatherStatsPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch VirtualShadowMapGatherStatsPass::Prepare(
+    const VirtualShadowMapGatherStatsBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
     auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
@@ -64,22 +60,24 @@ br::render::PreparedComputeDispatch VirtualShadowMapGatherStatsPass::Prepare(con
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_ALLOCATION_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_ALLOCATION_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_allocationIndirectArgsBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_LIST_HEADER_DESCRIPTOR_INDEX] = m_pageListHeaderBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    const auto srv = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource, variant}).index; };
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_TABLE_DESCRIPTOR_INDEX] = srv(bindings.pageTable, static_cast<uint32_t>(SRVViewType::Texture2DArrayFull));
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_ALLOCATION_COUNT_DESCRIPTOR_INDEX] = srv(bindings.allocationCount);
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_ALLOCATION_INDIRECT_ARGS_DESCRIPTOR_INDEX] = srv(bindings.allocationArgs);
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_LIST_HEADER_DESCRIPTOR_INDEX] = srv(bindings.header);
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_CLIPMAP_INFO_DESCRIPTOR_INDEX] = srv(bindings.clipmapInfo);
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_METADATA_DESCRIPTOR_INDEX] = srv(bindings.pageMetadata);
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_STATS_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.stats, {org::BindlessViewKind::UnorderedAccess}).index;
     data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
     data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_CAPTURE_PRE_ALLOCATE_STATE] = m_capturePreAllocateState ? 1u : 0u;
+    data.constants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_CAPTURE_PRE_ALLOCATE_STATE] = bindings.capturePreAllocateState ? 1u : 0u;
     data.groupsX = (config.pageTableResolution + 7u) / 8u; data.groupsY = data.groupsX; data.groupsZ = CLodVirtualShadowMaxSupportedClipmapCount;
     return data;
 }
 
 void VirtualShadowMapGatherStatsPass::ShutdownPass() {}
 
-void VirtualShadowMapGatherStatsPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void VirtualShadowMapGatherStatsPass::Record(const VirtualShadowMapGatherStatsBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

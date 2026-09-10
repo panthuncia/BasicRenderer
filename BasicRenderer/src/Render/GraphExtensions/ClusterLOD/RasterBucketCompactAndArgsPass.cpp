@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <vector>
 
+#include <BasicTelemetry/Telemetry.h>
+
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
@@ -84,14 +86,13 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     m_compactionCommandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
-void RasterBucketCompactAndArgsPass::Declare(org::PassBuilder& builder) {
+RasterBucketCompactAndArgsBindings RasterBucketCompactAndArgsPass::Declare(org::PassBuilder& builder) {
+    RasterBucketCompactAndArgsBindings bindings{
+        builder.BindShaderResource(m_visibleClustersBuffer),
+        builder.BindShaderResource(m_visibleClusterTransformIndicesBuffer),
+        builder.BindShaderResource(m_visibleClustersCounterBuffer),
+        builder.BindShaderResource(m_compactedBaseCounterBuffer)};
     builder.WithShaderResource(
-            m_visibleClustersBuffer,
-            m_visibleClusterTransformIndicesBuffer,
-            m_visibleClustersCounterBuffer,
-            m_compactedBaseCounterBuffer,
-            m_histogramBuffer,
-            m_offsetsBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::InstanceDrawRecordBuffer,
             Builtin::PerInstanceTransformBuffer,
@@ -99,30 +100,46 @@ void RasterBucketCompactAndArgsPass::Declare(org::PassBuilder& builder) {
             Builtin::PerMeshBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::Material::TextureStreamingMetadataBuffer)
-        .WithUnorderedAccess(
-            Builtin::Material::TextureStreamingFeedbackBuffer,
-            m_writeCursorBuffer,
-            m_compactedClustersBuffer,
-            m_compactedClusterTransformIndicesBuffer,
-            m_indirectArgsBuffer,
-            m_sortedToUnsortedMappingBuffer)
-        .WithIndirectArguments(m_indirectCommand);
+        .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer);
+    bindings.indirectCommand = builder.BindIndirectArguments(m_indirectCommand);
+    bindings.histogram = builder.BindShaderResource(m_histogramBuffer);
+    bindings.offsets = builder.BindShaderResource(m_offsetsBuffer);
+    bindings.writeCursor = builder.BindUnorderedAccess(m_writeCursorBuffer);
+    bindings.compactedClusters = builder.BindUnorderedAccess(m_compactedClustersBuffer);
+    bindings.compactedTransforms = builder.BindUnorderedAccess(m_compactedClusterTransformIndicesBuffer);
+    bindings.indirectArgs = builder.BindUnorderedAccess(m_indirectArgsBuffer);
+    bindings.sortedMapping = builder.BindUnorderedAccess(m_sortedToUnsortedMappingBuffer);
     if (m_reyesOwnershipBitsetBuffer) {
-        builder.WithShaderResource(m_reyesOwnershipBitsetBuffer);
+        bindings.reyesOwnership = builder.BindShaderResource(m_reyesOwnershipBitsetBuffer);
     }
     if (m_readBaseCounterBuffer) {
-        builder.WithShaderResource(m_readBaseCounterBuffer);
+        bindings.readBaseCount = builder.BindShaderResource(m_readBaseCounterBuffer);
     }
     if (m_telemetryBuffer) {
-        builder.WithUnorderedAccess(m_telemetryBuffer);
+        bindings.telemetry = builder.BindUnorderedAccess(m_telemetryBuffer);
     }
 
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    bindings.numBuckets = m_numBuckets;
+    bindings.maxVisibleClusters = static_cast<uint32_t>(m_maxVisibleClusters);
+    bindings.enabled = m_enabled && m_numBuckets != 0u;
+    bindings.appendToExisting = m_appendToExisting;
+    bindings.readReverse = m_readReverse;
+    bindings.buildSoftwareRasterDispatch = m_buildSoftwareRasterDispatch;
+    bindings.hasReadBaseCount = static_cast<bool>(m_readBaseCounterBuffer);
+    bindings.hasReyesOwnership = static_cast<bool>(m_reyesOwnershipBitsetBuffer);
+    bindings.hasTelemetry = static_cast<bool>(m_telemetryBuffer);
+    bindings.telemetryEnabled = IsCLodWorkGraphTelemetryEnabled();
+    return bindings;
 }
 
 
-RasterBucketCompactAndArgsPreparedData RasterBucketCompactAndArgsPass::Prepare(const org::PassPrepareContext& preparation) {
+RasterBucketCompactAndArgsPreparedData RasterBucketCompactAndArgsPass::Prepare(
+    const RasterBucketCompactAndArgsBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const uint32_t numBuckets = context->preparedRasterBucketCount;
+    const bool enabled = numBuckets != 0u && (!m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)()));
     PreparedData data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
@@ -131,42 +148,65 @@ RasterBucketCompactAndArgsPreparedData RasterBucketCompactAndArgsPass::Prepare(c
     data.compactProgram = preparation.CaptureProgram(m_pso);
     preparation.Retain(m_compactionCommandSignature);
     data.commandSignature = (*m_compactionCommandSignature)->GetHandle();
-    data.indirectCommand = preparation.CaptureResource(m_indirectCommand->GetGlobalResourceID());
-    data.cursorResource = preparation.CaptureResource(m_writeCursorBuffer->GetGlobalResourceID());
+    data.indirectCommand = preparation.CaptureResource(bindings.indirectCommand);
+    data.cursorResource = preparation.CaptureResource(bindings.writeCursor);
     data.clearDescriptorIndices = CaptureResourceDescriptorIndices(m_clearPipeline.GetResourceDescriptorSlots());
     data.compactDescriptorIndices = CaptureResourceDescriptorIndices(m_pso.GetResourceDescriptorSlots());
     data.clearConstants.resize(NumMiscUintRootConstants);
     data.compactConstants.resize(NumMiscUintRootConstants);
-    const uint32_t numBuckets = context->materialManager->GetRasterBucketCount();
-    data.enabled = numBuckets != 0u && (!m_runWhenComputeSWRasterEnabledOnly
-        || CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)()));
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index; };
+    const auto indirectArgsResource = preparation.CaptureResource(bindings.indirectArgs);
+    const auto indirectArgsHandle = preparation.ResolveCapturedResource(indirectArgsResource).GetHandle();
+    BT_PLOT("CLod.RasterArgs.WriterResourceIndex", static_cast<int64_t>(indirectArgsHandle.index));
+    BT_PLOT("CLod.RasterArgs.WriterResourceGeneration", static_cast<int64_t>(indirectArgsHandle.generation));
+    data.enabled = enabled;
     data.clearGroups = (numBuckets + 63u) / 64u;
-    data.clearConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.clearConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = uav(bindings.writeCursor);
     data.clearConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = numBuckets;
     auto& c = data.compactConstants;
-    c[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_appendToExisting && m_readBaseCounterBuffer ? m_readBaseCounterBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_COMPACTION_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_COMPACTION_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_COMPACTION_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_compactedClusterTransformIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_COMPACTION_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer ? m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled() ? m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_COMPACTION_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
-    c[CLOD_COMPACTION_READ_MODE_FLAGS] = (m_readReverse ? CLOD_COMPACTION_READ_FLAG_REVERSED : 0u)
-        | (m_buildSoftwareRasterDispatch ? CLOD_COMPACTION_READ_FLAG_BUILD_SW_DISPATCH : 0u)
-        | (m_reyesOwnershipBitsetBuffer ? CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED : 0u);
-    c[CLOD_COMPACTION_READ_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
+    c[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = bindings.appendToExisting && bindings.hasReadBaseCount ? srv(bindings.readBaseCount) : 0xFFFFFFFFu;
+    c[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.visibleClusters);
+    c[CLOD_COMPACTION_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.visibleTransforms);
+    c[CLOD_COMPACTION_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.visibleCount);
+    c[CLOD_COMPACTION_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = srv(bindings.histogram);
+    c[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = srv(bindings.offsets);
+    c[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX] = uav(bindings.writeCursor);
+    c[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = uav(bindings.compactedClusters);
+    c[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = uav(bindings.compactedTransforms);
+    // The UAV and indirect-argument reference must resolve from the same
+    // declaration snapshot. The wrapper may rotate to a newer allocation after
+    // this frame has been accepted; consulting it here would write commands to
+    // a different backing than ExecuteIndirect consumes.
+    c[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = uav(bindings.indirectArgs);
+    BT_PLOT("CLod.RasterArgs.WriterDescriptorIndex", static_cast<int64_t>(
+        c[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX]));
+    if (m_indirectArgsBuffer->GetName().find("HW phase1") != std::string::npos) {
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1Args.WriterResourceIndex",
+            static_cast<int64_t>(indirectArgsHandle.index));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1Args.WriterResourceGeneration",
+            static_cast<int64_t>(indirectArgsHandle.generation));
+        basic_telemetry::SetGauge("BasicRenderer.CLod.Phase1Args.WriterDescriptorIndex",
+            static_cast<int64_t>(c[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX]));
+        BT_PLOT("CLod.RasterArgs.PrimaryWriterResourceIndex", static_cast<int64_t>(indirectArgsHandle.index));
+        BT_PLOT("CLod.RasterArgs.PrimaryWriterResourceGeneration", static_cast<int64_t>(indirectArgsHandle.generation));
+        BT_PLOT("CLod.RasterArgs.PrimaryWriterDescriptorIndex", static_cast<int64_t>(
+            c[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX]));
+    }
+    c[CLOD_COMPACTION_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.compactedBaseCount);
+    c[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = uav(bindings.sortedMapping);
+    c[CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = bindings.hasReyesOwnership ? srv(bindings.reyesOwnership) : 0xFFFFFFFFu;
+    c[CLOD_COMPACTION_TELEMETRY_DESCRIPTOR_INDEX] = bindings.hasTelemetry && IsCLodWorkGraphTelemetryEnabled() ? uav(bindings.telemetry) : 0xFFFFFFFFu;
+    c[CLOD_COMPACTION_NUM_RASTER_BUCKETS] = numBuckets | (bindings.appendToExisting ? 0x80000000u : 0u);
+    c[CLOD_COMPACTION_READ_MODE_FLAGS] = (bindings.readReverse ? CLOD_COMPACTION_READ_FLAG_REVERSED : 0u)
+        | (bindings.buildSoftwareRasterDispatch ? CLOD_COMPACTION_READ_FLAG_BUILD_SW_DISPATCH : 0u)
+        | (bindings.hasReyesOwnership ? CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED : 0u);
+    c[CLOD_COMPACTION_READ_CAPACITY] = bindings.maxVisibleClusters;
     return data;
 }
 
-void RasterBucketCompactAndArgsPass::Record(const PreparedData& data, org::PassRecordContext& recording) {
+void RasterBucketCompactAndArgsPass::Record(const RasterBucketCompactAndArgsBindings&,
+    const PreparedData& data, org::PassRecordContext& recording) {
     if (!data.enabled) return;
     auto& commands = recording.Commands();
     commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
@@ -195,22 +235,34 @@ void RasterBucketCompactAndArgsPass::Record(const PreparedData& data, org::PassR
 }
 
 void RasterBucketCompactAndArgsPass::Update(const UpdateExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
+    const bool nextEnabled = !m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)());
+    m_declaredResourcesChanged = nextEnabled != m_enabled;
+    m_enabled = nextEnabled;
+    if (!m_enabled) {
         return;
     }
 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    auto numBuckets = context.preparedRasterBucketCount;
+    const uint32_t nextBucketCount = context.preparedRasterBucketCount;
+    m_declaredResourcesChanged |= nextBucketCount != m_numBuckets;
+    m_numBuckets = nextBucketCount;
 
-    if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
-        m_writeCursorBuffer->ResizeStructured(numBuckets);
+    if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(m_numBuckets) * sizeof(uint32_t)) {
+        m_writeCursorBuffer->ResizeStructured(m_numBuckets);
+        m_declaredResourcesChanged = true;
     }
-    if (m_indirectArgsBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(RasterizeClustersCommand)) {
-        m_indirectArgsBuffer->ResizeStructured(numBuckets);
+    if (m_indirectArgsBuffer->GetSize() < static_cast<size_t>(m_numBuckets) * sizeof(RasterizeClustersCommand)) {
+        m_indirectArgsBuffer->ResizeStructured(m_numBuckets);
+        m_declaredResourcesChanged = true;
     }
-    BT_PLOT("CLod.RasterArgs.UpdateBucketCount", static_cast<int64_t>(numBuckets));
+    BT_PLOT("CLod.RasterArgs.UpdateBucketCount", static_cast<int64_t>(m_numBuckets));
     BT_PLOT("CLod.RasterArgs.UpdateBackingBytes", static_cast<int64_t>(m_indirectArgsBuffer->GetSize()));
 
+}
+
+bool RasterBucketCompactAndArgsPass::DeclaredResourcesChanged() const {
+    return m_declaredResourcesChanged;
 }
 

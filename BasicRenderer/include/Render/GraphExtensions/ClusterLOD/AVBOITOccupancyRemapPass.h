@@ -10,7 +10,8 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITOccupancyRemapPass final : public org::TypedRenderGraphPass<AVBOITOccupancyRemapPass, br::render::PreparedComputeDispatch> {
+struct AVBOITOccupancyRemapBindings { org::ResourceBindingToken config, lut, occupancy; };
+class AVBOITOccupancyRemapPass final : public org::TypedRenderGraphPass<AVBOITOccupancyRemapPass, br::render::PreparedComputeDispatch, AVBOITOccupancyRemapBindings> {
 public:
     AVBOITOccupancyRemapPass(
         std::shared_ptr<Buffer> configBuffer,
@@ -18,9 +19,9 @@ public:
         std::shared_ptr<PixelBuffer> occupancySliceMaskTexture,
         std::shared_ptr<Buffer> depthWarpLUTBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    AVBOITOccupancyRemapBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITOccupancyRemapBindings&, const org::PassPrepareContext&) const;
+    static void Record(const AVBOITOccupancyRemapBindings&, const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

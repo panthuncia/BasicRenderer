@@ -46,35 +46,43 @@ ReyesDicePass::ReyesDicePass(
     m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
-void ReyesDicePass::Declare(org::PassBuilder& builder)
+ReyesDiceBindings ReyesDicePass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_diceQueueBuffer, m_diceQueueCounterBuffer, m_tessTableConfigsBuffer)
-        .WithUnorderedAccess(m_telemetryBuffer);
-    m_indirectArgumentsBinding = builder.BindIndirectArguments(m_indirectArgsBuffer);
+    ReyesDiceBindings bindings{builder.BindShaderResource(m_diceQueueBuffer),
+        builder.BindShaderResource(m_diceQueueCounterBuffer)};
     if (m_diceQueueReadOffsetBuffer) {
-        builder.WithShaderResource(m_diceQueueReadOffsetBuffer);
+        bindings.readOffset = builder.BindShaderResource(m_diceQueueReadOffsetBuffer);
+        bindings.hasReadOffset = true;
     }
+    bindings.tessConfigs = builder.BindShaderResource(m_tessTableConfigsBuffer);
+    bindings.indirectArgs = builder.BindIndirectArguments(m_indirectArgsBuffer);
+    bindings.telemetry = builder.BindUnorderedAccess(m_telemetryBuffer);
+    bindings.capacity = m_maxDiceQueueEntries;
+    bindings.phase = m_phaseIndex;
+    return bindings;
 }
 
-br::render::PreparedComputeIndirect ReyesDicePass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeIndirect ReyesDicePass::Prepare(
+    const ReyesDiceBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     br::render::PreparedComputeIndirect data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.commandSignature = preparation.CaptureCommandSignature(m_commandSignature);
-    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
+    data.argumentsReference = preparation.CaptureResource(bindings.indirectArgs);
     auto program = preparation.CaptureProgramBinding(m_pso);
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_REYES_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX] = m_diceQueueReadOffsetBuffer ? m_diceQueueReadOffsetBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
-    data.constants[CLOD_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_DICE_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_REYES_DICE_PHASE_INDEX] = m_phaseIndex; data.constants[CLOD_REYES_DICE_QUEUE_CAPACITY] = m_maxDiceQueueEntries;
-    data.constants[CLOD_REYES_DICE_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    data.constants[CLOD_REYES_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX] = bindings.hasReadOffset ? srv(bindings.readOffset) : 0xFFFFFFFFu;
+    data.constants[CLOD_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = srv(bindings.queue);
+    data.constants[CLOD_REYES_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.counter);
+    data.constants[CLOD_REYES_DICE_TELEMETRY_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.telemetry, {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_REYES_DICE_PHASE_INDEX] = bindings.phase; data.constants[CLOD_REYES_DICE_QUEUE_CAPACITY] = bindings.capacity;
+    data.constants[CLOD_REYES_DICE_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = srv(bindings.tessConfigs);
     return data;
 }
 
-void ReyesDicePass::Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+void ReyesDicePass::Record(const ReyesDiceBindings&, const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeIndirect(data, recording);
 }

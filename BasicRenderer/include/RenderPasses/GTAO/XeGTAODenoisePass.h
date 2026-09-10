@@ -7,19 +7,26 @@
 #include "Render/Runtime/DescriptorServiceAccess.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class GTAODenoisePass : public org::TypedRenderGraphPass<GTAODenoisePass, br::render::PreparedComputeDispatch> {
+struct GTAODenoiseBindings {
+    org::ResourceBindingToken workingAO, workingEdges, outputAO;
+};
+
+class GTAODenoisePass : public org::TypedRenderGraphPass<GTAODenoisePass,
+    br::render::PreparedComputeDispatch, GTAODenoiseBindings> {
 public:
     GTAODenoisePass() {
         CreatePointClampSampler();
         CreateXeGTAOComputePSO();
     }
 
-    void Declare(org::PassBuilder& builder) {
+    GTAODenoiseBindings Declare(org::PassBuilder& builder) {
         builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-        builder.WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
-            .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm)
-            .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
+        builder.WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
 		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+        return {
+            builder.BindShaderResource(Builtin::GTAO::WorkingAOTerm1),
+            builder.BindShaderResource(Builtin::GTAO::WorkingEdges),
+            builder.BindUnorderedAccess(Builtin::GTAO::OutputAOTerm) };
     }
 
     void Initialize() {
@@ -28,11 +35,9 @@ public:
 
 
 
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch Prepare(const GTAODenoiseBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
-        const auto workingAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
-        const auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
-        const auto outputAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm);
         auto payload = DenoiseLastPassPSO.GetPayload();
         br::render::PreparedComputeDispatch data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle();
@@ -43,16 +48,20 @@ public:
         data.descriptorIndices = std::move(program.descriptorIndices);
 
 
-        data.constants[UintRootConstant0] = workingAO->GetSRVInfo(0).slot.index;
-        data.constants[UintRootConstant1] = workingEdges->GetSRVInfo(0).slot.index;
+        data.constants[UintRootConstant0] = preparation.ResolveView(bindings.workingAO,
+            {org::BindlessViewKind::ShaderResource}).index;
+        data.constants[UintRootConstant1] = preparation.ResolveView(bindings.workingEdges,
+            {org::BindlessViewKind::ShaderResource}).index;
         data.constants[UintRootConstant2] = m_samplerIndex;
-        data.constants[UintRootConstant3] = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
+        data.constants[UintRootConstant3] = preparation.ResolveView(bindings.outputAO,
+            {org::BindlessViewKind::UnorderedAccess}).index;
         data.groupsX = (context->renderResolution.x + XE_GTAO_NUMTHREADS_X * 2u - 1u) / (XE_GTAO_NUMTHREADS_X * 2u);
         data.groupsY = (context->renderResolution.y + XE_GTAO_NUMTHREADS_Y - 1u) / XE_GTAO_NUMTHREADS_Y;
         return data;
     }
 
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const GTAODenoiseBindings&, const br::render::PreparedComputeDispatch& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeDispatch(data, recording);
     }
 

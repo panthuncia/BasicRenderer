@@ -59,6 +59,10 @@ struct PublishedIndirectWorkload {
     DrawWorkloadKey key;
     std::shared_ptr<org::GloballyIndexedResource> indirectArguments;
     std::shared_ptr<org::GloballyIndexedResource> activeDrawList;
+    // The bindless index is part of this immutable publication. Consumers must
+    // use it with the retained resource version instead of consulting a live
+    // descriptor registry while preparing a queued frame.
+    std::uint32_t activeDrawListSRVIndex = 0;
     std::uint32_t count = 0;
     std::uint32_t capacity = 0;
     std::uint64_t activeListRevision = 0;
@@ -69,6 +73,7 @@ struct PublishedIndirectState {
     // closure. Culling must not fetch this from an independently advancing
     // DrawRecords catalog slot or generations can be compared across cuts.
     std::shared_ptr<org::GloballyIndexedResource> visibilityGenerations;
+    std::uint32_t visibilityGenerationsSRVIndex = 0;
     ArtifactVersionID drawRecordsRoot{};
     struct ActiveListVersion {
         std::uint64_t workloadID = 0;

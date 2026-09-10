@@ -29,8 +29,16 @@ struct ClusterSoftwareRasterFrameData {
     org::PreparedResourceReference cacheAllocator{}, cacheHash{}, cacheWorkRecords{}, cachePositions{}, cacheMapping{};
 };
 
+struct ClusterSoftwareRasterBindings {
+    org::ResourceBindingToken histogram, visible, transforms, mapping, viewInfo, indirectArgs;
+    org::ResourceBindingToken pageTable, clipmapInfo, physicalPages, dynamicPages, telemetry;
+    org::ResourceBindingToken skinMapping, skinHash, skinPositions, skinAllocator, skinWork, skinArgs, skinMembership;
+    bool virtualShadow = false, hasTelemetry = false, hasSkinCache = false;
+};
+
 class ClusterSoftwareRasterizationPass
-    : public org::TypedRenderGraphPass<ClusterSoftwareRasterizationPass, ClusterSoftwareRasterFrameData>,
+    : public org::TypedRenderGraphPass<ClusterSoftwareRasterizationPass,
+          ClusterSoftwareRasterFrameData, ClusterSoftwareRasterBindings>,
       public IDynamicDeclaredResources {
 public:
     ClusterSoftwareRasterizationPass(
@@ -50,11 +58,13 @@ public:
         bool runWhenComputeSWRasterEnabledOnly = false);
     ~ClusterSoftwareRasterizationPass();
 
-    void Declare(org::PassBuilder& builder);
+    ClusterSoftwareRasterBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    ClusterSoftwareRasterFrameData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const ClusterSoftwareRasterFrameData&, org::PassRecordContext&);
+    ClusterSoftwareRasterFrameData Prepare(const ClusterSoftwareRasterBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ClusterSoftwareRasterBindings&, const ClusterSoftwareRasterFrameData&,
+        org::PassRecordContext&);
 
 private:
     std::shared_ptr<rhi::CommandSignaturePtr> m_rasterizationCommandSignature;
@@ -68,7 +78,6 @@ private:
     std::shared_ptr<Buffer> m_compactedVisibleClusterTransformIndicesBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
-	org::ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
@@ -89,5 +98,5 @@ private:
     bool m_runWhenComputeSWRasterEnabledOnly = false;
     uint32_t m_dynamicWindSkinCacheHashEntryCount = 0u;
     uint32_t m_dynamicWindSkinCachePositionCapacity = 0u;
-    uint32_t m_dynamicWindSkinCacheGeneration = 1u;
+    mutable uint32_t m_dynamicWindSkinCacheGeneration = 1u;
 };

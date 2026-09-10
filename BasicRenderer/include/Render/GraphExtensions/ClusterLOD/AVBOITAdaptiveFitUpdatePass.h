@@ -8,16 +8,17 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class AVBOITAdaptiveFitUpdatePass final : public org::TypedRenderGraphPass<AVBOITAdaptiveFitUpdatePass, br::render::PreparedComputeDispatch> {
+struct AVBOITAdaptiveFitUpdateBindings { org::ResourceBindingToken config, histogram, state; };
+class AVBOITAdaptiveFitUpdatePass final : public org::TypedRenderGraphPass<AVBOITAdaptiveFitUpdatePass, br::render::PreparedComputeDispatch, AVBOITAdaptiveFitUpdateBindings> {
 public:
     AVBOITAdaptiveFitUpdatePass(
         std::shared_ptr<Buffer> configBuffer,
         std::shared_ptr<Buffer> occupancyHistogramBuffer,
         std::shared_ptr<Buffer> fitStateBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    AVBOITAdaptiveFitUpdateBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITAdaptiveFitUpdateBindings&, const org::PassPrepareContext&) const;
+    static void Record(const AVBOITAdaptiveFitUpdateBindings&, const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

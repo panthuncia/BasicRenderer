@@ -262,7 +262,8 @@ ArtifactBuildResult BuildStaticScene(const ArtifactBuildContext& context) {
         }
         expectedPages[page.pageIndex] = page.page;
     }
-    const auto expectedResourceRoots = input->requireResourceClosure ? 3u : 0u;
+    const auto expectedResourceRoots = (input->requireResourceClosure ? 3u : 0u) +
+        0u;
     if (context.dependencies.size() != input->pages.size() + expectedResourceRoots) {
         return ArtifactBuildResult::Failure("static scene dependency closure is incomplete");
     }

@@ -23,11 +23,11 @@ VirtualShadowMapBuildMarkTilesPass::VirtualShadowMapBuildMarkTilesPass(
         "CLod.VirtualShadow.BuildMarkTiles.PSO");
 }
 
-void VirtualShadowMapBuildMarkTilesPass::Declare(org::PassBuilder& builder)
+VirtualShadowMapBuildMarkTilesBindings VirtualShadowMapBuildMarkTilesPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
-        .WithUnorderedAccess(m_tileWorkBuffer, m_tileCountBuffer);
+    builder.WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }));
+    return {builder.BindUnorderedAccess(m_tileWorkBuffer), builder.BindUnorderedAccess(m_tileCountBuffer)};
 }
 
 void VirtualShadowMapBuildMarkTilesPass::Initialize() {}
@@ -41,7 +41,8 @@ void VirtualShadowMapBuildMarkTilesPass::Update(const UpdateExecutionContext& ex
 
 
 
-br::render::PreparedComputeDispatch VirtualShadowMapBuildMarkTilesPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch VirtualShadowMapBuildMarkTilesPass::Prepare(
+    const VirtualShadowMapBuildMarkTilesBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     auto payload = m_pso.GetPayload();
     br::render::PreparedComputeDispatch data{};
@@ -51,8 +52,10 @@ br::render::PreparedComputeDispatch VirtualShadowMapBuildMarkTilesPass::Prepare(
     auto program = preparation.CaptureProgramBinding(std::move(payload));
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_TILE_WORK_DESCRIPTOR_INDEX] = m_tileWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_TILE_COUNT_DESCRIPTOR_INDEX] = m_tileCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_TILE_WORK_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.tileWork,
+        {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_TILE_COUNT_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.tileCount,
+        {org::BindlessViewKind::UnorderedAccess}).index;
     data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_SCREEN_WIDTH] = context->renderResolution.x;
     data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_SCREEN_HEIGHT] = context->renderResolution.y;
     data.constants[CLOD_VIRTUAL_SHADOW_BUILD_MARK_TILES_MAX_TILE_COUNT] = CLodVirtualShadowMaxMarkTileCount;
@@ -63,6 +66,7 @@ br::render::PreparedComputeDispatch VirtualShadowMapBuildMarkTilesPass::Prepare(
 
 void VirtualShadowMapBuildMarkTilesPass::ShutdownPass() {}
 
-void VirtualShadowMapBuildMarkTilesPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void VirtualShadowMapBuildMarkTilesPass::Record(const VirtualShadowMapBuildMarkTilesBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

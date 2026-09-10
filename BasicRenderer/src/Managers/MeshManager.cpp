@@ -34,6 +34,8 @@
 
 #include "../../generated/BuiltinResources.h"
 #include "Render/MemoryIntrospectionAPI.h"
+#include "Render/GeometryResidencyStateArtifacts.h"
+#include "Render/RendererStateRequestService.h"
 
 namespace {
 
@@ -1960,11 +1962,85 @@ void MeshManager::PublishCLodStreamingDomainEvent(CLodStreamingDomainEvent event
 		return;
 	}
 
+	const auto publicationEvent = event;
 	{
 		std::lock_guard lock(m_clodStreamingDomainEventsMutex);
 		m_clodStreamingDomainEvents.push_back(std::move(event));
 	}
 	m_clodStreamingDomainEventGeneration.fetch_add(1u, std::memory_order_release);
+	PublishGeometryResidencyDelta(publicationEvent);
+}
+
+void MeshManager::SetRendererStateRequestService(br::render::RendererStateRequestService* service) {
+	std::lock_guard lock(m_geometryResidencyPublicationMutex);
+	m_rendererStateRequests = service;
+	m_geometryResidencyVersion = {};
+	m_geometryResidencyRevision = 0;
+	if (service == nullptr) return;
+
+	auto input = std::make_shared<br::render::GeometryResidencyDeltaInput>();
+	input->kind = br::render::GeometryResidencyDeltaKind::Reset;
+	const auto revision = ++m_geometryResidencyRevision;
+	std::shared_ptr<const br::render::GeometryResidencyDeltaInput> immutableInput = std::move(input);
+	const auto result = service->Request(
+		{ br::render::ArtifactKind::GeometryResidency, 1u, 0u }, revision,
+		{}, br::render::ArtifactPayload::Make<br::render::GeometryResidencyDeltaInput>(
+			std::move(immutableInput)), revision);
+	if (result) m_geometryResidencyVersion = result.Handle();
+}
+
+std::optional<br::render::ArtifactVersionHandle> MeshManager::GeometryResidencyVersion() const {
+	std::lock_guard lock(m_geometryResidencyPublicationMutex);
+	if (!m_geometryResidencyVersion) return std::nullopt;
+	return m_geometryResidencyVersion;
+}
+
+void MeshManager::PublishGeometryResidencyDelta(const CLodStreamingDomainEvent& event) {
+	if (event.kind == CLodStreamingDomainEventKind::SharedMeshAdded) return;
+	std::lock_guard lock(m_geometryResidencyPublicationMutex);
+	if (m_rendererStateRequests == nullptr) return;
+
+	auto input = std::make_shared<br::render::GeometryResidencyDeltaInput>();
+	switch (event.kind) {
+	case CLodStreamingDomainEventKind::ActiveRangeAdded:
+		input->kind = br::render::GeometryResidencyDeltaKind::AddOrReplace;
+		break;
+	case CLodStreamingDomainEventKind::ActiveRangeRemoved:
+		input->kind = br::render::GeometryResidencyDeltaKind::Remove;
+		break;
+	case CLodStreamingDomainEventKind::FullReset:
+		input->kind = br::render::GeometryResidencyDeltaKind::Reset;
+		break;
+	case CLodStreamingDomainEventKind::SharedMeshAdded:
+		return;
+	}
+	input->range.groupsBase = event.groupsBase;
+	input->range.groupCount = event.groupCount;
+	input->range.maxTraversalDepth = event.maxTraversalDepth;
+	input->range.coarsestRanges.reserve(event.coarsestRanges.size());
+	for (const auto& range : event.coarsestRanges) {
+		input->range.coarsestRanges.emplace_back(range.groupsBase, range.groupCount);
+	}
+
+	std::vector<br::render::ArtifactRequirement> requirements;
+	if (m_geometryResidencyVersion) {
+		requirements.push_back(br::render::Exact(m_geometryResidencyVersion));
+	}
+	const auto revision = ++m_geometryResidencyRevision;
+	const std::uint64_t fingerprint = revision ^
+		(static_cast<std::uint64_t>(event.groupsBase) << 32u) ^ event.groupCount ^
+		(static_cast<std::uint64_t>(event.maxTraversalDepth) << 48u);
+	std::shared_ptr<const br::render::GeometryResidencyDeltaInput> immutableInput = std::move(input);
+	const auto result = m_rendererStateRequests->Request(
+		{ br::render::ArtifactKind::GeometryResidency, 1u, 0u }, revision,
+		std::move(requirements),
+		br::render::ArtifactPayload::Make<br::render::GeometryResidencyDeltaInput>(
+			std::move(immutableInput)), fingerprint);
+	if (result) {
+		m_geometryResidencyVersion = result.Handle();
+	} else {
+		basic_telemetry::AddCounter("BasicRenderer.GeometryResidency.RequestRejected");
+	}
 }
 
 void MeshManager::PublishCLodStreamingDomainEventForSharedState(
@@ -1978,6 +2054,7 @@ void MeshManager::PublishCLodStreamingDomainEventForSharedState(
 	event.kind = kind;
 	event.groupsBase = sharedState->groupsBase;
 	event.groupCount = sharedState->groupCount;
+	event.maxTraversalDepth = sharedState->maxTraversalDepth;
 	event.coarsestRanges.reserve(sharedState->coarsestRanges.size());
 	for (const auto& localRange : sharedState->coarsestRanges) {
 		if (localRange.groupCount == 0u || localRange.firstGroup >= sharedState->groupCount) {

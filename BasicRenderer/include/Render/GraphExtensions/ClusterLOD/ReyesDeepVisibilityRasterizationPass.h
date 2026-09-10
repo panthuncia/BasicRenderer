@@ -17,7 +17,17 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesDeepVisibilityRasterizationPass final : public org::TypedRenderGraphPass<ReyesDeepVisibilityRasterizationPass, br::render::PreparedComputeIndirect>, public IDynamicDeclaredResources {
+struct ReyesDeepVisibilityRasterBindings {
+    org::ResourceBindingToken visible, transforms, diceQueue, diceCounter, work, workCounter;
+    org::ResourceBindingToken tessConfigs, tessVertices, tessTriangles, indirectArgs, telemetry, viewInfo;
+    org::ResourceBindingToken nodes, nodeCounter, overflowCounter;
+    std::vector<org::ResourceBindingToken> visibilityBuffers, headPointerBuffers;
+    uint32_t patchVisibilityIndexBase = 0u;
+    uint32_t nodeCapacity = 1u;
+};
+
+class ReyesDeepVisibilityRasterizationPass final : public org::TypedRenderGraphPass<ReyesDeepVisibilityRasterizationPass,
+    br::render::PreparedComputeIndirect, ReyesDeepVisibilityRasterBindings>, public IDynamicDeclaredResources {
 public:
     ReyesDeepVisibilityRasterizationPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -38,11 +48,13 @@ public:
         std::string_view resourceName,
         uint32_t patchVisibilityIndexBase);
 
-    void Declare(org::PassBuilder& builder);
+    ReyesDeepVisibilityRasterBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording);
+    br::render::PreparedComputeIndirect Prepare(const ReyesDeepVisibilityRasterBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesDeepVisibilityRasterBindings&, const br::render::PreparedComputeIndirect& data,
+        org::PassRecordContext& recording);
 
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;

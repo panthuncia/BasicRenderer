@@ -47,9 +47,10 @@ enum class ArtifactKind : std::uint16_t {
     GrassShard,
     GrassScratch,
     GrassScene,
+    GeometryResidency,
 };
 inline constexpr std::size_t kArtifactKindCount =
-    static_cast<std::size_t>(ArtifactKind::GrassScene) + 1u;
+    static_cast<std::size_t>(ArtifactKind::GeometryResidency) + 1u;
 
 struct ArtifactAddress {
     ArtifactKind kind = ArtifactKind::Generic;

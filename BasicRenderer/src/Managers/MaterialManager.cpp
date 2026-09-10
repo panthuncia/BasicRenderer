@@ -466,6 +466,7 @@ MaterialManager::MaterialManager() {
 }
 
 MaterialManager::~MaterialManager() {
+	m_reservationLifetime.reset();
 	if (m_snapshotCommitScope.Valid()) m_snapshotCommitScope.CancelAndWait();
 }
 
@@ -561,12 +562,22 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex) {
 			ZoneScopedN("MaterialManager::ProcessPendingMaterialUpdates::FlushDirtyMaterials::Material");
 			ZoneValue(materialID);
 			++dirtyMaterialsVisited;
-			auto materialIt = m_activeMaterialsByID.find(materialID);
-			if (materialIt == m_activeMaterialsByID.end() || materialIt->second == nullptr) {
-				continue;
+			Material* material = nullptr;
+			if (const auto materialIt = m_activeMaterialsByID.find(materialID);
+				materialIt != m_activeMaterialsByID.end()) {
+				material = materialIt->second;
 			}
+			std::shared_ptr<Material> ingestedOwner;
+			if (!material) {
+				if (const auto source = m_ingestedMaterialSourcesByID.find(materialID);
+					source != m_ingestedMaterialSourcesByID.end()) {
+					ingestedOwner = source->second.lock();
+					material = ingestedOwner.get();
+				}
+			}
+			if (!material) continue;
 
-			FlushDirtyMaterial(*materialIt->second, nullptr);
+			FlushDirtyMaterial(*material, false);
 			++dirtyMaterialsFlushed;
 		}
 	}
@@ -593,7 +604,8 @@ void MaterialManager::ProcessPendingMaterialUpdates(uint64_t frameIndex) {
 	}
 }
 
-unsigned int MaterialManager::IncrementMaterialUsageCount(Material& material, TextureFactory* textureFactory, unsigned int count) {
+unsigned int MaterialManager::IncrementMaterialUsageCount(
+	Material& material, bool refreshTextureBindings, unsigned int count) {
 	std::lock_guard mutationLock(m_materialMutationMutex);
 	ZoneScopedN("MaterialManager::IncrementMaterialUsageCount");
 	ZoneValue(material.GetMaterialID());
@@ -621,7 +633,8 @@ unsigned int MaterialManager::IncrementMaterialUsageCount(Material& material, Te
 		ZoneScopedN("MaterialManager::IncrementMaterialUsageCount::ResolveMaterialSlot");
 		materialSlot = alreadyResident
 			? existingSlotIt->second
-			: GetMaterialSlot(materialID, textureFactory ? std::optional<PerMaterialCB>{ material.GetData() } : std::nullopt);
+			: GetMaterialSlot(materialID, refreshTextureBindings
+				? std::optional<PerMaterialCB>{ material.GetData() } : std::nullopt);
 		material.SetOpenPBRMaterialDataIndex(materialSlot);
 		m_activeMaterialsByID[materialID] = &material;
 	}
@@ -629,9 +642,9 @@ unsigned int MaterialManager::IncrementMaterialUsageCount(Material& material, Te
 	m_materialUsageCounts[materialSlot] += count;
 	if (m_materialUsageCounts[materialSlot] == 1u) {
 		ZoneScopedN("MaterialManager::IncrementMaterialUsageCount::FirstUse");
-		if (textureFactory) {
+		if (refreshTextureBindings) {
 			ZoneScopedN("MaterialManager::IncrementMaterialUsageCount::FirstUse::FlushDirtyMaterial");
-			FlushDirtyMaterial(material, textureFactory);
+			FlushDirtyMaterial(material, true);
 		} else {
 			{
 				ZoneScopedN("MaterialManager::IncrementMaterialUsageCount::FirstUse::UpdateTextureUsage");
@@ -650,6 +663,107 @@ unsigned int MaterialManager::IncrementMaterialUsageCount(Material& material, Te
 	return materialSlot;
 }
 
+void MaterialManager::RegisterMaterialSource(const std::shared_ptr<Material>& material) {
+	if (!material) return;
+	std::lock_guard mutationLock(m_materialMutationMutex);
+	m_ingestedMaterialSourcesByID[material->GetMaterialID()] = material;
+}
+
+br::render::MaterialUsageBatchEntry MaterialManager::CaptureMaterialUsage(
+	Material& material, unsigned int count, bool refreshTextureBindings) {
+	std::lock_guard mutationLock(m_materialMutationMutex);
+	if (refreshTextureBindings) material.RefreshTextureBindings();
+	br::render::MaterialUsageBatchEntry entry{};
+	entry.materialID = material.GetMaterialID();
+	entry.count = count;
+	entry.base = material.GetData();
+	entry.evaluation = BuildMaterialEvalData(material);
+	entry.openPbr = BuildOpenPBRMaterialData(material);
+	entry.compileFlags = material.Technique().compileFlags;
+	entry.textureServiceInputs = CollectMaterialTextureAssets(material);
+	entry.retainedTextureResources = CollectMaterialTextureResources(material);
+	entry.textureBindings.reserve(entry.textureServiceInputs.size());
+	for (const auto& texture : entry.textureServiceInputs) {
+		if (!texture) continue;
+		const auto binding = texture->GetPublishedBindingSnapshot();
+		if (texture->GetStreamingTextureID() == 0 || binding.bindingRevision == 0 ||
+			!binding.image || !binding.image->HasValidBackingResource()) continue;
+		const auto imageIndex = binding.image && binding.image->HasValidBackingResource()
+			? binding.image->GetSRVInfo(0).slot.index : UINT32_MAX;
+		entry.textureBindings.push_back({
+			texture->GetStreamingTextureID(), binding.bindingRevision, imageIndex,
+			texture->SamplerDescriptorIndex() });
+	}
+	return entry;
+}
+
+std::shared_ptr<const br::render::MaterialUsageReservation>
+MaterialManager::ReserveMaterialUsage(
+	const std::vector<br::render::MaterialUsageBatchEntry>& entries) {
+	struct ReservedBindings {
+		std::uint32_t materialID = 0;
+		std::vector<std::uint64_t> bindingIDs;
+		std::vector<std::uint32_t> streamingTextureIDs;
+	};
+	std::vector<ReservedBindings> reserved;
+	{
+		std::lock_guard mutationLock(m_materialMutationMutex);
+		if (!m_textureStreamingManager) {
+			return std::make_shared<br::render::MaterialUsageReservation>(
+				[](bool) { return true; });
+		}
+		reserved.reserve(entries.size());
+		for (const auto& entry : entries) {
+			const auto existing = m_materialIDSlotMapping.find(entry.materialID);
+			if (existing != m_materialIDSlotMapping.end() &&
+				existing->second < m_materialUsageCounts.size() &&
+				m_materialUsageCounts[existing->second] != 0u) continue;
+			ReservedBindings material{ .materialID = entry.materialID };
+			const bool alphaTested =
+				(entry.compileFlags & MaterialCompileFlags::MaterialCompileAlphaTest) != 0u;
+			for (const auto& texture : entry.textureServiceInputs) {
+				if (!texture || texture->GetStreamingTextureID() == 0u) continue;
+				const auto bindingID = m_textureStreamingManager->RegisterTextureBinding(
+					texture, {}, "material-reservation:" + std::to_string(entry.materialID),
+					TextureStreamingBindingOptions{
+						.requiresExactGraphPublication = true,
+						.alphaTested = alphaTested });
+				if (bindingID == 0u) continue;
+				material.bindingIDs.push_back(bindingID);
+				material.streamingTextureIDs.push_back(texture->GetStreamingTextureID());
+			}
+			reserved.push_back(std::move(material));
+		}
+	}
+	auto weakLifetime = std::weak_ptr<void>(m_reservationLifetime);
+	return std::make_shared<br::render::MaterialUsageReservation>(
+		[this, weakLifetime, reserved = std::move(reserved)](bool commit) mutable {
+			if (weakLifetime.expired()) return !commit;
+			std::lock_guard mutationLock(m_materialMutationMutex);
+			if (!commit) {
+				if (m_textureStreamingManager) {
+					for (const auto& material : reserved)
+						m_textureStreamingManager->UnregisterTextureBindings(material.bindingIDs);
+				}
+				basic_telemetry::AddCounter("SARP.Material.UsageReservation.Cancelled");
+				return true;
+			}
+			for (auto& material : reserved) {
+				if (m_materialTextureStreamingBindingIDs.contains(material.materialID)) {
+					if (m_textureStreamingManager)
+						m_textureStreamingManager->UnregisterTextureBindings(material.bindingIDs);
+					continue;
+				}
+				m_materialTextureStreamingBindingIDs[material.materialID] =
+					std::move(material.bindingIDs);
+				m_materialTextureStreamingTextureIDs[material.materialID] =
+					std::move(material.streamingTextureIDs);
+			}
+			basic_telemetry::AddCounter("SARP.Material.UsageReservation.Committed");
+			return true;
+		});
+}
+
 MaterialTextureStreamingReadinessStats MaterialManager::GetMaterialTextureStreamingReadinessStats() const {
 	return m_textureStreamingManager
 		? m_textureStreamingManager->GetTextureStreamingReadinessStats()
@@ -664,22 +778,36 @@ MaterialManager::ApplyMaterialUsageBatch(
 	result->materialSlots.reserve(input.entries.size());
 	{
 		std::lock_guard mutationLock(m_materialMutationMutex);
-		struct Admission { Material* material = nullptr; std::uint64_t count = 0; };
-		std::unordered_map<std::uint32_t, Admission> admissions;
+		std::unordered_set<std::uint32_t> materialIDs;
 		for (const auto& entry : input.entries) {
-			if (!entry.material || entry.count == 0) return {};
-			const auto materialID = entry.material->GetMaterialID();
-			auto& admission = admissions[materialID];
-			if (admission.material && admission.material != entry.material.get()) return {};
-			admission.material = entry.material.get();
-			admission.count += entry.count;
-			if (admission.count > (std::numeric_limits<unsigned int>::max)()) return {};
+			if (entry.materialID == 0 || entry.count == 0 ||
+				!materialIDs.insert(entry.materialID).second) return {};
+			const auto existing = m_materialIDSlotMapping.find(entry.materialID);
+			if (existing != m_materialIDSlotMapping.end() &&
+				existing->second < m_materialUsageCounts.size() &&
+				m_materialUsageCounts[existing->second] >
+					(std::numeric_limits<unsigned int>::max)() - entry.count) return {};
 		}
-		for (const auto& [materialID, admission] : admissions) {
-			const auto slot = IncrementMaterialUsageCount(
-				*admission.material, input.textureFactory,
-				static_cast<unsigned int>(admission.count));
-			result->materialSlots.emplace_back(materialID, slot);
+		if (!input.reservation || !input.reservation->Commit()) return {};
+		for (const auto& entry : input.entries) {
+			const auto existing = m_materialIDSlotMapping.find(entry.materialID);
+			const bool alreadyResident = existing != m_materialIDSlotMapping.end() &&
+				existing->second < m_materialUsageCounts.size() &&
+				m_materialUsageCounts[existing->second] != 0u;
+			const auto slot = alreadyResident
+				? existing->second : GetMaterialSlot(entry.materialID, entry.base);
+			if (slot >= m_materialUsageCounts.size() ||
+				m_materialUsageCounts[slot] > (std::numeric_limits<unsigned int>::max)() - entry.count) {
+				return {};
+			}
+			m_materialUsageCounts[slot] += entry.count;
+			if (!alreadyResident) {
+				m_trackedMaterialTextures[entry.materialID] = entry.retainedTextureResources;
+				const auto sourceRevision = ++m_materialRowSourceRevisions[entry.materialID];
+				ApplyMaterialRowArtifact({ entry.materialID, slot, sourceRevision,
+					entry.base, entry.evaluation, entry.openPbr });
+			}
+			result->materialSlots.emplace_back(entry.materialID, slot);
 		}
 		std::ranges::sort(result->materialSlots);
 	}
@@ -736,13 +864,13 @@ void MaterialManager::UpdateMaterialDataBuffer(Material& material) {
 	FlushDirtyMaterial(material);
 }
 
-void MaterialManager::FlushDirtyMaterial(Material& material, TextureFactory* textureFactory) {
+void MaterialManager::FlushDirtyMaterial(Material& material, bool refreshTextureBindings) {
 	ZoneScopedN("MaterialManager::FlushDirtyMaterial");
 	ZoneValue(material.GetMaterialID());
 	const unsigned int materialSlot = GetMaterialSlot(material.GetMaterialID());
 	material.SetOpenPBRMaterialDataIndex(materialSlot);
 	const bool textureAssetsChanged = MaterialTextureAssetBindingsChanged(material);
-	const bool refreshedTextures = textureFactory != nullptr || textureAssetsChanged;
+	const bool refreshedTextures = refreshTextureBindings || textureAssetsChanged;
 	if (textureAssetsChanged) {
 		{
 			ZoneScopedN("MaterialManager::FlushDirtyMaterial::UntrackTextureBindings");
@@ -1036,6 +1164,7 @@ void MaterialManager::DecrementMaterialUsageCount(const Material& material) {
 		m_freeMaterialSlots.push_back(materialSlot);
 		m_materialIDSlotMapping.erase(materialID);
 		m_activeMaterialsByID.erase(materialID);
+		m_ingestedMaterialSourcesByID.erase(materialID);
 		m_dirtyMaterialIDSet.erase(materialID);
 		std::erase(m_dirtyMaterialIDs, materialID);
 	}
@@ -1067,8 +1196,18 @@ bool MaterialManager::MaterialTextureAssetBindingsChanged(const Material& materi
 }
 
 void MaterialManager::TrackMaterialTextureAssets(const Material& material, int delta) {
+	TrackMaterialTextureAssets(material.GetMaterialID(),
+		CollectMaterialTextureAssets(material),
+		(material.Technique().compileFlags & MaterialCompileFlags::MaterialCompileAlphaTest) != 0u,
+		delta);
+}
+
+void MaterialManager::TrackMaterialTextureAssets(
+	std::uint32_t materialID,
+	const std::vector<std::shared_ptr<TextureAsset>>& textureAssets,
+	bool alphaTested,
+	int delta) {
 	ZoneScopedN("MaterialManager::TrackMaterialTextureAssets");
-	const uint32_t materialID = material.GetMaterialID();
 	ZoneValue(materialID);
 	if (delta > 0) {
 		if (!m_textureStreamingManager) {
@@ -1076,12 +1215,7 @@ void MaterialManager::TrackMaterialTextureAssets(const Material& material, int d
 		}
 		std::vector<uint64_t> bindingIDs;
 		std::vector<uint32_t> streamingTextureIDs;
-		std::vector<std::shared_ptr<TextureAsset>> textureAssets;
-		{
-			ZoneScopedN("MaterialManager::TrackMaterialTextureAssets::CollectAssets");
-			textureAssets = CollectMaterialTextureAssets(material);
-			TracyPlot("MaterialManager.TrackedTextureAssetCount", static_cast<int64_t>(textureAssets.size()));
-		}
+		TracyPlot("MaterialManager.TrackedTextureAssetCount", static_cast<int64_t>(textureAssets.size()));
 		for (const auto& texture : textureAssets) {
 			ZoneScopedN("MaterialManager::TrackMaterialTextureAssets::RegisterBinding");
 			ZoneValue(materialID);
@@ -1094,9 +1228,6 @@ void MaterialManager::TrackMaterialTextureAssets(const Material& material, int d
 				continue;
 			}
 			TracyPlot("MaterialManager.RegisterBinding.StreamingTextureID", static_cast<int64_t>(streamingTextureID));
-			const bool alphaTested =
-				(material.Technique().compileFlags & MaterialCompileFlags::MaterialCompileAlphaTest) != 0u;
-
 			const uint64_t bindingID = m_textureStreamingManager->RegisterTextureBinding(
 				texture,
 				{},
@@ -1396,6 +1527,7 @@ std::uint64_t MaterialManager::CommitGpuVisibleSnapshot(bool forceGraphSnapshot)
 		(std::min<unsigned int>)(slotResidentCapacity, scanCoveredSlots));
 
 	std::vector<br::render::MaterialCompileFlagEntryDTO> activeCompileFlags;
+	std::vector<MaterialRasterFlags> rasterBucketFlags;
 	{
 		BT_ZONE_SCOPE("MaterialManager::CommitGpuVisibleSnapshot::PublishActiveFlags");
 		const auto& registryActiveFlags = m_compileFlagsRegistry.GetActiveFlags();
@@ -1411,6 +1543,15 @@ std::uint64_t MaterialManager::CommitGpuVisibleSnapshot(bool forceGraphSnapshot)
 			captured.push_back({ registryActiveFlags[i], slot });
 		}
 		activeCompileFlags = std::move(captured);
+	}
+	{
+		BT_ZONE_SCOPE("MaterialManager::CommitGpuVisibleSnapshot::PublishRasterBuckets");
+		rasterBucketFlags.reserve(m_rasterBucketsUsed);
+		for (unsigned int bucket = 0; bucket < m_rasterBucketsUsed; ++bucket) {
+			rasterBucketFlags.push_back(bucket < m_bucketToRasterFlagMapping.size()
+				? m_bucketToRasterFlagMapping[bucket]
+				: MaterialRasterFlags::MaterialRasterFlagsNone);
+		}
 	}
 
 	if constexpr (kEnableMaterialStateGraph) if (const auto source = br::render::PublishedStateSource::ProcessSource()) {
@@ -1451,6 +1592,7 @@ std::uint64_t MaterialManager::CommitGpuVisibleSnapshot(bool forceGraphSnapshot)
 			mix(static_cast<std::uint64_t>(entry.flags));
 			mix(entry.slot);
 		}
+		for (const auto flags : rasterBucketFlags) mix(static_cast<std::uint64_t>(flags));
 		mix(m_materialRowsRevision.load(std::memory_order_acquire));
 		if (fingerprint != m_pendingMaterialStateFingerprint) {
 			m_pendingMaterialStateFingerprint = fingerprint;
@@ -1550,6 +1692,7 @@ std::uint64_t MaterialManager::CommitGpuVisibleSnapshot(bool forceGraphSnapshot)
 			// make table publication wait for every texture's asynchronous graph state.
 			input->slotsUsed = publishedSlots;
 			input->activeCompileFlags = activeCompileFlags;
+			input->rasterBucketFlags = rasterBucketFlags;
 			input->baseTableKey = m_materialBufferFamilies[0]->Configuration().address;
 			input->evalTableKey = m_materialBufferFamilies[1]->Configuration().address;
 			input->openPbrTableKey = m_materialBufferFamilies[2]->Configuration().address;

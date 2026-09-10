@@ -13,7 +13,14 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapAllocatePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapAllocatePagesPass, br::render::PreparedComputeIndirect> {
+struct VirtualShadowMapAllocatePagesBindings {
+    org::ResourceBindingToken requests, requestCount, indirectArgs, clipmapInfo, pageTable;
+    org::ResourceBindingToken pageMetadata, dirtyFlags, freePages, reusablePages, header, stats;
+    uint32_t pageRenderBudget = 0;
+};
+
+class VirtualShadowMapAllocatePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapAllocatePagesPass,
+    br::render::PreparedComputeIndirect, VirtualShadowMapAllocatePagesBindings> {
 public:
     VirtualShadowMapAllocatePagesPass(
         std::shared_ptr<Buffer> allocationRequestsBuffer,
@@ -28,9 +35,11 @@ public:
         std::shared_ptr<Buffer> pageListHeaderBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
+    VirtualShadowMapAllocatePagesBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeIndirect Prepare(const VirtualShadowMapAllocatePagesBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapAllocatePagesBindings&,
+        const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     PipelineState m_pso;
@@ -38,7 +47,6 @@ private:
     std::shared_ptr<Buffer> m_allocationRequestsBuffer;
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
     std::shared_ptr<Buffer> m_pageMetadataBuffer;

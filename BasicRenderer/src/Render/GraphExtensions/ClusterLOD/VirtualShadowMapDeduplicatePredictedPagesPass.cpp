@@ -47,27 +47,24 @@ VirtualShadowMapDeduplicatePredictedPagesPass::VirtualShadowMapDeduplicatePredic
         "CLod.VirtualShadow.DeduplicatePredictedPages.PSO");
 }
 
-void VirtualShadowMapDeduplicatePredictedPagesPass::Declare(org::PassBuilder& declaration)
+VirtualShadowMapDeduplicatePredictedPagesBindings VirtualShadowMapDeduplicatePredictedPagesPass::Declare(org::PassBuilder& declaration)
 {
     declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    auto* builder = &declaration;
-    builder->WithShaderResource(
-            m_predictiveRawPagesBuffer,
-            m_predictiveRawPageCountBuffer)
-        .WithConstantBuffer(Builtin::PerFrameBuffer)
-        .WithUnorderedAccess(
-            m_predictedScratchBitsetBuffer,
-            m_predictedPagesBuffer,
-            m_predictedPageCountBuffer,
-            m_statsBuffer,
-            m_pageTableTexture,
-            m_pageMetadataBuffer,
-            m_dirtyFlagsBuffer);
+    declaration.WithConstantBuffer(Builtin::PerFrameBuffer);
+    return {declaration.BindShaderResource(m_predictiveRawPagesBuffer),
+        declaration.BindShaderResource(m_predictiveRawPageCountBuffer),
+        declaration.BindUnorderedAccess(m_predictedScratchBitsetBuffer),
+        declaration.BindUnorderedAccess(m_predictedPagesBuffer),
+        declaration.BindUnorderedAccess(m_predictedPageCountBuffer),
+        declaration.BindUnorderedAccess(m_statsBuffer), declaration.BindUnorderedAccess(m_pageTableTexture),
+        declaration.BindUnorderedAccess(m_pageMetadataBuffer), declaration.BindUnorderedAccess(m_dirtyFlagsBuffer),
+        m_physicalPageCount};
 }
 
 
 
-br::render::PreparedComputePipelineSequence VirtualShadowMapDeduplicatePredictedPagesPass::Prepare(const org::PassPrepareContext& preparation)
+br::render::PreparedComputePipelineSequence VirtualShadowMapDeduplicatePredictedPagesPass::Prepare(
+    const VirtualShadowMapDeduplicatePredictedPagesBindings& bindings, const org::PassPrepareContext& preparation) const
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     br::render::PreparedComputePipelineSequence data{};
@@ -81,16 +78,18 @@ br::render::PreparedComputePipelineSequence VirtualShadowMapDeduplicatePredicted
     data.steps[1].program = deduplicate.program;
     data.steps[1].descriptorIndices = std::move(deduplicate.descriptorIndices);
     auto& c = data.steps[0].constants;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGES_DESCRIPTOR_INDEX] = m_predictiveRawPagesBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictiveRawPageCountBuffer->GetSRVInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_SCRATCH_BITSET_DESCRIPTOR_INDEX] = m_predictedScratchBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGES_DESCRIPTOR_INDEX] = m_predictedPagesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictedPageCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PHYSICAL_PAGE_COUNT] = m_physicalPageCount;
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index; };
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGES_DESCRIPTOR_INDEX] = srv(bindings.rawPages);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX] = srv(bindings.rawCount);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_SCRATCH_BITSET_DESCRIPTOR_INDEX] = uav(bindings.scratch);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGES_DESCRIPTOR_INDEX] = uav(bindings.pages);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGE_COUNT_DESCRIPTOR_INDEX] = uav(bindings.pageCount);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_STATS_DESCRIPTOR_INDEX] = uav(bindings.stats);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PAGE_TABLE_DESCRIPTOR_INDEX] = uav(bindings.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PAGE_METADATA_DESCRIPTOR_INDEX] = uav(bindings.pageMetadata);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_DIRTY_FLAGS_DESCRIPTOR_INDEX] = uav(bindings.dirtyFlags);
+    c[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_PHYSICAL_PAGE_COUNT] = bindings.physicalPageCount;
     data.steps[0].groupsX = (CLodVirtualShadowFallbackDependencyHashCapacity + 63u) / 64u;
     data.steps[1].groupsX = (CLodVirtualShadowPredictiveRawPageCapacity + 63u) / 64u;
     data.steps[1].constants = c;
@@ -98,6 +97,7 @@ br::render::PreparedComputePipelineSequence VirtualShadowMapDeduplicatePredicted
     return data;
 }
 
-void VirtualShadowMapDeduplicatePredictedPagesPass::Record(const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
+void VirtualShadowMapDeduplicatePredictedPagesPass::Record(const VirtualShadowMapDeduplicatePredictedPagesBindings&,
+    const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputePipelineSequence(data, recording);
 }

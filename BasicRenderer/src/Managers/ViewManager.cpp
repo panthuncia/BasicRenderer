@@ -220,6 +220,16 @@ void ViewManager::AttachDepth(uint64_t viewID,
     }
     v->gpu.depthMap = depth;
     v->gpu.linearDepthMap = linearDepth;
+    v->gpu.linearDepthSRVIndices.clear();
+    if (linearDepth) {
+        const auto sliceCount = linearDepth->GetDescription().isCubemap
+            ? 6u * (std::max)(1u, linearDepth->GetDescription().arraySize)
+            : (linearDepth->GetDescription().isArray
+                ? (std::max)(1u, linearDepth->GetDescription().arraySize) : 1u);
+        v->gpu.linearDepthSRVIndices.reserve(sliceCount);
+        for (uint32_t slice = 0; slice < sliceCount; ++slice)
+            v->gpu.linearDepthSRVIndices.push_back(linearDepth->GetSRVInfo(0, slice).slot.index);
+    }
     v->gpu.lastFrameLinearDepthMap.reset();
     v->gpu.lastFrameLinearDepthValid = false;
     ++v->gpu.depthHistoryEpoch;
@@ -253,6 +263,11 @@ void ViewManager::AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelB
     if (!v) return;
     v->gpu.visibilityBuffer = visibilityBuffer;
     v->gpu.clodDeepVisibilityHeadPointers.reset();
+    v->gpu.visibilitySRVIndex = visibilityBuffer
+        ? visibilityBuffer->GetSRVInfo(0).slot.index : 0xFFFFFFFFu;
+    v->gpu.visibilityUAVIndex = visibilityBuffer
+        ? visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
+    v->gpu.clodDeepVisibilityHeadPointersUAVIndex = 0xFFFFFFFFu;
     if (m_events.onVisibilityBufferAttached) {
         m_events.onVisibilityBufferAttached(*v);
     }
@@ -272,6 +287,8 @@ std::shared_ptr<PixelBuffer> ViewManager::EnsureCLodDeepVisibilityHeadPointers(u
 
     if (!needsCreate) {
         v->gpu.clodDeepVisibilityHeadPointers->EnsureVirtualDescriptorSlotsAllocated();
+        v->gpu.clodDeepVisibilityHeadPointersUAVIndex =
+            v->gpu.clodDeepVisibilityHeadPointers->GetUAVShaderVisibleInfo(0).slot.index;
         return v->gpu.clodDeepVisibilityHeadPointers;
     }
 
@@ -283,6 +300,8 @@ std::shared_ptr<PixelBuffer> ViewManager::EnsureCLodDeepVisibilityHeadPointers(u
     // GetUAVShaderVisibleInfo()/GetUAVNonShaderVisibleInfo() are valid before graph materialization.
     headPointerTexture->EnsureVirtualDescriptorSlotsAllocated();
     v->gpu.clodDeepVisibilityHeadPointers = std::move(headPointerTexture);
+    v->gpu.clodDeepVisibilityHeadPointersUAVIndex =
+        v->gpu.clodDeepVisibilityHeadPointers->GetUAVShaderVisibleInfo(0).slot.index;
     return v->gpu.clodDeepVisibilityHeadPointers;
 }
 

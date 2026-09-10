@@ -31,7 +31,17 @@ inAU4 rectInfo, // left, top, width, height
 ASU1 mips
 */
 
-class DownsamplePass : public org::TypedRenderGraphPass<DownsamplePass, br::render::PreparedComputePipelineSequence>, public IDynamicDeclaredResources {
+struct DownsampleMapBindings {
+    org::ResourceBindingToken source, counter, constants;
+    bool isArrayLike = false;
+    unsigned int constantsIndex = 0;
+    std::array<unsigned int, 3> dispatch{};
+};
+
+struct DownsampleBindings { std::vector<DownsampleMapBindings> maps; };
+
+class DownsamplePass : public org::TypedRenderGraphPass<DownsamplePass,
+    br::render::PreparedComputePipelineSequence, DownsampleBindings>, public IDynamicDeclaredResources {
 public:
 
     DownsamplePass()
@@ -41,14 +51,30 @@ public:
     ~DownsamplePass() {
     }
 
-    void Declare(org::PassBuilder& declaration) {
+    DownsampleBindings Declare(org::PassBuilder& declaration) {
         declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         SyncMapInfos(m_activeDepthMaps);
-        for (const auto& [resourceID, map] : m_perMapInfo) {
+        DownsampleBindings bindings;
+        bindings.maps.reserve(m_perMapInfo.size());
+        for (auto& [resourceID, map] : m_perMapInfo) {
             (void)resourceID;
-            declaration.WithShaderResource(Subresources(map.sourceMap, Mip{0, 1}), map.constantsBuffer)
-                .WithUnorderedAccess(Subresources(map.sourceMap, FromMip{1}), map.pCounterResource);
+            auto source = declaration.BindShaderResource(
+                Subresources(map.sourceMap, Mip{0, 1}));
+            declaration.WithUnorderedAccess(Subresources(map.sourceMap, FromMip{1}));
+            auto counter = declaration.BindUnorderedAccess(map.pCounterResource);
+            auto constants = declaration.BindShaderResource(map.constantsBuffer);
+            auto frozenConstants = map.constants;
+            for (uint32_t i = 0; i < frozenConstants.mips; ++i) {
+                frozenConstants.mipUavDescriptorIndices[i] = declaration.DeclaredBindlessIndex(
+                    map.sourceMap, {org::BindlessViewKind::UnorderedAccess,
+                        UINT32_MAX, i + 1u, 0u});
+            }
+            map.constantsBuffer->UpdateView(map.pConstantsBufferView.get(), &frozenConstants);
+            bindings.maps.push_back({source, counter, constants, map.isArrayLike,
+                map.constantsIndex, {map.dispatchThreadGroupCountXY[0],
+                    map.dispatchThreadGroupCountXY[1], map.dispatchThreadGroupCountZ}});
         }
+        return bindings;
     }
 
     void Update(const UpdateExecutionContext& executionContext) override {
@@ -81,35 +107,40 @@ public:
         return m_declaredResourcesChanged;
     }
 
-    br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputePipelineSequence Prepare(const DownsampleBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto& context = *preparation.preparationData->Get<UpdateContext>();
         br::render::PreparedComputePipelineSequence data{};
         data.resourceHeap = context.textureDescriptorHeap.GetHandle();
         data.samplerHeap = context.samplerDescriptorHeap.GetHandle();
         const auto standard = preparation.CaptureProgramBinding(downsamplePassPSO);
         const auto array = preparation.CaptureProgramBinding(downsampleArrayPSO);
-        data.steps.reserve(m_perMapInfo.size());
-        for (const auto& [resourceID, map] : m_perMapInfo) {
-            (void)resourceID;
+        data.steps.reserve(bindings.maps.size());
+        for (const auto& map : bindings.maps) {
             const auto& program = map.isArrayLike ? array : standard;
             br::render::PreparedComputePipelineSequence::Step item{};
             item.program = program.program;
             item.descriptorIndices = program.descriptorIndices;
-            item.constants[UintRootConstant0] = map.pCounterResource->GetUAVShaderVisibleInfo(0).slot.index;
+            item.constants[UintRootConstant0] = preparation.ResolveView(map.counter,
+                {org::BindlessViewKind::UnorderedAccess}).index;
             item.constants[UintRootConstant1] = map.isArrayLike
-                ? map.sourceMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index
-                : map.sourceMap->GetSRVInfo(0).slot.index;
-            item.constants[UintRootConstant2] = map.constantsBuffer->GetSRVInfo(0).slot.index;
+                ? preparation.ResolveView(map.source, {org::BindlessViewKind::ShaderResource,
+                    static_cast<uint32_t>(SRVViewType::Texture2DArray)}).index
+                : preparation.ResolveView(map.source,
+                    {org::BindlessViewKind::ShaderResource}).index;
+            item.constants[UintRootConstant2] = preparation.ResolveView(map.constants,
+                {org::BindlessViewKind::ShaderResource}).index;
             item.constants[UintRootConstant3] = map.constantsIndex;
-            item.groupsX = map.dispatchThreadGroupCountXY[0];
-            item.groupsY = map.dispatchThreadGroupCountXY[1];
-            item.groupsZ = map.dispatchThreadGroupCountZ;
+            item.groupsX = map.dispatch[0];
+            item.groupsY = map.dispatch[1];
+            item.groupsZ = map.dispatch[2];
             data.steps.push_back(std::move(item));
         }
         return data;
     }
 
-    static void Record(const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
+    static void Record(const DownsampleBindings&,
+        const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
         br::render::RecordPreparedComputePipelineSequence(data, recording);
     }
 
@@ -139,6 +170,7 @@ private:
         unsigned int dispatchThreadGroupCountZ;
         std::shared_ptr<GloballyIndexedResource> pCounterResource;
         uint64_t sourceBackingGeneration;
+        spdConstants constants{};
     };
 	std::unordered_map<uint64_t, PerMapInfo> m_perMapInfo;
     std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> m_activeDepthMaps;
@@ -252,10 +284,6 @@ private:
         constants.workGroupOffset[0] = workGroupOffset[0];
         constants.workGroupOffset[1] = workGroupOffset[1];
 
-		for (uint32_t i = 0; i < constants.mips; ++i) {
-			constants.mipUavDescriptorIndices[i] = linearDepthMap->GetUAVShaderVisibleInfo(i + 1).slot.index;
-		}
-
         // A new backing generation gets a new immutable constants allocation.
         auto constantsBuffer = LazyDynamicStructuredBuffer<spdConstants>::CreateShared(1, "Downsample map constants");
         auto constantsView = constantsBuffer->Add();
@@ -273,6 +301,7 @@ private:
         mapInfo.dispatchThreadGroupCountZ = GetSliceCount(*linearDepthMap);
         mapInfo.pCounterResource = CreateIndexedStructuredBuffer(1, sizeof(unsigned int) * 6, true);
         mapInfo.sourceBackingGeneration = generation;
+        mapInfo.constants = constants;
 
         m_perMapInfo[resourceID] = std::move(mapInfo);
     }

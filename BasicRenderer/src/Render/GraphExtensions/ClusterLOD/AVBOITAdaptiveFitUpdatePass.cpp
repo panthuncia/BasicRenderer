@@ -22,14 +22,13 @@ AVBOITAdaptiveFitUpdatePass::AVBOITAdaptiveFitUpdatePass(
         "CLod.AVBOITAdaptiveFitUpdate.PSO");
 }
 
-void AVBOITAdaptiveFitUpdatePass::Declare(org::PassBuilder& builder)
+AVBOITAdaptiveFitUpdateBindings AVBOITAdaptiveFitUpdatePass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(m_configBuffer, m_occupancyHistogramBuffer)
-        .WithUnorderedAccess(m_fitStateBuffer);
+    return {builder.BindShaderResource(m_configBuffer), builder.BindShaderResource(m_occupancyHistogramBuffer), builder.BindUnorderedAccess(m_fitStateBuffer)};
 }
 
-br::render::PreparedComputeDispatch AVBOITAdaptiveFitUpdatePass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch AVBOITAdaptiveFitUpdatePass::Prepare(const AVBOITAdaptiveFitUpdateBindings& bindings, const org::PassPrepareContext& preparation) const {
     br::render::PreparedComputeDispatch data{};
     if (!m_configBuffer || !m_occupancyHistogramBuffer || !m_fitStateBuffer) {
         return {};
@@ -46,16 +45,16 @@ br::render::PreparedComputeDispatch AVBOITAdaptiveFitUpdatePass::Prepare(const o
 
     auto& misc = data.constants;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_CONFIG_DESCRIPTOR_INDEX] =
-        m_configBuffer->GetSRVInfo(0).slot.index;
+        preparation.ResolveView(bindings.config, {org::BindlessViewKind::ShaderResource}).index;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_STATE_DESCRIPTOR_INDEX] =
-        m_fitStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        preparation.ResolveView(bindings.state, {org::BindlessViewKind::UnorderedAccess}).index;
     misc[CLOD_AVBOIT_VBOIT_ADAPTIVE_FIT_HISTOGRAM_DESCRIPTOR_INDEX] =
-        m_occupancyHistogramBuffer->GetSRVInfo(0).slot.index;
+        preparation.ResolveView(bindings.histogram, {org::BindlessViewKind::ShaderResource}).index;
 
     data.groupsX = 1u; data.groupsY = 1u; data.groupsZ = 1u;
     return data;
 }
 
-void AVBOITAdaptiveFitUpdatePass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void AVBOITAdaptiveFitUpdatePass::Record(const AVBOITAdaptiveFitUpdateBindings&, const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

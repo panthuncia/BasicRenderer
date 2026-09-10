@@ -28,19 +28,18 @@ VirtualShadowMapComposePagesPass::VirtualShadowMapComposePagesPass(
         "CLod.VirtualShadow.ComposePhysicalPages.PSO");
 }
 
-void VirtualShadowMapComposePagesPass::Declare(org::PassBuilder& builder)
+VirtualShadowMapComposePagesBindings VirtualShadowMapComposePagesPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-    builder.WithShaderResource(
-            m_staticPagesTexture,
-            m_pageTableTexture,
-            m_pageMetadataBuffer)
-        .WithUnorderedAccess(m_dynamicPagesTexture, m_statsBuffer);
+    return {builder.BindShaderResource(m_staticPagesTexture), builder.BindUnorderedAccess(m_dynamicPagesTexture),
+        builder.BindShaderResource(m_pageTableTexture), builder.BindShaderResource(m_pageMetadataBuffer),
+        builder.BindUnorderedAccess(m_statsBuffer)};
 }
 
 
 
-br::render::PreparedComputeDispatch VirtualShadowMapComposePagesPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch VirtualShadowMapComposePagesPass::Prepare(
+    const VirtualShadowMapComposePagesBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
     auto payload = m_pso.GetPayload();
@@ -51,18 +50,21 @@ br::render::PreparedComputeDispatch VirtualShadowMapComposePagesPass::Prepare(co
     auto program = preparation.CaptureProgramBinding(std::move(payload));
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_STATIC_PAGES_DESCRIPTOR_INDEX] = m_staticPagesTexture->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = m_dynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index;
-    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetSRVInfo(0).slot.index;
+    const auto srv = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource, variant}).index; };
+    const auto uav = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index; };
+    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_STATIC_PAGES_DESCRIPTOR_INDEX] = srv(bindings.staticPages);
+    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = uav(bindings.dynamicPages);
+    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PAGE_TABLE_DESCRIPTOR_INDEX] = srv(bindings.pageTable, static_cast<uint32_t>(SRVViewType::Texture2DArrayFull));
+    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PAGE_METADATA_DESCRIPTOR_INDEX] = srv(bindings.pageMetadata);
     data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
     data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PHYSICAL_PAGE_COUNT] = config.maxPhysicalPages;
     data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_PHYSICAL_ATLAS_PAGES_WIDE] = config.physicalAtlasPagesWide;
-    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    data.constants[CLOD_VIRTUAL_SHADOW_COMPOSE_STATS_DESCRIPTOR_INDEX] = uav(bindings.stats);
     data.groupsX = config.maxPhysicalPages;
     return data;
 }
 
-void VirtualShadowMapComposePagesPass::Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+void VirtualShadowMapComposePagesPass::Record(const VirtualShadowMapComposePagesBindings&,
+    const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeDispatch(data, recording);
 }

@@ -12,7 +12,13 @@ using org::Buffer;
 namespace org { class UploadInstance; }
 using org::UploadInstance;
 
-class CLodStreamingBeginFramePass : public org::TypedRenderGraphPass<CLodStreamingBeginFramePass, br::render::PreparedComputeDispatchSequence> {
+struct CLodStreamingBeginFrameBindings {
+    org::ResourceBindingToken loadCounter, loadRequestKeys, usedGroupsCounter, sourceMismatchCounter;
+    bool hasSourceMismatchCounter = false;
+};
+
+class CLodStreamingBeginFramePass : public org::TypedRenderGraphPass<CLodStreamingBeginFramePass,
+    br::render::PreparedComputeDispatchSequence, CLodStreamingBeginFrameBindings> {
 public:
     CLodStreamingBeginFramePass(
         std::function<UploadInstance*()> getUploadInstance,
@@ -28,9 +34,11 @@ public:
         std::function<void()> scheduleStreamingReadbacks,
         std::function<void()> processStreamingRequests);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatchSequence Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatchSequence&, org::PassRecordContext&);
+    CLodStreamingBeginFrameBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatchSequence Prepare(const CLodStreamingBeginFrameBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const CLodStreamingBeginFrameBindings&,
+        const br::render::PreparedComputeDispatchSequence&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
 
 private:

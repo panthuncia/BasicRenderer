@@ -11,7 +11,14 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapResolveMarkedBlocksPass final : public org::TypedRenderGraphPass<VirtualShadowMapResolveMarkedBlocksPass, br::render::PreparedComputeDispatch> {
+struct VirtualShadowMapResolveMarkedBlocksBindings {
+    org::ResourceBindingToken mask, list, count, requests, requestCount, clipmapData;
+    org::ResourceBindingToken pageTable, dirtyFlags, pageViewInfo, stats;
+    uint32_t activeClipmapCount = 0;
+};
+
+class VirtualShadowMapResolveMarkedBlocksPass final : public org::TypedRenderGraphPass<VirtualShadowMapResolveMarkedBlocksPass,
+    br::render::PreparedComputeDispatch, VirtualShadowMapResolveMarkedBlocksBindings> {
 public:
     VirtualShadowMapResolveMarkedBlocksPass(
         std::shared_ptr<Buffer> markedBlocksMaskBuffer,
@@ -25,11 +32,13 @@ public:
         std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapResolveMarkedBlocksBindings Declare(org::PassBuilder& builder);
     void Initialize();
     void Update(const UpdateExecutionContext& executionContext) override;
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const VirtualShadowMapResolveMarkedBlocksBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapResolveMarkedBlocksBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
     void ShutdownPass();
 
 private:

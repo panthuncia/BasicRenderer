@@ -55,39 +55,47 @@ ReyesQueueResetPass::ReyesQueueResetPass(
     }
 }
 
-void ReyesQueueResetPass::Declare(org::PassBuilder& declaration)
+ReyesQueueResetBindings ReyesQueueResetPass::Declare(org::PassBuilder& declaration)
 {
     declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
     auto* builder = &declaration;
-    builder->WithUnorderedAccess(m_fullClusterCounter, m_ownedClusterCounter, m_diceQueueCounter, m_diceQueueOverflowCounter, m_telemetryBuffer);
+    ReyesQueueResetBindings bindings{
+        builder->BindUnorderedAccess(m_fullClusterCounter),
+        builder->BindUnorderedAccess(m_ownedClusterCounter),
+        {}, {},
+        builder->BindUnorderedAccess(m_diceQueueCounter),
+        builder->BindUnorderedAccess(m_diceQueueOverflowCounter),
+        builder->BindUnorderedAccess(m_telemetryBuffer)};
     if (m_replaySplitQueueCounter) {
-        builder->WithUnorderedAccess(m_replaySplitQueueCounter);
+        bindings.replaySplitQueueCounter = builder->BindUnorderedAccess(m_replaySplitQueueCounter);
     }
     if (m_replaySplitQueueOverflowCounter) {
-        builder->WithUnorderedAccess(m_replaySplitQueueOverflowCounter);
+        bindings.replaySplitQueueOverflowCounter = builder->BindUnorderedAccess(m_replaySplitQueueOverflowCounter);
     }
     if (m_replayDiceQueueCounter) {
-        builder->WithUnorderedAccess(m_replayDiceQueueCounter);
+        bindings.replayDiceQueueCounter = builder->BindUnorderedAccess(m_replayDiceQueueCounter);
     }
     if (m_replayDiceQueueOverflowCounter) {
-        builder->WithUnorderedAccess(m_replayDiceQueueOverflowCounter);
+        bindings.replayDiceQueueOverflowCounter = builder->BindUnorderedAccess(m_replayDiceQueueOverflowCounter);
     }
     if (m_ownershipBitsetBuffer) {
-        builder->WithUnorderedAccess(m_ownershipBitsetBuffer);
+        bindings.ownershipBitset = builder->BindUnorderedAccess(m_ownershipBitsetBuffer);
     }
     for (const auto& splitQueueCounter : m_splitQueueCounters) {
-        builder->WithUnorderedAccess(splitQueueCounter);
+        bindings.splitQueueCounters.push_back(builder->BindUnorderedAccess(splitQueueCounter));
     }
     for (const auto& splitQueueOverflowCounter : m_splitQueueOverflowCounters) {
-        builder->WithUnorderedAccess(splitQueueOverflowCounter);
+        bindings.splitQueueOverflowCounters.push_back(builder->BindUnorderedAccess(splitQueueOverflowCounter));
     }
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    return bindings;
 }
 
 void ReyesQueueResetPass::Initialize() {}
 
-br::render::PreparedComputePipelineSequence ReyesQueueResetPass::Prepare(const org::PassPrepareContext& preparation)
+br::render::PreparedComputePipelineSequence ReyesQueueResetPass::Prepare(
+    const ReyesQueueResetBindings& bindings, const org::PassPrepareContext& preparation) const
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     br::render::PreparedComputePipelineSequence data{};
@@ -100,25 +108,28 @@ br::render::PreparedComputePipelineSequence ReyesQueueResetPass::Prepare(const o
     counters.descriptorIndices = std::move(program.descriptorIndices);
     counters.groupsX = 1;
     auto& c = counters.constants;
-    c[CLOD_REYES_RESET_FULL_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_fullClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_REYES_RESET_OWNED_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = m_ownedClusterCounter->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_A_DESCRIPTOR_INDEX] = m_splitQueueCounters[0]->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_A_DESCRIPTOR_INDEX] = m_splitQueueOverflowCounters[0]->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_B_DESCRIPTOR_INDEX] = m_splitQueueCounters[1]->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_B_DESCRIPTOR_INDEX] = m_splitQueueOverflowCounters[1]->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_REYES_RESET_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index;
-    c[CLOD_REYES_RESET_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_diceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index;
+    const auto uavIndex = [&](org::ResourceBindingToken token) {
+        return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index;
+    };
+    c[CLOD_REYES_RESET_FULL_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = uavIndex(bindings.fullClusterCounter);
+    c[CLOD_REYES_RESET_OWNED_CLUSTER_COUNTER_DESCRIPTOR_INDEX] = uavIndex(bindings.ownedClusterCounter);
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_A_DESCRIPTOR_INDEX] = uavIndex(bindings.splitQueueCounters.at(0));
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_A_DESCRIPTOR_INDEX] = uavIndex(bindings.splitQueueOverflowCounters.at(0));
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_B_DESCRIPTOR_INDEX] = uavIndex(bindings.splitQueueCounters.at(1));
+    c[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_B_DESCRIPTOR_INDEX] = uavIndex(bindings.splitQueueOverflowCounters.at(1));
+    c[CLOD_REYES_RESET_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = uavIndex(bindings.diceQueueCounter);
+    c[CLOD_REYES_RESET_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = uavIndex(bindings.diceQueueOverflowCounter);
     c[CLOD_REYES_RESET_CLEAR_DICE_QUEUE_COUNTER] = m_clearDiceQueueCounter ? 1u : 0u;
-    c[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replaySplitQueueCounter ? m_replaySplitQueueCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replaySplitQueueOverflowCounter ? m_replaySplitQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_replayDiceQueueCounter ? m_replayDiceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_replayDiceQueueOverflowCounter ? m_replayDiceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    if (m_ownershipBitsetBuffer && m_ownershipBitsetWordCount) {
+    c[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX] = bindings.replaySplitQueueCounter ? uavIndex(*bindings.replaySplitQueueCounter) : 0xFFFFFFFFu;
+    c[CLOD_REYES_RESET_REPLAY_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = bindings.replaySplitQueueOverflowCounter ? uavIndex(*bindings.replaySplitQueueOverflowCounter) : 0xFFFFFFFFu;
+    c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = bindings.replayDiceQueueCounter ? uavIndex(*bindings.replayDiceQueueCounter) : 0xFFFFFFFFu;
+    c[CLOD_REYES_RESET_REPLAY_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = bindings.replayDiceQueueOverflowCounter ? uavIndex(*bindings.replayDiceQueueOverflowCounter) : 0xFFFFFFFFu;
+    if (bindings.ownershipBitset && m_ownershipBitsetWordCount) {
         br::render::PreparedComputePipelineSequence::Step bitset{};
         auto bitsetProgram = preparation.CaptureProgramBinding(m_clearOwnershipBitsetPso);
         bitset.program = bitsetProgram.program;
         bitset.descriptorIndices = std::move(bitsetProgram.descriptorIndices);
-        c[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        c[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = uavIndex(*bindings.ownershipBitset);
         c[CLOD_REYES_RESET_OWNERSHIP_BITSET_WORD_COUNT] = m_ownershipBitsetWordCount;
         bitset.constants = c;
         bitset.groupsX = (m_ownershipBitsetWordCount + 63u) / 64u;
@@ -127,7 +138,8 @@ br::render::PreparedComputePipelineSequence ReyesQueueResetPass::Prepare(const o
     return data;
 }
 
-void ReyesQueueResetPass::Record(const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
+void ReyesQueueResetPass::Record(const ReyesQueueResetBindings&,
+    const br::render::PreparedComputePipelineSequence& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputePipelineSequence(data, recording);
 }
 

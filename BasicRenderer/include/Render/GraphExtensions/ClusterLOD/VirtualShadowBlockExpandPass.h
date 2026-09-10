@@ -38,7 +38,14 @@ struct VirtualShadowBlockFrameData {
     std::vector<br::render::PreparedComputeIndirect> buckets;
 };
 
-class VirtualShadowBlockExpandPass : public org::TypedRenderGraphPass<VirtualShadowBlockExpandPass, VirtualShadowBlockFrameData> {
+struct VirtualShadowBlockBindings {
+    org::ResourceBindingToken sourceVisible, sourceTransforms, sourceHistogram, sourceArgs;
+    org::ResourceBindingToken expandedHistogram, expandedOffsets, expandedCursor, expandedVisible, expandedTransforms;
+    org::ResourceBindingToken clipmapInfo, rigidMetadata, skinnedMetadata, coverage, stats;
+};
+
+class VirtualShadowBlockExpandPass : public org::TypedRenderGraphPass<VirtualShadowBlockExpandPass,
+    VirtualShadowBlockFrameData, VirtualShadowBlockBindings> {
 public:
     VirtualShadowBlockExpandPass(
         VirtualShadowBlockExpandMode mode,
@@ -121,7 +128,7 @@ public:
             "CLod_VirtualShadowBlockExpandClearUintPSO");
     }
 
-    void Declare(org::PassBuilder& declaration)
+    VirtualShadowBlockBindings Declare(org::PassBuilder& declaration)
     {
         declaration.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         auto* builder = &declaration;
@@ -163,6 +170,27 @@ public:
         if (m_slabResourceGroup) {
             builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
         }
+        VirtualShadowBlockBindings bindings{
+            builder->BindShaderResource(m_sourceVisibleClustersBuffer),
+            builder->BindShaderResource(m_sourceVisibleClusterTransformIndicesBuffer),
+            builder->BindShaderResource(m_sourceHistogramBuffer),
+            builder->BindIndirectArguments(m_sourceIndirectArgsBuffer),
+            builder->BindUnorderedAccess(m_expandedHistogramBuffer),
+            {}, {}, {}, {},
+            builder->BindShaderResource(m_virtualShadowClipmapInfoBuffer),
+            builder->BindShaderResource(m_virtualShadowActiveBlockMetadataBuffer),
+            builder->BindShaderResource(m_virtualShadowDynamicActiveBlockMetadataBuffer),
+            m_mode == VirtualShadowBlockExpandMode::Histogram
+                ? builder->BindUnorderedAccess(m_virtualShadowBlockClusterCoverageBuffer)
+                : builder->BindShaderResource(m_virtualShadowBlockClusterCoverageBuffer),
+            builder->BindUnorderedAccess(m_virtualShadowStatsBuffer)};
+        if (m_mode == VirtualShadowBlockExpandMode::Emit) {
+            bindings.expandedOffsets = builder->BindShaderResource(m_expandedOffsetsBuffer);
+            bindings.expandedCursor = builder->BindUnorderedAccess(m_expandedWriteCursorBuffer);
+            bindings.expandedVisible = builder->BindUnorderedAccess(m_expandedVisibleClustersBuffer);
+            bindings.expandedTransforms = builder->BindUnorderedAccess(m_expandedVisibleClusterTransformIndicesBuffer);
+        }
+        return bindings;
     }
 
     void Update(const UpdateExecutionContext& executionContext) override
@@ -189,48 +217,54 @@ public:
         }
     }
 
-    VirtualShadowBlockFrameData Prepare(const org::PassPrepareContext& preparation) {
+    VirtualShadowBlockFrameData Prepare(const VirtualShadowBlockBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         VirtualShadowBlockFrameData data{};
         if (m_runWhenComputeSWRasterEnabledOnly &&
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) return data;
         const auto& context = *preparation.preparationData->Get<UpdateContext>();
         const auto numBuckets = context.preparedRasterBucketCount;
         if (numBuckets == 0u) return data;
-        const auto& bufferToClear = m_mode == VirtualShadowBlockExpandMode::Histogram
-            ? m_expandedHistogramBuffer : m_expandedWriteCursorBuffer;
+        const auto clearToken = m_mode == VirtualShadowBlockExpandMode::Histogram
+            ? bindings.expandedHistogram : bindings.expandedCursor;
+        const auto srv = [&](org::ResourceBindingToken token) {
+            return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index;
+        };
+        const auto uav = [&](org::ResourceBindingToken token) {
+            return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess}).index;
+        };
         data.clear.resourceHeap = context.textureDescriptorHeap.GetHandle();
         data.clear.samplerHeap = context.samplerDescriptorHeap.GetHandle();
         auto clear = preparation.CaptureProgramBinding(m_clearPso);
         data.clear.program = clear.program;
         data.clear.descriptorIndices = std::move(clear.descriptorIndices);
-        data.clear.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = bufferToClear->GetUAVShaderVisibleInfo(0).slot.index;
+        data.clear.constants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = uav(clearToken);
         data.clear.constants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
         data.clear.constants[CLOD_CLEAR_UINT_BUFFER_COUNT] = numBuckets;
         data.clear.groupsX = (numBuckets + 63u) / 64u;
-        data.clearBarrier = preparation.CaptureResource(bufferToClear->GetGlobalResourceID());
-        const auto arguments = preparation.CaptureResource(m_sourceIndirectArgsBuffer->GetGlobalResourceID());
+        data.clearBarrier = preparation.CaptureResource(clearToken);
+        const auto arguments = preparation.CaptureResource(bindings.sourceArgs);
         const auto signature = preparation.CaptureCommandSignature(m_commandSignature);
         const auto rigid = preparation.CaptureProgramBinding(m_rigidPso);
         const auto skinnedBinding = preparation.CaptureProgramBinding(m_skinnedPso);
         uint32_t misc[NumMiscUintRootConstants] = {};
-        misc[CLOD_VSM_BLOCK_EXPAND_SOURCE_HISTOGRAM_DESCRIPTOR_INDEX] = m_sourceHistogramBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_VSM_BLOCK_EXPAND_SOURCE_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_sourceVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_VSM_BLOCK_EXPAND_SOURCE_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_sourceVisibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_HISTOGRAM_DESCRIPTOR_INDEX] = m_expandedHistogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        misc[CLOD_VSM_BLOCK_EXPAND_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_VSM_BLOCK_EXPAND_SOURCE_HISTOGRAM_DESCRIPTOR_INDEX] = srv(bindings.sourceHistogram);
+        misc[CLOD_VSM_BLOCK_EXPAND_SOURCE_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.sourceVisible);
+        misc[CLOD_VSM_BLOCK_EXPAND_SOURCE_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.sourceTransforms);
+        misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_HISTOGRAM_DESCRIPTOR_INDEX] = uav(bindings.expandedHistogram);
+        misc[CLOD_VSM_BLOCK_EXPAND_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = srv(bindings.clipmapInfo);
         misc[CLOD_VSM_BLOCK_EXPAND_CLUSTER_COVERAGE_DESCRIPTOR_INDEX] =
             m_mode == VirtualShadowBlockExpandMode::Histogram
-                ? m_virtualShadowBlockClusterCoverageBuffer->GetUAVShaderVisibleInfo(0).slot.index
-                : m_virtualShadowBlockClusterCoverageBuffer->GetSRVInfo(0).slot.index;
+                ? uav(bindings.coverage) : srv(bindings.coverage);
         misc[CLOD_VSM_BLOCK_EXPAND_RECORD_CAPACITY] = m_expandedRecordCapacity;
         misc[CLOD_VSM_BLOCK_EXPAND_STATS_DESCRIPTOR_INDEX] =
-            m_virtualShadowStatsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uav(bindings.stats);
 
         if (m_mode == VirtualShadowBlockExpandMode::Emit) {
-            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_OFFSETS_DESCRIPTOR_INDEX] = m_expandedOffsetsBuffer->GetSRVInfo(0).slot.index;
-            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_expandedWriteCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_expandedVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_expandedVisibleClusterTransformIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_OFFSETS_DESCRIPTOR_INDEX] = srv(bindings.expandedOffsets);
+            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_WRITE_CURSOR_DESCRIPTOR_INDEX] = uav(bindings.expandedCursor);
+            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = uav(bindings.expandedVisible);
+            misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = uav(bindings.expandedTransforms);
         }
 
         data.buckets.reserve(numBuckets);
@@ -239,10 +273,7 @@ public:
             const bool skinned =
                 (flags & MaterialRasterFlagsSkinned) != 0;
             misc[CLOD_VSM_BLOCK_EXPAND_ACTIVE_BLOCK_METADATA_DESCRIPTOR_INDEX] =
-                (skinned
-                    ? m_virtualShadowDynamicActiveBlockMetadataBuffer
-                    : m_virtualShadowActiveBlockMetadataBuffer)
-                    ->GetSRVInfo(0).slot.index;
+                srv(skinned ? bindings.skinnedMetadata : bindings.rigidMetadata);
 
             const auto& binding = skinned ? skinnedBinding : rigid;
             br::render::PreparedComputeIndirect bucket{};
@@ -259,7 +290,8 @@ public:
         return data;
     }
 
-    static void Record(const VirtualShadowBlockFrameData& data, org::PassRecordContext& recording) {
+    static void Record(const VirtualShadowBlockBindings&, const VirtualShadowBlockFrameData& data,
+        org::PassRecordContext& recording) {
         if (data.clear.groupsX == 0) return;
         br::render::RecordPreparedComputeDispatch(data.clear, recording);
         br::render::RecordPreparedComputeUavBarrier(data.clearBarrier, recording);

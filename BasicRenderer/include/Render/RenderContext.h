@@ -9,6 +9,8 @@
 #include "Render/SceneFrameSnapshot.h"
 #include "Render/PublishedRendererState.h"
 #include "Render/RasterBucketFlags.h"
+#include "Render/ObjectBufferStateArtifacts.h"
+#include "ShaderBuffers.h"
 
 class Scene;
 class ObjectManager;
@@ -21,6 +23,8 @@ class MaterialManager;
 class SkeletonManager;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
+template<class T> class DynamicStructuredBuffer;
+class SortedUnsignedIntBuffer;
 
 namespace br::render {
 class CLodRayTracingSystem;
@@ -33,6 +37,25 @@ struct PreparedViewFrameData {
 	bool shadow = false;
 	bool cascade = false;
 	Components::LightType lightType = Components::LightType::Directional;
+	std::shared_ptr<PixelBuffer> visibilityBuffer;
+	std::shared_ptr<PixelBuffer> deepVisibilityHeadPointers;
+	uint32_t visibilitySRVIndex = 0xFFFFFFFFu;
+	uint32_t visibilityUAVIndex = 0xFFFFFFFFu;
+	uint32_t deepVisibilityHeadPointersUAVIndex = 0xFFFFFFFFu;
+};
+
+using PreparedActiveDrawEntry = br::render::PublishedActiveSkinnedPlacement;
+
+// Transitional object publication selected before graph update. CPU records
+// are copied; resource identities are retained so declarations can freeze their
+// exact backing versions for the accepted frame.
+struct PreparedObjectFrameData {
+	uint32_t residentTransformCount = 0;
+	std::shared_ptr<DynamicStructuredBuffer<SkinnedAssemblyPlacementGPU>> skinnedPlacements;
+	std::shared_ptr<SortedUnsignedIntBuffer> activeSkinnedPlacements;
+	uint32_t activeSkinnedPlacementResidentSize = 0;
+	std::shared_ptr<const std::vector<SkinnedAssemblyPlacementGPU>> placementRecords;
+	std::shared_ptr<const std::vector<PreparedActiveDrawEntry>> activePlacementEntries;
 };
 
 struct RenderContext {
@@ -50,6 +73,9 @@ struct RenderContext {
 	// Owner-thread snapshot used by delayed typed/transitioning packets. A
 	// recording worker must not enumerate the live ViewManager container.
 	std::vector<PreparedViewFrameData> preparedViews;
+	uint32_t preparedViewCameraBufferSize = 0;
+	uint64_t preparedViewResourceLayoutRevision = 0;
+	PreparedObjectFrameData preparedObjects;
 	uint32_t preparedRasterBucketCount = 0;
 	std::vector<MaterialRasterFlags> preparedRasterBucketFlags;
 
@@ -93,6 +119,10 @@ struct UpdateContext {
 	// must use this rather than racing the live manager between phases.
 	uint32_t preparedRasterBucketCount = 0;
 	std::vector<MaterialRasterFlags> preparedRasterBucketFlags;
+	std::vector<PreparedViewFrameData> preparedViews;
+	uint32_t preparedViewCameraBufferSize = 0;
+	uint64_t preparedViewResourceLayoutRevision = 0;
+	PreparedObjectFrameData preparedObjects;
 	SkeletonManager* skeletonManager = nullptr;
 	rhi::DescriptorHeap textureDescriptorHeap;
 	rhi::DescriptorHeap samplerDescriptorHeap;

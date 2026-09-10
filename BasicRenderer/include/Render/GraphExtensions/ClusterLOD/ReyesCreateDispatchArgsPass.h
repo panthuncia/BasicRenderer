@@ -9,7 +9,15 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class ReyesCreateDispatchArgsPass final : public org::TypedRenderGraphPass<ReyesCreateDispatchArgsPass, br::render::PreparedComputeDispatch> {
+struct ReyesCreateDispatchArgsBindings {
+    org::ResourceBindingToken sourceCounter, indirectArgs, sourceBaseCounter;
+    uint32_t threadsPerGroup = 0;
+    uint32_t maxWorkItemCount = 0;
+    bool hasSourceBaseCounter = false;
+};
+
+class ReyesCreateDispatchArgsPass final : public org::TypedRenderGraphPass<ReyesCreateDispatchArgsPass,
+    br::render::PreparedComputeDispatch, ReyesCreateDispatchArgsBindings> {
 public:
     ReyesCreateDispatchArgsPass(
         std::shared_ptr<Buffer> sourceCounterBuffer,
@@ -18,10 +26,12 @@ public:
         uint32_t threadsPerGroup = 64u,
         uint32_t maxWorkItemCount = 0xFFFFFFFFu);
 
-    void Declare(org::PassBuilder& builder);
+    ReyesCreateDispatchArgsBindings Declare(org::PassBuilder& builder);
     void Initialize();
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const ReyesCreateDispatchArgsBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesCreateDispatchArgsBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
     void ShutdownPass();
 

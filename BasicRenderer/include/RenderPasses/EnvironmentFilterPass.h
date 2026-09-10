@@ -15,21 +15,32 @@
 
 #include <vector>
 
-class EnvironmentFilterPass : public org::TypedRenderGraphPass<EnvironmentFilterPass, br::render::PreparedEnvironmentDispatch>, public IDynamicDeclaredResources {
+struct EnvironmentFilterBindings {
+    struct Job {
+        org::ResourceBindingToken source, destination;
+        uint32_t baseResolution = 0, mipCount = 0;
+    };
+    std::vector<Job> jobs;
+};
+
+class EnvironmentFilterPass : public org::TypedRenderGraphPass<EnvironmentFilterPass,
+    br::render::PreparedEnvironmentDispatch, EnvironmentFilterBindings>, public IDynamicDeclaredResources {
 public:
     EnvironmentFilterPass() {
         CreatePrefilterPSO();
     }
 
-    void Declare(org::PassBuilder& builder) {
+    EnvironmentFilterBindings Declare(org::PassBuilder& builder) {
+        EnvironmentFilterBindings bindings;
         for (const auto& j : m_pending) {
             if (!j->work.srcCubemap || !j->work.dstPrefilteredCubemap) continue;
-
-            builder.WithShaderResource(j->work.srcCubemap);
-            builder.WithUnorderedAccess(j->work.dstPrefilteredCubemap);
+            bindings.jobs.push_back({builder.BindShaderResource(j->work.srcCubemap),
+                builder.BindUnorderedAccess(j->work.dstPrefilteredCubemap), j->work.baseResolution,
+                j->work.dstPrefilteredCubemap->GetNumUAVMipLevels()});
         }
 
         m_declaredResourcesChanged = false;
+        return bindings;
     }
 
 
@@ -41,7 +52,8 @@ public:
         if (pending != m_pending) { m_pending = std::move(pending); m_declaredResourcesChanged = true; }
     }
 
-    br::render::PreparedEnvironmentDispatch Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedEnvironmentDispatch Prepare(const EnvironmentFilterBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         br::render::PreparedEnvironmentDispatch data;
         if (m_pending.empty()) return data;
         const auto* context = preparation.preparationData->Get<UpdateContext>();
@@ -49,15 +61,17 @@ public:
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
         data.program = preparation.CaptureProgram(m_pso);
         data.constantCount = 5;
-        for (const auto& entry : m_pending) {
-            const auto& job = entry->work;
-            const auto src = job.srcCubemap->GetSRVInfo(0).slot.index;
-            const auto mipCount = job.dstPrefilteredCubemap->GetNumUAVMipLevels();
+        for (const auto& job : bindings.jobs) {
+            const auto src = preparation.ResolveView(job.source,
+                {org::BindlessViewKind::ShaderResource}).index;
+            const auto mipCount = job.mipCount;
             for (uint32_t mip = 0; mip < mipCount; ++mip) {
                 const auto size = std::max(1u, job.baseResolution >> mip);
                 const auto roughness = as_uint(mipCount > 1 ? float(mip) / float(mipCount - 1) : 0.0f);
                 for (uint32_t face = 0; face < 6; ++face)
-                    data.faces.push_back({{src, job.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, face).slot.index, face, size, roughness}, (size + 7) / 8});
+                    data.faces.push_back({{src, preparation.ResolveView(job.destination,
+                        {org::BindlessViewKind::UnorderedAccess, UINT32_MAX, mip, face}).index,
+                        face, size, roughness}, (size + 7) / 8});
             }
         }
         m_work.Reserve(m_pending, preparation);
@@ -65,7 +79,8 @@ public:
         return data;
     }
 
-    static void Record(const br::render::PreparedEnvironmentDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const EnvironmentFilterBindings&, const br::render::PreparedEnvironmentDispatch& data,
+        org::PassRecordContext& recording) {
         br::render::RecordEnvironmentDispatch(data, recording);
     }
 
@@ -76,9 +91,9 @@ public:
 
 
 private:
-    EnvironmentManager::PrefilterWorkQueue m_work;
-    EnvironmentManager::PrefilterWorkQueue::Snapshot m_pending;
-    bool m_declaredResourcesChanged = true;
+    mutable EnvironmentManager::PrefilterWorkQueue m_work;
+    mutable EnvironmentManager::PrefilterWorkQueue::Snapshot m_pending;
+    mutable bool m_declaredResourcesChanged = true;
 
     PipelineState m_pso;
 

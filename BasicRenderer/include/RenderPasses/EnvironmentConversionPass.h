@@ -12,23 +12,30 @@
 
 #include <vector>
 
-class EnvironmentConversionPass : public org::TypedRenderGraphPass<EnvironmentConversionPass, br::render::PreparedEnvironmentDispatch>, public IDynamicDeclaredResources {
+struct EnvironmentConversionBindings {
+    struct Job { org::ResourceBindingToken source, destination; uint32_t size = 0; };
+    std::vector<Job> jobs;
+};
+
+class EnvironmentConversionPass : public org::TypedRenderGraphPass<EnvironmentConversionPass,
+    br::render::PreparedEnvironmentDispatch, EnvironmentConversionBindings>, public IDynamicDeclaredResources {
 public:
     EnvironmentConversionPass() {
 
         CreateEnvironmentConversionPSO();
     }
 
-    void Declare(org::PassBuilder& builder) {
+    EnvironmentConversionBindings Declare(org::PassBuilder& builder) {
+        EnvironmentConversionBindings bindings;
         builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         for (const auto& j : m_pending) {
             if (!j->work.srcTexture || !j->work.dstCubemap) continue;
-
-            builder.WithShaderResource(j->work.srcTexture);
-            builder.WithUnorderedAccess(j->work.dstCubemap);
+            bindings.jobs.push_back({builder.BindShaderResource(j->work.srcTexture),
+                builder.BindUnorderedAccess(j->work.dstCubemap), j->work.dstCubemap->GetWidth()});
         }
 
         m_declaredResourcesChanged = false;
+        return bindings;
     }
 
 
@@ -40,7 +47,8 @@ public:
         if (pending != m_pending) { m_pending = std::move(pending); m_declaredResourcesChanged = true; }
     }
 
-    br::render::PreparedEnvironmentDispatch Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedEnvironmentDispatch Prepare(const EnvironmentConversionBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         br::render::PreparedEnvironmentDispatch data;
         if (m_pending.empty()) return data;
         const auto* context = preparation.preparationData->Get<UpdateContext>();
@@ -48,19 +56,22 @@ public:
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
         data.program = preparation.CaptureProgram(m_pso);
         data.constantCount = 4;
-        for (const auto& entry : m_pending) {
-            const auto& job = entry->work;
-            const auto size = job.dstCubemap->GetWidth();
-            const auto src = job.srcTexture->GetSRVInfo(0).slot.index;
+        for (const auto& job : bindings.jobs) {
+            const auto size = job.size;
+            const auto src = preparation.ResolveView(job.source,
+                {org::BindlessViewKind::ShaderResource}).index;
             for (uint32_t face = 0; face < 6; ++face)
-                data.faces.push_back({{src, job.dstCubemap->GetUAVShaderVisibleInfo(0, face).slot.index, face, size, 0}, (size + 7) / 8});
+                data.faces.push_back({{src, preparation.ResolveView(job.destination,
+                    {org::BindlessViewKind::UnorderedAccess, UINT32_MAX, 0, face}).index,
+                    face, size, 0}, (size + 7) / 8});
         }
         m_work.Reserve(m_pending, preparation);
         m_pending.clear(); m_declaredResourcesChanged = true;
         return data;
     }
 
-    static void Record(const br::render::PreparedEnvironmentDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const EnvironmentConversionBindings&, const br::render::PreparedEnvironmentDispatch& data,
+        org::PassRecordContext& recording) {
         br::render::RecordEnvironmentDispatch(data, recording);
     }
 
@@ -71,9 +82,9 @@ public:
 
 
 private:
-    EnvironmentManager::ConversionWorkQueue m_work;
-    EnvironmentManager::ConversionWorkQueue::Snapshot m_pending;
-    bool m_declaredResourcesChanged = true;
+    mutable EnvironmentManager::ConversionWorkQueue m_work;
+    mutable EnvironmentManager::ConversionWorkQueue::Snapshot m_pending;
+    mutable bool m_declaredResourcesChanged = true;
 
     PipelineState m_pso;
 

@@ -8,16 +8,17 @@
 namespace org { class Buffer; }
 using org::Buffer;
 
-class AVBOITDepthWarpPass final : public org::TypedRenderGraphPass<AVBOITDepthWarpPass, br::render::PreparedComputeDispatch> {
+struct AVBOITDepthWarpBindings { org::ResourceBindingToken config, histogram, lut; };
+class AVBOITDepthWarpPass final : public org::TypedRenderGraphPass<AVBOITDepthWarpPass, br::render::PreparedComputeDispatch, AVBOITDepthWarpBindings> {
 public:
     AVBOITDepthWarpPass(
         std::shared_ptr<Buffer> configBuffer,
         std::shared_ptr<Buffer> occupancyHistogramBuffer,
         std::shared_ptr<Buffer> depthWarpLUTBuffer);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    AVBOITDepthWarpBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITDepthWarpBindings&, const org::PassPrepareContext&) const;
+    static void Record(const AVBOITDepthWarpBindings&, const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

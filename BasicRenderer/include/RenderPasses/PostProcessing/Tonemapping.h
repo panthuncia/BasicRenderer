@@ -25,8 +25,12 @@ A_STATIC void LpmSetupOut(AU1 i, inAU4 v)
 #include "../shaders/FidelityFX/ffx_lpm.h"
 #include "../shaders/PerPassRootConstants/tonemapRootConstants.h"
 
+struct TonemappingBindings {
+    org::ResourceBindingToken lpm, bloom;
+};
+
 class TonemappingPass : public org::TypedRenderGraphPass<
-    TonemappingPass, br::render::PreparedFullscreenDraw> {
+    TonemappingPass, br::render::PreparedFullscreenDraw, TonemappingBindings> {
 public:
 	explicit TonemappingPass(bool bloomEnabled = false)
         : m_bloomEnabled(bloomEnabled) {
@@ -45,21 +49,20 @@ public:
 		return m_providedResources;
     }
 
-    void Declare(org::PassBuilder& builder) {
-        builder.WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer, "FFX::LPMConstants")
+    TonemappingBindings Declare(org::PassBuilder& builder) {
+        builder.WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer)
             .WithRenderTarget(Builtin::Backbuffer);
+        TonemappingBindings bindings{};
+        bindings.lpm = builder.BindShaderResource(m_pLPMConstants);
         if (m_bloomEnabled) {
-            builder.WithShaderResource(Subresources(Builtin::PostProcessing::BloomTexture, Mip{ 1, 2 }));
+            bindings.bloom = builder.BindShaderResource(
+                Subresources(Builtin::PostProcessing::BloomTexture, Mip{ 1, 2 }));
         }
 		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+        return bindings;
     }
 
 	void Initialize() {
-        if (m_bloomEnabled) {
-            m_pBloomTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(
-                Builtin::PostProcessing::BloomTexture);
-        }
-
         LPMConstants lpmConstants = {};
 
         lpmConstants.shoulder = true;
@@ -74,7 +77,8 @@ public:
         BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), org::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
     }
 
-	br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
+	br::render::PreparedFullscreenDraw Prepare(const TonemappingBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
 		const auto* context = preparation.preparationData->Get<UpdateContext>();
 		br::render::PreparedFullscreenDraw data{};
 		data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
@@ -84,18 +88,21 @@ public:
 
         br::render::BindPreparedProgram(
             data, preparation, m_pso);
-		data.constants[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
+		data.constants[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.lpm, {org::BindlessViewKind::ShaderResource}).index;
 		data.constants[TONEMAP_TYPE] = getTonemapType(); data.constants[TONEMAP_BLOOM_ENABLED] = m_bloomEnabled ? 1u : 0u;
 		if (m_bloomEnabled) {
-			data.constants[TONEMAP_BLOOM_MIP1_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(1).slot.index;
-			data.constants[TONEMAP_BLOOM_MIP2_SRV_DESCRIPTOR_INDEX] = m_pBloomTarget->GetSRVInfo(2).slot.index;
+			data.constants[TONEMAP_BLOOM_MIP1_SRV_DESCRIPTOR_INDEX] = preparation.ResolveView(
+                bindings.bloom, {org::BindlessViewKind::ShaderResource, UINT32_MAX, 1}).index;
+			data.constants[TONEMAP_BLOOM_MIP2_SRV_DESCRIPTOR_INDEX] = preparation.ResolveView(
+                bindings.bloom, {org::BindlessViewKind::ShaderResource, UINT32_MAX, 2}).index;
 			data.constants[TONEMAP_BLOOM_FILTER_RADIUS] = as_uint(0.001f);
 			data.constants[TONEMAP_BLOOM_ASPECT_RATIO] = as_uint(context->outputResolution.x / static_cast<float>(context->outputResolution.y));
 		}
 		return data;
 	}
 
-    static void Record(const br::render::PreparedFullscreenDraw& data,
+    static void Record(const TonemappingBindings&, const br::render::PreparedFullscreenDraw& data,
         org::PassRecordContext& recording) {
         br::render::RecordPreparedFullscreenDraw(data, recording);
     }
@@ -108,7 +115,6 @@ private:
 
     std::function<unsigned int()> getTonemapType;
     bool m_bloomEnabled = false;
-    PixelBuffer* m_pBloomTarget = nullptr;
 
     std::vector<ResourceIdentifier> m_providedResources = {
 		"FFX::LPMConstants"

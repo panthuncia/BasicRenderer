@@ -15,7 +15,15 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapAdmitPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapAdmitPagesPass, br::render::PreparedComputePipelineSequence> {
+struct VirtualShadowMapAdmitPagesBindings {
+    org::ResourceBindingToken pageTable, dirtyPageFlags, pageMetadata, clipmapInfo, compactShadowCameras, stats;
+    std::vector<org::ResourceBindingToken> upgradeInputs;
+    uint32_t normalBudget = 0;
+    uint32_t upgradeBudget = 0;
+};
+
+class VirtualShadowMapAdmitPagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapAdmitPagesPass,
+    br::render::PreparedComputePipelineSequence, VirtualShadowMapAdmitPagesBindings> {
 public:
     VirtualShadowMapAdmitPagesPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
@@ -27,9 +35,11 @@ public:
         std::shared_ptr<Buffer> statsBuffer,
         VirtualShadowUpgradeQueue upgradeQueue);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputePipelineSequence Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
+    VirtualShadowMapAdmitPagesBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputePipelineSequence Prepare(const VirtualShadowMapAdmitPagesBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapAdmitPagesBindings&,
+        const br::render::PreparedComputePipelineSequence&, org::PassRecordContext&);
 
 private:
     PipelineState m_pso;

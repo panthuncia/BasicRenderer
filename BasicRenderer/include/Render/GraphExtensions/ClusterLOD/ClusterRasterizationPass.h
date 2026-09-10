@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -30,8 +31,22 @@ struct ClusterRasterizationPassInputs {
     RG_DEFINE_PASS_INPUTS(ClusterRasterizationPassInputs, &ClusterRasterizationPassInputs::wireframe, &ClusterRasterizationPassInputs::clearGbuffer, &ClusterRasterizationPassInputs::renderPhase, &ClusterRasterizationPassInputs::outputKind);
 };
 
+struct ClusterRasterBindings {
+    org::ResourceBindingToken histogram, visible, transforms, viewInfo, mapping, indirectArgs;
+    org::ResourceBindingToken telemetry, mismatchCounter, mismatchDetails;
+    org::ResourceBindingToken pageTable, clipmapInfo, physicalPages, dynamicPages;
+    org::ResourceBindingToken deepNodes, deepCounter, deepOverflow;
+    org::ResourceBindingToken avboitConfig, visibleResolve;
+    std::array<org::ResourceBindingToken, 3> colors{};
+    org::ResourceBindingToken depth;
+    std::vector<org::ResourceBindingToken> visibilityBuffers;
+    bool hasTelemetry = false, hasMismatch = false, virtualShadow = false;
+    bool deepVisibility = false, avboit = false, hasVisibleResolve = false, hasDepth = false;
+};
+
 class ClusterRasterizationPass
-    : public org::TypedRenderGraphPass<ClusterRasterizationPass, br::render::PreparedRenderIndirectSequence>,
+    : public org::TypedRenderGraphPass<ClusterRasterizationPass,
+          br::render::PreparedRenderIndirectSequence, ClusterRasterBindings>,
       public IDynamicDeclaredResources {
 public:
     ClusterRasterizationPass(
@@ -66,12 +81,14 @@ public:
           std::shared_ptr<PixelBuffer> virtualShadowDynamicPagesTexture = nullptr);
     ~ClusterRasterizationPass();
 
-    void Declare(org::PassBuilder& builder);
+    ClusterRasterBindings Declare(org::PassBuilder& builder);
     void Initialize();
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
-    br::render::PreparedRenderIndirectSequence Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedRenderIndirectSequence& data, org::PassRecordContext& recording) {
+    br::render::PreparedRenderIndirectSequence Prepare(const ClusterRasterBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ClusterRasterBindings&, const br::render::PreparedRenderIndirectSequence& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedRenderIndirectSequence(data, recording);
     }
 
@@ -89,7 +106,6 @@ private:
     std::shared_ptr<Buffer> m_compactedVisibleClusterTransformIndicesBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
-	org::ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;

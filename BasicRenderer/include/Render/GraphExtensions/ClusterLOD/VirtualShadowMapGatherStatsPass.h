@@ -11,7 +11,13 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapGatherStatsPass final : public org::TypedRenderGraphPass<VirtualShadowMapGatherStatsPass, br::render::PreparedComputeDispatch> {
+struct VirtualShadowMapGatherStatsBindings {
+    org::ResourceBindingToken pageTable, allocationCount, allocationArgs, header, pageMetadata, clipmapInfo, stats;
+    bool capturePreAllocateState = false;
+};
+
+class VirtualShadowMapGatherStatsPass final : public org::TypedRenderGraphPass<VirtualShadowMapGatherStatsPass,
+    br::render::PreparedComputeDispatch, VirtualShadowMapGatherStatsBindings> {
 public:
     VirtualShadowMapGatherStatsPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
@@ -23,10 +29,12 @@ public:
         std::shared_ptr<Buffer> statsBuffer,
         bool capturePreAllocateState);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapGatherStatsBindings Declare(org::PassBuilder& builder);
     void Initialize();
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const VirtualShadowMapGatherStatsBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapGatherStatsBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
     void ShutdownPass();
 
 private:

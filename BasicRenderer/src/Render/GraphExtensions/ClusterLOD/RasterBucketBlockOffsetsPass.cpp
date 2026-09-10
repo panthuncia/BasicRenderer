@@ -28,42 +28,47 @@ RasterBucketBlockOffsetsPass::RasterBucketBlockOffsetsPass(
         "CLod_RasterBucketsBlockOffsetsPSO");
 }
 
-void RasterBucketBlockOffsetsPass::Declare(org::PassBuilder& builder) {
-    builder.WithShaderResource(m_blockSumsBuffer)
-        .WithUnorderedAccess(m_offsetsBuffer, m_scannedBlockSumsBuffer, m_totalCountBuffer);
+RasterBucketBlockOffsetsBindings RasterBucketBlockOffsetsPass::Declare(org::PassBuilder& builder) {
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+    return {builder.BindUnorderedAccess(m_offsetsBuffer), builder.BindShaderResource(m_blockSumsBuffer),
+        builder.BindUnorderedAccess(m_scannedBlockSumsBuffer), builder.BindUnorderedAccess(m_totalCountBuffer),
+        m_numBuckets, m_enabled};
 }
 
 
-br::render::PreparedComputeDispatch RasterBucketBlockOffsetsPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeDispatch RasterBucketBlockOffsetsPass::Prepare(
+    const RasterBucketBlockOffsetsBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
+    const uint32_t numBuckets = context->preparedRasterBucketCount;
+    const bool enabled = numBuckets != 0u && (!m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)()));
     br::render::PreparedComputeDispatch data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle();
     data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
     data.program = preparation.CaptureProgram(m_pso);
     data.descriptorIndices = CaptureResourceDescriptorIndices(m_pso.GetResourceDescriptorSlots());
-    const auto numBuckets = context->materialManager->GetRasterBucketCount();
     data.constants[CLOD_PREFIX_OFFSETS_NUM_BUCKETS] = numBuckets;
     data.constants[CLOD_PREFIX_OFFSETS_NUM_BLOCKS] = (numBuckets + m_blockSize - 1u) / m_blockSize;
-    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_blockSumsBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_scannedBlockSumsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX] = m_totalCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.groupsX = (!m_runWhenComputeSWRasterEnabledOnly
-        || CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) ? 1u : 0u;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.offsets, {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.blockSums, {org::BindlessViewKind::ShaderResource}).index;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.scannedBlockSums, {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.totalCount, {org::BindlessViewKind::UnorderedAccess}).index;
+    data.groupsX = enabled ? 1u : 0u;
     return data;
 }
 
 void RasterBucketBlockOffsetsPass::Update(const UpdateExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
+    m_enabled = !m_runWhenComputeSWRasterEnabledOnly ||
+        CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)());
+    if (!m_enabled) {
         return;
     }
 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
-    auto numBuckets = context.preparedRasterBucketCount;
-    const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
+    m_numBuckets = context.preparedRasterBucketCount;
+    const uint32_t numBlocks = (m_numBuckets + m_blockSize - 1) / m_blockSize;
 
     if (m_scannedBlockSumsBuffer->GetSize() < static_cast<size_t>(numBlocks) * sizeof(uint32_t)) {
         m_scannedBlockSumsBuffer->ResizeStructured(numBlocks);

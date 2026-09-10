@@ -11,7 +11,12 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapComposePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapComposePagesPass, br::render::PreparedComputeDispatch> {
+struct VirtualShadowMapComposePagesBindings {
+    org::ResourceBindingToken staticPages, dynamicPages, pageTable, pageMetadata, stats;
+};
+
+class VirtualShadowMapComposePagesPass final : public org::TypedRenderGraphPass<VirtualShadowMapComposePagesPass,
+    br::render::PreparedComputeDispatch, VirtualShadowMapComposePagesBindings> {
 public:
     VirtualShadowMapComposePagesPass(
         std::shared_ptr<PixelBuffer> staticPagesTexture,
@@ -20,10 +25,12 @@ public:
         std::shared_ptr<Buffer> pageMetadataBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapComposePagesBindings Declare(org::PassBuilder& builder);
     void Initialize() {}
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const VirtualShadowMapComposePagesBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapComposePagesBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
     void ShutdownPass() {}
 
 private:

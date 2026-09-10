@@ -33,7 +33,7 @@ struct PreparedForwardIndirect {
     rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
     rhi::PipelineLayoutHandle layout{};
     rhi::CommandSignatureHandle commandSignature{};
-    rhi::DescriptorSlot color{}, depth{};
+    org::PreparedDescriptorReference color{}, depth{};
     DirectX::XMUINT2 resolution{};
     std::array<unsigned int, 3> settings{};
     std::vector<Draw> draws;
@@ -46,8 +46,8 @@ inline void RecordPreparedForwardIndirect(const PreparedForwardIndirect& data, o
     if (data.resourceHeap.valid())
         commands.SetDescriptorHeaps(data.resourceHeap,
             data.samplerHeap.valid() ? std::optional{data.samplerHeap} : std::nullopt);
-    rhi::ColorAttachment color{}; color.rtv = data.color; color.loadOp = rhi::LoadOp::Load; color.storeOp = rhi::StoreOp::Store;
-    rhi::DepthAttachment depth{}; depth.dsv = data.depth; depth.depthLoad = rhi::LoadOp::Load; depth.depthStore = rhi::StoreOp::Store;
+    rhi::ColorAttachment color{}; color.rtv = recording.Resolve(data.color); color.loadOp = rhi::LoadOp::Load; color.storeOp = rhi::StoreOp::Store;
+    rhi::DepthAttachment depth{}; depth.dsv = recording.Resolve(data.depth); depth.depthLoad = rhi::LoadOp::Load; depth.depthStore = rhi::StoreOp::Store;
     depth.stencilLoad = rhi::LoadOp::DontCare; depth.stencilStore = rhi::StoreOp::DontCare;
     rhi::PassBeginInfo pass{}; pass.colors = {&color, 1}; pass.depth = &depth;
     pass.width = data.resolution.x; pass.height = data.resolution.y; pass.debugName = "Forward Render Pass";
@@ -76,8 +76,13 @@ struct ForwardRenderPassInputs {
 };
 
 
+struct ForwardRenderBindings {
+    org::ResourceBindingToken color, depth;
+};
+
 class ForwardRenderPass
-    : public org::TypedRenderGraphPass<ForwardRenderPass, br::render::PreparedForwardIndirect> {
+    : public org::TypedRenderGraphPass<ForwardRenderPass,
+        br::render::PreparedForwardIndirect, ForwardRenderBindings> {
 public:
     ForwardRenderPass()
     {
@@ -92,7 +97,7 @@ public:
     ~ForwardRenderPass() {
     }
 
-    void Declare(org::PassBuilder& declaration) {
+    ForwardRenderBindings Declare(org::PassBuilder& declaration) {
 		auto* builder = &declaration;
 		auto inputs = Inputs<ForwardRenderPassInputs>();
 		m_wireframe = inputs.wireframe;
@@ -119,10 +124,12 @@ public:
 			Builtin::OpenPBR::IdealMetalEnergyComplement,
             Builtin::OpenPBR::IdealMetalAverageEnergyComplement,
 			Builtin::OpenPBR::OpaqueDielectricEnergyComplement,
-			Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement)
-            .WithRenderTarget(Builtin::Color::HDRColorTarget)
-            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+            Builtin::OpenPBR::OpaqueDielectricAverageEnergyComplement)
             .IsGeometryPass();
+
+        ForwardRenderBindings bindings{
+            builder->BindRenderTarget(Builtin::Color::HDRColorTarget),
+            builder->BindDepthReadWrite(Builtin::PrimaryCamera::DepthTexture) };
 
         if (getShadowsEnabled()) {
             builder->WithShaderResource(Builtin::Shadows::CLodClipmapInfo,
@@ -154,6 +161,7 @@ public:
             }
         }
 		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+        return bindings;
     }
 
     void Initialize() {
@@ -162,15 +170,12 @@ public:
             RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
         }
 
-        // Setup resources
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
-
         //if (m_meshShaders)
             //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }
 
-    br::render::PreparedForwardIndirect Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedForwardIndirect Prepare(const ForwardRenderBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         const auto published = context->publishedRendererState
             ? context->publishedRendererState->indirectWorkloads.payload.Get<br::render::PublishedIndirectState>() : nullptr;
@@ -181,7 +186,8 @@ public:
         data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
         data.commandSignature = preparation.CaptureCommandSignature(
             CommandSignatureManager::GetInstance().CaptureDispatchMeshCommandSignature());
-        data.color = m_pHDRTarget->GetRTVInfo(0).slot; data.depth = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
+        data.color = preparation.CaptureView(bindings.color, {org::BindlessViewKind::RenderTarget});
+        data.depth = preparation.CaptureView(bindings.depth, {org::BindlessViewKind::DepthStencil});
         data.resolution = context->renderResolution;
         data.settings = {getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled};
         if (!m_meshShaders || !m_indirect)
@@ -204,168 +210,17 @@ public:
         }
         return data;
     }
-    static void Record(const br::render::PreparedForwardIndirect& data, org::PassRecordContext& recording) {
+    static void Record(const ForwardRenderBindings&, const br::render::PreparedForwardIndirect& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedForwardIndirect(data, recording);
     }
 
 private:
-    // Retained temporarily as implementation reference for the unimplemented
-    // direct-forward modes; graph execution uses only the typed packet above.
-    void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
-
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-		rhi::PassBeginInfo passInfo{};
-		rhi::ColorAttachment colorAttachment{};
-		colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(0).slot;
-		colorAttachment.loadOp = rhi::LoadOp::Load;
-		colorAttachment.storeOp = rhi::StoreOp::Store;
-		colorAttachment.clear = m_pHDRTarget->GetClearColor();
-		passInfo.colors = { &colorAttachment, 1 };
-		rhi::DepthAttachment depthAttachment{};
-		depthAttachment.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
-		depthAttachment.depthLoad = rhi::LoadOp::Load;
-		depthAttachment.depthStore = rhi::StoreOp::Store;
-		depthAttachment.stencilLoad = rhi::LoadOp::DontCare;
-		depthAttachment.stencilStore = rhi::StoreOp::DontCare;
-		depthAttachment.clear = m_pPrimaryDepthBuffer->GetClearColor();
-		passInfo.depth = &depthAttachment;
-		passInfo.width = context.renderResolution.x;
-		passInfo.height = context.renderResolution.y;
-		passInfo.debugName = "Forward Render Pass";
-		commandList.BeginPass(passInfo);
-
-        commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
-		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-    }
-
-    void SetCommonRootConstants(const RenderContext& context, rhi::CommandList& commandList) {
-        unsigned int settings[] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
-
-        if (m_meshShaders) {
-            //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-        }
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscEnableShadows, 3, settings);
-    }
-
-    void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
-        // Regular forward rendering using DrawIndexedInstanced
-        auto& psoManager = PSOManager::GetInstance();
-
-        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
-			auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash]; // Pull out only the meshes for this render phase
-
-            unsigned int perObjectIndex = drawInfo.perObjectCBIndex;
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerObjectBufferIndex, 1, &perObjectIndex);
-
-            for (auto& pMesh : meshes) {
-                auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                unsigned int perMeshIndices[] = {
-                    static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB)),
-                    static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB))
-                };
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerMeshBufferIndex, 2, perMeshIndices);
-
-				//commandList.SetIndexBuffer(mesh.GetIndexBufferView());
-				//commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
-            }
-            });
-    }
-
-    void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
-        // Mesh shading path using DispatchMesh
-        auto& psoManager = PSOManager::GetInstance();
-
-        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes perPassMeshes) {
-            auto& meshes = perPassMeshes.meshesByPass[m_renderPhase.hash];
-
-            unsigned int perObjectIndex = drawInfo.perObjectCBIndex;
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerObjectBufferIndex, 1, &perObjectIndex);
-
-            for (auto& pMesh : meshes) {
-                auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                unsigned int perMeshIndices[] = {
-                    static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB)),
-                    static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB))
-                };
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, MiscPerMeshBufferIndex, 2, perMeshIndices);
-
-                // Mesh shaders use DispatchMesh
-                //commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
-            }
-            });
-    }
-
-    void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
-        // Mesh shading with ExecuteIndirect
-        auto& psoManager = PSOManager::GetInstance();
-
-        auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
-        auto primaryViewID = context.primaryViewID;
-        const auto published = context.publishedRendererState
-            ? context.publishedRendererState->indirectWorkloads.payload.Get<br::render::PublishedIndirectState>()
-            : nullptr;
-        if (!published) return;
-        auto workloads = published->Find(primaryViewID, Engine::Primary::ForwardPass, false);
-
-		for (const auto* workload : workloads) {
-
-            if (!workload || !workload->indirectArguments) continue;
-			auto materialCompileFlags = workload->key.compileFlags;
-            auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags, materialCompileFlags, m_wireframe);
-            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-            auto apiResource = workload->indirectArguments->GetAPIResource();
-            const auto commandCount = workload->count;
-            if (commandCount == 0u) {
-                continue;
-            }
-            if (const auto backing = std::dynamic_pointer_cast<Buffer>(workload->indirectArguments)) {
-                const auto requiredBytes = static_cast<uint64_t>(commandCount) * sizeof(DispatchMeshIndirectCommand);
-                if (backing->GetSize() < requiredBytes) {
-                    spdlog::error(
-                        "ForwardRenderPass: skipping indirect workload with undersized args flags={} count={} bytes={} required={}",
-                        static_cast<uint64_t>(materialCompileFlags),
-                        commandCount,
-                        backing->GetSize(),
-                        requiredBytes);
-                    continue;
-                }
-            }
-
-			commandList.ExecuteIndirect(
-				commandSignature.GetHandle(), 
-                apiResource.GetHandle(), 
-                0, 
-                apiResource.GetHandle(), 
-                workload->indirectArguments->GetUAVCounterOffset(),
-                commandCount);
-        }
-    }
-
-private:
-    flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
     bool m_gtaoEnabled = true;
     bool m_clusteredLightingEnabled = true;
-
-	RenderPhase m_renderPhase = Engine::Primary::ForwardPass;
-
-    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
-    DynamicGloballyIndexedResource* m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
-    PixelBuffer* m_pPrimaryDepthBuffer = nullptr;
-    PixelBuffer* m_pHDRTarget = nullptr;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;

@@ -11,7 +11,12 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class GTAOFilterPass : public org::TypedRenderGraphPass<GTAOFilterPass, br::render::PreparedComputeDispatch> {
+struct GTAOFilterBindings {
+    org::ResourceBindingToken depth, workingDepths;
+};
+
+class GTAOFilterPass : public org::TypedRenderGraphPass<GTAOFilterPass,
+    br::render::PreparedComputeDispatch, GTAOFilterBindings> {
 public:
     GTAOFilterPass() {
         CreatePointClampSampler();
@@ -46,21 +51,21 @@ public:
             0);
     }
 
-    void Declare(org::PassBuilder& builder) {
+    GTAOFilterBindings Declare(org::PassBuilder& builder) {
         builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         builder.WithShaderResource(Builtin::Surface::NormalRoughness)
-            .WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }))
-            .WithUnorderedAccess(Builtin::GTAO::WorkingDepths)
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
 		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+        return {
+            builder.BindShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 })),
+            builder.BindUnorderedAccess(Builtin::GTAO::WorkingDepths) };
     }
 
 
 
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch Prepare(const GTAOFilterBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
-        const auto depth = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);
-        const auto workingDepths = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
         auto payload = PrefilterDepths16x16PSO.GetPayload(); br::render::PreparedComputeDispatch data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
         data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle(); auto program = preparation.CaptureProgramBinding(std::move(payload));
@@ -68,17 +73,17 @@ public:
         data.descriptorIndices = std::move(program.descriptorIndices);
 
         data.constants[UintRootConstant0] = m_samplerIndex;
-        data.constants[UintRootConstant1] = depth->GetSRVInfo(0).slot.index;
-        data.constants[UintRootConstant2] = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
-        data.constants[UintRootConstant3] = workingDepths->GetUAVShaderVisibleInfo(1).slot.index;
-        data.constants[UintRootConstant4] = workingDepths->GetUAVShaderVisibleInfo(2).slot.index;
-        data.constants[UintRootConstant5] = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
-        data.constants[UintRootConstant6] = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
+        data.constants[UintRootConstant1] = preparation.ResolveView(bindings.depth,
+            {org::BindlessViewKind::ShaderResource}).index;
+        for (uint32_t mip = 0; mip < 5; ++mip)
+            data.constants[UintRootConstant2 + mip] = preparation.ResolveView(bindings.workingDepths,
+                {org::BindlessViewKind::UnorderedAccess, UINT32_MAX, mip}).index;
         data.groupsX = (context->renderResolution.x + 15u) / 16u; data.groupsY = (context->renderResolution.y + 15u) / 16u;
         return data;
     }
 
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const GTAOFilterBindings&, const br::render::PreparedComputeDispatch& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeDispatch(data, recording);
     }
 

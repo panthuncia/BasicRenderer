@@ -109,6 +109,7 @@
 #include "Render/TerrainStateArtifacts.h"
 #include "Render/VersionedGpuBufferArtifacts.h"
 #include "Render/StaticStateArtifacts.h"
+#include "Render/GeometryResidencyStateArtifacts.h"
 #include "Render/ObjectBufferStateArtifacts.h"
 #include "Render/RasterBucketFlags.h"
 #include "Render/TerrainRvtTelemetry.h"
@@ -781,6 +782,7 @@ void Renderer::Initialize(
 	br::render::RegisterTextureImageTableProducer(*m_asyncStateGraph);
     br::render::RegisterObjectBufferStateProducer(*m_asyncStateGraph);
     br::render::RegisterStaticStateProducers(*m_asyncStateGraph);
+    br::render::RegisterGeometryResidencyStateProducer(*m_asyncStateGraph);
     m_asyncStateGraph->SetReadyCallback([this](const br::render::ArtifactSnapshot& artifact) {
         if (m_rendererStateRequests) m_rendererStateRequests->OnArtifactReady(artifact);
     });
@@ -825,6 +827,7 @@ void Renderer::Initialize(
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
     m_pMeshManager = MeshManager::CreateUnique();
+	m_pMeshManager->SetRendererStateRequestService(m_rendererStateRequests.get());
 	m_pObjectManager = ObjectManager::CreateUnique();
 	m_pObjectManager->SetRendererStateServices(
 		m_rendererStateRequests.get(),
@@ -871,6 +874,7 @@ void Renderer::Initialize(
 	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
 	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
     m_pMeshManager->SetViewManager(m_pViewManager.get());
+	m_pIndirectCommandBufferManager->AttachActiveDrawSource(*m_pObjectManager);
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
 	m_pMeshManager->SetSkeletonManager(m_pSkeletonManager.get());
     m_pTextureFactory = TextureFactory::CreateUnique();
@@ -3276,12 +3280,26 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
     updateData.clodRayTracingSystem = m_clodRayTracingSystem;
-    updateData.preparedRasterBucketCount = m_pMaterialManager
-        ? m_pMaterialManager->GetRasterBucketCount() : 0;
-    updateData.preparedRasterBucketFlags.reserve(updateData.preparedRasterBucketCount);
-    for (uint32_t bucket = 0; bucket < updateData.preparedRasterBucketCount; ++bucket) {
-        updateData.preparedRasterBucketFlags.push_back(
-            m_pMaterialManager->GetRasterFlagsForBucket(bucket));
+    const auto publishedMaterialState = updateData.publishedRendererState
+        ? updateData.publishedRendererState->materials.payload
+            .Get<br::render::PublishedMaterialState>()
+        : nullptr;
+    if (publishedMaterialState) {
+        updateData.preparedRasterBucketFlags = publishedMaterialState->rasterBucketFlags;
+        updateData.preparedRasterBucketCount =
+            static_cast<uint32_t>(updateData.preparedRasterBucketFlags.size());
+        basic_telemetry::AddCounter("SARP.FrameInputs.PublishedRasterBuckets");
+    } else if (m_pMaterialManager) {
+        // Bootstrap only: no material root has reached publication yet. Keep
+        // the scene renderable while the first exact table version is built,
+        // and measure this path so it can be removed at the authority gate.
+        updateData.preparedRasterBucketCount = m_pMaterialManager->GetRasterBucketCount();
+        updateData.preparedRasterBucketFlags.reserve(updateData.preparedRasterBucketCount);
+        for (uint32_t bucket = 0; bucket < updateData.preparedRasterBucketCount; ++bucket) {
+            updateData.preparedRasterBucketFlags.push_back(
+                m_pMaterialManager->GetRasterFlagsForBucket(bucket));
+        }
+        basic_telemetry::AddCounter("SARP.FrameInputs.BootstrapRasterBucketFallback");
     }
     updateData.skeletonManager = m_pSkeletonManager.get();
     updateData.textureDescriptorHeap = m_context.textureDescriptorHeap;
@@ -3302,23 +3320,6 @@ void Renderer::Update(float elapsedSeconds) {
         updateData.globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
     updateData.deltaTime = elapsedSeconds;
 
-    struct RendererUpdateHostData : IHostExecutionData {
-        std::shared_ptr<const UpdateContext> data;
-        std::shared_ptr<const RenderContext> renderData;
-
-        const void* TryGet(std::type_index t) const noexcept override {
-            if (t == std::type_index(typeid(UpdateContext))) {
-                return data.get();
-            }
-            if (t == std::type_index(typeid(RenderContext))) {
-                return renderData.get();
-            }
-            return nullptr;
-        }
-    };
-
-    auto updateHostData = std::make_shared<RendererUpdateHostData>();
-    updateHostData->data = std::make_shared<const UpdateContext>(updateData);
     // The executable-frame request owns the logical render snapshot used by
     // transitional packets. It must never reinterpret UpdateContext as the
     // differently-laid-out RenderContext during delayed recording.
@@ -3337,6 +3338,8 @@ void Renderer::Update(float elapsedSeconds) {
     renderSnapshot.deltaTime = updateData.deltaTime;
     renderSnapshot.preparedViews.clear();
     if (updateData.viewManager) {
+        updateData.preparedViewCameraBufferSize = updateData.viewManager->GetCameraBufferSize();
+        updateData.preparedViewResourceLayoutRevision = updateData.viewManager->GetResourceLayoutRevision();
         updateData.viewManager->ForEachView([&](uint64_t viewID) {
             const auto* view = updateData.viewManager->Get(viewID);
             if (!view) return;
@@ -3347,12 +3350,47 @@ void Renderer::Update(float elapsedSeconds) {
                 .shadow = view->flags.shadow,
                 .cascade = view->flags.cascaded,
                 .lightType = view->lightType,
+                .visibilityBuffer = view->gpu.visibilityBuffer,
+                .deepVisibilityHeadPointers = view->gpu.clodDeepVisibilityHeadPointers,
+                .visibilitySRVIndex = view->gpu.visibilitySRVIndex,
+                .visibilityUAVIndex = view->gpu.visibilityUAVIndex,
+                .deepVisibilityHeadPointersUAVIndex = view->gpu.clodDeepVisibilityHeadPointersUAVIndex,
             });
         });
     }
+	const auto publishedObjects = updateData.publishedRendererState
+		? updateData.publishedRendererState->drawRecords.payload
+			.Get<br::render::PublishedObjectBufferState>()
+		: nullptr;
+	if (publishedObjects) {
+		updateData.preparedObjects.residentTransformCount =
+			publishedObjects->residentTransformCount;
+		updateData.preparedObjects.skinnedPlacements = publishedObjects->skinnedPlacements;
+		updateData.preparedObjects.activeSkinnedPlacements =
+			publishedObjects->activeSkinnedPlacements;
+		updateData.preparedObjects.activeSkinnedPlacementResidentSize =
+			publishedObjects->activeSkinnedPlacementResidentSize;
+		updateData.preparedObjects.placementRecords = publishedObjects->placementRecords;
+		updateData.preparedObjects.activePlacementEntries =
+			publishedObjects->activePlacementEntries;
+		basic_telemetry::AddCounter("SARP.FrameInputs.PublishedObjectSelection");
+		basic_telemetry::SetGauge("SARP.FrameInputs.ObjectSnapshot.PlacementCount",
+			publishedObjects->placementRecords
+				? static_cast<std::int64_t>(publishedObjects->placementRecords->size()) : 0);
+		basic_telemetry::SetGauge("SARP.FrameInputs.ObjectSnapshot.ActivePlacementCount",
+			publishedObjects->activePlacementEntries
+				? static_cast<std::int64_t>(publishedObjects->activePlacementEntries->size()) : 0);
+	}
+    updateData.preparedViews = renderSnapshot.preparedViews;
+    renderSnapshot.preparedViewCameraBufferSize = updateData.preparedViewCameraBufferSize;
+    renderSnapshot.preparedViewResourceLayoutRevision = updateData.preparedViewResourceLayoutRevision;
+	renderSnapshot.preparedObjects = updateData.preparedObjects;
     renderSnapshot.preparedRasterBucketCount = updateData.preparedRasterBucketCount;
     renderSnapshot.preparedRasterBucketFlags = updateData.preparedRasterBucketFlags;
-    updateHostData->renderData = std::make_shared<const RenderContext>(std::move(renderSnapshot));
+    auto immutableUpdate = std::make_shared<const UpdateContext>(updateData);
+    m_frameInputs = std::make_shared<const br::render::RendererFrameInputs>(
+        std::move(immutableUpdate),
+        std::make_shared<const RenderContext>(std::move(renderSnapshot)));
 
     runCapturedStage("PublishDeferredBackingResizesLate", []() {
         BT_ZONE_SCOPE("Renderer::Update::PublishDeferredBackingResizesLate");
@@ -3372,9 +3410,10 @@ void Renderer::Update(float elapsedSeconds) {
 		if (m_pObjectManager) {
 			m_pObjectManager->PublishDesiredBufferState();
 		}
-        if (m_pIndirectCommandBufferManager && m_pObjectManager && m_pMaterialManager) {
+        if (m_pIndirectCommandBufferManager && m_pObjectManager) {
 			m_pIndirectCommandBufferManager->PublishDesiredState(
-				*m_pObjectManager, *m_pMaterialManager);
+				m_pObjectManager->DesiredBufferStateRequirement(),
+				m_pObjectManager->GetResidentInstanceDrawRecordCount());
         }
     });
 
@@ -3384,8 +3423,8 @@ void Renderer::Update(float elapsedSeconds) {
     context.preparationSlot = m_preparationFrameIndex;
     context.frameFenceValue = m_currentFrameFenceValue;
     context.deltaTime = elapsedSeconds;
-    context.hostData = updateHostData.get();
-    context.ownedHostData = updateHostData;
+    context.hostData = m_frameInputs.get();
+    context.ownedHostData = m_frameInputs;
     context.beforeCompileFrame = [this]() {
         BT_ZONE_SCOPE("Renderer::Update::TerrainRvtTelemetry");
         MaybeRequestTerrainRvtTelemetry();
@@ -3951,6 +3990,7 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
         return;
     }
     if (m_clodTelemetryReadbackPending ||
+        m_clodRasterArgsReadbackPending ||
         m_clodVisibleCounterReadbackPending ||
         m_clodReplayStateReadbackPending) {
         return;
@@ -3986,6 +4026,17 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
             }
         });
 
+    std::shared_ptr<Resource> rasterArgsResource;
+    world.query_builder<const Components::Resource>()
+        .with<CLodPrimaryPhase1RasterIndirectArgsTag>()
+        .with<CLodExtensionTypeTag>(visibilityTag)
+        .build()
+        .each([&](const Components::Resource& component) {
+            if (!rasterArgsResource) {
+                rasterArgsResource = component.resource.lock();
+            }
+        });
+
     std::shared_ptr<Resource> replayStateResource;
     world.query_builder<const Components::Resource>()
         .with<CLodOcclusionReplayStateBufferTag>()
@@ -3997,13 +4048,14 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
             }
         });
 
-    if (!telemetryResource || !visibleCounterResource || !replayStateResource) {
+    if (!telemetryResource || !rasterArgsResource || !visibleCounterResource || !replayStateResource) {
         return;
     }
 
     const uint64_t requestedFrame = m_totalFramesRendered;
     m_lastCLodVisibilityTelemetryRequestFrame = requestedFrame;
     m_clodTelemetryReadbackPending = true;
+    m_clodRasterArgsReadbackPending = true;
     m_clodVisibleCounterReadbackPending = true;
     m_clodReplayStateReadbackPending = true;
 
@@ -4082,6 +4134,11 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
             auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
                 return decoded.counters[static_cast<size_t>(idx)];
             };
+            const auto publishCounter = [&](std::string_view name,
+                CLodWorkGraphCounterIndex index) {
+                basic_telemetry::SetGauge(name,
+                    static_cast<std::int64_t>(counter(index)));
+            };
             auto distributionCounter = [&](uint32_t depthBin, uint32_t footprintBin) -> uint32_t {
                 constexpr uint32_t footprintBinCount = 6u;
                 const auto index = static_cast<size_t>(CLodWorkGraphCounterIndex::VoxelRasterDistributionBinBase) +
@@ -4098,6 +4155,11 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
                 .residentLeaves = traversalLeaves > nonresidentLeaves ? traversalLeaves - nonresidentLeaves : 0u,
                 .nonresidentLeaves = nonresidentLeaves,
                 .visibleClusterWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites),
+                .bucketRecordsDispatched = counter(CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched),
+                .histogramInputs = counter(CLodWorkGraphCounterIndex::RasterSortHistogramInputs),
+                .histogramTriangleContributors = counter(CLodWorkGraphCounterIndex::RasterSortHistogramTriangleContributors),
+                .compactionInputs = counter(CLodWorkGraphCounterIndex::RasterSortCompactionInputs),
+                .compactionTriangleEmitted = counter(CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted),
                 .rasterInitializationFailures = counter(CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed),
                 .sourceGroupMismatches = counter(CLodWorkGraphCounterIndex::RasterMeshShaderSourceGroupMismatch),
                 .outputTriangles = counter(CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles),
@@ -4105,6 +4167,76 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
                 .activeSetMembers = primaryActiveSetMembers,
                 .depthTileOccupancyAvailable = false,
             });
+
+            // Keep the GPU readback boundaries in structured telemetry.  These
+            // counters are specifically intended to distinguish missing scene
+            // admission from traversal, bucket, mesh-shader, and pixel-stage
+            // collapses in automated runs; the log-only diagnostic was too easy
+            // to lose when the host exits immediately after benchmarking.
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Frame",
+                static_cast<std::int64_t>(requestedFrame));
+            publishCounter("BasicRenderer.CLod.Readback.ObjectCullInRange",
+                CLodWorkGraphCounterIndex::ObjectCullInRangeThreads);
+            publishCounter("BasicRenderer.CLod.Readback.ObjectCullVisible",
+                CLodWorkGraphCounterIndex::ObjectCullVisibleThreads);
+            publishCounter("BasicRenderer.CLod.Readback.TraversalLeaves",
+                CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords);
+            publishCounter("BasicRenderer.CLod.Readback.TraversalEmitted",
+                CLodWorkGraphCounterIndex::TraverseNodesTraverseRecordsEmitted);
+            publishCounter("BasicRenderer.CLod.Readback.ClusterVisibleWrites",
+                CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+            publishCounter("BasicRenderer.CLod.Readback.BucketRecords",
+                CLodWorkGraphCounterIndex::ClusterCullBucketRecordsDispatched);
+            publishCounter("BasicRenderer.CLod.Readback.HistogramInputs",
+                CLodWorkGraphCounterIndex::RasterSortHistogramInputs);
+            publishCounter("BasicRenderer.CLod.Readback.CompactionInputs",
+                CLodWorkGraphCounterIndex::RasterSortCompactionInputs);
+            publishCounter("BasicRenderer.CLod.Readback.CompactionTriangles",
+                CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+            publishCounter("BasicRenderer.CLod.Readback.RasterArgsNonZeroBuckets",
+                CLodWorkGraphCounterIndex::RasterArgsNonZeroBuckets);
+            publishCounter("BasicRenderer.CLod.Readback.RasterArgsDispatchGroups",
+                CLodWorkGraphCounterIndex::RasterArgsDispatchGroups);
+            publishCounter("BasicRenderer.CLod.Readback.RasterGroups",
+                CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+            publishCounter("BasicRenderer.CLod.Readback.RasterInRange",
+                CLodWorkGraphCounterIndex::RasterMeshShaderInRange);
+            publishCounter("BasicRenderer.CLod.Readback.RasterInitFailures",
+                CLodWorkGraphCounterIndex::RasterMeshShaderInitFailed);
+            publishCounter("BasicRenderer.CLod.Readback.RasterSourceGroupMismatches",
+                CLodWorkGraphCounterIndex::RasterMeshShaderSourceGroupMismatch);
+            publishCounter("BasicRenderer.CLod.Readback.RasterOutputTriangles",
+                CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
+            publishCounter("BasicRenderer.CLod.Readback.PixelInvocations",
+                CLodWorkGraphCounterIndex::RasterPixelShaderInvocations);
+            publishCounter("BasicRenderer.CLod.Readback.PixelVisibilityWrites",
+                CLodWorkGraphCounterIndex::RasterPixelVisibilityWrites);
+            publishCounter("BasicRenderer.CLod.Readback.PixelScissorRejected",
+                CLodWorkGraphCounterIndex::RasterPixelScissorRejected);
+            publishCounter("BasicRenderer.CLod.Readback.PixelTargetBoundsRejected",
+                CLodWorkGraphCounterIndex::RasterPixelTargetBoundsRejected);
+
+            const auto compactedTriangles = counter(
+                CLodWorkGraphCounterIndex::RasterSortCompactionTriangleEmitted);
+            const auto argumentDispatchGroups = counter(
+                CLodWorkGraphCounterIndex::RasterArgsDispatchGroups);
+            const auto rasterGroups = counter(
+                CLodWorkGraphCounterIndex::RasterMeshShaderGroups);
+            const auto outputTriangles = counter(
+                CLodWorkGraphCounterIndex::RasterMeshShaderOutputTriangles);
+            const auto pixelInvocations = counter(
+                CLodWorkGraphCounterIndex::RasterPixelShaderInvocations);
+            const auto visibilityWrites = counter(
+                CLodWorkGraphCounterIndex::RasterPixelVisibilityWrites);
+            const bool collapsed = CLodRasterPipelineCollapsed(compactedTriangles,
+                argumentDispatchGroups, rasterGroups, outputTriangles,
+                pixelInvocations, visibilityWrites);
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.RasterPipelineCollapsed",
+                collapsed ? 1 : 0);
+            if (collapsed) {
+                basic_telemetry::AddCounter(
+                    "BasicRenderer.CLod.Readback.RasterPipelineCollapseSamples");
+            }
 
 			spdlog::info(
 				"SARP CLOD visibility telemetry: frame={} object(in_range={} visible={} total={} rejected_stale_generation={} rejected_frustum={} rejected_occlusion={} replay_rejected_occlusion={} invalid_bounds={}) traverse(internal={} leaf={} culled={} rejected_error={} active_children={} emitted={} child_frustum={} child_lod={}) stream(request_attempts={} range_rejects={} resident_hits={} request_appends={}) cluster(in_range={} visible_writes={} total={} rejected_frustum={} rejected_condition2={} rejected_occlusion={} rejected_out_of_range={} zero_survivor_waves={} nonresident_leaf={} emit_bucket={}) voxel_object(candidates={} frustum_reject={} visible={} traverse={} root_internal={} root_leaf={}) voxel(leaves={} rejected_error={} desc_hits={} desc_misses={} raster_work={} raster_dropped={}) voxel_raster(groups={} rigid={} skinned={} cube_candidates={} skin_bone_groups={} invalid_cluster={} desc_miss={} invalid_payload={} bad_width={} proj_reject={} scissor_reject={} depth_reject={} dda_miss={} vis_writes={} vis_wins={} vis_losses={} projected_px={} queued_px={} queue_overflow={} nonpos_depth={}) raster(groups={} in_range={} init_failed={} source_group_mismatch={} zero_tri_outputs={} out_tris={}) sort(compact_inputs={} voxel_skipped={} reyes_skipped={} compact_tris={})",
@@ -4279,6 +4411,67 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
                 counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletLaunches),
                 counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords),
                 counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletBucketRecordsEmitted));
+        });
+
+    readbackService->RequestReadbackCapture(
+        "CLodOpaque::RasterizeClustersPass1",
+        rasterArgsResource.get(),
+        RangeSpec{},
+        [this, requestedFrame](ReadbackCaptureResult&& result) {
+            m_clodRasterArgsReadbackPending = false;
+
+            const size_t commandCount = result.data.size() / sizeof(RasterizeClustersCommand);
+            uint64_t dispatchGroups = 0u;
+            uint32_t nonZeroCommands = 0u;
+            RasterizeClustersCommand firstNonZero{};
+            bool foundFirst = false;
+            for (size_t i = 0; i < commandCount; ++i) {
+                RasterizeClustersCommand command{};
+                std::memcpy(&command,
+                    result.data.data() + i * sizeof(RasterizeClustersCommand),
+                    sizeof(command));
+                const uint64_t groups = static_cast<uint64_t>(command.dispatchX) *
+                    command.dispatchY * command.dispatchZ;
+                if (groups == 0u) {
+                    continue;
+                }
+                ++nonZeroCommands;
+                dispatchGroups += groups;
+                if (!foundFirst) {
+                    firstNonZero = command;
+                    foundFirst = true;
+                }
+            }
+
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Phase1RasterArgsBufferBytes",
+                static_cast<std::int64_t>(result.data.size()));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Phase1RasterArgsBufferCommands",
+                static_cast<std::int64_t>(commandCount));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Phase1RasterArgsBufferNonZeroCommands",
+                static_cast<std::int64_t>(nonZeroCommands));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Phase1RasterArgsBufferDispatchGroups",
+                static_cast<std::int64_t>(dispatchGroups));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Phase1RasterArgsBufferFirstBase",
+                static_cast<std::int64_t>(firstNonZero.baseClusterOffset));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Phase1RasterArgsBufferFirstXDim",
+                static_cast<std::int64_t>(firstNonZero.xDim));
+            basic_telemetry::SetGauge("BasicRenderer.CLod.Readback.Phase1RasterArgsBufferFirstBucket",
+                static_cast<std::int64_t>(firstNonZero.rasterBucketID));
+
+            spdlog::info(
+                "SARP CLOD phase-1 raster-args readback: frame={} bytes={} commands={} nonzero={} groups={} "
+                "first(base={} xdim={} bucket={} dispatch={},{},{})",
+                requestedFrame,
+                result.data.size(),
+                commandCount,
+                nonZeroCommands,
+                dispatchGroups,
+                firstNonZero.baseClusterOffset,
+                firstNonZero.xDim,
+                firstNonZero.rasterBucketID,
+                firstNonZero.dispatchX,
+                firstNonZero.dispatchY,
+                firstNonZero.dispatchZ);
         });
 
     readbackService->RequestReadbackCapture(
@@ -5246,38 +5439,14 @@ void Renderer::Render() {
 
     }
 
-    struct RendererHostFrameData : IHostExecutionData {
-        rhi::DescriptorHeap textureDescriptorHeap;
-        rhi::DescriptorHeap samplerDescriptorHeap;
-        DirectX::XMUINT2 renderResolution{};
-        DirectX::XMUINT2 outputResolution{};
-        const RenderContext* renderContext = nullptr;
-
-        const void* TryGet(std::type_index t) const noexcept override {
-            if (t == std::type_index(typeid(RenderContext))) {
-                return renderContext;
-            }
-            if (t == std::type_index(typeid(RendererHostFrameData))) {
-                return this;
-            }
-            return nullptr;
-        }
-    };
-
-    RendererHostFrameData hostFrameData{};
-    hostFrameData.textureDescriptorHeap = m_context.textureDescriptorHeap;
-    hostFrameData.samplerDescriptorHeap = m_context.samplerDescriptorHeap;
-    hostFrameData.renderResolution = m_context.renderResolution;
-    hostFrameData.outputResolution = m_context.outputResolution;
-    hostFrameData.renderContext = &m_context;
-
     PassExecutionContext passExecutionContext{};
     passExecutionContext.device = deviceManager.GetDevice();
     passExecutionContext.frameIndex = m_context.frameIndex;
     passExecutionContext.executionSlot = renderedFrameIndex;
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
-    passExecutionContext.hostData = &hostFrameData;
+    passExecutionContext.ownedHostData = m_frameInputs;
+    passExecutionContext.hostData = passExecutionContext.ownedHostData.get();
 
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
     auto computeQueue = deviceManager.GetComputeQueue();
@@ -5530,6 +5699,7 @@ void Renderer::Cleanup() {
     // service it can target is destroyed. CancelAndWait also prevents a late
     // producer completion from publishing into manager teardown.
     m_managerInterface.SetRendererStateRequests(nullptr);
+	if (m_pMeshManager) m_pMeshManager->SetRendererStateRequestService(nullptr);
     if (m_rendererStateCommitScope.Valid()) {
         m_rendererStateCommitScope.CancelAndWait();
         m_rendererStateCommitScope = {};
@@ -5602,6 +5772,7 @@ void Renderer::Cleanup() {
     m_pTextureFactory.reset();
     m_clodRayTracingSystem.reset();
     m_context = {};
+    m_frameInputs.reset();
     m_producerServices = {};
     m_openPBRLookupResources = {};
     m_blueNoiseTexture.reset();
@@ -5736,9 +5907,10 @@ std::shared_ptr<Scene> Renderer::AppendScene(std::shared_ptr<Scene> scene) {
 	if (m_pMaterialManager) {
 		m_pMaterialManager->CommitGpuVisibleSnapshot();
 	}
-	if (m_pIndirectCommandBufferManager && m_pObjectManager && m_pMaterialManager) {
+	if (m_pIndirectCommandBufferManager && m_pObjectManager) {
 		m_pIndirectCommandBufferManager->PublishDesiredState(
-			*m_pObjectManager, *m_pMaterialManager);
+			m_pObjectManager->DesiredBufferStateRequirement(),
+			m_pObjectManager->GetResidentInstanceDrawRecordCount());
 	}
 
 	m_warnedNullScene = false;

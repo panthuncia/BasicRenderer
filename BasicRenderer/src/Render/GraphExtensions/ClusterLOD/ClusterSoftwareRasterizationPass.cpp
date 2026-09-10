@@ -21,7 +21,8 @@
 #include "../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
 
 void ClusterSoftwareRasterizationPass::Record(
-    const ClusterSoftwareRasterFrameData& frame, org::PassRecordContext& recording) {
+    const ClusterSoftwareRasterBindings&, const ClusterSoftwareRasterFrameData& frame,
+    org::PassRecordContext& recording) {
     if (!frame.enabled || frame.bucketCount == 0u) return;
 
     auto& commands = recording.Commands();
@@ -241,7 +242,7 @@ ClusterSoftwareRasterizationPass::ClusterSoftwareRasterizationPass(
 
 ClusterSoftwareRasterizationPass::~ClusterSoftwareRasterizationPass() = default;
 
-void ClusterSoftwareRasterizationPass::Declare(org::PassBuilder& declaration) {
+ClusterSoftwareRasterBindings ClusterSoftwareRasterizationPass::Declare(org::PassBuilder& declaration) {
     auto* builder = &declaration;
     builder->PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
     builder->WithShaderResource(
@@ -270,7 +271,13 @@ void ClusterSoftwareRasterizationPass::Declare(org::PassBuilder& declaration) {
             m_viewRasterInfoBuffer)
         .WithUnorderedAccess(Builtin::Material::TextureStreamingFeedbackBuffer)
         .WithUnorderedAccess(Builtin::DebugVisualization);
-	m_indirectArgumentsBinding = builder->BindIndirectArguments(m_rasterBucketsIndirectArgsBuffer);
+    ClusterSoftwareRasterBindings bindings{
+        builder->BindShaderResource(m_rasterBucketsHistogramBuffer),
+        builder->BindShaderResource(m_compactedVisibleClustersBuffer),
+        builder->BindShaderResource(m_compactedVisibleClusterTransformIndicesBuffer),
+        builder->BindShaderResource(m_sortedToUnsortedMappingBuffer),
+        builder->BindShaderResource(m_viewRasterInfoBuffer),
+        builder->BindIndirectArguments(m_rasterBucketsIndirectArgsBuffer)};
 
     if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
         for (auto& vb : m_visibilityBuffers) {
@@ -278,6 +285,7 @@ void ClusterSoftwareRasterizationPass::Declare(org::PassBuilder& declaration) {
         }
     }
     else if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        bindings.virtualShadow = true;
         builder->WithShaderResource(
                 m_virtualShadowClipmapInfoBuffer,
                 Builtin::Shadows::CLodDirectionalPageViewInfo)
@@ -287,6 +295,8 @@ void ClusterSoftwareRasterizationPass::Declare(org::PassBuilder& declaration) {
                 m_virtualShadowDynamicPagesTexture);
         if (m_telemetryBuffer) {
             builder->WithUnorderedAccess(m_telemetryBuffer);
+            bindings.telemetry = builder->BindUnorderedAccess(m_telemetryBuffer);
+            bindings.hasTelemetry = true;
         }
         if (m_dynamicWindSkinCacheHashBuffer) {
             builder->WithUnorderedAccess(
@@ -298,7 +308,19 @@ void ClusterSoftwareRasterizationPass::Declare(org::PassBuilder& declaration) {
                 m_dynamicWindSkinCacheIndirectArgsBuffer)
                 .WithIndirectArguments(m_dynamicWindSkinCacheIndirectArgsBuffer)
                 .WithShaderResource("Builtin::DynamicWind::VisibleSkeletonMembership");
+            bindings.skinMapping = builder->BindUnorderedAccess(m_dynamicWindSkinCacheMappingBuffer);
+            bindings.skinHash = builder->BindUnorderedAccess(m_dynamicWindSkinCacheHashBuffer);
+            bindings.skinPositions = builder->BindUnorderedAccess(m_dynamicWindSkinCachePositionsBuffer);
+            bindings.skinAllocator = builder->BindUnorderedAccess(m_dynamicWindSkinCacheAllocatorBuffer);
+            bindings.skinWork = builder->BindUnorderedAccess(m_dynamicWindSkinCacheWorkRecordsBuffer);
+            bindings.skinArgs = builder->BindUnorderedAccess(m_dynamicWindSkinCacheIndirectArgsBuffer);
+            bindings.skinMembership = builder->BindShaderResource("Builtin::DynamicWind::VisibleSkeletonMembership");
+            bindings.hasSkinCache = true;
         }
+        bindings.pageTable = builder->BindUnorderedAccess(m_virtualShadowPageTableTexture);
+        bindings.clipmapInfo = builder->BindShaderResource(m_virtualShadowClipmapInfoBuffer);
+        bindings.physicalPages = builder->BindUnorderedAccess(m_virtualShadowPhysicalPagesTexture);
+        bindings.dynamicPages = builder->BindUnorderedAccess(m_virtualShadowDynamicPagesTexture);
     }
 
     if (m_slabResourceGroup) {
@@ -306,6 +328,7 @@ void ClusterSoftwareRasterizationPass::Declare(org::PassBuilder& declaration) {
     }
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+    return bindings;
 }
 
 void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& executionContext) {
@@ -314,43 +337,39 @@ void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& exec
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
     std::vector<std::shared_ptr<PixelBuffer>> nextVisibilityBuffers;
-    auto numViews = context.viewManager->GetCameraBufferSize();
+    auto numViews = context.preparedViewCameraBufferSize;
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
 
-    context.viewManager->ForEachView([&](uint64_t v) {
-        auto viewInfo = context.viewManager->Get(v);
-        if (!viewInfo) {
-            return;
-        }
-
-        auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+    for (const auto& viewInfo : context.preparedViews) {
+        auto cameraIndex = viewInfo.cameraBufferIndex;
+        if (cameraIndex >= viewRasterInfo.size()) continue;
         CLodViewRasterInfo info{};
         info.scissorMinX = 0;
         info.scissorMinY = 0;
 
         if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-            if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+            if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
                 info.scissorMaxX = virtualShadowConfig.virtualResolution;
                 info.scissorMaxY = virtualShadowConfig.virtualResolution;
                 info.viewportScaleX = 1.0f;
                 info.viewportScaleY = 1.0f;
             }
             viewRasterInfo[cameraIndex] = info;
-            return;
+            continue;
         }
 
-        if (viewInfo->gpu.visibilityBuffer == nullptr) {
-            return;
+        if (viewInfo.visibilityBuffer == nullptr) {
+            continue;
         }
 
-        info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
-        info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
+        info.visibilityUAVDescriptorIndex = viewInfo.visibilityUAVIndex;
+        info.scissorMaxX = viewInfo.visibilityBuffer->GetWidth();
+        info.scissorMaxY = viewInfo.visibilityBuffer->GetHeight();
         info.viewportScaleX = 1.0f;
         info.viewportScaleY = 1.0f;
         viewRasterInfo[cameraIndex] = info;
-        nextVisibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
-    });
+        nextVisibilityBuffers.push_back(viewInfo.visibilityBuffer);
+    }
 
     m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
     BUFFER_UPLOAD(
@@ -367,7 +386,8 @@ bool ClusterSoftwareRasterizationPass::DeclaredResourcesChanged() const {
     return m_declaredResourcesChanged;
 }
 
-ClusterSoftwareRasterFrameData ClusterSoftwareRasterizationPass::Prepare(const org::PassPrepareContext& preparation) {
+ClusterSoftwareRasterFrameData ClusterSoftwareRasterizationPass::Prepare(
+    const ClusterSoftwareRasterBindings& bindings, const org::PassPrepareContext& preparation) const {
     ClusterSoftwareRasterFrameData frame{};
     if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(
         SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)()))
@@ -382,7 +402,13 @@ ClusterSoftwareRasterFrameData ClusterSoftwareRasterizationPass::Prepare(const o
     auto& data = frame.raster;
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.commandSignature = preparation.CaptureCommandSignature(m_rasterizationCommandSignature);
-	data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
+    data.argumentsReference = preparation.CaptureResource(bindings.indirectArgs);
+    const auto srv = [&](org::ResourceBindingToken token) {
+        return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index;
+    };
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) {
+        return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index;
+    };
     std::array<unsigned int, NumMiscUintRootConstants> constants{};
     constants[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_MAPPING_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
@@ -392,36 +418,36 @@ ClusterSoftwareRasterFrameData ClusterSoftwareRasterizationPass::Prepare(const o
     constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_WORK_RECORDS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_INDIRECT_ARGS_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     constants[CLOD_RASTER_DYNAMIC_WIND_VISIBLE_MEMBERSHIP_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
-    constants[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
-    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_compactedVisibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-    constants[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    constants[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
-    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+    constants[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = srv(bindings.histogram);
+    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
+    constants[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.transforms);
+    constants[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.viewInfo);
+    constants[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = srv(bindings.mapping);
+    if (bindings.virtualShadow) {
         const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
-        constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-        constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-        constants[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-        constants[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowDynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
+            uav(bindings.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+        constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = srv(bindings.clipmapInfo);
+        constants[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = uav(bindings.physicalPages);
+        constants[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = uav(bindings.dynamicPages);
         constants[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
         constants[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
         constants[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = config.virtualResolution;
-        if (m_telemetryBuffer) constants[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        if (m_dynamicWindSkinCacheHashBuffer) {
+        if (bindings.hasTelemetry) constants[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = uav(bindings.telemetry);
+        if (bindings.hasSkinCache) {
             ++m_dynamicWindSkinCacheGeneration;
             if (m_dynamicWindSkinCacheGeneration == 0u || m_dynamicWindSkinCacheGeneration >= 0x7FFFFFFFu)
                 m_dynamicWindSkinCacheGeneration = 1u;
-            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_MAPPING_DESCRIPTOR_INDEX] = m_dynamicWindSkinCacheMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_HASH_DESCRIPTOR_INDEX] = m_dynamicWindSkinCacheHashBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_MAPPING_DESCRIPTOR_INDEX] = uav(bindings.skinMapping);
+            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_HASH_DESCRIPTOR_INDEX] = uav(bindings.skinHash);
             constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_HASH_ENTRY_COUNT] = m_dynamicWindSkinCacheHashEntryCount;
             constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_GENERATION] = m_dynamicWindSkinCacheGeneration;
-            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_POSITIONS_DESCRIPTOR_INDEX] = m_dynamicWindSkinCachePositionsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_POSITIONS_DESCRIPTOR_INDEX] = uav(bindings.skinPositions);
             constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_POSITION_CAPACITY] = m_dynamicWindSkinCachePositionCapacity;
-            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_ALLOCATOR_DESCRIPTOR_INDEX] = m_dynamicWindSkinCacheAllocatorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_WORK_RECORDS_DESCRIPTOR_INDEX] = m_dynamicWindSkinCacheWorkRecordsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_dynamicWindSkinCacheIndirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            constants[CLOD_RASTER_DYNAMIC_WIND_VISIBLE_MEMBERSHIP_DESCRIPTOR_INDEX] = m_resourceRegistryView
-                ->RequestPtr<GloballyIndexedResource>("Builtin::DynamicWind::VisibleSkeletonMembership")->GetSRVInfo(0).slot.index;
+            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_ALLOCATOR_DESCRIPTOR_INDEX] = uav(bindings.skinAllocator);
+            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_WORK_RECORDS_DESCRIPTOR_INDEX] = uav(bindings.skinWork);
+            constants[CLOD_RASTER_DYNAMIC_WIND_SKIN_CACHE_INDIRECT_ARGS_DESCRIPTOR_INDEX] = uav(bindings.skinArgs);
+            constants[CLOD_RASTER_DYNAMIC_WIND_VISIBLE_MEMBERSHIP_DESCRIPTOR_INDEX] = srv(bindings.skinMembership);
         }
     }
     const auto numBuckets = context->preparedRasterBucketCount;
@@ -441,10 +467,10 @@ ClusterSoftwareRasterFrameData ClusterSoftwareRasterizationPass::Prepare(const o
         step.argumentsOffset = static_cast<uint64_t>(bucket) * sizeof(RasterizeClustersCommand);
         data.steps.push_back(std::move(step));
     }
-    if (m_dynamicWindSkinCacheHashBuffer && numBuckets != 0u) {
+    if (bindings.hasSkinCache && numBuckets != 0u) {
         frame.hasSkinCache = true;
         frame.cacheConstants = constants;
-        frame.clearConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_dynamicWindSkinCacheAllocatorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        frame.clearConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = uav(bindings.skinAllocator);
         frame.clearConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = 2u;
         frame.clearProgram = preparation.CaptureProgramBinding(m_dynamicWindSkinCacheClearPipeline);
         frame.buildProgram = preparation.CaptureProgramBinding(m_dynamicWindSkinCacheBuildPipeline);
@@ -452,12 +478,12 @@ ClusterSoftwareRasterFrameData ClusterSoftwareRasterizationPass::Prepare(const o
         frame.skinProgram = preparation.CaptureProgramBinding(m_dynamicWindSkinCacheSkinPipeline);
         frame.resolveProgram = preparation.CaptureProgramBinding(m_dynamicWindSkinCacheResolvePipeline);
         frame.cacheDispatchSignature = preparation.CaptureCommandSignature(m_dynamicWindSkinCacheDispatchCommandSignature);
-        frame.cacheIndirectArgs = preparation.CaptureResource(m_dynamicWindSkinCacheIndirectArgsBuffer->GetGlobalResourceID());
-        frame.cacheAllocator = preparation.CaptureResource(m_dynamicWindSkinCacheAllocatorBuffer->GetGlobalResourceID());
-        frame.cacheHash = preparation.CaptureResource(m_dynamicWindSkinCacheHashBuffer->GetGlobalResourceID());
-        frame.cacheWorkRecords = preparation.CaptureResource(m_dynamicWindSkinCacheWorkRecordsBuffer->GetGlobalResourceID());
-        frame.cachePositions = preparation.CaptureResource(m_dynamicWindSkinCachePositionsBuffer->GetGlobalResourceID());
-        frame.cacheMapping = preparation.CaptureResource(m_dynamicWindSkinCacheMappingBuffer->GetGlobalResourceID());
+        frame.cacheIndirectArgs = preparation.CaptureResource(bindings.skinArgs);
+        frame.cacheAllocator = preparation.CaptureResource(bindings.skinAllocator);
+        frame.cacheHash = preparation.CaptureResource(bindings.skinHash);
+        frame.cacheWorkRecords = preparation.CaptureResource(bindings.skinWork);
+        frame.cachePositions = preparation.CaptureResource(bindings.skinPositions);
+        frame.cacheMapping = preparation.CaptureResource(bindings.skinMapping);
     }
     return frame;
 }

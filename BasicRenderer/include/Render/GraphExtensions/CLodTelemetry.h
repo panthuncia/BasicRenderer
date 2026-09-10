@@ -264,6 +264,8 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     ReceiverSubpageMeshletRejects,
     DynamicWindSkinCachePositionBytesUsed,
     DynamicWindSkinCacheMetadataBytesUsed,
+    RasterArgsNonZeroBuckets,
+    RasterArgsDispatchGroups,
 
     Count
 };
@@ -276,10 +278,26 @@ static_assert(static_cast<uint32_t>(CLodWorkGraphCounterIndex::RasterMeshShaderS
 static_assert(static_cast<uint32_t>(CLodWorkGraphCounterIndex::RasterMeshShaderSkinnedOutputTriangles) == 266u);
 static_assert(static_cast<uint32_t>(CLodWorkGraphCounterIndex::DynamicWindSkinCacheEligibleClusters) == 267u);
 static_assert(static_cast<uint32_t>(CLodWorkGraphCounterIndex::DynamicWindSkinCacheInlineRasterVertices) == 274u);
+static_assert(static_cast<uint32_t>(CLodWorkGraphCounterIndex::RasterArgsNonZeroBuckets) == 279u);
+static_assert(static_cast<uint32_t>(CLodWorkGraphCounterIndex::RasterArgsDispatchGroups) == 280u);
 
 struct CLodWorkGraphTelemetryCounters {
     std::array<uint32_t, CLodWorkGraphCounterCount> counters{};
 };
+
+[[nodiscard]] constexpr bool CLodRasterPipelineCollapsed(
+    uint32_t compactedTriangles, uint32_t argumentDispatchGroups,
+    uint32_t rasterGroups, uint32_t outputTriangles,
+    uint32_t pixelInvocations, uint32_t visibilityWrites) noexcept {
+    return (compactedTriangles != 0u && argumentDispatchGroups == 0u) ||
+        (argumentDispatchGroups != 0u && rasterGroups == 0u) ||
+        (rasterGroups != 0u && outputTriangles == 0u) ||
+        (outputTriangles != 0u && pixelInvocations == 0u) ||
+        visibilityWrites > pixelInvocations;
+}
+
+static_assert(CLodRasterPipelineCollapsed(10u, 10u, 0u, 0u, 0u, 0u));
+static_assert(!CLodRasterPipelineCollapsed(10u, 10u, 10u, 20u, 100u, 80u));
 
 inline constexpr uint32_t CLodVsmAttributionClipmapCapacity = 22u;
 
@@ -315,6 +333,11 @@ struct CLodPrimaryVisibilitySnapshot {
     uint32_t residentLeaves = 0u;
     uint32_t nonresidentLeaves = 0u;
     uint32_t visibleClusterWrites = 0u;
+    uint32_t bucketRecordsDispatched = 0u;
+    uint32_t histogramInputs = 0u;
+    uint32_t histogramTriangleContributors = 0u;
+    uint32_t compactionInputs = 0u;
+    uint32_t compactionTriangleEmitted = 0u;
     uint32_t rasterInitializationFailures = 0u;
     uint32_t sourceGroupMismatches = 0u;
     uint32_t outputTriangles = 0u;

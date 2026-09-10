@@ -68,6 +68,41 @@ AVBOITSetupBindings AVBOITSetupPass::Declare(org::PassBuilder& builder)
     if (m_shadingExtinctionTexture) {
         bindings.targets.push_back(builder.BindRenderTargetClear(m_shadingExtinctionTexture));
     }
+
+    const auto index = [&](const auto& resource, org::BindlessViewRequest request) {
+        return resource ? builder.DeclaredBindlessIndex(resource, request) : 0xFFFFFFFFu;
+    };
+    m_config.occupancyUAVDescriptorIndex = index(m_occupancyTexture,
+        {org::BindlessViewKind::UnorderedAccess});
+    m_config.coverageUAVDescriptorIndex = index(m_coverageTexture,
+        {org::BindlessViewKind::UnorderedAccess});
+    m_config.occupancySliceMaskUAVDescriptorIndex = index(m_occupancySliceMaskTexture,
+        {org::BindlessViewKind::UnorderedAccess});
+    m_config.depthWarpLUTSRVDescriptorIndex = index(m_depthWarpLUTBuffer,
+        {org::BindlessViewKind::ShaderResource});
+    m_config.scalarExtinctionUAVDescriptorIndex = index(m_scalarExtinctionTexture,
+        {org::BindlessViewKind::UnorderedAccess,
+            static_cast<uint32_t>(UAVViewType::Texture2DArrayFull)});
+    m_config.chromaticExtinctionUAVDescriptorIndex = index(m_chromaticExtinctionTexture,
+        {org::BindlessViewKind::UnorderedAccess,
+            static_cast<uint32_t>(UAVViewType::Texture2DArrayFull)});
+    m_config.integratedTransmittanceUAVDescriptorIndex = index(m_integratedTransmittanceTexture,
+        {org::BindlessViewKind::UnorderedAccess,
+            static_cast<uint32_t>(UAVViewType::Texture2DArrayFull)});
+    m_config.shadingTransmittanceSRVDescriptorIndex = index(m_integratedTransmittanceTexture,
+        {org::BindlessViewKind::ShaderResource,
+            static_cast<uint32_t>(SRVViewType::Texture2DArrayFull)});
+    m_config.zeroTransmittanceSliceUAVDescriptorIndex = index(m_zeroTransmittanceSliceTexture,
+        {org::BindlessViewKind::UnorderedAccess});
+    m_config.sliceCount = CLodAVBOITDefaultSliceCount;
+    m_config.virtualSliceCount = CLodAVBOITDefaultVirtualSliceCount;
+    m_config.lowResolutionWidth = m_occupancyTexture ? m_occupancyTexture->GetWidth() : 0u;
+    m_config.lowResolutionHeight = m_occupancyTexture ? m_occupancyTexture->GetHeight() : 0u;
+    m_config.depthDistributionExponent = CLodAVBOITDefaultDepthDistributionExponent;
+    m_config.lookupDepthBiasInSlices = CLodAVBOITDefaultLookupDepthBiasInSlices;
+    m_config.zeroTransmittanceThreshold = CLodAVBOITDefaultZeroTransmittanceThreshold;
+    BUFFER_UPLOAD(&m_config, sizeof(m_config),
+        org::runtime::UploadTarget::FromShared(m_configBuffer), 0);
     return bindings;
 }
 
@@ -95,42 +130,6 @@ void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
 	m_integratedTransmittanceTexture->EnsureVirtualDescriptorSlotsAllocated();
     m_zeroTransmittanceSliceTexture->EnsureVirtualDescriptorSlotsAllocated();
 
-    CLodAVBOITConfig config{};
-    config.occupancyUAVDescriptorIndex = m_occupancyTexture
-        ? m_occupancyTexture->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    config.coverageUAVDescriptorIndex = m_coverageTexture
-        ? m_coverageTexture->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    config.occupancySliceMaskUAVDescriptorIndex = m_occupancySliceMaskTexture
-        ? m_occupancySliceMaskTexture->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    config.depthWarpLUTSRVDescriptorIndex = m_depthWarpLUTBuffer
-        ? m_depthWarpLUTBuffer->GetSRVInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    config.scalarExtinctionUAVDescriptorIndex = m_scalarExtinctionTexture
-        ? m_scalarExtinctionTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index
-        : 0xFFFFFFFFu;
-    config.chromaticExtinctionUAVDescriptorIndex = m_chromaticExtinctionTexture
-        ? m_chromaticExtinctionTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index
-        : 0xFFFFFFFFu;
-    config.integratedTransmittanceUAVDescriptorIndex = m_integratedTransmittanceTexture
-        ? m_integratedTransmittanceTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index
-        : 0xFFFFFFFFu;
-    config.shadingTransmittanceSRVDescriptorIndex = m_integratedTransmittanceTexture
-        ? m_integratedTransmittanceTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
-        : 0xFFFFFFFFu;
-    config.zeroTransmittanceSliceUAVDescriptorIndex = m_zeroTransmittanceSliceTexture
-        ? m_zeroTransmittanceSliceTexture->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
-    config.sliceCount = CLodAVBOITDefaultSliceCount;
-    config.virtualSliceCount = CLodAVBOITDefaultVirtualSliceCount;
-    config.lowResolutionWidth = m_occupancyTexture ? m_occupancyTexture->GetWidth() : 0u;
-    config.lowResolutionHeight = m_occupancyTexture ? m_occupancyTexture->GetHeight() : 0u;
-    config.depthDistributionExponent = CLodAVBOITDefaultDepthDistributionExponent;
-    config.lookupDepthBiasInSlices = CLodAVBOITDefaultLookupDepthBiasInSlices;
-    config.zeroTransmittanceThreshold = CLodAVBOITDefaultZeroTransmittanceThreshold;
-
     if (context.viewManager) {
         context.viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewID) {
             const View* view = context.viewManager->Get(viewID);
@@ -138,12 +137,12 @@ void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
                 return;
             }
 
-            config.viewNearDepth = view->cameraInfo.zNear;
-            config.viewFarDepth = view->cameraInfo.zFar;
+            m_config.viewNearDepth = view->cameraInfo.zNear;
+            m_config.viewFarDepth = view->cameraInfo.zFar;
         });
     }
 
-    BUFFER_UPLOAD(&config, sizeof(CLodAVBOITConfig), org::runtime::UploadTarget::FromShared(m_configBuffer), 0);
+    BUFFER_UPLOAD(&m_config, sizeof(m_config), org::runtime::UploadTarget::FromShared(m_configBuffer), 0);
 
     if (m_fitStateBuffer && !m_fitStateInitialized) {
         const CLodAVBOITFitState fitState{};

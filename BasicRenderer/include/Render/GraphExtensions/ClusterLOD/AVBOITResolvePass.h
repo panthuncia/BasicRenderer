@@ -10,7 +10,12 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class AVBOITResolvePass final : public org::TypedRenderGraphPass<AVBOITResolvePass, br::render::PreparedComputeDispatch> {
+struct AVBOITResolveBindings {
+    org::ResourceBindingToken config, accumulation, normalization, extinction;
+};
+
+class AVBOITResolvePass final : public org::TypedRenderGraphPass<AVBOITResolvePass,
+    br::render::PreparedComputeDispatch, AVBOITResolveBindings> {
 public:
     AVBOITResolvePass(
         std::shared_ptr<Buffer> configBuffer,
@@ -18,9 +23,11 @@ public:
         std::shared_ptr<PixelBuffer> normalizationTexture,
         std::shared_ptr<PixelBuffer> shadingExtinctionTexture);
 
-    void Declare(org::PassBuilder& builder);
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    AVBOITResolveBindings Declare(org::PassBuilder& builder);
+    br::render::PreparedComputeDispatch Prepare(const AVBOITResolveBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const AVBOITResolveBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_configBuffer;

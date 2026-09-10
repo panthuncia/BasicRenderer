@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "ShaderBuffers.h"
 #include "RenderPasses/PreparedResourceClears.h"
 #include <array>
@@ -58,5 +59,6 @@ private:
     std::shared_ptr<PixelBuffer> m_accumulationTexture;
     std::shared_ptr<PixelBuffer> m_normalizationTexture;
     std::shared_ptr<PixelBuffer> m_shadingExtinctionTexture;
+    CLodAVBOITConfig m_config{};
     bool m_fitStateInitialized = false;
 };

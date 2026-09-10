@@ -22,7 +22,21 @@ struct RasterBucketHistogramPreparedData {
     bool enabled = false;
 };
 
-class RasterBucketHistogramPass : public org::TypedRenderGraphPass<RasterBucketHistogramPass, RasterBucketHistogramPreparedData> {
+struct RasterBucketHistogramBindings {
+    org::ResourceBindingToken visibleClusters, visibleCount, indirectArguments, histogram;
+    org::ResourceBindingToken reyesOwnership, telemetry, readBaseCounter;
+    uint32_t numBuckets = 0;
+    uint32_t visibleCapacity = 0;
+    bool enabled = false;
+    bool telemetryEnabled = false;
+    bool readReverse = false;
+    bool hasReyesOwnership = false;
+    bool hasTelemetry = false;
+    bool hasReadBaseCounter = false;
+};
+
+class RasterBucketHistogramPass : public org::TypedRenderGraphPass<RasterBucketHistogramPass,
+    RasterBucketHistogramPreparedData, RasterBucketHistogramBindings> {
 public:
     RasterBucketHistogramPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -37,9 +51,11 @@ public:
         bool runWhenComputeSWRasterEnabledOnly = false);
     ~RasterBucketHistogramPass();
 
-    void Declare(org::PassBuilder& builder);
-    RasterBucketHistogramPreparedData Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const RasterBucketHistogramPreparedData&, org::PassRecordContext&);
+    RasterBucketHistogramBindings Declare(org::PassBuilder& builder);
+    RasterBucketHistogramPreparedData Prepare(const RasterBucketHistogramBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const RasterBucketHistogramBindings&,
+        const RasterBucketHistogramPreparedData&, org::PassRecordContext&);
     void Update(const UpdateExecutionContext& executionContext) override;
 
 private:
@@ -63,4 +79,6 @@ private:
     bool m_readReverse = false;
     uint32_t m_visibleClustersCapacity = 0u;
     bool m_runWhenComputeSWRasterEnabledOnly = false;
+    uint32_t m_numBuckets = 0u;
+    bool m_enabled = false;
 };

@@ -5,7 +5,12 @@
 #include "Render/RenderContext.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
-class DilateMotionVectorsPass : public org::TypedRenderGraphPass<DilateMotionVectorsPass, br::render::PreparedComputeDispatch> {
+struct DilateMotionVectorsBindings {
+    org::ResourceBindingToken source, depth, destination;
+};
+
+class DilateMotionVectorsPass : public org::TypedRenderGraphPass<DilateMotionVectorsPass,
+    br::render::PreparedComputeDispatch, DilateMotionVectorsBindings> {
 public:
     DilateMotionVectorsPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -16,23 +21,18 @@ public:
             "DilateMotionVectorsCS");
     }
 
-    void Declare(org::PassBuilder& builder) {
+    DilateMotionVectorsBindings Declare(org::PassBuilder& builder) {
         builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
-        builder.WithShaderResource(
-            Builtin::Surface::Motion,
-            Builtin::PrimaryCamera::ProjectedDepthTexture)
-            .WithUnorderedAccess(Builtin::Surface::DilatedMotion);
-    }
-
-    void Initialize() {
-        m_source = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Surface::Motion);
-        m_depth = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::ProjectedDepthTexture);
-        m_destination = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Surface::DilatedMotion);
+        return {
+            builder.BindShaderResource(Builtin::Surface::Motion),
+            builder.BindShaderResource(Builtin::PrimaryCamera::ProjectedDepthTexture),
+            builder.BindUnorderedAccess(Builtin::Surface::DilatedMotion) };
     }
 
 
 
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch Prepare(const DilateMotionVectorsBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         auto payload = m_pso.GetPayload(); br::render::PreparedComputeDispatch data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
@@ -40,14 +40,18 @@ public:
         data.program = program.program;
         data.descriptorIndices = std::move(program.descriptorIndices);
 
-        data.constants[0] = m_source->GetSRVInfo(0).slot.index; data.constants[1] = m_depth->GetSRVInfo(0).slot.index;
-        data.constants[2] = m_destination->GetUAVShaderVisibleInfo(0).slot.index;
-        data.constants[3] = m_destination->GetWidth(); data.constants[4] = m_destination->GetHeight();
-        data.groupsX = (m_destination->GetWidth() + 7u) / 8u; data.groupsY = (m_destination->GetHeight() + 7u) / 8u;
+        data.constants[0] = preparation.ResolveView(bindings.source, {org::BindlessViewKind::ShaderResource}).index;
+        data.constants[1] = preparation.ResolveView(bindings.depth, {org::BindlessViewKind::ShaderResource}).index;
+        data.constants[2] = preparation.ResolveView(bindings.destination, {org::BindlessViewKind::UnorderedAccess}).index;
+        const auto& destination = preparation.Describe(bindings.destination);
+        data.constants[3] = destination.texture.width; data.constants[4] = destination.texture.height;
+        data.groupsX = (destination.texture.width + 7u) / 8u;
+        data.groupsY = (destination.texture.height + 7u) / 8u;
         return data;
     }
 
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const DilateMotionVectorsBindings&, const br::render::PreparedComputeDispatch& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeDispatch(data, recording);
     }
 
@@ -55,7 +59,4 @@ public:
 
 private:
     PipelineState m_pso;
-    PixelBuffer* m_source = nullptr;
-    PixelBuffer* m_depth = nullptr;
-    PixelBuffer* m_destination = nullptr;
 };

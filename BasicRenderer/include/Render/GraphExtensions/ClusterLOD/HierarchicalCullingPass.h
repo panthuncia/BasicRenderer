@@ -53,9 +53,26 @@ struct HierarchicalCullingPassInputs {
     RG_DEFINE_PASS_INPUTS(HierarchicalCullingPassInputs, &HierarchicalCullingPassInputs::isFirstPass, &HierarchicalCullingPassInputs::maxVisibleClusters, &HierarchicalCullingPassInputs::backend, &HierarchicalCullingPassInputs::workGraphMode, &HierarchicalCullingPassInputs::workGraphReyesVisibility, &HierarchicalCullingPassInputs::renderPhase, &HierarchicalCullingPassInputs::clodOnlyWorkloads, &HierarchicalCullingPassInputs::useShadowCascadeViews, &HierarchicalCullingPassInputs::rasterOutputKind);
 };
 
+struct HierarchicalCullingBindings {
+    org::ResourceBindingToken visible, transforms, visibleCounter, swCounter, histogram, telemetry;
+    org::ResourceBindingToken viewRasterInfo, replay, replayState, nodeInputs, viewDepthIndices;
+    org::ResourceBindingToken shadowPageTable, shadowPhysicalPages, shadowActiveMetadata;
+    org::ResourceBindingToken shadowDynamicPages, shadowDynamicMetadata, shadowDirty;
+    org::ResourceBindingToken invalidatedInstances, predictiveCandidates, predictiveCount;
+    org::ResourceBindingToken phase1Counter, swWriteBase;
+    std::array<org::ResourceBindingToken, 4> voxelQueues{};
+    std::array<org::ResourceBindingToken, 3> pageJobQueues{};
+    org::ResourceBindingToken reyesDice, reyesDiceCounter, reyesOverflow;
+    org::ResourceBindingToken reyesConfigs, reyesVertices, reyesTriangles, reyesTelemetry;
+    bool hasSw = false, hasViewRasterInfo = false, hasViewDepth = false, hasVirtualShadow = false;
+    bool hasShadowDirty = false;
+    bool hasShadowRaster = false, hasReyes = false, hasInvalidated = false, hasPredictive = false;
+    bool hasPhase1 = false, hasSwWriteBase = false, hasVoxelQueues = false, hasPageJobQueues = false;
+};
+
 class HierarchicalCullingPass
     : public org::TypedRenderGraphPass<HierarchicalCullingPass,
-          br::render::PreparedComputeCommandSequence>
+          br::render::PreparedComputeCommandSequence, HierarchicalCullingBindings>
     , public IDynamicDeclaredResources {
 public:
     HierarchicalCullingPass(
@@ -102,11 +119,11 @@ public:
         uint32_t reyesDiceQueueCapacity = 0u);
     ~HierarchicalCullingPass();
 
-    void Declare(org::PassBuilder& builder);
+    HierarchicalCullingBindings Declare(org::PassBuilder& builder);
     void Initialize();
-    br::render::PreparedComputeCommandSequence Prepare(
-        const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeCommandSequence& data,
+    br::render::PreparedComputeCommandSequence Prepare(const HierarchicalCullingBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const HierarchicalCullingBindings&, const br::render::PreparedComputeCommandSequence& data,
         org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeCommands(data, recording);
     }

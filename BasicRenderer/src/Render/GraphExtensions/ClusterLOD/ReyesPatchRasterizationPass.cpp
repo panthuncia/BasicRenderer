@@ -67,20 +67,10 @@ ReyesPatchRasterizationPass::ReyesPatchRasterizationPass(
     m_commandSignature = std::make_shared<rhi::CommandSignaturePtr>(std::move(commandSignature));
 }
 
-void ReyesPatchRasterizationPass::Declare(org::PassBuilder& builder)
+ReyesPatchRasterBindings ReyesPatchRasterizationPass::Declare(org::PassBuilder& builder)
 {
     builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
     builder.WithShaderResource(
-            m_visibleClustersBuffer,
-            m_visibleClusterTransformIndicesBuffer,
-            m_diceQueueBuffer,
-            m_diceQueueCounterBuffer,
-            m_rasterWorkBuffer,
-            m_rasterWorkCounterBuffer,
-            m_tessTableConfigsBuffer,
-            m_tessTableVerticesBuffer,
-            m_tessTableTrianglesBuffer,
-            m_viewRasterInfoBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::InstanceDrawRecordBuffer,
@@ -123,9 +113,14 @@ void ReyesPatchRasterizationPass::Declare(org::PassBuilder& builder)
             Builtin::Terrain::RvtRequestList,
             Builtin::Terrain::RvtCounters,
             Builtin::Terrain::RvtStats)
-        .WithUnorderedAccess(m_telemetryBuffer)
         .WithConstantBuffer(Builtin::PerFrameBuffer);
-    m_indirectArgumentsBinding = builder.BindIndirectArguments(m_indirectArgsBuffer);
+    ReyesPatchRasterBindings bindings{
+        builder.BindShaderResource(m_visibleClustersBuffer), builder.BindShaderResource(m_visibleClusterTransformIndicesBuffer),
+        builder.BindShaderResource(m_diceQueueBuffer), builder.BindShaderResource(m_diceQueueCounterBuffer),
+        builder.BindShaderResource(m_rasterWorkBuffer), builder.BindShaderResource(m_rasterWorkCounterBuffer),
+        builder.BindShaderResource(m_tessTableConfigsBuffer), builder.BindShaderResource(m_tessTableVerticesBuffer),
+        builder.BindShaderResource(m_tessTableTrianglesBuffer), builder.BindShaderResource(m_viewRasterInfoBuffer),
+        builder.BindIndirectArguments(m_indirectArgsBuffer), builder.BindUnorderedAccess(m_telemetryBuffer)};
 
     for (const auto& visibilityBuffer : m_visibilityBuffers) {
         builder.WithUnorderedAccess(visibilityBuffer);
@@ -133,6 +128,10 @@ void ReyesPatchRasterizationPass::Declare(org::PassBuilder& builder)
     if (m_slabResourceGroup) {
         builder.WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
+    bindings.phase = m_phaseIndex;
+    bindings.patchIndexBase = m_patchVisibilityIndexBase;
+    bindings.enabled = !SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableNonVoxelVisibilitySettingName)();
+    return bindings;
 }
 
 void ReyesPatchRasterizationPass::Update(const UpdateExecutionContext& executionContext)
@@ -157,32 +156,35 @@ bool ReyesPatchRasterizationPass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-br::render::PreparedComputeIndirect ReyesPatchRasterizationPass::Prepare(const org::PassPrepareContext& preparation) {
+br::render::PreparedComputeIndirect ReyesPatchRasterizationPass::Prepare(
+    const ReyesPatchRasterBindings& bindings, const org::PassPrepareContext& preparation) const {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     br::render::PreparedComputeIndirect data{};
-    data.enabled = !SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableNonVoxelVisibilitySettingName)();
+    data.enabled = bindings.enabled;
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.commandSignature = preparation.CaptureCommandSignature(m_commandSignature);
-    data.argumentsReference = preparation.CaptureResource(m_indirectArgumentsBinding);
+    data.argumentsReference = preparation.CaptureResource(bindings.indirectArgs);
     auto program = preparation.CaptureProgramBinding(m_pso);
     data.program = program.program;
     data.descriptorIndices = std::move(program.descriptorIndices);
-    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_PHASE_INDEX] = m_phaseIndex;
-    data.constants[CLOD_REYES_PATCH_RASTER_WORK_COUNTER_DESCRIPTOR_INDEX] = m_rasterWorkCounterBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
-    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
-    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
+    const auto srv = [&](org::ResourceBindingToken token) { return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index; };
+    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
+    data.constants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.transforms);
+    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.diceCounter);
+    data.constants[CLOD_REYES_PATCH_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.work);
+    data.constants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX] = srv(bindings.diceQueue);
+    data.constants[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX] = srv(bindings.viewRasterInfo);
+    data.constants[CLOD_REYES_PATCH_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = preparation.ResolveView(bindings.telemetry, {org::BindlessViewKind::UnorderedAccess}).index;
+    data.constants[CLOD_REYES_PATCH_RASTER_PHASE_INDEX] = bindings.phase;
+    data.constants[CLOD_REYES_PATCH_RASTER_WORK_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.workCounter);
+    data.constants[CLOD_REYES_PATCH_RASTER_PATCH_INDEX_BASE] = bindings.patchIndexBase;
+    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = srv(bindings.tessConfigs);
+    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = srv(bindings.tessVertices);
+    data.constants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = srv(bindings.tessTriangles);
     return data;
 }
 
-void ReyesPatchRasterizationPass::Record(const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
+void ReyesPatchRasterizationPass::Record(const ReyesPatchRasterBindings&,
+    const br::render::PreparedComputeIndirect& data, org::PassRecordContext& recording) {
     br::render::RecordPreparedComputeIndirect(data, recording);
 }

@@ -15,7 +15,8 @@
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
 
-void VoxelSoftwareRasterizationPass::Record(const VoxelRasterFrameData& data, org::PassRecordContext& recording) {
+void VoxelSoftwareRasterizationPass::Record(const VoxelRasterBindings&, const VoxelRasterFrameData& data,
+    org::PassRecordContext& recording) {
     auto& commands = recording.Commands();
     commands.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
     for (const auto& step : data.steps) {
@@ -147,7 +148,7 @@ VoxelSoftwareRasterizationPass::VoxelSoftwareRasterizationPass(
 
 VoxelSoftwareRasterizationPass::~VoxelSoftwareRasterizationPass() = default;
 
-void VoxelSoftwareRasterizationPass::Declare(org::PassBuilder& declaration)
+VoxelRasterBindings VoxelSoftwareRasterizationPass::Declare(org::PassBuilder& declaration)
 {
     auto* builder = &declaration;
     builder->PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
@@ -212,6 +213,26 @@ void VoxelSoftwareRasterizationPass::Declare(org::PassBuilder& declaration)
     if (m_slabResourceGroup) {
         builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
+    VoxelRasterBindings bindings{
+        builder->BindShaderResource(m_visibleClustersBuffer),
+        builder->BindShaderResource(m_visibleClusterTransformIndicesBuffer),
+        {},
+        builder->BindShaderResource(m_viewRasterInfoBuffer)};
+    bindings.hasTelemetry = static_cast<bool>(m_telemetryBuffer);
+    if (bindings.hasTelemetry) bindings.telemetry = builder->BindUnorderedAccess(m_telemetryBuffer);
+    for (uint32_t i = 0; i < 2; ++i) {
+        bindings.workRecords[i] = builder->BindShaderResource(m_voxelWorkRecordsBuffers[i]);
+        bindings.workCounters[i] = builder->BindShaderResource(m_voxelWorkCounterBuffers[i]);
+        bindings.indirectArgs[i] = builder->BindUnorderedAccess(m_voxelIndirectArgsBuffers[i]);
+    }
+    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        bindings.pageTable = builder->BindUnorderedAccess(m_virtualShadowPageTableTexture);
+        bindings.clipmapInfo = builder->BindShaderResource(m_virtualShadowClipmapInfoBuffer);
+        bindings.physicalPages = builder->BindUnorderedAccess(m_virtualShadowPhysicalPagesTexture);
+        bindings.dynamicPages = builder->BindUnorderedAccess(m_virtualShadowDynamicPagesTexture);
+        bindings.virtualShadow = true;
+    }
+    return bindings;
 }
 
 void VoxelSoftwareRasterizationPass::Update(const UpdateExecutionContext& executionContext)
@@ -250,7 +271,7 @@ void VoxelSoftwareRasterizationPass::Update(const UpdateExecutionContext& execut
             return;
         }
 
-        info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityUAVIndex;
         info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
         info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
         info.viewportScaleX = 1.0f;
@@ -275,39 +296,48 @@ bool VoxelSoftwareRasterizationPass::DeclaredResourcesChanged() const
     return m_declaredResourcesChanged;
 }
 
-VoxelRasterFrameData VoxelSoftwareRasterizationPass::Prepare(const org::PassPrepareContext& preparation)
+VoxelRasterFrameData VoxelSoftwareRasterizationPass::Prepare(const VoxelRasterBindings& bindings,
+    const org::PassPrepareContext& preparation) const
 {
     const auto* context = preparation.preparationData->Get<UpdateContext>();
     VoxelRasterFrameData data{};
     data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
     data.commandSignature = preparation.CaptureCommandSignature(m_dispatchCommandSignature);
+    const auto srv = [&](org::ResourceBindingToken token) {
+        return preparation.ResolveView(token, {org::BindlessViewKind::ShaderResource}).index;
+    };
+    const auto uav = [&](org::ResourceBindingToken token, uint32_t variant = UINT32_MAX) {
+        return preparation.ResolveView(token, {org::BindlessViewKind::UnorderedAccess, variant}).index;
+    };
     std::array<uint32_t, NumMiscUintRootConstants> misc{};
     misc[CLOD_RASTER_VOXEL_WORK_CAPACITY] = m_voxelWorkCapacity;
-    misc[CLOD_RASTER_VOXEL_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_VOXEL_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = m_visibleClusterTransformIndicesBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled() ? m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index : 0xFFFFFFFFu;
-    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+    misc[CLOD_RASTER_VOXEL_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = srv(bindings.visible);
+    misc[CLOD_RASTER_VOXEL_VISIBLE_CLUSTER_TRANSFORM_INDICES_DESCRIPTOR_INDEX] = srv(bindings.transforms);
+    misc[CLOD_RASTER_TELEMETRY_DESCRIPTOR_INDEX] = bindings.hasTelemetry && IsCLodWorkGraphTelemetryEnabled()
+        ? uav(bindings.telemetry) : 0xFFFFFFFFu;
+    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = srv(bindings.viewInfo);
+    if (bindings.virtualShadow) {
         const auto config = CLodVirtualShadowBuildRuntimeResolutionConfig();
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowDynamicPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] =
+            uav(bindings.pageTable, static_cast<uint32_t>(UAVViewType::Texture2DArrayFull));
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = srv(bindings.clipmapInfo);
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = uav(bindings.physicalPages);
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_DYNAMIC_PAGES_DESCRIPTOR_INDEX] = uav(bindings.dynamicPages);
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = config.pageTableResolution;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = config.virtualResolution;
     }
-    const bool telemetry = m_telemetryBuffer && IsCLodWorkGraphTelemetryEnabled();
+    const bool telemetry = bindings.hasTelemetry && IsCLodWorkGraphTelemetryEnabled();
     for (uint32_t i = 0; i < data.steps.size(); ++i) {
         auto& step = data.steps[i]; step.constants = misc;
-        step.constants[CLOD_RASTER_VOXEL_WORK_RECORDS_DESCRIPTOR_INDEX] = m_voxelWorkRecordsBuffers[i]->GetSRVInfo(0).slot.index;
-        step.constants[CLOD_RASTER_VOXEL_WORK_COUNTER_DESCRIPTOR_INDEX] = m_voxelWorkCounterBuffers[i]->GetSRVInfo(0).slot.index;
-        step.constants[CLOD_RASTER_VOXEL_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_voxelIndirectArgsBuffers[i]->GetUAVShaderVisibleInfo(0).slot.index;
+        step.constants[CLOD_RASTER_VOXEL_WORK_RECORDS_DESCRIPTOR_INDEX] = srv(bindings.workRecords[i]);
+        step.constants[CLOD_RASTER_VOXEL_WORK_COUNTER_DESCRIPTOR_INDEX] = srv(bindings.workCounters[i]);
+        step.constants[CLOD_RASTER_VOXEL_INDIRECT_ARGS_DESCRIPTOR_INDEX] = uav(bindings.indirectArgs[i]);
         step.buildProgram = preparation.CaptureProgramBinding(m_buildArgsPso);
         const PipelineState& raster = telemetry ? (i == 0 ? m_rigidTelemetryRasterPso : m_skinnedTelemetryRasterPso)
             : (i == 0 ? m_rigidRasterPso : m_skinnedRasterPso);
         step.rasterProgram = preparation.CaptureProgramBinding(raster);
-        step.arguments = preparation.CaptureResource(m_voxelIndirectArgsBuffers[i]->GetGlobalResourceID());
+        step.arguments = preparation.CaptureResource(bindings.indirectArgs[i]);
     }
     return data;
 }

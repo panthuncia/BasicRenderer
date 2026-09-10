@@ -17,6 +17,7 @@
 #include "Managers/Singletons/DirectStorageManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "RenderPasses/Base/PassReturn.h"
+#include "Render/AsyncStateGraph.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/PagePool.h"
 #include "Interfaces/IResourceProvider.h"
@@ -33,6 +34,7 @@ using org::ResourceGroup;
 namespace org { class BufferView; }
 using org::BufferView;
 class ViewManager;
+namespace br::render { class RendererStateRequestService; }
 
 class MeshManager : public IResourceProvider {
 public:
@@ -138,6 +140,9 @@ public:
 
 	void AddMeshesBulk(const std::vector<std::shared_ptr<Mesh>>& meshes, bool useMeshletReorderedVertices);
 	void SetSkeletonManager(SkeletonManager* manager) { m_skeletonManager = manager; }
+	void SetRendererStateRequestService(br::render::RendererStateRequestService* service);
+	[[nodiscard]] std::optional<br::render::ArtifactVersionHandle>
+		GeometryResidencyVersion() const;
 	std::vector<StaticMeshTemplateRegistration> AddStaticMeshTemplatesBulk(const std::vector<StaticMeshTemplateRequest>& requests);
 	void PrepareStaticMeshTemplateResourcesAsync(const std::vector<StaticMeshTemplateRequest>& requests);
 	uint32_t GetCLodMaxTraversalDepth() const { return m_clodActiveMaxTraversalDepth.load(std::memory_order_acquire); }
@@ -165,6 +170,7 @@ public:
 		CLodStreamingDomainEventKind kind = CLodStreamingDomainEventKind::FullReset;
 		uint32_t groupsBase = 0;
 		uint32_t groupCount = 0;
+		uint32_t maxTraversalDepth = 0;
 		std::vector<CLodActiveGroupRange> coarsestRanges;
 	};
 
@@ -383,6 +389,10 @@ private:
 	mutable std::mutex m_clodStreamingDomainEventsMutex;
 	std::vector<CLodStreamingDomainEvent> m_clodStreamingDomainEvents;
 	std::atomic<uint64_t> m_clodStreamingDomainEventGeneration{0};
+	mutable std::mutex m_geometryResidencyPublicationMutex;
+	br::render::RendererStateRequestService* m_rendererStateRequests = nullptr;
+	br::render::ArtifactVersionHandle m_geometryResidencyVersion;
+	uint64_t m_geometryResidencyRevision = 0;
 	std::atomic<bool> m_clodStreamingDirectStorageEnabled{true};
 	SettingsManager::Subscription m_clodStreamingDirectStorageSubscription;
 
@@ -531,6 +541,7 @@ private:
 
 	void RebuildCLodSharedStreamingRangeIndex();
 	void PublishCLodStreamingDomainEvent(CLodStreamingDomainEvent event);
+	void PublishGeometryResidencyDelta(const CLodStreamingDomainEvent& event);
 	void PublishCLodStreamingDomainEventForSharedState(CLodStreamingDomainEventKind kind, const std::shared_ptr<CLodSharedStreamingState>& sharedState);
 	void RecomputeCLodActiveMaxTraversalDepth();
 	std::shared_ptr<CLodSharedStreamingState> FindCLodSharedStreamingStateByGlobalGroup(uint32_t groupGlobalIndex, uint32_t& outGroupLocalIndex);

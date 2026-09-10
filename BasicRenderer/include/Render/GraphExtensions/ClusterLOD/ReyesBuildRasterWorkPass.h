@@ -13,7 +13,16 @@ using org::Buffer;
 namespace org { class ResourceGroup; }
 using org::ResourceGroup;
 
-class ReyesBuildRasterWorkPass final : public org::TypedRenderGraphPass<ReyesBuildRasterWorkPass, br::render::PreparedComputeIndirect> {
+struct ReyesBuildRasterWorkBindings {
+    org::ResourceBindingToken diceQueue, diceCounter, readOffset, tessConfigs, output, outputCounter, indirectArgs, telemetry;
+    org::ResourceBindingToken visibleClusters, visibleTransforms, viewDepthIndices, replayQueue, replayCounter, replayOverflow;
+    uint32_t capacity = 0, phase = 0, replayCapacity = 0;
+    bool hasReadOffset = false, hasVisibleClusters = false, hasVisibleTransforms = false, hasViewDepthIndices = false;
+    bool hasReplayQueue = false, hasReplayCounter = false, hasReplayOverflow = false, useAabbOcclusion = false;
+};
+
+class ReyesBuildRasterWorkPass final : public org::TypedRenderGraphPass<ReyesBuildRasterWorkPass,
+    br::render::PreparedComputeIndirect, ReyesBuildRasterWorkBindings> {
 public:
     ReyesBuildRasterWorkPass(
         std::shared_ptr<Buffer> diceQueueBuffer,
@@ -35,10 +44,11 @@ public:
         uint32_t replayDiceQueueCapacity = 0u,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr);
 
-    void Declare(org::PassBuilder& builder);
+    ReyesBuildRasterWorkBindings Declare(org::PassBuilder& builder);
     void Update(const UpdateExecutionContext& executionContext) override;
-    br::render::PreparedComputeIndirect Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
+    br::render::PreparedComputeIndirect Prepare(const ReyesBuildRasterWorkBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const ReyesBuildRasterWorkBindings&, const br::render::PreparedComputeIndirect&, org::PassRecordContext&);
 
 private:
     std::shared_ptr<Buffer> m_diceQueueBuffer;
@@ -48,7 +58,6 @@ private:
     std::shared_ptr<Buffer> m_rasterWorkBuffer;
     std::shared_ptr<Buffer> m_rasterWorkCounterBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    ResourceBindingToken m_indirectArgumentsBinding{};
     std::shared_ptr<Buffer> m_telemetryBuffer;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClusterTransformIndicesBuffer;

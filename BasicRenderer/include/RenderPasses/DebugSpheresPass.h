@@ -24,8 +24,12 @@ struct DebugSphereFrameData {
     std::vector<Sphere> spheres;
 };
 
+struct DebugSphereBindings {
+	org::ResourceBindingToken cameraBuffer, objectBuffer;
+};
+
 class DebugSpherePass
-    : public org::TypedRenderGraphPass<DebugSpherePass, DebugSphereFrameData> {
+	: public org::TypedRenderGraphPass<DebugSpherePass, DebugSphereFrameData, DebugSphereBindings> {
 public:
 	DebugSpherePass() {
 		CreateDebugRootSignature();
@@ -36,15 +40,17 @@ public:
 	~DebugSpherePass() {
 	}
 
-	void Declare(org::PassBuilder& declaration) {
+	DebugSphereBindings Declare(org::PassBuilder& declaration) {
 		auto* builder = &declaration;
-		builder->WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
+		builder->WithShaderResource(Builtin::PerMeshBuffer)
 			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
 			.IsGeometryPass();
 		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
+		return {builder->BindShaderResource(Builtin::CameraBuffer),
+			builder->BindShaderResource(Builtin::PerObjectBuffer)};
 	}
 
-	DebugSphereFrameData Prepare(const org::PassPrepareContext& preparation) {
+	DebugSphereFrameData Prepare(const DebugSphereBindings& bindings, const org::PassPrepareContext& preparation) const {
 		const auto* context = preparation.preparationData->Get<UpdateContext>();
 		DebugSphereFrameData data{};
 		data.resourceHeap = context->textureDescriptorHeap.GetHandle();
@@ -52,8 +58,8 @@ public:
 		data.layout = (*m_debugLayout)->GetHandle();
 		data.program = preparation.CaptureProgram(m_pso);
 		preparation.Retain(m_debugLayout);
-		data.cameraBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
-		data.objectBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
+		data.cameraBufferIndex = preparation.ResolveView(bindings.cameraBuffer, {org::BindlessViewKind::ShaderResource}).index;
+		data.objectBufferIndex = preparation.ResolveView(bindings.objectBuffer, {org::BindlessViewKind::ShaderResource}).index;
 		m_meshInstancesQuery.each([&](flecs::entity, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
 			for (const auto& instance : meshInstances.meshInstances) {
 				const auto bounds = instance->GetMesh()->GetPerMeshCBData().boundingSphere.sphere;
@@ -62,7 +68,7 @@ public:
 		});
 		return data;
 	}
-	static void Record(const DebugSphereFrameData& data, org::PassRecordContext& recording) {
+	static void Record(const DebugSphereBindings&, const DebugSphereFrameData& data, org::PassRecordContext& recording) {
 		if (data.spheres.empty()) return;
 		auto& commandList = recording.Commands();
 		commandList.SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);

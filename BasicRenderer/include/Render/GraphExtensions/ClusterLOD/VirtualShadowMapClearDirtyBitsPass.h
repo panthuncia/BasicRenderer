@@ -13,7 +13,15 @@ using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 
-class VirtualShadowMapClearDirtyBitsPass final : public org::TypedRenderGraphPass<VirtualShadowMapClearDirtyBitsPass, br::render::PreparedComputeDispatch> {
+struct VirtualShadowMapClearDirtyBitsBindings {
+    org::ResourceBindingToken pageTable;
+    org::ResourceBindingToken dirtyFlags;
+    org::ResourceBindingToken stats;
+    bool completeEmptyAdmittedPages = false;
+};
+
+class VirtualShadowMapClearDirtyBitsPass final : public org::TypedRenderGraphPass<VirtualShadowMapClearDirtyBitsPass,
+    br::render::PreparedComputeDispatch, VirtualShadowMapClearDirtyBitsBindings> {
 public:
     VirtualShadowMapClearDirtyBitsPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
@@ -23,10 +31,12 @@ public:
         std::shared_ptr<Buffer> dirtyFlagsBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
-    void Declare(org::PassBuilder& builder);
+    VirtualShadowMapClearDirtyBitsBindings Declare(org::PassBuilder& builder);
     void Initialize();
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation);
-    static void Record(const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
+    br::render::PreparedComputeDispatch Prepare(const VirtualShadowMapClearDirtyBitsBindings&,
+        const org::PassPrepareContext& preparation) const;
+    static void Record(const VirtualShadowMapClearDirtyBitsBindings&,
+        const br::render::PreparedComputeDispatch&, org::PassRecordContext&);
     void ShutdownPass();
 
 private:

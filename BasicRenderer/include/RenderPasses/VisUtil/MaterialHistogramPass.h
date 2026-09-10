@@ -7,8 +7,16 @@
 #include "Materials/TechniqueDescriptor.h"
 #include "../shaders/PerPassRootConstants/visUtilRootConstants.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
+#include "Render/MaterialStateArtifacts.h"
 
-class MaterialHistogramPass : public org::TypedRenderGraphPass<MaterialHistogramPass, br::render::PreparedComputeDispatch> {
+struct MaterialHistogramBindings {
+    org::ResourceBindingToken visibleClusters, reyesDiceQueue;
+    bool hasReyesDiceQueue = false;
+    uint32_t patchVisibilityIndexBase = 0;
+};
+
+class MaterialHistogramPass : public org::TypedRenderGraphPass<MaterialHistogramPass,
+    br::render::PreparedComputeDispatch, MaterialHistogramBindings> {
 public:
     MaterialHistogramPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -36,10 +44,14 @@ public:
             .with<CLodReyesDiceQueueTag>()
             .build();
     }
-    void Declare(org::PassBuilder& b) {
-
-        b.WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
-        b.WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
+    MaterialHistogramBindings Declare(org::PassBuilder& b) {
+        RefreshResourcePointers();
+        MaterialHistogramBindings bindings{b.BindShaderResource(m_visibleClusterResource)};
+        if (m_reyesDiceQueueResource) {
+            bindings.reyesDiceQueue = b.BindShaderResource(m_reyesDiceQueueResource);
+            bindings.hasReyesDiceQueue = true;
+        }
+        bindings.patchVisibilityIndexBase = m_patchVisibilityIndexBase;
 	    b.WithShaderResource(Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
@@ -49,20 +61,20 @@ public:
          .WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer");
 		b.WithConstantBuffer(Builtin::PerFrameBuffer)
          .PreferQueue(org::QueueKind::Compute);
+        return bindings;
     }
 
     void Initialize() {
         RefreshResourcePointers();
-        RefreshDescriptorIndices();
     }
 
     void RefreshResourcePointers() {
-        std::vector<GloballyIndexedResource*> visibleClusterResources;
+        std::vector<std::shared_ptr<GloballyIndexedResource>> visibleClusterResources;
         m_visibleClustersQuery.each([&](flecs::entity e) {
             auto& res = e.get<Components::Resource>();
             auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
             if (test) {
-                visibleClusterResources.push_back(test.get());
+                visibleClusterResources.push_back(std::move(test));
             }
             const auto capacity = e.get<CLodVisibleClusterCapacity>();
             m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(capacity.maxVisibleClusters);
@@ -72,48 +84,47 @@ public:
             throw std::runtime_error("BuildPixelListPass: Expected exactly one visible cluster buffer resource.");
         }
 
-        m_visibleClusterResource = visibleClusterResources[0];
-        m_reyesDiceQueueResource = nullptr;
-        m_reyesDiceQueueBufferSRVIndex = 0xFFFFFFFFu;
+        m_visibleClusterResource = std::move(visibleClusterResources[0]);
+        m_reyesDiceQueueResource.reset();
 
-        std::vector<GloballyIndexedResource*> reyesDiceQueueResources;
+        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesDiceQueueResources;
         m_reyesDiceQueueQuery.each([&](flecs::entity e) {
             if (const auto res = e.try_get<Components::Resource>(); res) {
                 if (const auto test = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); test) {
-                    reyesDiceQueueResources.push_back(test.get());
+                    reyesDiceQueueResources.push_back(std::move(test));
                 }
             }
             });
         if (reyesDiceQueueResources.size() == 1) {
-            m_reyesDiceQueueResource = reyesDiceQueueResources[0];
+            m_reyesDiceQueueResource = std::move(reyesDiceQueueResources[0]);
         }
     }
 
-    void RefreshDescriptorIndices() {
-        if (m_visibleClusterResource) {
-            m_visibleClusterBufferSRVIndex = m_visibleClusterResource->GetSRVInfo(0).slot.index;
-        }
-        m_reyesDiceQueueBufferSRVIndex = m_reyesDiceQueueResource
-            ? m_reyesDiceQueueResource->GetSRVInfo(0).slot.index
-            : 0xFFFFFFFFu;
-    }
-
-    br::render::PreparedComputeDispatch Prepare(const org::PassPrepareContext& preparation) {
+    br::render::PreparedComputeDispatch Prepare(const MaterialHistogramBindings& bindings,
+        const org::PassPrepareContext& preparation) const {
         const auto* update = preparation.preparationData->Get<UpdateContext>();
         const auto* render = preparation.preparationData->Get<RenderContext>();
         if (!update && !render) throw std::logic_error("MaterialHistogramPass requires frame context");
-        RefreshDescriptorIndices();
         br::render::PreparedComputeDispatch data{};
         data.layout = PSOManager::GetInstance().GetComputeRootSignature().GetHandle();
         auto program = CaptureProgramBinding(preparation, m_pso);
         data.program = program.program;
         data.descriptorIndices = std::move(program.descriptorIndices);
-        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
-        data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
-        data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+        data.constants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = preparation.ResolveView(
+            bindings.visibleClusters, {org::BindlessViewKind::ShaderResource}).index;
+        data.constants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = bindings.hasReyesDiceQueue
+            ? preparation.ResolveView(bindings.reyesDiceQueue, {org::BindlessViewKind::ShaderResource}).index
+            : 0xFFFFFFFFu;
+        data.constants[VISBUF_REYES_PATCH_INDEX_BASE] = bindings.patchVisibilityIndexBase;
         uint32_t voxelMaterialBin = 0xFFFFFFFFu;
-        auto* materialManager = update ? update->materialManager : render->materialManager;
-        materialManager->TryGetCompileFlagsSlot(MaterialCompileFlags::MaterialCompileVoxel, voxelMaterialBin);
+        const auto& published = update ? update->publishedRendererState : render->publishedRendererState;
+        const auto materialState = published
+            ? published->materials.payload.Get<br::render::PublishedMaterialState>() : nullptr;
+        if (materialState) {
+            const bool foundVoxelSlot = materialState->TryGetCompileFlagsSlot(
+                MaterialCompileFlags::MaterialCompileVoxel, voxelMaterialBin);
+            (void)foundVoxelSlot;
+        }
         data.constants[VISBUF_VOXEL_MATERIAL_BIN_INDEX] = voxelMaterialBin;
         const auto resolution = update ? update->renderResolution : render->renderResolution;
         data.groupsX = (resolution.x + 7u) / 8u;
@@ -121,7 +132,8 @@ public:
         return data;
     }
 
-    static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
+    static void Record(const MaterialHistogramBindings&, const br::render::PreparedComputeDispatch& data,
+        org::PassRecordContext& recording) {
         br::render::RecordPreparedComputeDispatch(data, recording);
     }
 
@@ -134,9 +146,7 @@ private:
     PipelineState m_pso;
 	flecs::query<> m_visibleClustersQuery;
     flecs::query<> m_reyesDiceQueueQuery;
-    GloballyIndexedResource* m_visibleClusterResource = nullptr;
-    GloballyIndexedResource* m_reyesDiceQueueResource = nullptr;
-    uint32_t m_visibleClusterBufferSRVIndex = 0;
-    uint32_t m_reyesDiceQueueBufferSRVIndex = 0xFFFFFFFFu;
+    std::shared_ptr<GloballyIndexedResource> m_visibleClusterResource;
+    std::shared_ptr<GloballyIndexedResource> m_reyesDiceQueueResource;
     uint32_t m_patchVisibilityIndexBase = 0u;
 };

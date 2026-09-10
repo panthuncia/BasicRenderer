@@ -385,16 +385,15 @@ struct WindSharedResources {
             activeBoneCount = 0u;
             return;
         }
-        const auto transformCount = update->objectManager ? static_cast<std::uint32_t>(update->objectManager->GetResidentInstanceTransformCount()) : 0u;
+        const auto transformCount = update->preparedObjects.residentTransformCount;
         residentTransformCount = transformCount;
-        if (update->objectManager) {
-            skinnedPlacements = update->objectManager->GetSkinnedAssemblyPlacements();
-            activeSkinnedPlacements = update->objectManager->GetActiveSkinnedAssemblyPlacements();
-        }
-		const std::uint32_t placementCapacity = (std::max)(1u, activeSkinnedPlacements
-			? static_cast<std::uint32_t>(activeSkinnedPlacements->ResidentSize()) : 0u);
-		const std::uint32_t placementCount = activeSkinnedPlacements
-			? static_cast<std::uint32_t>(activeSkinnedPlacements->ResidentSize()) : 0u;
+        skinnedPlacements = update->preparedObjects.skinnedPlacements;
+        activeSkinnedPlacements = update->preparedObjects.activeSkinnedPlacements;
+		const auto& activePlacementEntries = update->preparedObjects.activePlacementEntries;
+		const std::uint32_t placementCount = activePlacementEntries
+			? static_cast<std::uint32_t>(activePlacementEntries->size()) : 0u;
+		const std::uint32_t placementCapacity = (std::max)(
+			1u, update->preparedObjects.activeSkinnedPlacementResidentSize);
 		const std::uint64_t instanceRevision = update->skeletonManager->GetActiveInstanceRevision();
 		const std::uint64_t profileRevision = runtime->ProfileRevision();
 		const bool structureChanged =
@@ -610,13 +609,14 @@ struct WindSharedResources {
 			layoutSummary << ']';
         }
 		std::vector<std::uint32_t> placementCountByFirstVariant(types.size(), 0u);
-		if (update->objectManager && activeSkinnedPlacements) {
-			const auto placementRecords = update->objectManager->GetSkinnedAssemblyPlacementCPU();
-			for (const auto& activeEntry : activeSkinnedPlacements->SnapshotActiveEntries()) {
-				if (activeEntry.drawRecordIndex >= placementRecords.size()) {
+		if (activeSkinnedPlacements) {
+			const auto& placementRecords = update->preparedObjects.placementRecords;
+			const auto& activeEntries = update->preparedObjects.activePlacementEntries;
+			if (placementRecords && activeEntries) for (const auto& activeEntry : *activeEntries) {
+				if (activeEntry.drawRecordIndex >= placementRecords->size()) {
 					continue;
 				}
-				const auto& placement = placementRecords[activeEntry.drawRecordIndex];
+				const auto& placement = (*placementRecords)[activeEntry.drawRecordIndex];
 				if (placement.generation != activeEntry.generation ||
 					placement.skinningTypeSlot >= sourceSlotToBaseType.size()) {
 					continue;
