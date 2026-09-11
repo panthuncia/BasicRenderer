@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 #include <functional>
+#include <mutex>
 
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -9,7 +10,7 @@
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Managers/Singletons/RendererECSManager.h"
+#include "Render/DebugSceneSnapshotService.h"
 
 struct DebugSphereFrameData {
     struct Sphere {
@@ -31,11 +32,10 @@ struct DebugSphereBindings {
 class DebugSpherePass
 	: public org::TypedRenderGraphPass<DebugSpherePass, DebugSphereFrameData, DebugSphereBindings> {
 public:
-	DebugSpherePass() {
+	explicit DebugSpherePass(std::shared_ptr<br::render::DebugSceneSnapshotService> snapshots)
+		: m_snapshots(std::move(snapshots)) {
 		CreateDebugRootSignature();
 		CreateDebugMeshPSO();
-		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-		m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 	~DebugSpherePass() {
 	}
@@ -50,6 +50,13 @@ public:
 			builder->BindShaderResource(Builtin::PerObjectBuffer)};
 	}
 
+	void Update(const UpdateExecutionContext&) override {
+		std::scoped_lock lock(m_spheresMutex);
+		m_spheres.clear();
+		for (const auto& sphere : m_snapshots->CaptureSpheres())
+			m_spheres.push_back({sphere.bounds, sphere.perObjectIndex});
+	}
+
 	DebugSphereFrameData Prepare(const DebugSphereBindings& bindings, const org::PassPrepareContext& preparation) const {
 		const auto* context = preparation.preparationData->Get<UpdateContext>();
 		DebugSphereFrameData data{};
@@ -60,12 +67,10 @@ public:
 		preparation.Retain(m_debugLayout);
 		data.cameraBufferIndex = preparation.ResolveView(bindings.cameraBuffer, {org::BindlessViewKind::ShaderResource}).index;
 		data.objectBufferIndex = preparation.ResolveView(bindings.objectBuffer, {org::BindlessViewKind::ShaderResource}).index;
-		m_meshInstancesQuery.each([&](flecs::entity, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
-			for (const auto& instance : meshInstances.meshInstances) {
-				const auto bounds = instance->GetMesh()->GetPerMeshCBData().boundingSphere.sphere;
-				data.spheres.push_back({bounds, drawInfo.perObjectCBIndex});
-			}
-		});
+		{
+			std::scoped_lock lock(m_spheresMutex);
+			data.spheres = m_spheres;
+		}
 		return data;
 	}
 	static void Record(const DebugSphereBindings&, const DebugSphereFrameData& data, org::PassRecordContext& recording) {
@@ -89,6 +94,7 @@ public:
 	}
 
 private:
+	std::shared_ptr<br::render::DebugSceneSnapshotService> m_snapshots;
 
 	void CreateDebugRootSignature() {
 		auto device = DeviceManager::GetInstance().GetDevice();
@@ -178,13 +184,10 @@ private:
 
 	}
 
-	flecs::query<Components::ObjectDrawInfo, Components::MeshInstances> m_meshInstancesQuery;
+	std::vector<DebugSphereFrameData::Sphere> m_spheres;
+	mutable std::mutex m_spheresMutex;
 	std::shared_ptr<rhi::PipelineLayoutPtr> m_debugLayout;
 	std::shared_ptr<rhi::PipelinePtr> m_pso;
 	bool m_wireframe;
-
-	std::function<bool()> getImageBasedLightingEnabled;
-	std::function<bool()> getPunctualLightingEnabled;
-	std::function<bool()> getShadowsEnabled;
 
 };

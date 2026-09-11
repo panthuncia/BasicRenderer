@@ -10,7 +10,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/MeshManager.h"
 #include "Render/RenderContext.h"
-#include "Render/ProducerPassServices.h"
+#include "Render/MaterialEvaluationBuildInputs.h"
 #include "Render/MaterialStateArtifacts.h"
 #include "Render/IndirectCommand.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
@@ -370,7 +370,7 @@ struct EvaluateTerrainRegionMaterialGroupsBindings {
 class EvaluateTerrainRegionMaterialGroupsPass : public org::TypedRenderGraphPass<EvaluateTerrainRegionMaterialGroupsPass,
     br::render::PreparedComputeIndirect, EvaluateTerrainRegionMaterialGroupsBindings> {
 public:
-    explicit EvaluateTerrainRegionMaterialGroupsPass(ProducerPassServices& services) {
+    explicit EvaluateTerrainRegionMaterialGroupsPass(const MaterialEvaluationBuildInputs& services) {
         std::vector<DxcDefine> defines;
         defines.push_back({ L"PSO_TERRAIN", L"1" });
         defines.push_back({ L"VISUTIL_SPECIALIZED_MATERIAL_EVAL", L"1" });
@@ -383,39 +383,15 @@ public:
             std::move(defines),
             "VisUtil_EvaluateTerrainRegionMaterialGroupPSO");
 
-        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-        auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
-        m_visibleClustersQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<VisibleClustersBufferTag>()
-            .build();
-        m_reyesDiceQueueQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesDiceQueueTag>()
-            .build();
-        m_reyesTessTableConfigsQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesTessTableConfigsTag>()
-            .build();
-        m_reyesTessTableVerticesQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesTessTableVerticesTag>()
-            .build();
-        m_reyesTessTableTrianglesQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesTessTableTrianglesTag>()
-            .build();
-
+        m_visibleClusterResource = services.visibleClusters;
+        m_reyesDiceQueueResource = services.reyesDiceQueue;
+        m_reyesTessTableConfigsResource = services.reyesTessTableConfigs;
+        m_reyesTessTableVerticesResource = services.reyesTessTableVertices;
+        m_reyesTessTableTrianglesResource = services.reyesTessTableTriangles;
+        m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(services.visibleClusterCapacity);
         m_slabResourceGroup = services.clodSlabResources;
     }
-
     EvaluateTerrainRegionMaterialGroupsBindings Declare(org::PassBuilder& builder) {
-        RefreshResourcePointers();
         EvaluateTerrainRegionMaterialGroupsBindings bindings{};
         bindings.visibleClusters = builder.BindShaderResource(m_visibleClusterResource);
         if (m_reyesDiceQueueResource) {
@@ -431,11 +407,6 @@ public:
         bindings.patchVisibilityIndexBase = m_patchVisibilityIndexBase;
         builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         auto* b = &builder;
-        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
-        b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
-        b->WithShaderResource(ECSResourceResolver(m_reyesTessTableConfigsQuery));
-        b->WithShaderResource(ECSResourceResolver(m_reyesTessTableVerticesQuery));
-        b->WithShaderResource(ECSResourceResolver(m_reyesTessTableTrianglesQuery));
 
         if (m_slabResourceGroup) {
             b->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
@@ -510,80 +481,10 @@ public:
     }
 
     void Initialize() {
-        RefreshResourcePointers();
         m_terrainRegionEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::TerrainRegionMaterialEvaluationCommandBuffer");
         m_activeCount = m_resourceRegistryView->RequestPtr<Resource>("Builtin::VisUtil::TerrainRegionActiveCountBuffer");
     }
 
-    void RefreshResourcePointers() {
-        std::vector<std::shared_ptr<GloballyIndexedResource>> visibleClusterResources;
-        m_visibleClustersQuery.each([&](flecs::entity e) {
-            auto& res = e.get<Components::Resource>();
-            auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
-            if (test) {
-                visibleClusterResources.push_back(std::move(test));
-            }
-            const auto capacity = e.get<CLodVisibleClusterCapacity>();
-            m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(capacity.maxVisibleClusters);
-        });
-        if (visibleClusterResources.size() != 1) {
-            throw std::runtime_error("EvaluateTerrainRegionMaterialGroupsPass: Expected exactly one visible cluster buffer resource.");
-        }
-
-        m_visibleClusterResource = std::move(visibleClusterResources[0]);
-        m_reyesDiceQueueResource.reset();
-        m_reyesTessTableConfigsResource.reset();
-        m_reyesTessTableVerticesResource.reset();
-        m_reyesTessTableTrianglesResource.reset();
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesDiceQueueResources;
-        m_reyesDiceQueueQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto test = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); test) {
-                    reyesDiceQueueResources.push_back(std::move(test));
-                }
-            }
-        });
-        if (reyesDiceQueueResources.size() == 1) {
-            m_reyesDiceQueueResource = std::move(reyesDiceQueueResources[0]);
-        }
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableConfigResources;
-        m_reyesTessTableConfigsQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableConfigResources.push_back(std::move(resource));
-                }
-            }
-        });
-        if (reyesTessTableConfigResources.size() == 1) {
-            m_reyesTessTableConfigsResource = std::move(reyesTessTableConfigResources[0]);
-        }
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableVertexResources;
-        m_reyesTessTableVerticesQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableVertexResources.push_back(std::move(resource));
-                }
-            }
-        });
-        if (reyesTessTableVertexResources.size() == 1) {
-            m_reyesTessTableVerticesResource = std::move(reyesTessTableVertexResources[0]);
-        }
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableTriangleResources;
-        m_reyesTessTableTrianglesQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableTriangleResources.push_back(std::move(resource));
-                }
-            }
-        });
-        if (reyesTessTableTriangleResources.size() == 1) {
-            m_reyesTessTableTrianglesResource = std::move(reyesTessTableTriangleResources[0]);
-        }
-    }
 
     br::render::PreparedComputeIndirect Prepare(const EvaluateTerrainRegionMaterialGroupsBindings& bindings,
         const org::PassPrepareContext& preparation) const {
@@ -623,11 +524,6 @@ public:
     }
 
     void ShutdownPass() {
-        m_visibleClustersQuery = {};
-        m_reyesDiceQueueQuery = {};
-        m_reyesTessTableConfigsQuery = {};
-        m_reyesTessTableVerticesQuery = {};
-        m_reyesTessTableTrianglesQuery = {};
         m_slabResourceGroup.reset();
         m_terrainRegionEvalCmds = nullptr;
         m_activeCount = nullptr;
@@ -635,11 +531,6 @@ public:
 
 private:
     PipelineState m_pso;
-    flecs::query<> m_visibleClustersQuery;
-    flecs::query<> m_reyesDiceQueueQuery;
-    flecs::query<> m_reyesTessTableConfigsQuery;
-    flecs::query<> m_reyesTessTableVerticesQuery;
-    flecs::query<> m_reyesTessTableTrianglesQuery;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::shared_ptr<GloballyIndexedResource> m_visibleClusterResource;
     std::shared_ptr<GloballyIndexedResource> m_reyesDiceQueueResource;

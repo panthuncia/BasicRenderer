@@ -156,7 +156,7 @@ void DeepVisibilityResolvePass::Update(const UpdateExecutionContext& executionCo
     m_globalPsoFlags = context.globalPSOFlags;
 
     std::shared_ptr<PixelBuffer> primaryHeadPointers;
-    for (const auto& view : context.preparedViews) if (view.primary) {
+    for (const auto& view : context.Views()) if (view.primary) {
         primaryHeadPointers = view.deepVisibilityHeadPointers;
         break;
     }

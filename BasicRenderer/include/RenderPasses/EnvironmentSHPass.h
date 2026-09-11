@@ -53,10 +53,7 @@ public:
 
     void Update(const UpdateExecutionContext& context) override {
         const auto* input = context.hostData->Get<UpdateContext>();
-        if (input->environmentManager) {
-            m_work = input->environmentManager->GetSHWorkQueue();
-            input->environmentManager->PublishWorkTelemetry();
-        }
+        m_work = input->environmentWork.sphericalHarmonics;
         auto pending = m_work.Pending();
         if (pending != m_pending) {
             m_pending = std::move(pending);
@@ -100,8 +97,8 @@ public:
 
 
 private:
-    EnvironmentManager::SHWorkQueue m_work;
-    EnvironmentManager::SHWorkQueue::Snapshot m_pending;
+    br::render::EnvironmentSHWorkQueue m_work;
+    br::render::EnvironmentSHWorkQueue::Snapshot m_pending;
 	bool m_declaredResourcesChanged = true;
 
 	void CreatePSO() {

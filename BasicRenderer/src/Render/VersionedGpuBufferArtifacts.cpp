@@ -582,10 +582,12 @@ ArtifactRequestResult VersionedBufferFamily::RequestContentSnapshot(
     std::uint64_t contentRevision = 0;
     {
         std::lock_guard lock(m_mutex);
-        const auto [found, inserted] = m_contentRevisions.try_emplace(
-            contentFingerprint, 0u);
-        if (inserted) found->second = ++m_nextContentRevision;
-        contentRevision = found->second;
+        if (m_lastContentRevision == 0 ||
+            m_lastContentFingerprint != contentFingerprint) {
+            m_lastContentFingerprint = contentFingerprint;
+            m_lastContentRevision = ++m_nextContentRevision;
+        }
+        contentRevision = m_lastContentRevision;
     }
     return RequestSnapshot(requests, uploads, contentRevision, bytes,
         elementCount, capacity);

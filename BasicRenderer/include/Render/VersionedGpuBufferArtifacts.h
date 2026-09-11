@@ -224,7 +224,11 @@ private:
     std::shared_ptr<const PublishedGpuBufferVersion> m_previous;
     std::uint64_t m_lastJournalRevision = 0;
     ArtifactVersionHandle m_lastJournalHandle;
-    std::unordered_map<std::uint64_t, std::uint64_t> m_contentRevisions;
+    // Content snapshots are normally monotonic frame publications. Remember
+    // only the current semantic image; retaining every historical fingerprint
+    // made CPU memory grow with world streaming even after GPU versions retired.
+    std::uint64_t m_lastContentFingerprint = 0;
+    std::uint64_t m_lastContentRevision = 0;
     std::uint64_t m_nextContentRevision = 0;
 };
 

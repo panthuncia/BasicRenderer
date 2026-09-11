@@ -337,10 +337,10 @@ void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& exec
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
     std::vector<std::shared_ptr<PixelBuffer>> nextVisibilityBuffers;
-    auto numViews = context.preparedViewCameraBufferSize;
+    auto numViews = context.ViewCameraBufferSize();
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
 
-    for (const auto& viewInfo : context.preparedViews) {
+    for (const auto& viewInfo : context.Views()) {
         auto cameraIndex = viewInfo.cameraBufferIndex;
         if (cameraIndex >= viewRasterInfo.size()) continue;
         CLodViewRasterInfo info{};

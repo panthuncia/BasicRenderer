@@ -128,6 +128,10 @@ public:
     bool ActiveEntryMode() const {
         return m_activeEntryMode;
     }
+    std::vector<std::byte> CaptureCpuShadowBytes() const {
+        std::lock_guard lock(m_activeStateMutex);
+        return m_cpuShadowData;
+    }
 
 private:
     SortedUnsignedIntBuffer(uint64_t capacity = 64, std::string name = "", bool UAV = false, bool activeEntryMode = false, bool graphManaged = false)

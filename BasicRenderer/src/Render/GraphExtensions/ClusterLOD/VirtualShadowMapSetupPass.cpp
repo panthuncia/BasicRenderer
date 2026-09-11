@@ -24,16 +24,6 @@
 
 namespace {
 
-std::array<CLodVirtualShadowClipmapInfo, CLodVirtualShadowMaxSupportedClipmapCount> g_previousClipmapInfos{};
-std::array<int64_t, CLodVirtualShadowMaxSupportedClipmapCount> g_previousClipmapPageOffsetX{};
-std::array<int64_t, CLodVirtualShadowMaxSupportedClipmapCount> g_previousClipmapPageOffsetY{};
-bool g_previousClipmapInfosValid = false;
-DirectX::XMFLOAT3 g_previousDirectionalLightDirection{};
-bool g_previousDirectionalLightDirectionValid = false;
-DirectX::XMUINT2 g_previousRenderResolution{};
-bool g_previousRenderResolutionValid = false;
-uint32_t g_pendingRenderResolutionResetFrames = 0u;
-
 uint32_t GetVirtualShadowVirtualResolution()
 {
     return CLodVirtualShadowBuildRuntimeResolutionConfig().virtualResolution;
@@ -191,16 +181,16 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
     const bool renderResolutionChanged =
         updateContext != nullptr &&
-        g_previousRenderResolutionValid &&
-        (g_previousRenderResolution.x != updateContext->renderResolution.x ||
-            g_previousRenderResolution.y != updateContext->renderResolution.y);
+        m_previousRenderResolutionValid &&
+        (m_previousRenderResolution.x != updateContext->renderResolution.x ||
+            m_previousRenderResolution.y != updateContext->renderResolution.y);
     if (renderResolutionChanged) {
         // Virtual shadow page marking samples the primary linear-depth texture
         // before the current frame repopulates it, so a resolution change needs
         // one reset for the resize frame and one more once the new-size depth is valid.
-        g_pendingRenderResolutionResetFrames = 2u;
+        m_pendingRenderResolutionResetFrames = 2u;
     }
-    const bool renderResolutionResetPending = g_pendingRenderResolutionResetFrames > 0u;
+    const bool renderResolutionResetPending = m_pendingRenderResolutionResetFrames > 0u;
     const bool forceResetResources = m_forceResetResources || disableVirtualShadowPageCaching || renderResolutionResetPending;
     m_forceResetResources = false;
     m_feedbackRecoveryRefresh =
@@ -208,7 +198,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
             false,
             std::memory_order_acq_rel);
     if (renderResolutionResetPending) {
-        --g_pendingRenderResolutionResetFrames;
+        --m_pendingRenderResolutionResetFrames;
     }
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = GetVirtualShadowResolutionConfig();
     const uint32_t virtualShadowResolution = virtualShadowConfig.virtualResolution;
@@ -218,7 +208,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     const uint32_t virtualShadowPhysicalAtlasPagesHigh = virtualShadowConfig.physicalAtlasPagesHigh;
 
     m_resetReasonForced = forceResetResources;
-    m_resetReasonNoPreviousState = !g_previousClipmapInfosValid;
+    m_resetReasonNoPreviousState = !m_previousClipmapInfosValid;
     m_resetReasonStructureMismatch = false;
     m_resetReasonLightDirectionChanged = false;
     m_resetResources = m_resetReasonForced || m_resetReasonNoPreviousState;
@@ -233,7 +223,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     uint32_t activeClipmapCount = 0u;
 
     if (updateContext) {
-        for (const auto& view : updateContext->preparedViews) {
+        for (const auto& view : updateContext->Views()) {
             if (!view.primary) continue;
             compactMainCamera.positionWorldSpace = view.cameraInfo.positionWorldSpace;
             compactMainCamera.viewInverse = view.cameraInfo.viewInverse;
@@ -241,9 +231,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
             break;
         }
 
-        const auto publishedLights = updateContext->publishedRendererState
-            ? updateContext->publishedRendererState->lights.payload
-                .Get<br::render::PublishedLightTableState>() : nullptr;
+        const auto& publishedLights = updateContext->lightTables;
         if (publishedLights && !publishedLights->directionalShadows.empty()) {
             const auto& lightViewInfo = publishedLights->directionalShadows.front();
             currentDirectionalLightDirection = lightViewInfo.direction;
@@ -256,7 +244,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 			// which skinned VSM clipmaps are required. Keep the two workloads on one
 			// quality control instead of allowing shadow skinning beyond wind reach.
 			const float configuredSkinnedShadowRadius = (std::max)(0.0f,
-				SettingsManager::GetInstance().getSettingGetter<float>(ProceduralWindOuterRadiusSettingName)());
+				updateContext->proceduralWind.outerRadius);
 			const float casterDynamicShadowRadius = m_virtualShadowCasters
 				? m_virtualShadowCasters->GetRequestedDynamicShadowRadius()
 				: 0.0f;
@@ -273,9 +261,9 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 			uint32_t reclassifiedClipmapCount = 0u;
 
             for (uint32_t clipmapIndex = 0; clipmapIndex < clipmapCount; ++clipmapIndex) {
-                const auto viewIt = std::ranges::find(updateContext->preparedViews,
+                const auto viewIt = std::ranges::find(updateContext->Views(),
                     lightViewInfo.viewIDs[clipmapIndex], &PreparedViewFrameData::id);
-                if (viewIt == updateContext->preparedViews.end()) {
+                if (viewIt == updateContext->Views().end()) {
                     continue;
                 }
                 const auto& view = *viewIt;
@@ -311,14 +299,14 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 clipmapInfo.pageTableLayer = clipmapIndex;
                 clipmapInfo.shadowCameraBufferIndex = view.cameraBufferIndex;
                 clipmapInfo.clipLevel = clipmapIndex;
-				const uint32_t previousDynamicFlag = g_previousClipmapInfosValid
-					? g_previousClipmapInfos[clipmapIndex].flags & CLodVirtualShadowClipmapDynamicSkinnedFlag
+				const uint32_t previousDynamicFlag = m_previousClipmapInfosValid
+					? m_previousClipmapInfos[clipmapIndex].flags & CLodVirtualShadowClipmapDynamicSkinnedFlag
 					: 0u;
 				const uint32_t currentDynamicFlag = dynamicSkinnedClipmap
 					? CLodVirtualShadowClipmapDynamicSkinnedFlag
 					: 0u;
 				clipmapInfo.flags = CLodVirtualShadowClipmapValidFlag | currentDynamicFlag;
-				if (g_previousClipmapInfosValid && previousDynamicFlag != currentDynamicFlag) {
+				if (m_previousClipmapInfosValid && previousDynamicFlag != currentDynamicFlag) {
 					clipmapInfo.flags |= CLodVirtualShadowClipmapInvalidateFlag;
 					++reclassifiedClipmapCount;
 				}
@@ -357,16 +345,16 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 compactShadowCameras[clipmapIndex].projection = view.cameraInfo.jitteredProjection;
                 compactShadowCameras[clipmapIndex].viewProjection = view.cameraInfo.viewProjection;
                 compactShadowCameras[clipmapIndex].isOrtho = view.cameraInfo.isOrtho;
-                if (g_previousClipmapInfosValid && IsClipmapValid(g_previousClipmapInfos[clipmapIndex])) {
+                if (m_previousClipmapInfosValid && IsClipmapValid(m_previousClipmapInfos[clipmapIndex])) {
                     clipmapInfo.clearOffsetX = ClampClearOffset(
-                        pageOffsetX - g_previousClipmapPageOffsetX[clipmapIndex],
+                        pageOffsetX - m_previousClipmapPageOffsetX[clipmapIndex],
                         virtualShadowPageTableResolution);
                     clipmapInfo.clearOffsetY = ClampClearOffset(
-                        pageOffsetY - g_previousClipmapPageOffsetY[clipmapIndex],
+                        pageOffsetY - m_previousClipmapPageOffsetY[clipmapIndex],
                         virtualShadowPageTableResolution);
                 }
-                g_previousClipmapPageOffsetX[clipmapIndex] = pageOffsetX;
-                g_previousClipmapPageOffsetY[clipmapIndex] = pageOffsetY;
+                m_previousClipmapPageOffsetX[clipmapIndex] = pageOffsetX;
+                m_previousClipmapPageOffsetY[clipmapIndex] = pageOffsetY;
             }
 			g_clodSkinnedShadowEffectiveDynamicClipmapCount.store(
 				effectiveDynamicClipmapCount, std::memory_order_relaxed);
@@ -386,8 +374,8 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     }
 
     if (currentDirectionalLightDirectionValid &&
-        g_previousDirectionalLightDirectionValid &&
-        !NearlyEqualDirection(currentDirectionalLightDirection, g_previousDirectionalLightDirection)) {
+        m_previousDirectionalLightDirectionValid &&
+        !NearlyEqualDirection(currentDirectionalLightDirection, m_previousDirectionalLightDirection)) {
         m_resetReasonLightDirectionChanged = true;
         m_resetResources = true;
     }
@@ -418,19 +406,19 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         markData.unwrappedPageOffsetX = info.unwrappedPageOffsetX;
         markData.unwrappedPageOffsetY = info.unwrappedPageOffsetY;
 
-        if (!m_resetResources && !ClipmapStructureEquals(info, g_previousClipmapInfos[clipmapIndex])) {
+        if (!m_resetResources && !ClipmapStructureEquals(info, m_previousClipmapInfos[clipmapIndex])) {
             m_resetReasonStructureMismatch = true;
             m_resetResources = true;
         }
     }
 
-    g_previousClipmapInfos = clipmapInfos;
-    g_previousClipmapInfosValid = true;
-    g_previousDirectionalLightDirection = currentDirectionalLightDirection;
-    g_previousDirectionalLightDirectionValid = currentDirectionalLightDirectionValid;
+    m_previousClipmapInfos = clipmapInfos;
+    m_previousClipmapInfosValid = true;
+    m_previousDirectionalLightDirection = currentDirectionalLightDirection;
+    m_previousDirectionalLightDirectionValid = currentDirectionalLightDirectionValid;
     if (updateContext) {
-        g_previousRenderResolution = updateContext->renderResolution;
-        g_previousRenderResolutionValid = true;
+        m_previousRenderResolution = updateContext->renderResolution;
+        m_previousRenderResolutionValid = true;
     }
 
     runtimeState.clipmapCount = activeClipmapCount;

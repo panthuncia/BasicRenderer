@@ -6,77 +6,16 @@
 
 #include <tracy/Tracy.hpp>
 
-#include "Managers/LightManager.h"
-#include "Managers/ManagerInterface.h"
-#include "Managers/ObjectManager.h"
-#include "Managers/ViewManager.h"
-#include "Managers/Singletons/RendererECSManager.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Materials/Material.h"
-#include "Render/DrawWorkload.h"
-#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Render/SceneIngestionServices.h"
+#include "Render/SceneEntityMaterializationService.h"
+#include "Render/SceneSourceStateStore.h"
 #include "Mesh/MeshInstance.h"
-#include "Resources/Sampler.h"
 #include "Scene/Components.h"
 #include "Resources/components.h"
-#include "Utilities/Utilities.h"
 
 namespace {
 
 struct BridgedSceneEntity {};
-struct CameraResourceSignature {
-    uint32_t depthResX = 0;
-    uint32_t depthResY = 0;
-    bool primary = false;
-};
-struct LightResourceSignature {
-    Components::LightType type = Components::LightType::Directional;
-    bool shadowCaster = false;
-    uint16_t shadowResolution = 0;
-    uint8_t directionalCascadeCount = 0;
-    bool hasPrimaryCamera = false;
-};
-struct RenderableSignature {
-    std::vector<uint64_t> meshInstanceKeys;
-};
-
-bool operator==(const CameraResourceSignature& lhs, const CameraResourceSignature& rhs) {
-    return lhs.depthResX == rhs.depthResX
-        && lhs.depthResY == rhs.depthResY
-        && lhs.primary == rhs.primary;
-}
-
-bool operator==(const LightResourceSignature& lhs, const LightResourceSignature& rhs) {
-    return lhs.type == rhs.type
-        && lhs.shadowCaster == rhs.shadowCaster
-        && lhs.shadowResolution == rhs.shadowResolution
-        && lhs.directionalCascadeCount == rhs.directionalCascadeCount
-        && lhs.hasPrimaryCamera == rhs.hasPrimaryCamera;
-}
-
-uint64_t BuildMeshInstanceKey(const std::shared_ptr<MeshInstance>& meshInstance) {
-    const auto mesh = meshInstance->GetMesh();
-    const auto material = meshInstance->GetEffectiveMaterial();
-    const auto instanceKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(meshInstance.get()));
-    const auto meshKey = mesh ? mesh->GetGlobalID() : 0ull;
-    const auto materialKey = material ? static_cast<uint64_t>(material->GetMaterialID()) : 0ull;
-    const auto perMeshKey = static_cast<uint64_t>(meshInstance->GetPerMeshBufferIndex());
-    return instanceKey ^ (meshKey << 1) ^ (materialKey << 33) ^ (perMeshKey << 49);
-}
-
-RenderableSignature BuildRenderableSignature(const Components::MeshInstances* meshInstances) {
-    RenderableSignature signature;
-    if (!meshInstances) {
-        return signature;
-    }
-
-    signature.meshInstanceKeys.reserve(meshInstances->meshInstances.size());
-    for (const auto& meshInstance : meshInstances->meshInstances) {
-        signature.meshInstanceKeys.push_back(BuildMeshInstanceKey(meshInstance));
-    }
-    return signature;
-}
-
 bool HasSkinningPassEligibleMeshes(const Components::MeshInstances* meshInstances) {
     if (!meshInstances) {
         return false;
@@ -94,45 +33,6 @@ bool HasSkinningPassEligibleMeshes(const Components::MeshInstances* meshInstance
     }
 
     return false;
-}
-
-Components::PerPassMeshes BuildPerPassMeshes(const Components::MeshInstances* meshInstances) {
-    Components::PerPassMeshes perPassMeshes;
-    if (!meshInstances) {
-        return perPassMeshes;
-    }
-
-    for (const auto& meshInstance : meshInstances->meshInstances) {
-        const auto mesh = meshInstance->GetMesh();
-        const auto material = meshInstance->GetEffectiveMaterial();
-        ForEachMeshRenderPhase(*mesh, *(material ? material : mesh->material), [&](const RenderPhase& pass) {
-            perPassMeshes.meshesByPass[pass.hash].push_back(meshInstance);
-        });
-    }
-
-    return perPassMeshes;
-}
-
-void DestroyRendererObject(flecs::entity entity, ObjectManager& objectManager) {
-    if (const auto* drawInfo = entity.try_get<Components::ObjectDrawInfo>()) {
-        objectManager.RemoveObject(drawInfo);
-        entity.remove<Components::ObjectDrawInfo>();
-    }
-}
-
-void DestroyRendererCamera(flecs::entity entity, ViewManager& viewManager) {
-    if (const auto* renderView = entity.try_get<Components::RenderViewRef>()) {
-        viewManager.DestroyView(renderView->viewID);
-        entity.remove<Components::RenderViewRef>();
-    }
-    entity.remove<Components::DepthMap>();
-}
-
-void DestroyRendererLight(flecs::entity entity, LightManager& lightManager) {
-    if (entity.has<Components::LightViewInfo>()) {
-        lightManager.RemoveLight(entity);
-    }
-    entity.remove<Components::DepthMap>();
 }
 
 void CopyCommonComponents(flecs::entity dst, flecs::entity src) {
@@ -163,212 +63,6 @@ void CopyCommonComponents(flecs::entity dst, uint64_t stableSceneID, const std::
     } else {
         dst.remove<Components::Name>();
     }
-}
-
-void SyncPassMembership(flecs::entity dst, const Components::MeshInstances* meshInstances) {
-    dst.remove<Components::ParticipatesInPass>(flecs::Wildcard);
-
-    if (!meshInstances) {
-        return;
-    }
-
-    const auto& renderPhaseEntities = RendererECSManager::GetInstance().GetRenderPhaseEntities();
-    std::unordered_set<uint64_t> passHashes;
-    for (const auto& meshInstance : meshInstances->meshInstances) {
-        const auto mesh = meshInstance->GetMesh();
-        const auto material = meshInstance->GetEffectiveMaterial();
-        ForEachMeshRenderPhase(*mesh, *(material ? material : mesh->material), [&](const RenderPhase& pass) {
-            passHashes.insert(pass.hash);
-        });
-    }
-
-    for (const auto& [phase, phaseEntity] : renderPhaseEntities) {
-        if (passHashes.contains(phase.hash)) {
-            dst.add<Components::ParticipatesInPass>(phaseEntity);
-        }
-    }
-}
-
-bool SyncRenderableDerivedStateForBulk(
-    flecs::entity dst,
-    const Components::MeshInstances* meshInstances,
-    const Components::InstanceTransforms* instanceTransforms,
-    ObjectManager& objectManager,
-    ObjectManager::ObjectBuildInfo& objectBuildInfo) {
-    const auto newSignature = BuildRenderableSignature(meshInstances);
-    const auto perPassMeshes = BuildPerPassMeshes(meshInstances);
-    const auto* oldSignature = dst.try_get<RenderableSignature>();
-    const bool signatureChanged = oldSignature == nullptr || oldSignature->meshInstanceKeys != newSignature.meshInstanceKeys;
-    const auto* matrix = dst.try_get<Components::Matrix>();
-
-    if (meshInstances) {
-        dst.set<Components::MeshInstances>(*meshInstances);
-        dst.set<Components::PerPassMeshes>(perPassMeshes);
-    } else {
-        dst.remove<Components::MeshInstances>();
-        dst.remove<Components::PerPassMeshes>();
-    }
-    if (instanceTransforms) {
-        dst.set<Components::InstanceTransforms>(*instanceTransforms);
-    } else {
-        dst.remove<Components::InstanceTransforms>();
-    }
-
-    if (!dst.has<Components::RenderableObject>()) {
-        Components::RenderableObject renderable{};
-        if (matrix) {
-            renderable.perObjectCB.modelMatrix = matrix->matrix;
-            renderable.perObjectCB.prevModelMatrix = matrix->matrix;
-            renderable.perObjectCB.modelInverseMatrix = DirectX::XMMatrixInverse(nullptr, matrix->matrix);
-        }
-        dst.set<Components::RenderableObject>(renderable);
-    }
-
-    if (const auto* stableId = dst.try_get<Components::StableSceneID>()) {
-        auto renderable = dst.get<Components::RenderableObject>();
-        renderable.perObjectCB.stableSceneIdLo = static_cast<uint32_t>(stableId->value);
-        renderable.perObjectCB.stableSceneIdHi = static_cast<uint32_t>(stableId->value >> 32u);
-        dst.set<Components::RenderableObject>(renderable);
-    }
-
-    if (signatureChanged) {
-        DestroyRendererObject(dst, objectManager);
-        auto renderable = dst.get<Components::RenderableObject>();
-        objectBuildInfo = { renderable.perObjectCB, meshInstances, instanceTransforms };
-        dst.set<RenderableSignature>(newSignature);
-    }
-
-    SyncPassMembership(dst, meshInstances);
-    return signatureChanged;
-}
-
-Components::Camera BuildRendererCamera(
-    const Components::Camera& sceneCamera,
-    const Components::DepthMap& depthMap,
-    uint32_t width,
-    uint32_t height,
-    uint32_t lodHeight) {
-    auto rendererCamera = sceneCamera;
-    rendererCamera.info.numDepthMips = NumMips(width, height);
-    rendererCamera.info.depthResX = width;
-    rendererCamera.info.depthResY = height;
-    rendererCamera.info.lodResY = lodHeight != 0u ? lodHeight : height;
-    const auto paddedLinearDepthX = depthMap.linearDepthMap->GetInternalWidth();
-    const auto paddedLinearDepthY = depthMap.linearDepthMap->GetInternalHeight();
-    rendererCamera.info.uvScaleToNextPowerOfTwo = {
-        static_cast<float>(width) / static_cast<float>(paddedLinearDepthX),
-        static_cast<float>(height) / static_cast<float>(paddedLinearDepthY)
-    };
-    return rendererCamera;
-}
-
-void SyncCameraDerivedState(
-    flecs::entity dst,
-    const Components::Camera& sceneCamera,
-    bool isPrimary,
-    ViewManager& viewManager,
-    uint32_t renderWidth,
-    uint32_t renderHeight,
-    uint32_t lodHeight) {
-    const CameraResourceSignature newSignature{ renderWidth, renderHeight, isPrimary };
-    const auto* oldSignature = dst.try_get<CameraResourceSignature>();
-    const bool signatureChanged = oldSignature == nullptr || !(*oldSignature == newSignature);
-
-    if (signatureChanged) {
-        DestroyRendererCamera(dst, viewManager);
-
-        auto depthMap = CreateDepthMapComponent(renderWidth, renderHeight, 1, false);
-        auto rendererCamera = BuildRendererCamera(sceneCamera, depthMap, renderWidth, renderHeight, lodHeight);
-        const auto viewFlags = isPrimary ? ViewFlags::PrimaryCamera() : ViewFlags::Generic();
-        const auto viewID = viewManager.CreateView(rendererCamera.info, viewFlags);
-        viewManager.AttachDepth(viewID, depthMap.depthMap, depthMap.linearDepthMap);
-
-        dst.set<Components::Camera>(rendererCamera);
-        dst.set<Components::RenderViewRef>({ viewID });
-        dst.set<Components::DepthMap>(depthMap);
-        dst.set<CameraResourceSignature>(newSignature);
-    } else {
-        const auto existing = dst.get<Components::Camera>();
-        const auto depthMap = dst.get<Components::DepthMap>();
-        auto rendererCamera = BuildRendererCamera(sceneCamera, depthMap, renderWidth, renderHeight, lodHeight);
-        // Preserve view/projection history maintained by RunRenderResourceSyncStage.
-        // The scene camera does not maintain these — its view stays at identity.
-        rendererCamera.info.view = existing.info.view;
-        rendererCamera.info.viewInverse = existing.info.viewInverse;
-        rendererCamera.info.prevView = existing.info.prevView;
-        rendererCamera.info.jitteredProjection = existing.info.jitteredProjection;
-        rendererCamera.info.prevJitteredProjection = existing.info.prevJitteredProjection;
-        rendererCamera.info.prevUnjitteredProjection = existing.info.prevUnjitteredProjection;
-        rendererCamera.info.viewProjection = existing.info.viewProjection;
-        rendererCamera.info.projectionInverse = existing.info.projectionInverse;
-        rendererCamera.info.positionWorldSpace = existing.info.positionWorldSpace;
-        rendererCamera.jitterPixelSpace = existing.jitterPixelSpace;
-        rendererCamera.jitterNDC = existing.jitterNDC;
-        dst.set<Components::Camera>(rendererCamera);
-    }
-}
-
-LightResourceSignature BuildLightSignature(const Components::Light& light, uint16_t shadowResolution, uint8_t directionalCascadeCount, bool hasPrimaryCamera) {
-    return LightResourceSignature{
-        light.type,
-        light.lightInfo.shadowCaster,
-        shadowResolution,
-        directionalCascadeCount,
-        hasPrimaryCamera
-    };
-}
-
-void ApplyLightRendererBindings(Components::Light& light, flecs::entity dst) {
-    light.lightInfo.shadowViewInfoIndex = -1;
-    light.lightInfo.shadowMapIndex = -1;
-    light.lightInfo.shadowSamplerIndex = -1;
-
-    if (const auto* viewInfo = dst.try_get<Components::LightViewInfo>()) {
-        light.lightInfo.shadowViewInfoIndex = viewInfo->viewInfoBufferIndex;
-    }
-}
-
-void SyncLightDerivedState(
-    flecs::entity dst,
-    const Components::Light& sceneLight,
-    const Components::FrustumPlanes* sceneFrustumPlanes,
-    LightManager& lightManager,
-    uint16_t shadowResolution,
-    uint8_t directionalCascadeCount,
-    bool hasPrimaryCamera) {
-    const auto newSignature = BuildLightSignature(sceneLight, shadowResolution, directionalCascadeCount, hasPrimaryCamera);
-    const auto* oldSignature = dst.try_get<LightResourceSignature>();
-    const bool signatureChanged = oldSignature == nullptr || !(*oldSignature == newSignature);
-
-    Components::Light rendererLight = sceneLight;
-
-    if (signatureChanged) {
-        DestroyRendererLight(dst, lightManager);
-
-        AddLightReturn addInfo = lightManager.AddLight(&rendererLight.lightInfo, dst.id());
-        dst.set<Components::LightViewInfo>(addInfo.lightViewInfo);
-
-        if (sceneFrustumPlanes) {
-            dst.set<Components::FrustumPlanes>(*sceneFrustumPlanes);
-        } else {
-            dst.remove<Components::FrustumPlanes>();
-        }
-        if (addInfo.frustumPlanes.has_value()) {
-            dst.set<Components::FrustumPlanes>(*addInfo.frustumPlanes);
-        }
-
-        dst.set<LightResourceSignature>(newSignature);
-    } else if (sceneFrustumPlanes) {
-        dst.set<Components::FrustumPlanes>(*sceneFrustumPlanes);
-    }
-
-	dst.remove<Components::DepthMap>();
-
-    ApplyLightRendererBindings(rendererLight, dst);
-    if (const auto* viewInfo = dst.try_get<Components::LightViewInfo>()) {
-        lightManager.UpdateLightBufferView(viewInfo->lightBufferView.get(), rendererLight.lightInfo);
-    }
-    dst.set<Components::Light>(rendererLight);
 }
 
 flecs::entity GetOrCreateBridgedEntity(
@@ -427,21 +121,13 @@ uint64_t GetStableSceneID(flecs::entity entity) {
 void DestroyBridgedEntity(
     flecs::world& renderWorld,
     uint64_t renderEntityId,
-    const ManagerInterface& managerInterface) {
+    const br::render::SceneIngestionServices& services) {
     flecs::entity entity{ renderWorld, renderEntityId };
     if (!entity.is_alive()) {
         return;
     }
 
-    if (auto* objectManager = managerInterface.GetObjectManager()) {
-        DestroyRendererObject(entity, *objectManager);
-    }
-    if (auto* viewManager = managerInterface.GetViewManager()) {
-        DestroyRendererCamera(entity, *viewManager);
-    }
-    if (auto* lightManager = managerInterface.GetLightManager()) {
-        DestroyRendererLight(entity, *lightManager);
-    }
+    if (services.sceneEntities) services.sceneEntities->Destroy(entity);
     entity.destruct();
 }
 
@@ -893,8 +579,9 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
     return snapshot;
 }
 
-void SceneRenderBridge::Clear(const ManagerInterface& managerInterface) {
-    if (!RendererECSManager::GetInstance().IsAlive()) {
+void SceneRenderBridge::Clear(const SceneIngestionServices& services) {
+    m_sourceStore = nullptr;
+    if (!services.source || !services.source->Available()) {
         m_bridgedEntities.clear();
         m_sceneRootEntityId = 0;
         m_primaryCameraEntityId = 0;
@@ -909,10 +596,11 @@ void SceneRenderBridge::Clear(const ManagerInterface& managerInterface) {
         return;
     }
 
-    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
+    auto source = services.source->AcquireWrite();
+    auto& renderWorld = source.World();
 
     for (const auto& [stableSceneID, state] : m_bridgedEntities) {
-        DestroyBridgedEntity(renderWorld, state.renderEntityId, managerInterface);
+        DestroyBridgedEntity(renderWorld, state.renderEntityId, services);
     }
 
     if (m_sceneRootEntityId != 0) {
@@ -935,37 +623,28 @@ void SceneRenderBridge::Clear(const ManagerInterface& managerInterface) {
     InvalidateExportQueries();
 }
 
-void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const ManagerInterface& managerInterface) {
+void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot,
+    const SceneIngestionServices& services, const SceneIngestionConfiguration& configuration) {
     ZoneScopedN("SceneRenderBridge::IngestSnapshot");
 
-    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
-    auto* objectManager = managerInterface.GetObjectManager();
-    auto* viewManager = managerInterface.GetViewManager();
-    auto* lightManager = managerInterface.GetLightManager();
-
-    if (!objectManager || !viewManager || !lightManager) {
-        throw std::runtime_error("SceneRenderBridge requires object, view, and light managers");
+    if (!services.source || !services.source->Available()) {
+        throw std::runtime_error("SceneRenderBridge requires renderer source-state storage");
+    }
+    auto source = services.source->AcquireWrite(snapshot.snapshotSequence);
+    auto& renderWorld = source.World();
+    m_sourceStore = services.source;
+    auto* sceneEntities = services.sceneEntities;
+    if (!sceneEntities || !sceneEntities->Available()) {
+        throw std::runtime_error("SceneRenderBridge requires scene-entity materialization");
     }
 
-    DirectX::XMUINT2 renderResolution{};
-    DirectX::XMUINT2 outputResolution{};
-    uint16_t shadowResolution = 0;
-    uint8_t directionalCascadeCount = 0;
-    float maxShadowDistance = 0.0f;
-    float directionalShadowDistanceLowerBound = 0.0f;
-    float directionalShadowSceneExtent = 0.0f;
-    CLodLodHeightMode clodLodHeightMode = CLodLodHeightMode::OutputHeight;
-    {
-        ZoneScopedN("SceneRenderBridge::IngestSnapshot::ReadSettings");
-        renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-        outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-        shadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution")();
-        directionalCascadeCount = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
-        maxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance")();
-        directionalShadowDistanceLowerBound = SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowDistanceLowerBound")();
-        directionalShadowSceneExtent = SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowSceneExtent")();
-        clodLodHeightMode = SettingsManager::GetInstance().getSettingGetter<CLodLodHeightMode>(CLodLodHeightModeSettingName)();
-    }
+    const auto renderResolution = configuration.renderResolution;
+    const auto outputResolution = configuration.outputResolution;
+    const auto shadowResolution = configuration.shadowResolution;
+    const auto directionalCascadeCount = configuration.directionalCascadeCount;
+    const auto maxShadowDistance = configuration.maxShadowDistance;
+    const auto directionalShadowDistanceLowerBound = configuration.directionalShadowDistanceLowerBound;
+    const auto directionalShadowSceneExtent = configuration.directionalShadowSceneExtent;
     const bool lightResourceSettingsChanged =
         !m_hasLightResourceSettings ||
         m_lastRenderWidth != renderResolution.x ||
@@ -994,13 +673,8 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     // Process only renderables that actually changed (transform, mesh, or new)
     {
         ZoneScopedN("SceneRenderBridge::IngestSnapshot::ChangedRenderables");
-        struct PendingObjectDraw {
-            flecs::entity entity;
-        };
-        std::vector<ObjectManager::ObjectBuildInfo> objectBuildInfos;
-        std::vector<PendingObjectDraw> pendingObjectDraws;
-        objectBuildInfos.reserve(snapshot.changedRenderables.size());
-        pendingObjectDraws.reserve(snapshot.changedRenderables.size());
+        std::vector<SceneEntityMaterializationService::RenderableRequest> materializationRequests;
+        materializationRequests.reserve(snapshot.changedRenderables.size());
 
         for (const auto& renderable : snapshot.changedRenderables) {
             auto dst = GetOrCreateBridgedEntity(renderWorld, m_bridgedEntities, renderable.stableID, m_currentIngestionFrame, sceneRoot);
@@ -1024,12 +698,8 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             }
 
             if (isNew || meshChanged) {
-                ObjectManager::ObjectBuildInfo objectBuildInfo;
                 const auto* instanceTransforms = renderable.hasInstanceTransforms ? &renderable.instanceTransforms : nullptr;
-                if (SyncRenderableDerivedStateForBulk(dst, &renderable.meshInstances, instanceTransforms, *objectManager, objectBuildInfo)) {
-                    objectBuildInfos.push_back(objectBuildInfo);
-                    pendingObjectDraws.push_back({ dst });
-                }
+                materializationRequests.push_back({ dst, &renderable.meshInstances, instanceTransforms });
                 entityState.meshGeneration = renderable.meshInstances.generation;
                 entityState.instanceTransformGeneration = renderable.instanceTransforms.generation;
             }
@@ -1053,20 +723,9 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             }
         }
 
-        if (!objectBuildInfos.empty()) {
+        if (!materializationRequests.empty()) {
             ZoneScopedN("SceneRenderBridge::IngestSnapshot::ChangedRenderables::AddObjectsBulk");
-            auto drawInfos = objectManager->AddObjectsBulk(objectBuildInfos);
-            const auto count = std::min(drawInfos.size(), pendingObjectDraws.size());
-            for (size_t i = 0; i < count; ++i) {
-                auto dst = pendingObjectDraws[i].entity;
-                if (!dst.is_alive()) {
-                    continue;
-                }
-                auto renderable = dst.get<Components::RenderableObject>();
-                renderable.perObjectCB.normalMatrixBufferIndex = drawInfos[i].normalMatrixIndex;
-                dst.set<Components::RenderableObject>(renderable);
-                dst.set<Components::ObjectDrawInfo>(drawInfos[i]);
-            }
+            sceneEntities->MaterializeRenderables(materializationRequests, source.Phases());
         }
     }
 
@@ -1079,10 +738,11 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             dst.add<Components::RenderTransformUpdated>();
             const bool useOutputHeight =
                 camera.primary &&
-                clodLodHeightMode == CLodLodHeightMode::OutputHeight &&
+                configuration.primaryCameraUsesOutputHeight &&
                 outputResolution.y != 0u;
             const uint32_t lodHeight = useOutputHeight ? outputResolution.y : renderResolution.y;
-            SyncCameraDerivedState(dst, camera.camera, camera.primary, *viewManager, renderResolution.x, renderResolution.y, lodHeight);
+            sceneEntities->MaterializeCamera(dst, camera.camera, camera.primary,
+                renderResolution.x, renderResolution.y, lodHeight);
             if (camera.useExternalMatrices) {
                 dst.set<Components::ExternalCameraMatrices>(camera.externalMatrices);
             } else {
@@ -1091,7 +751,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             if (camera.primary) {
                 dst.add<Components::PrimaryCamera>();
                 m_primaryCameraEntityId = dst.id();
-                lightManager->SetCurrentCamera(dst);
+                sceneEntities->SelectCurrentCamera(dst);
             } else {
                 dst.remove<Components::PrimaryCamera>();
             }
@@ -1106,7 +766,8 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             CopyCommonComponents(dst, light.stableID, light.name, light.matrix);
             dst.add<Components::RenderTransformUpdated>();
             const auto* frustumPlanes = light.frustumPlanes ? &light.frustumPlanes.value() : nullptr;
-            SyncLightDerivedState(dst, light.light, frustumPlanes, *lightManager, shadowResolution, directionalCascadeCount, m_primaryCameraEntityId != 0);
+            sceneEntities->MaterializeLight(dst, light.light, frustumPlanes,
+                shadowResolution, directionalCascadeCount, m_primaryCameraEntityId != 0);
             if (light.skipShadowPass) {
                 dst.add<Components::SkipShadowPass>();
             } else {
@@ -1124,11 +785,10 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             .build();
         resyncQuery.each([&](flecs::entity entity, Components::Light& light) {
             const auto* frustumPlanes = entity.try_get<Components::FrustumPlanes>();
-            SyncLightDerivedState(
+            sceneEntities->MaterializeLight(
                 entity,
                 light,
                 frustumPlanes,
-                *lightManager,
                 shadowResolution,
                 directionalCascadeCount,
                 m_primaryCameraEntityId != 0);
@@ -1152,7 +812,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             if (it == m_bridgedEntities.end()) {
                 return;
             }
-            DestroyBridgedEntity(renderWorld, it->second.renderEntityId, managerInterface);
+            DestroyBridgedEntity(renderWorld, it->second.renderEntityId, services);
             m_bridgedEntities.erase(it);
         };
         for (const auto stableSceneID : snapshot.removedRenderableIDs) {
@@ -1174,7 +834,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             if (!snapshot.aliveRenderableIDs.contains(stableSceneID) &&
                 !snapshot.aliveCameraIDs.contains(stableSceneID) &&
                 !snapshot.aliveLightIDs.contains(stableSceneID)) {
-                DestroyBridgedEntity(renderWorld, state.renderEntityId, managerInterface);
+                DestroyBridgedEntity(renderWorld, state.renderEntityId, services);
                 staleStableSceneIDs.push_back(stableSceneID);
             }
         }
@@ -1185,8 +845,9 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     }
 }
 
-void SceneRenderBridge::Sync(Scene& scene, const ManagerInterface& managerInterface) {
-    IngestSnapshot(ExportSnapshot(scene, 0, 0), managerInterface);
+void SceneRenderBridge::Sync(Scene& scene, const SceneIngestionServices& services,
+    const SceneIngestionConfiguration& configuration) {
+    IngestSnapshot(ExportSnapshot(scene, 0, 0), services, configuration);
 }
 
 bool SceneRenderBridge::HasPrimaryCamera() const {
@@ -1194,41 +855,45 @@ bool SceneRenderBridge::HasPrimaryCamera() const {
         return false;
     }
 
-    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
+    if (!m_sourceStore || !m_sourceStore->Available()) return false;
+    auto source = m_sourceStore->AcquireWrite();
+    auto& renderWorld = source.World();
     flecs::entity entity{ renderWorld, m_primaryCameraEntityId };
     return entity.is_alive();
 }
 
 flecs::entity SceneRenderBridge::GetSceneRoot() const {
-    if (m_sceneRootEntityId == 0 || !RendererECSManager::GetInstance().IsAlive()) {
+    if (m_sceneRootEntityId == 0 || !m_sourceStore || !m_sourceStore->Available()) {
         return {};
     }
 
-    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
+    auto source = m_sourceStore->AcquireWrite();
+    auto& renderWorld = source.World();
     flecs::entity root{ renderWorld, m_sceneRootEntityId };
     return root.is_alive() ? root : flecs::entity{};
 }
 
 flecs::entity SceneRenderBridge::GetPrimaryCameraEntity() const {
-    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
+    if (!m_sourceStore || !m_sourceStore->Available()) return {};
+    auto source = m_sourceStore->AcquireWrite();
+    auto& renderWorld = source.World();
     return flecs::entity{ renderWorld, m_primaryCameraEntityId };
 }
 
-void SceneRenderBridge::ResyncPrimaryCameraDepth(ViewManager& viewManager, uint32_t renderWidth, uint32_t renderHeight) {
+void SceneRenderBridge::ResyncPrimaryCameraDepth(const SceneIngestionServices& services,
+    uint32_t renderWidth, uint32_t renderHeight, uint32_t primaryLodHeight) {
     if (m_primaryCameraEntityId == 0) return;
-    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
+    if (!m_sourceStore || !m_sourceStore->Available()) return;
+    auto source = m_sourceStore->AcquireWrite();
+    auto& renderWorld = source.World();
     auto entity = flecs::entity{ renderWorld, m_primaryCameraEntityId };
     if (!entity.is_alive() || !entity.has<Components::Camera>()) return;
     const auto camera = entity.get<Components::Camera>();
-    uint32_t lodHeight = renderHeight;
-    if (entity.has<Components::PrimaryCamera>()) {
-        const auto lodHeightMode = SettingsManager::GetInstance().getSettingGetter<CLodLodHeightMode>(CLodLodHeightModeSettingName)();
-        const auto outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-        if (lodHeightMode == CLodLodHeightMode::OutputHeight && outputResolution.y != 0u) {
-            lodHeight = outputResolution.y;
-        }
-    }
-    SyncCameraDerivedState(entity, camera, entity.has<Components::PrimaryCamera>(), viewManager, renderWidth, renderHeight, lodHeight);
+    const uint32_t lodHeight = entity.has<Components::PrimaryCamera>() && primaryLodHeight != 0u
+        ? primaryLodHeight : renderHeight;
+    if (!services.sceneEntities || !services.sceneEntities->Available()) return;
+    services.sceneEntities->MaterializeCamera(entity, camera,
+        entity.has<Components::PrimaryCamera>(), renderWidth, renderHeight, lodHeight);
 }
 
 } // namespace br::render

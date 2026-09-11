@@ -1,6 +1,6 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/MeshManager.h"
-#include "Managers/SkeletonManager.h"
+#include "Render/PoseInstanceRegistrationService.h"
 #include "Materials/Material.h"
 
 #include <algorithm>
@@ -17,14 +17,14 @@ void MeshInstance::InitializeBoundsFromMesh_()
 }
 
 void MeshInstance::ReleaseSkinningInstance_() {
-    if (m_pCurrentSkeletonManager == nullptr || m_skeleton == nullptr) {
+    if (m_poseRegistration == nullptr || m_skeleton == nullptr) {
         return;
     }
 
-    auto lifetime = m_skeletonManagerLifetime.lock();
+    auto lifetime = m_poseRegistrationLifetime.lock();
     if (!lifetime || !lifetime->load(std::memory_order_acquire)) {
-        m_pCurrentSkeletonManager = nullptr;
-        m_skeletonManagerLifetime.reset();
+        m_poseRegistration = nullptr;
+        m_poseRegistrationLifetime.reset();
         return;
     }
 
@@ -32,16 +32,16 @@ void MeshInstance::ReleaseSkinningInstance_() {
         return;
     }
 
-    m_pCurrentSkeletonManager->ReleaseSkinningInstance(m_skeleton.get());
+    m_poseRegistration->Release(m_skeleton.get());
 }
 
-void MeshInstance::SetCurrentSkeletonManager(SkeletonManager* manager) {
-    m_pCurrentSkeletonManager = manager;
-    if (manager != nullptr) {
-        m_skeletonManagerLifetime = manager->GetLifetimeToken();
+void MeshInstance::SetPoseRegistrationService(br::render::PoseInstanceRegistrationService* service) {
+    m_poseRegistration = service;
+    if (service != nullptr) {
+        m_poseRegistrationLifetime = service->GetLifetimeToken();
     }
     else {
-        m_skeletonManagerLifetime.reset();
+        m_poseRegistrationLifetime.reset();
     }
 }
 
@@ -111,8 +111,8 @@ void MeshInstance::SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
 	m_skeleton = skeleton;
     if (m_skeleton != nullptr) {
         m_skeleton->SetAnimationSpeed(m_animationSpeed);
-        if (m_pCurrentSkeletonManager != nullptr) {
-            m_pCurrentSkeletonManager->AcquireSkinningInstance(m_skeleton);
+        if (m_poseRegistration != nullptr) {
+            m_poseRegistration->Acquire(m_skeleton);
             m_perMeshInstanceBufferData.skinningInstanceSlot = m_skeleton->GetSkinningInstanceSlot();
         }
     }

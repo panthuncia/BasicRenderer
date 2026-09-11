@@ -149,10 +149,10 @@ void ReyesVirtualShadowRasterizationPass::Update(const UpdateExecutionContext& e
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
     m_shadowConfig = virtualShadowConfig;
 
-    const auto numViews = context.preparedViewCameraBufferSize;
+    const auto numViews = context.ViewCameraBufferSize();
     std::vector<CLodViewRasterInfo> nextViewRasterInfos(numViews);
 
-    for (const auto& viewInfo : context.preparedViews) {
+    for (const auto& viewInfo : context.Views()) {
         const auto cameraIndex = viewInfo.cameraBufferIndex;
         CLodViewRasterInfo info{};
         if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {

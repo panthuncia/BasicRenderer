@@ -18,7 +18,7 @@
 #include "Animation/Skeleton.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "Managers/Singletons/RendererECSManager.h"
+#include "Render/DebugSceneSnapshotService.h"
 #include "Mesh/MeshInstance.h"
 #include "Render/RenderContext.h"
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
@@ -34,8 +34,8 @@ struct SkeletonDebugLine {
 
 struct DebugSkeletonFrameData {
     struct DrawRange { uint32_t lineOffset = 0, lineCount = 0; };
-    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{}, rtvHeap{};
-    uint32_t rtvIndex = 0;
+    rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
+    org::PreparedDescriptorReference target{};
     DirectX::XMUINT2 outputResolution{};
     rhi::PipelineLayoutHandle layout{};
     org::PreparedProgramBinding program{};
@@ -45,31 +45,26 @@ struct DebugSkeletonFrameData {
 };
 
 struct DebugSkeletonBindings {
-    org::ResourceBindingToken lines, perFrame, camera;
+    org::ResourceBindingToken lines, perFrame, camera, target;
 };
 
 class DebugSkeletonPass final
     : public org::TypedRenderGraphPass<DebugSkeletonPass, DebugSkeletonFrameData, DebugSkeletonBindings> {
 public:
-    DebugSkeletonPass()
-    {
+    explicit DebugSkeletonPass(std::shared_ptr<br::render::DebugSceneSnapshotService> snapshots)
+        : m_snapshots(std::move(snapshots)) {
         m_lineBuffer = DynamicStructuredBuffer<SkeletonDebugLine>::CreateShared(65536, "Debug Skeleton Lines");
         CreatePSO();
 
-        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::Matrix, Components::ObjectDrawInfo, Components::MeshInstances>()
-            .cached()
-            .cache_kind(flecs::QueryCacheAll)
-            .build();
     }
 
     DebugSkeletonBindings Declare(org::PassBuilder& declaration)
     {
         auto* builder = &declaration;
-        builder->WithRenderTarget(Builtin::Backbuffer);
         return {builder->BindShaderResource(m_lineBuffer),
             builder->BindConstantBuffer(Builtin::PerFrameBuffer),
-            builder->BindShaderResource(Builtin::CameraBuffer)};
+            builder->BindShaderResource(Builtin::CameraBuffer),
+            builder->BindRenderTarget(ResourceIdentifier{Builtin::PresentationColor})};
     }
 
     void Update(const UpdateExecutionContext&) override
@@ -88,8 +83,8 @@ public:
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         data.resourceHeap = context->textureDescriptorHeap.GetHandle();
         data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.rtvHeap = context->rtvHeap;
-        data.rtvIndex = context->frameIndex;
+        data.target = preparation.CaptureView(bindings.target,
+            {org::BindlessViewKind::RenderTarget});
         data.outputResolution = context->outputResolution;
         data.layout = PSOManager::GetInstance().GetRootSignature().GetHandle();
         data.program = preparation.CaptureProgramBinding(m_pso, m_resourceDescriptorBindings);
@@ -112,7 +107,7 @@ public:
 
         rhi::PassBeginInfo passInfo{};
         rhi::ColorAttachment colorAttachment{};
-        colorAttachment.rtv = { data.rtvHeap, data.rtvIndex };
+        colorAttachment.rtv = recording.Resolve(data.target);
         colorAttachment.loadOp = rhi::LoadOp::Load;
         colorAttachment.storeOp = rhi::StoreOp::Store;
         passInfo.colors = { &colorAttachment };
@@ -297,24 +292,10 @@ private:
         uint32_t diagnosticLongSameInstanceLineCount = 0;
 
         uint32_t skeletonIndex = 0;
-        std::unordered_set<const Skeleton*> drawnSkeletons;
-        m_meshInstancesQuery.each([&](flecs::entity, Components::Matrix matrix, Components::ObjectDrawInfo, Components::MeshInstances meshInstances) {
-            for (const auto& meshInstance : meshInstances.meshInstances) {
-                if (!meshInstance || !meshInstance->HasSkin()) {
-                    continue;
-                }
-
-                const auto skin = meshInstance->GetSkin();
-                if (!skin) {
-                    continue;
-                }
-                if (!drawnSkeletons.insert(skin.get()).second) {
-                    continue;
-                }
-
-                const auto boneMatrices = skin->GetBoneMatrices();
-                const auto parentIndices = skin->GetParentIndices();
-                const auto rootParentGlobals = skin->GetRootParentGlobals();
+        for (const auto& source : m_snapshots->CaptureSkeletons()) {
+                const auto& boneMatrices = source.boneMatrices;
+                const auto& parentIndices = source.parentIndices;
+                const auto& rootParentGlobals = source.rootParentGlobals;
                 const uint32_t boneCount = (std::min)(
                     static_cast<uint32_t>(boneMatrices.size()),
                     static_cast<uint32_t>(parentIndices.size()));
@@ -325,8 +306,8 @@ private:
                 const uint32_t rangeStart = static_cast<uint32_t>(m_lines.size());
                 const uint32_t currentSkeletonIndex = skeletonIndex;
                 const DirectX::XMFLOAT4 color = ColorForSkeleton(skeletonIndex++);
-                const auto boneNames = skin->GetBoneNames();
-                const DirectX::XMFLOAT4 skeletonRootWorld = TransformJointOrigin(boneMatrices[0], matrix.matrix);
+                const auto& boneNames = source.boneNames;
+                const DirectX::XMFLOAT4 skeletonRootWorld = TransformJointOrigin(boneMatrices[0], source.objectMatrix);
                 for (uint32_t boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
                     const int32_t parentIndex = parentIndices[boneIndex];
 
@@ -336,16 +317,16 @@ private:
                         if (boneIndex >= rootParentGlobals.size() || MatrixIsNearlyIdentity(rootParentGlobals[boneIndex])) {
                             continue;
                         }
-                        line.startWorld = TransformJointOrigin(rootParentGlobals[boneIndex], matrix.matrix);
+                        line.startWorld = TransformJointOrigin(rootParentGlobals[boneIndex], source.objectMatrix);
                         rootParentLine = true;
                     }
                     else if (static_cast<uint32_t>(parentIndex) < boneCount) {
-                        line.startWorld = TransformJointOrigin(boneMatrices[static_cast<uint32_t>(parentIndex)], matrix.matrix);
+                        line.startWorld = TransformJointOrigin(boneMatrices[static_cast<uint32_t>(parentIndex)], source.objectMatrix);
                     }
                     else {
                         continue;
                     }
-                    line.endWorld = TransformJointOrigin(boneMatrices[boneIndex], matrix.matrix);
+                    line.endWorld = TransformJointOrigin(boneMatrices[boneIndex], source.objectMatrix);
 
                     const float lineLength = Distance(line.startWorld, line.endWorld);
                     const float startDistanceFromRoot = Distance(line.startWorld, skeletonRootWorld);
@@ -431,8 +412,7 @@ private:
                         .lineCount = rangeCount,
                     });
                 }
-            }
-        });
+        }
 
         if (!m_loggedLineDiagnostics && !m_lines.empty()) {
             m_loggedLineDiagnostics = true;
@@ -540,7 +520,7 @@ private:
     std::shared_ptr<DynamicStructuredBuffer<SkeletonDebugLine>> m_lineBuffer;
     std::vector<SkeletonDebugLine> m_lines;
     std::vector<DrawRange> m_drawRanges;
-    flecs::query<Components::Matrix, Components::ObjectDrawInfo, Components::MeshInstances> m_meshInstancesQuery;
+    std::shared_ptr<br::render::DebugSceneSnapshotService> m_snapshots;
     std::shared_ptr<rhi::PipelinePtr> m_pso;
     PipelineResources m_resourceDescriptorBindings;
     bool m_loggedLineDiagnostics = false;

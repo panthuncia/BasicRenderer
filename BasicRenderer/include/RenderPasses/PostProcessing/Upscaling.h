@@ -4,11 +4,11 @@
 
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Scene/Scene.h"
-#include "Managers/Singletons/DeviceManager.h"
-#include "Managers/Singletons/UpscalingManager.h"
+#include "Render/UpscalingGenerationService.h"
 #include "Render/PreparedPass.h"
 
 struct UpscalingFrameData {
+    std::shared_ptr<const br::render::UpscalingGenerationService> service;
     Components::Camera camera;
     uint64_t frameNumber = 0;
     double deltaTime = 0;
@@ -21,10 +21,9 @@ struct UpscalingFrameData {
 class UpscalingPass
     : public org::TypedRenderGraphPass<UpscalingPass, UpscalingFrameData> {
 public:
-    UpscalingPass() {
-        m_renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-		m_outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-    }
+    explicit UpscalingPass(
+        std::shared_ptr<const br::render::UpscalingGenerationService> service)
+        : m_service(std::move(service)) {}
 
     void Declare(org::PassBuilder& declaration) {
         auto* builder = &declaration;
@@ -34,10 +33,9 @@ public:
         const auto upscaledHDR = Subresources(
             Builtin::PostProcessing::UpscaledHDR,
             Mip{ 0, 1 });
-        const UpscalingMode upscalingMode = UpscalingManager::GetInstance().GetCurrentUpscalingMode();
-        const rhi::Backend backend = DeviceManager::GetInstance().GetBackend();
-        const bool useDilatedMotionVectors = upscalingMode == UpscalingMode::DLSS &&
-            SettingsManager::GetInstance().getSettingGetter<bool>("enableDilatedMotionVectors")();
+        const UpscalingMode upscalingMode = m_service->Mode();
+        const rhi::Backend backend = m_service->Backend();
+        const bool useDilatedMotionVectors = m_service->UsesDilatedMotionVectors();
         const auto motionVectors = useDilatedMotionVectors
             ? Builtin::Surface::DilatedMotion
             : Builtin::Surface::Motion;
@@ -90,9 +88,7 @@ public:
 
     void Initialize() {
         m_pHDRTarget = m_resourceRegistryView->RequestSharedAs<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        const bool useDilatedMotionVectors =
-            UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS &&
-            SettingsManager::GetInstance().getSettingGetter<bool>("enableDilatedMotionVectors")();
+        const bool useDilatedMotionVectors = m_service->UsesDilatedMotionVectors();
         const auto motionVectors = useDilatedMotionVectors
             ? Builtin::Surface::DilatedMotion
             : Builtin::Surface::Motion;
@@ -104,6 +100,7 @@ public:
     UpscalingFrameData Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
         return UpscalingFrameData{
+            .service = m_service,
             .camera = context->primaryCamera,
             .frameNumber = preparation.frameNumber,
             .deltaTime = preparation.deltaTime,
@@ -114,7 +111,7 @@ public:
         };
     }
     static void Record(const UpscalingFrameData& data, org::PassRecordContext& recording) {
-        UpscalingManager::GetInstance().Evaluate(recording.Commands(), &data.camera,
+        data.service->Evaluate(recording.Commands(), data.camera,
             data.frameNumber, data.deltaTime, data.hdr.get(), data.output.get(),
             data.depth.get(), data.motion.get());
     }
@@ -126,7 +123,6 @@ private:
 	std::shared_ptr<PixelBuffer> m_pDepthTexture;
 	std::shared_ptr<PixelBuffer> m_pUpscaledHDRTarget;
 
-    DirectX::XMUINT2 m_renderRes;
-    DirectX::XMUINT2 m_outputRes;
+    std::shared_ptr<const br::render::UpscalingGenerationService> m_service;
 
 };

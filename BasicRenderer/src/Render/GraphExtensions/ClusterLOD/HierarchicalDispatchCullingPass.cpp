@@ -1352,7 +1352,7 @@ PassReturn HierarchicalDispatchCullingPass::EmitCommands(
 
     if (m_isFirstPass) {
         const auto preparedWorkloads = br::render::PrepareCullingWorkloads(
-            context.preparedViews, context.publishedRendererState, m_renderPhase,
+            context.Views(), context.publishedRendererState, m_renderPhase,
             m_clodOnlyWorkloads, m_useShadowCascadeViews, m_rasterOutputKind,
             kPureComputeObjectCullThreadsPerGroup, "HierarchicalDispatchCullingPass");
         std::vector<ObjectCullRecord> cullRecords;
@@ -1760,7 +1760,7 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     bool rebuildViewTables = false;
     {
         ZoneScopedN("HierarchicalDispatchCullingPass::CheckViewResourceRevision");
-        const uint64_t viewResourceRevision = context.preparedViewResourceLayoutRevision;
+        const uint64_t viewResourceRevision = context.ViewResourceLayoutRevision();
         rebuildViewTables = viewResourceRevision != m_lastViewResourceLayoutRevision;
         if (rebuildViewTables) {
             m_lastViewResourceLayoutRevision = viewResourceRevision;
@@ -1769,9 +1769,9 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
 
     if (rebuildViewTables || m_cachedViewRasterInfo.empty()) {
         ZoneScopedN("HierarchicalDispatchCullingPass::RebuildViewRasterInfo");
-        const auto numViews = context.preparedViewCameraBufferSize;
+        const auto numViews = context.ViewCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-        for (const auto& viewInfo : context.preparedViews) {
+        for (const auto& viewInfo : context.Views()) {
             const auto cameraIndex = viewInfo.cameraBufferIndex;
             if (cameraIndex >= viewRasterInfo.size()) {
                 continue;
@@ -1828,7 +1828,7 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
                 viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
             }
 
-            for (const auto& view : context.preparedViews) {
+            for (const auto& view : context.Views()) {
                 const uint32_t cameraBufferIndex = view.cameraBufferIndex;
                 if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
                     continue;

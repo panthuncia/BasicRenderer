@@ -20,7 +20,11 @@ public:
     }
 
     org::EmptyPassFrameData Prepare(const org::PassPrepareContext& preparation) {
-        if (m_historyService) preparation.Reserve(m_historyService->ReserveDepthHistoryPublication());
+        const auto* frame = preparation.preparationData->Get<UpdateContext>();
+        if (m_historyService) preparation.Reserve(
+            m_historyService->ReserveDepthHistoryPublication(
+                frame ? frame->viewFamily : nullptr,
+                frame ? frame->frameNumber : 0));
         return {};
     }
     static void Record(const org::EmptyPassFrameData&, org::PassRecordContext&) {}

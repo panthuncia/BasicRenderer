@@ -90,7 +90,7 @@ public:
             return;
         }
 
-        auto activeDepthMaps = CollectActiveDepthMaps(updateContext->preparedViews);
+        auto activeDepthMaps = CollectActiveDepthMaps(updateContext->Views());
         m_declaredResourcesChanged = !HaveSameActiveDepthMaps(m_activeDepthMaps, activeDepthMaps);
         for (const auto& [resourceID, map] : activeDepthMaps) {
             const auto previous = m_perMapInfo.find(resourceID);
@@ -181,7 +181,7 @@ private:
     bool m_declaredResourcesChanged = true;
 
     static std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> CollectActiveDepthMaps(
-        const std::vector<PreparedViewFrameData>& views)
+        std::span<const PreparedViewFrameData> views)
     {
         std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> activeDepthMaps;
 

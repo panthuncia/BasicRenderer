@@ -3,9 +3,10 @@
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
-#include "Managers/Singletons/FFXManager.h"
+#include "Render/ScreenSpaceReflectionsGenerationService.h"
 
 struct ScreenSpaceReflectionsFrameData {
+    std::shared_ptr<const br::render::ScreenSpaceReflectionsGenerationService> service;
     Components::Camera camera;
     rhi::DescriptorHeapHandle resourceHeap{}, samplerHeap{};
     std::shared_ptr<PixelBuffer> hdr, depth, normals, motion, environment, brdf, output;
@@ -14,8 +15,8 @@ struct ScreenSpaceReflectionsFrameData {
 class ScreenSpaceReflectionsPass
     : public org::TypedRenderGraphPass<ScreenSpaceReflectionsPass, ScreenSpaceReflectionsFrameData> {
 public:
-    ScreenSpaceReflectionsPass() {
-    }
+    ScreenSpaceReflectionsPass()
+        : m_service(br::render::ScreenSpaceReflectionsGenerationService::Create()) {}
 
     void Declare(org::PassBuilder& declaration) {
         auto* builder = &declaration;
@@ -53,7 +54,7 @@ public:
 
     ScreenSpaceReflectionsFrameData Prepare(const org::PassPrepareContext& preparation) {
         const auto* context = preparation.preparationData->Get<UpdateContext>();
-        return {.camera=context->primaryCamera,
+        return {.service=m_service, .camera=context->primaryCamera,
             .resourceHeap=context->textureDescriptorHeap.GetHandle(),
             .samplerHeap=context->samplerDescriptorHeap.GetHandle(),
             .hdr=m_pHDRTarget, .depth=m_pDepthTexture, .normals=m_pNormals,
@@ -62,9 +63,9 @@ public:
     }
     static void Record(const ScreenSpaceReflectionsFrameData& data, org::PassRecordContext& recording) {
         recording.Commands().SetDescriptorHeaps(data.resourceHeap, data.samplerHeap);
-        FFXManager::GetInstance().EvaluateSSSR(
-            recording.Commands(), &data.camera, data.hdr.get(), data.depth.get(),
-            data.normals.get(), data.normals.get(), data.motion.get(),
+        data.service->Evaluate(
+            recording.Commands(), data.camera, data.hdr.get(), data.depth.get(),
+            data.normals.get(), data.motion.get(),
             data.environment.get(), data.brdf.get(), data.output.get());
     }
 
@@ -72,4 +73,5 @@ private:
 
     std::shared_ptr<PixelBuffer> m_pHDRTarget, m_pMotionVectors, m_pDepthTexture,
         m_pNormals, m_pEnvironmentCubemap, m_pBRDFLUT, m_pSSSROutput;
+    std::shared_ptr<const br::render::ScreenSpaceReflectionsGenerationService> m_service;
 };

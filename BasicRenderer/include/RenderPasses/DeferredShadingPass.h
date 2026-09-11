@@ -14,9 +14,9 @@ public:
 	explicit DeferredShadingPass(bool skyboxEnabled = false)
 		: m_skyboxEnabled(skyboxEnabled) {
 		auto& settingsManager = SettingsManager::GetInstance();
-		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
-		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
-		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+		m_imageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting")();
+		m_punctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting")();
+		m_shadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows")();
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
 	}
@@ -51,7 +51,7 @@ public:
 				Builtin::DebugVisualization,
 				Builtin::Surface::Motion);
 
-			if (getShadowsEnabled()) {
+			if (m_shadowsEnabled) {
 				builder.WithShaderResource(Builtin::Shadows::CLodClipmapInfo,
 					Builtin::Shadows::CLodCompactMainCamera,
 					Builtin::Shadows::CLodCompactShadowCameras,
@@ -76,7 +76,7 @@ public:
 
 	void Initialize() {
 		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
-		if (getShadowsEnabled()) {
+		if (m_shadowsEnabled) {
 			RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
 		}
 	}
@@ -93,9 +93,10 @@ public:
 		auto program = CaptureProgramBinding(preparation, pso);
 		data.program = program.program;
 		data.descriptorIndices = std::move(program.descriptorIndices);
-		data.constants[MiscEnableShadows] = getShadowsEnabled();
-		data.constants[MiscEnableShadows + 1] = getPunctualLightingEnabled();
-		data.constants[MiscEnableShadows + 2] = m_gtaoEnabled;
+		const auto& lighting = update ? update->lighting : render->lighting;
+		data.constants[MiscEnableShadows] = lighting.shadowsEnabled;
+		data.constants[MiscEnableShadows + 1] = lighting.punctualLightingEnabled;
+		data.constants[MiscEnableShadows + 2] = lighting.gtaoEnabled;
 		data.constants[MiscEnableShadows + 3] = m_skyboxEnabled;
 		data.groupsX = (resolution.x + 7u) / 8u; data.groupsY = (resolution.y + 7u) / 8u;
 		return data;
@@ -106,9 +107,9 @@ public:
 
 private:
 
-	std::function<bool()> getImageBasedLightingEnabled;
-	std::function<bool()> getPunctualLightingEnabled;
-	std::function<bool()> getShadowsEnabled;
+	bool m_imageBasedLightingEnabled = true;
+	bool m_punctualLightingEnabled = true;
+	bool m_shadowsEnabled = true;
 
 	bool m_gtaoEnabled = true;
 	bool m_clusteredLightingEnabled = true;

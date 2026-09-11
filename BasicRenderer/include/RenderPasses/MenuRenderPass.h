@@ -6,28 +6,32 @@
 
 struct MenuFrameData {
 	std::shared_ptr<const PreparedImGuiDrawData> drawData;
+	org::PreparedDescriptorReference target{};
 	DirectX::XMUINT2 outputResolution{};
 };
 
-class MenuRenderPass final : public org::TypedRenderGraphPass<MenuRenderPass, MenuFrameData> {
+struct MenuBindings { org::ResourceBindingToken target; };
+
+class MenuRenderPass final : public org::TypedRenderGraphPass<MenuRenderPass, MenuFrameData, MenuBindings> {
 public:
-	void Declare(org::PassBuilder& builder) {
-		builder.WithRenderTarget(Builtin::Backbuffer);
+	MenuBindings Declare(org::PassBuilder& builder) {
+		return {builder.BindRenderTarget(ResourceIdentifier{Builtin::PresentationColor})};
 	}
 
-	MenuFrameData Prepare(const org::PassPrepareContext& preparation) {
+	MenuFrameData Prepare(const MenuBindings& bindings, const org::PassPrepareContext& preparation) const {
 		const auto* context = preparation.preparationData
 			? preparation.preparationData->Get<RenderContext>() : nullptr;
 		if (!context) return {};
 		return {
 			.drawData = Menu::GetInstance().PrepareDrawData(*context),
+			.target = preparation.CaptureView(bindings.target,
+				{org::BindlessViewKind::RenderTarget}),
 			.outputResolution = context->outputResolution,
 		};
 	}
 
-	static void Record(const MenuFrameData& data, org::PassRecordContext& recording) {
+	static void Record(const MenuBindings&, const MenuFrameData& data, org::PassRecordContext& recording) {
 		if (data.drawData) Menu::RecordPreparedDrawData(
-			*data.drawData, recording.Commands(),
-			recording.Resolve(org::ExternalBindingKey::SwapchainColor), data.outputResolution);
+			*data.drawData, recording.Commands(), recording.Resolve(data.target), data.outputResolution);
 	}
 };

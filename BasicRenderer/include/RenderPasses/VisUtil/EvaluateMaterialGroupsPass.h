@@ -18,7 +18,7 @@
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/ShaderVariantRequestService.h"
-#include "Render/ProducerPassServices.h"
+#include "Render/MaterialEvaluationBuildInputs.h"
 #include "Resources/Buffers/PagePool.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
@@ -35,56 +35,21 @@ struct EvaluateMaterialGroupsBindings {
 class EvaluateMaterialGroupsPass : public org::TypedRenderGraphPass<EvaluateMaterialGroupsPass,
     br::render::PreparedComputeIndirectSequence, EvaluateMaterialGroupsBindings> {
 public:
-    EvaluateMaterialGroupsPass(ProducerPassServices& services, bool terrainRvtEnabled)
-        : m_services(services), m_terrainRvtEnabled(terrainRvtEnabled) {
-        if (!m_services.IsValid()) throw std::invalid_argument("EvaluateMaterialGroupsPass requires producer services");
-        auto& ecsWorld = m_services.ecs->GetWorld();
+    EvaluateMaterialGroupsPass(MaterialEvaluationBuildInputs inputs, bool terrainRvtEnabled)
+        : m_inputs(std::move(inputs)), m_terrainRvtEnabled(terrainRvtEnabled) {
+        if (!m_inputs.IsValid()) throw std::invalid_argument("EvaluateMaterialGroupsPass requires captured build inputs");
 
-        // Global LOD extension visibility buffer tag
-        auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
-
-        // Query for entities with the visibility buffer tag
-        m_visibleClustersQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<VisibleClustersBufferTag>()
-            .build();
-
-        m_visibleClusterTransformIndicesQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<VisibleClusterTransformIndicesBufferTag>()
-            .build();
-
-        m_reyesDiceQueueQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesDiceQueueTag>()
-            .build();
-
-        m_reyesTessTableConfigsQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesTessTableConfigsTag>()
-            .build();
-
-        m_reyesTessTableVerticesQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesTessTableVerticesTag>()
-            .build();
-
-        m_reyesTessTableTrianglesQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesTessTableTrianglesTag>()
-            .build();
-
-        m_slabResourceGroup = m_services.clodSlabResources;
+        m_visibleClusterResource = m_inputs.visibleClusters;
+        m_visibleClusterTransformIndicesResource = m_inputs.visibleClusterTransformIndices;
+        m_reyesDiceQueueResource = m_inputs.reyesDiceQueue;
+        m_reyesTessTableConfigsResource = m_inputs.reyesTessTableConfigs;
+        m_reyesTessTableVerticesResource = m_inputs.reyesTessTableVertices;
+        m_reyesTessTableTrianglesResource = m_inputs.reyesTessTableTriangles;
+        m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(m_inputs.visibleClusterCapacity);
+        m_slabResourceGroup = m_inputs.clodSlabResources;
     }
 
     EvaluateMaterialGroupsBindings Declare(org::PassBuilder& builder) {
-        RefreshResourcePointers();
         EvaluateMaterialGroupsBindings bindings{};
         bindings.visibleClusters = builder.BindShaderResource(m_visibleClusterResource);
         bindings.visibleClusterTransformIndices = builder.BindShaderResource(m_visibleClusterTransformIndicesResource);
@@ -101,15 +66,6 @@ public:
         bindings.patchVisibilityIndexBase = m_patchVisibilityIndexBase;
         builder.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         auto* b = &builder;
-        // TODO(async-state-coherence): CLOD visibility/mesh metadata is still sourced
-        // from live manager resources while draw and material tables can come from
-        // PublishedRendererState. Select exact generations in one transaction.
-        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
-        b->WithShaderResource(ECSResourceResolver(m_visibleClusterTransformIndicesQuery));
-    	b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
-    	b->WithShaderResource(ECSResourceResolver(m_reyesTessTableConfigsQuery));
-    	b->WithShaderResource(ECSResourceResolver(m_reyesTessTableVerticesQuery));
-    	b->WithShaderResource(ECSResourceResolver(m_reyesTessTableTrianglesQuery));
 
         if (m_slabResourceGroup) {
             b->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
@@ -186,94 +142,9 @@ public:
     }
 
     void Initialize() {
-        RefreshResourcePointers();
         m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    void RefreshResourcePointers() {
-        std::vector<std::shared_ptr<GloballyIndexedResource>> visibleClusterResources;
-        m_visibleClustersQuery.each([&](flecs::entity e) {
-            auto& res = e.get<Components::Resource>();
-            auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
-            if (test) {
-                visibleClusterResources.push_back(std::move(test));
-            }
-            const auto capacity = e.get<CLodVisibleClusterCapacity>();
-            m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(capacity.maxVisibleClusters);
-            });
-
-        if (visibleClusterResources.size() != 1) {
-            throw std::runtime_error("EvaluateMaterialGroupsPass: Expected exactly one visible cluster buffer resource.");
-        }
-
-        m_visibleClusterResource = std::move(visibleClusterResources[0]);
-        m_visibleClusterTransformIndicesResource.reset();
-        m_reyesDiceQueueResource.reset();
-        m_reyesTessTableConfigsResource.reset();
-        m_reyesTessTableVerticesResource.reset();
-        m_reyesTessTableTrianglesResource.reset();
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> visibleClusterTransformIndexResources;
-        m_visibleClusterTransformIndicesQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    visibleClusterTransformIndexResources.push_back(std::move(resource));
-                }
-            }
-        });
-        if (visibleClusterTransformIndexResources.size() != 1) {
-            throw std::runtime_error("EvaluateMaterialGroupsPass: Expected exactly one visible cluster transform-index resource.");
-        }
-        m_visibleClusterTransformIndicesResource = std::move(visibleClusterTransformIndexResources[0]);
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesDiceQueueResources;
-        m_reyesDiceQueueQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto test = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); test) {
-                    reyesDiceQueueResources.push_back(std::move(test));
-                }
-            }
-            });
-        if (reyesDiceQueueResources.size() == 1) {
-            m_reyesDiceQueueResource = std::move(reyesDiceQueueResources[0]);
-        }
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableConfigResources;
-        m_reyesTessTableConfigsQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableConfigResources.push_back(std::move(resource));
-                }
-            }
-        });
-        if (reyesTessTableConfigResources.size() == 1) {
-            m_reyesTessTableConfigsResource = std::move(reyesTessTableConfigResources[0]);
-        }
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableVertexResources;
-        m_reyesTessTableVerticesQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableVertexResources.push_back(std::move(resource));
-                }
-            }
-        });
-        if (reyesTessTableVertexResources.size() == 1) {
-            m_reyesTessTableVerticesResource = std::move(reyesTessTableVertexResources[0]);
-        }
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesTessTableTriangleResources;
-        m_reyesTessTableTrianglesQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    reyesTessTableTriangleResources.push_back(std::move(resource));
-                }
-            }
-        });
-        if (reyesTessTableTriangleResources.size() == 1) {
-            m_reyesTessTableTrianglesResource = std::move(reyesTessTableTriangleResources[0]);
-        }
-    }
 
     br::render::PreparedComputeIndirectSequence Prepare(const EvaluateMaterialGroupsBindings& bindings,
         const org::PassPrepareContext& preparation) const {
@@ -283,11 +154,11 @@ public:
         if (!materialState) return {};
         br::render::PreparedComputeIndirectSequence data{};
         data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-        data.commandSignature = preparation.CaptureCommandSignature(m_services.commandSignatures->CaptureMaterialEvaluationCommandSignature());
+        data.commandSignature = preparation.CaptureCommandSignature(m_inputs.commandSignatures->CaptureMaterialEvaluationCommandSignature());
         data.argumentsReference = preparation.CaptureResource(m_materialEvalCmds->GetGlobalResourceID());
         const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);
-        const bool terrainEvaluation = m_services.settings->getSettingGetter<bool>("enableTerrainRegionMaterialEvaluation")();
-        const auto outputType = m_services.settings->getSettingGetter<unsigned int>("outputType")();
+        const bool terrainEvaluation = context->terrainRegionMaterialEvaluationEnabled;
+        const auto outputType = context->outputType;
         for (std::size_t activeIndex = 0; activeIndex < materialState->activeCompileFlags.size(); ++activeIndex) {
             const auto flags = materialState->activeCompileFlags[activeIndex];
             if (terrainEvaluation && (flags & MaterialCompileFlags::MaterialCompileTerrain) != 0) continue;
@@ -296,7 +167,7 @@ public:
             if (slot >= materialState->compileFlagSlotsUsed) continue;
             auto shaderKey = GetMaterialEvaluationShaderKey(flags);
             if (outputType == OutputType::COLOR) shaderKey |= MaterialCompileFlags::MaterialCompileMaterialEvalColorOnly;
-            const PipelineState* pso = m_services.pipelines->TryGetMaterialEvalPSO(shaderKey);
+            const PipelineState* pso = m_inputs.pipelines->TryGetMaterialEvalPSO(shaderKey);
             if (!pso) continue;
             const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
             if (auto* buffer = dynamic_cast<BufferBase*>(m_materialEvalCmds);
@@ -337,18 +208,12 @@ public:
     }
 
     void ShutdownPass() {
-        m_visibleClustersQuery = {};
-        m_visibleClusterTransformIndicesQuery = {};
-        m_reyesDiceQueueQuery = {};
-        m_reyesTessTableConfigsQuery = {};
-        m_reyesTessTableVerticesQuery = {};
-        m_reyesTessTableTrianglesQuery = {};
         m_slabResourceGroup.reset();
         m_materialEvalCmds = nullptr;
     }
 
 private:
-    ProducerPassServices& m_services;
+    MaterialEvaluationBuildInputs m_inputs;
     std::vector<unsigned int> CaptureMaterialResourceDescriptorIndices(const PipelineResources& resources) const {
         std::vector<unsigned int> indices;
         indices.reserve(resources.mandatoryResourceDescriptorSlots.size() + resources.optionalResourceDescriptorSlots.size());
@@ -363,12 +228,6 @@ private:
 
     bool m_terrainRvtEnabled = false;
     Resource* m_materialEvalCmds;
-    flecs::query<> m_visibleClustersQuery;
-    flecs::query<> m_visibleClusterTransformIndicesQuery;
-    flecs::query<> m_reyesDiceQueueQuery;
-    flecs::query<> m_reyesTessTableConfigsQuery;
-    flecs::query<> m_reyesTessTableVerticesQuery;
-    flecs::query<> m_reyesTessTableTrianglesQuery;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::shared_ptr<GloballyIndexedResource> m_visibleClusterResource;
     std::shared_ptr<GloballyIndexedResource> m_visibleClusterTransformIndicesResource;

@@ -15,6 +15,8 @@
 #include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
 #include "Resources/PixelBuffer.h"
+#include "Resources/Resolvers/PublishedStateResourceResolver.h"
+#include "Render/LightStateArtifacts.h"
 #include "../../generated/BuiltinResources.h"
 
 LightManager::LightManager() {
@@ -75,6 +77,24 @@ LightManager::LightManager() {
 	m_resources[Builtin::Light::SpotLightMatrixBuffer] = m_spotViewInfo;
 	m_resources[Builtin::Light::DirectionalLightCascadeBuffer] = m_directionalViewInfo;
 	m_resources[Builtin::Light::ActiveLightIndices] = m_activeLightIndices;
+
+    const auto publishedSource = br::render::PublishedStateSource::ProcessSource();
+    const auto addPublished = [&](ResourceIdentifier key, std::shared_ptr<Resource> fallback,
+        std::uint64_t variant) {
+        m_resolvers[key] = std::make_shared<PublishedStateResourceResolver>(publishedSource,
+            br::render::PublishedResourceKey{ br::render::PublishedFragmentKind::Lights,
+                br::render::PublishedResourceUsage::ShaderResource, 0, 0, variant },
+            std::move(fallback));
+    };
+    addPublished(Builtin::Light::InfoBuffer, m_lightBuffer, br::render::LightInfoTableVariant);
+    addPublished(Builtin::Light::SpotLightMatrixBuffer, m_spotViewInfo,
+        br::render::LightSpotViewTableVariant);
+    addPublished(Builtin::Light::PointLightCubemapBuffer, m_pointViewInfo,
+        br::render::LightPointViewTableVariant);
+    addPublished(Builtin::Light::DirectionalLightCascadeBuffer, m_directionalViewInfo,
+        br::render::LightDirectionalViewTableVariant);
+    addPublished(Builtin::Light::ActiveLightIndices, m_activeLightIndices,
+        br::render::LightActiveIndexTableVariant);
 
 	m_resolvers[Builtin::Light::ViewResourceGroup] = 
 		std::make_shared<ResourceGroupResolver>(m_pLightViewInfoResourceGroup);
@@ -556,6 +576,21 @@ void LightManager::SetCurrentCamera(flecs::entity camera) {
 
 void LightManager::SetShadowViewService(br::render::IShadowViewService* service) {
 	m_shadowViews = service;
+}
+
+std::vector<std::shared_ptr<const std::vector<std::byte>>> LightManager::CaptureTableImages() const {
+    std::vector<std::shared_ptr<const std::vector<std::byte>>> result;
+    result.reserve(5);
+    const auto capture = [&](const auto& buffer) {
+        result.push_back(std::make_shared<const std::vector<std::byte>>(
+            buffer->CaptureCpuShadowBytes()));
+    };
+    capture(m_lightBuffer);
+    capture(m_spotViewInfo);
+    capture(m_pointViewInfo);
+    capture(m_directionalViewInfo);
+    capture(m_activeLightIndices);
+    return result;
 }
 
 void LightManager::UpdateLightBufferView(BufferView* view, const LightInfo& data) {

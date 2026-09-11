@@ -319,7 +319,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     auto& context = *updateContext;
     const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
-    auto numViews = context.preparedViewCameraBufferSize;
+    auto numViews = context.ViewCameraBufferSize();
     std::vector<std::shared_ptr<PixelBuffer>> visibilityBuffers;
     std::vector<std::shared_ptr<PixelBuffer>> deepVisibilityHeadPointerBuffers;
 
@@ -340,7 +340,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
         maxViewHeight = maxViewWidth;
     }
 
-    for (const auto& viewInfo : context.preparedViews) {
+    for (const auto& viewInfo : context.Views()) {
 
         if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
             if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {
@@ -373,7 +373,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     }
 
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-    for (const auto& viewInfo : context.preparedViews) {
+    for (const auto& viewInfo : context.Views()) {
         auto cameraIndex = viewInfo.cameraBufferIndex;
         if (cameraIndex >= viewRasterInfo.size()) continue;
         CLodViewRasterInfo info{};
@@ -521,9 +521,9 @@ br::render::PreparedRenderIndirectSequence ClusterRasterizationPass::Prepare(
     }
     auto& misc = data.constants;
     if (m_outputKind == CLodRasterOutputKind::AVBOITShading) {
-        misc[MiscEnableShadows] = m_getShadowsEnabled ? m_getShadowsEnabled() : 0u;
-        misc[MiscEnablePunctualLights] = m_getPunctualLightingEnabled ? m_getPunctualLightingEnabled() : 0u;
-        misc[MiscEnableGTAO] = m_gtaoEnabled;
+        misc[MiscEnableShadows] = context->lighting.shadowsEnabled;
+        misc[MiscEnablePunctualLights] = context->lighting.punctualLightingEnabled;
+        misc[MiscEnableGTAO] = context->lighting.gtaoEnabled;
     }
     // These indices form one table with the descriptor indices embedded in
     // m_viewRasterInfoBuffer. Keep the table on one descriptor publication.

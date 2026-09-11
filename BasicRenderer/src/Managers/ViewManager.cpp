@@ -9,11 +9,13 @@
 #include "Resources/ResourceGroup.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "Resources/Resolvers/PublishedStateResourceResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/DynamicResource.h"
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Render/ViewStateArtifacts.h"
 
 namespace
 {
@@ -82,30 +84,38 @@ namespace
     }
 }
 
-ViewManager::ViewManager()
-    : m_publicationOwner(std::make_shared<PublicationOwner>()) {
-    m_publicationOwner->manager = this;
+ViewManager::ViewManager() {
     auto& resourceManager = ::ResourceManager::GetInstance();
     m_cameraBuffer = LazyDynamicStructuredBuffer<CameraInfo>::CreateShared(1, "cameraBuffer<ViewManager>");
 	m_cullingCameraBuffer = LazyDynamicStructuredBuffer<CullingCameraInfo>::CreateShared(1, "cullingCameraBuffer<ViewManager>");
     org::memory::SetResourceUsageHint(*m_cameraBuffer, "Camera and view buffers");
 	org::memory::SetResourceUsageHint(*m_cullingCameraBuffer, "Camera and view buffers");
     m_linearDepthGroup = std::make_shared<ResourceGroup>("LinearDepthMaps");
-    m_lastFrameLinearDepthGroup = std::make_shared<ResourceGroup>("LastFrameLinearDepthMaps");
 
     // Register provided resources
     m_resources[Builtin::CameraBuffer] = m_cameraBuffer;
 	m_resources[Builtin::CullingCameraBuffer] = m_cullingCameraBuffer;
+    const auto publishedSource = br::render::PublishedStateSource::ProcessSource();
+    m_resolvers[Builtin::CameraBuffer] = std::make_shared<PublishedStateResourceResolver>(
+        publishedSource, br::render::PublishedResourceKey{
+            br::render::PublishedFragmentKind::Views,
+            br::render::PublishedResourceUsage::ShaderResource, 0, 0,
+            br::render::ViewCameraTableVariant }, m_cameraBuffer);
+    m_resolvers[Builtin::CullingCameraBuffer] = std::make_shared<PublishedStateResourceResolver>(
+        publishedSource, br::render::PublishedResourceKey{
+            br::render::PublishedFragmentKind::Views,
+            br::render::PublishedResourceUsage::ShaderResource, 0, 0,
+            br::render::ViewCullingCameraTableVariant }, m_cullingCameraBuffer);
     m_resolvers[Builtin::LinearDepthMaps] =
         std::make_shared<ResourceGroupResolver>(m_linearDepthGroup);
+    // History is the last submitted contents of the persistent linear-depth
+    // resources. Keep the shader-facing legacy name as an alias while
+    // DepthHistoryPublicationService owns which producer is valid.
     m_resolvers[Builtin::LastFrameLinearDepthMaps] =
-        std::make_shared<ResourceGroupResolver>(m_lastFrameLinearDepthGroup);
+        std::make_shared<ResourceGroupResolver>(m_linearDepthGroup);
 }
 
-ViewManager::~ViewManager() {
-    std::lock_guard lock(m_publicationOwner->mutex);
-    m_publicationOwner->manager = nullptr;
-}
+ViewManager::~ViewManager() = default;
 
 uint64_t ViewManager::CreateView(const CameraInfo& cameraInfo,
     const ViewFlags& flags,
@@ -168,11 +178,6 @@ void ViewManager::DestroyView(uint64_t viewID) {
 
         if (!stillReferenced) {
             m_linearDepthGroup->RemoveResource(v.gpu.linearDepthMap.get());
-            auto it = m_lastFrameLinearDepthBySource.find(sourceID);
-            if (it != m_lastFrameLinearDepthBySource.end()) {
-                m_lastFrameLinearDepthGroup->RemoveResource(it->second.get());
-                m_lastFrameLinearDepthBySource.erase(it);
-            }
         }
     }
 
@@ -199,11 +204,6 @@ void ViewManager::AttachDepth(uint64_t viewID,
             });
         if (!stillReferenced) {
             m_linearDepthGroup->RemoveResource(previousLinearDepth.get());
-            auto historyIt = m_lastFrameLinearDepthBySource.find(previousSourceID);
-            if (historyIt != m_lastFrameLinearDepthBySource.end()) {
-                m_lastFrameLinearDepthGroup->RemoveResource(historyIt->second.get());
-                m_lastFrameLinearDepthBySource.erase(historyIt);
-            }
         }
     }
     v->gpu.depthMap = depth;
@@ -218,26 +218,8 @@ void ViewManager::AttachDepth(uint64_t viewID,
         for (uint32_t slice = 0; slice < sliceCount; ++slice)
             v->gpu.linearDepthSRVIndices.push_back(linearDepth->GetSRVInfo(0, slice).slot.index);
     }
-    v->gpu.lastFrameLinearDepthMap.reset();
-    v->gpu.lastFrameLinearDepthValid = false;
-    ++v->gpu.depthHistoryEpoch;
-
     if (linearDepth) {
-        const uint64_t sourceID = linearDepth->GetGlobalResourceID();
-        auto it = m_lastFrameLinearDepthBySource.find(sourceID);
-        if (it == m_lastFrameLinearDepthBySource.end()) {
-            auto desc = linearDepth->GetDescription();
-            auto history = PixelBuffer::CreateShared(desc);
-            history->SetName("Last Frame Linear Depth");
-            org::memory::SetResourceUsageHint(*history, "Depth resources");
-            m_lastFrameLinearDepthBySource[sourceID] = history;
-            m_linearDepthGroup->AddResource(linearDepth);
-            m_lastFrameLinearDepthGroup->AddResource(history);
-            v->gpu.lastFrameLinearDepthMap = history;
-        }
-        else {
-            v->gpu.lastFrameLinearDepthMap = it->second;
-        }
+        m_linearDepthGroup->AddResource(linearDepth);
     }
 
     if (m_events.onDepthAttached) {
@@ -314,61 +296,6 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
     if (m_events.onCameraUpdated) {
         m_events.onCameraUpdated(*v);
     }
-}
-
-void ViewManager::MarkDepthHistoryValid(uint64_t viewID) {
-    auto* v = Get(viewID);
-    if (!v || v->gpu.lastFrameLinearDepthValid) {
-        return;
-    }
-
-    v->gpu.lastFrameLinearDepthValid = true;
-    ++m_resourceLayoutRevision;
-    m_publicationRevision.fetch_add(1, std::memory_order_release);
-}
-
-std::shared_ptr<const org::PreparedLifecycleEffect> ViewManager::ReserveDepthHistoryPublication() {
-    struct Publication {
-        struct Entry {
-            uint64_t viewID = 0;
-            uint64_t sourceResourceID = 0;
-            uint64_t sourceGeneration = 0;
-            uint64_t historyEpoch = 0;
-        };
-        std::shared_ptr<PublicationOwner> owner;
-        std::vector<Entry> entries;
-    };
-
-    auto publication = std::make_shared<Publication>();
-    publication->owner = m_publicationOwner;
-    publication->entries.reserve(m_views.size());
-    ForEachView([&](uint64_t viewID) {
-        const auto* view = Get(viewID);
-        if (!view || !view->gpu.linearDepthMap) return;
-        publication->entries.push_back({
-            viewID,
-            view->gpu.linearDepthMap->GetGlobalResourceID(),
-            view->gpu.linearDepthMap->GetBackingGeneration(),
-            view->gpu.depthHistoryEpoch });
-    });
-
-    const auto submitted = [](Publication& value, org::SubmissionContext context) {
-        std::lock_guard lock(value.owner->mutex);
-        auto* manager = value.owner->manager;
-        if (!manager) return;
-        for (const auto& entry : value.entries) {
-            const auto* view = manager->Get(entry.viewID);
-            if (!view || !view->gpu.linearDepthMap ||
-                view->gpu.depthHistoryEpoch != entry.historyEpoch ||
-                view->gpu.linearDepthMap->GetGlobalResourceID() != entry.sourceResourceID ||
-                view->gpu.linearDepthMap->GetBackingGeneration() != entry.sourceGeneration) continue;
-            manager->MarkDepthHistoryValid(entry.viewID);
-            if (auto* mutableView = manager->Get(entry.viewID))
-                mutableView->gpu.lastDepthProducerSubmissionID = context.submissionID;
-        }
-    };
-    return std::make_shared<const org::PreparedOwnedLifecycle<Publication>>(
-        std::move(publication), submitted);
 }
 
 View* ViewManager::Get(uint64_t viewID) {

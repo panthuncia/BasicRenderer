@@ -8,6 +8,7 @@
 #include "../shaders/PerPassRootConstants/visUtilRootConstants.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 #include "Render/MaterialStateArtifacts.h"
+#include "Render/MaterialEvaluationBuildInputs.h"
 
 struct MaterialHistogramBindings {
     org::ResourceBindingToken visibleClusters, reyesDiceQueue;
@@ -18,7 +19,10 @@ struct MaterialHistogramBindings {
 class MaterialHistogramPass : public org::TypedRenderGraphPass<MaterialHistogramPass,
     br::render::PreparedComputeDispatch, MaterialHistogramBindings> {
 public:
-    MaterialHistogramPass() {
+    explicit MaterialHistogramPass(const MaterialEvaluationBuildInputs& inputs)
+        : m_visibleClusterResource(inputs.visibleClusters),
+          m_reyesDiceQueueResource(inputs.reyesDiceQueue),
+          m_patchVisibilityIndexBase(CLodReyesPatchVisibilityIndexBase(inputs.visibleClusterCapacity)) {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"shaders/VisUtil.hlsl",
@@ -26,26 +30,10 @@ public:
             {},
             "MaterialHistogramPSO");
 
-        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-
-        // Global LOD extension visibility buffer tag
-        auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
-
-        // Query for entities with the visibility buffer tag
-        m_visibleClustersQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<VisibleClustersBufferTag>()
-            .build();
-
-        m_reyesDiceQueueQuery =
-            ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<CLodReyesDiceQueueTag>()
-            .build();
+        if (!m_visibleClusterResource)
+            throw std::invalid_argument("MaterialHistogramPass requires the published visible-cluster resource");
     }
     MaterialHistogramBindings Declare(org::PassBuilder& b) {
-        RefreshResourcePointers();
         MaterialHistogramBindings bindings{b.BindShaderResource(m_visibleClusterResource)};
         if (m_reyesDiceQueueResource) {
             bindings.reyesDiceQueue = b.BindShaderResource(m_reyesDiceQueueResource);
@@ -62,42 +50,6 @@ public:
 		b.WithConstantBuffer(Builtin::PerFrameBuffer)
          .PreferQueue(org::QueueKind::Compute);
         return bindings;
-    }
-
-    void Initialize() {
-        RefreshResourcePointers();
-    }
-
-    void RefreshResourcePointers() {
-        std::vector<std::shared_ptr<GloballyIndexedResource>> visibleClusterResources;
-        m_visibleClustersQuery.each([&](flecs::entity e) {
-            auto& res = e.get<Components::Resource>();
-            auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
-            if (test) {
-                visibleClusterResources.push_back(std::move(test));
-            }
-            const auto capacity = e.get<CLodVisibleClusterCapacity>();
-            m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(capacity.maxVisibleClusters);
-            });
-
-        if (visibleClusterResources.size() != 1) {
-            throw std::runtime_error("BuildPixelListPass: Expected exactly one visible cluster buffer resource.");
-        }
-
-        m_visibleClusterResource = std::move(visibleClusterResources[0]);
-        m_reyesDiceQueueResource.reset();
-
-        std::vector<std::shared_ptr<GloballyIndexedResource>> reyesDiceQueueResources;
-        m_reyesDiceQueueQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto test = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); test) {
-                    reyesDiceQueueResources.push_back(std::move(test));
-                }
-            }
-            });
-        if (reyesDiceQueueResources.size() == 1) {
-            m_reyesDiceQueueResource = std::move(reyesDiceQueueResources[0]);
-        }
     }
 
     br::render::PreparedComputeDispatch Prepare(const MaterialHistogramBindings& bindings,
@@ -137,15 +89,8 @@ public:
         br::render::RecordPreparedComputeDispatch(data, recording);
     }
 
-    void ShutdownPass() {
-        m_visibleClustersQuery = {};
-        m_reyesDiceQueueQuery = {};
-    }
-
 private:
     PipelineState m_pso;
-	flecs::query<> m_visibleClustersQuery;
-    flecs::query<> m_reyesDiceQueueQuery;
     std::shared_ptr<GloballyIndexedResource> m_visibleClusterResource;
     std::shared_ptr<GloballyIndexedResource> m_reyesDiceQueueResource;
     uint32_t m_patchVisibilityIndexBase = 0u;

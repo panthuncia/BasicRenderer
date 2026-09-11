@@ -30,9 +30,7 @@ class ClearVisibilityBufferPass final
 	: public org::TypedRenderGraphPass<ClearVisibilityBufferPass,
 		ClearVisibilityFrameData, ClearVisibilityBindings> {
 public:
-	ClearVisibilityBufferPass() {
-		m_getOutputType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("outputType");
-	}
+	ClearVisibilityBufferPass() = default;
 
 	ClearVisibilityBindings Declare(org::PassBuilder& builder) {
 		ClearVisibilityBindings bindings{};
@@ -98,6 +96,4 @@ public:
 		commands.ClearDepthStencilView(recording.Resolve(data.depth), true, false, 1.0f, 0);
 	}
 
-	private:
-	std::function<unsigned int()> m_getOutputType;
 };

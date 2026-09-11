@@ -26,7 +26,7 @@ A_STATIC void LpmSetupOut(AU1 i, inAU4 v)
 #include "../shaders/PerPassRootConstants/tonemapRootConstants.h"
 
 struct TonemappingBindings {
-    org::ResourceBindingToken lpm, bloom;
+    org::ResourceBindingToken lpm, bloom, target;
 };
 
 class TonemappingPass : public org::TypedRenderGraphPass<
@@ -35,7 +35,6 @@ public:
 	explicit TonemappingPass(bool bloomEnabled = false)
         : m_bloomEnabled(bloomEnabled) {
 		CreatePSO();
-		getTonemapType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("tonemapType");
         m_pLPMConstants = LazyDynamicStructuredBuffer<LPMConstants>::CreateShared(1, "AMD LPM constants", 1, true);
 	}
 
@@ -50,9 +49,9 @@ public:
     }
 
     TonemappingBindings Declare(org::PassBuilder& builder) {
-        builder.WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer)
-            .WithRenderTarget(Builtin::Backbuffer);
+        builder.WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer);
         TonemappingBindings bindings{};
+        bindings.target = builder.BindRenderTarget(ResourceIdentifier{Builtin::PresentationColor});
         bindings.lpm = builder.BindShaderResource(m_pLPMConstants);
         if (m_bloomEnabled) {
             bindings.bloom = builder.BindShaderResource(
@@ -82,7 +81,9 @@ public:
 		const auto* context = preparation.preparationData->Get<UpdateContext>();
 		br::render::PreparedFullscreenDraw data{};
 		data.resourceHeap = context->textureDescriptorHeap.GetHandle(); data.samplerHeap = context->samplerDescriptorHeap.GetHandle();
-		data.externalRenderTarget = org::ExternalBindingKey::SwapchainColor;
+		data.targetResource = preparation.CaptureResource(bindings.target);
+		data.renderTargetReference = preparation.CaptureView(
+			bindings.target, {org::BindlessViewKind::RenderTarget});
 		data.loadOp = rhi::LoadOp::Clear;
 		data.clear.rgba[3] = 1.0f; data.width = context->outputResolution.x; data.height = context->outputResolution.y;
 
@@ -90,7 +91,7 @@ public:
             data, preparation, m_pso);
 		data.constants[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = preparation.ResolveView(
             bindings.lpm, {org::BindlessViewKind::ShaderResource}).index;
-		data.constants[TONEMAP_TYPE] = getTonemapType(); data.constants[TONEMAP_BLOOM_ENABLED] = m_bloomEnabled ? 1u : 0u;
+		data.constants[TONEMAP_TYPE] = context->tonemapType; data.constants[TONEMAP_BLOOM_ENABLED] = m_bloomEnabled ? 1u : 0u;
 		if (m_bloomEnabled) {
 			data.constants[TONEMAP_BLOOM_MIP1_SRV_DESCRIPTOR_INDEX] = preparation.ResolveView(
                 bindings.bloom, {org::BindlessViewKind::ShaderResource, UINT32_MAX, 1}).index;
@@ -113,7 +114,6 @@ private:
 
     std::shared_ptr<LazyDynamicStructuredBuffer<LPMConstants>> m_pLPMConstants;
 
-    std::function<unsigned int()> getTonemapType;
     bool m_bloomEnabled = false;
 
     std::vector<ResourceIdentifier> m_providedResources = {

@@ -21,7 +21,7 @@
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "Render/ProducerPassServices.h"
+#include "Render/MaterialEvaluationBuildInputs.h"
 #include "Render/TerrainRvtTelemetry.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 #include "Resources/Resolvers/ECSResourceResolver.h"
@@ -273,7 +273,7 @@ struct TerrainRvtMarkVisibilityMaterialPagesBindings {
 class TerrainRvtMarkVisibilityMaterialPagesPass final : public org::TypedRenderGraphPass<TerrainRvtMarkVisibilityMaterialPagesPass,
     br::render::PreparedComputeDispatch, TerrainRvtMarkVisibilityMaterialPagesBindings> {
 public:
-    explicit TerrainRvtMarkVisibilityMaterialPagesPass(ProducerPassServices& services)
+    explicit TerrainRvtMarkVisibilityMaterialPagesPass(const MaterialEvaluationBuildInputs& services)
     {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -282,22 +282,13 @@ public:
             TerrainRvt::ShaderDefines(),
             "TerrainRvt.MarkVisibleClusterPages.PSO");
 
-        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-        auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
-        m_visibleClustersQuery = ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<VisibleClustersBufferTag>()
-            .build();
-        m_visibleClustersCounterQuery = ecsWorld.query_builder<>()
-            .with<CLodExtensionTypeTag>(visBufferTag)
-            .with<VisibleClustersCounterTag>()
-            .build();
+        m_visibleClustersResource = services.visibleClusters;
+        m_visibleClustersCounterResource = services.visibleClusterCounter;
+        m_visibleClusterCapacity = services.visibleClusterCapacity;
         m_slabResourceGroup = services.clodSlabResources;
     }
-
     TerrainRvtMarkVisibilityMaterialPagesBindings Declare(org::PassBuilder& b)
     {
-        RefreshResourcePointers();
         b.PreferQueue(org::QueueKind::Compute).AutomaticQueueAssignment();
         TerrainRvtMarkVisibilityMaterialPagesBindings bindings{
             b.BindShaderResource(m_visibleClustersResource),
@@ -328,10 +319,7 @@ public:
         return bindings;
     }
 
-    void Initialize()
-    {
-        RefreshResourcePointers();
-    }
+    void Initialize() {}
 
     br::render::PreparedComputeDispatch Prepare(
         const TerrainRvtMarkVisibilityMaterialPagesBindings& bindings,
@@ -358,8 +346,6 @@ public:
 
     void ShutdownPass()
     {
-        m_visibleClustersQuery = {};
-        m_visibleClustersCounterQuery = {};
         m_slabResourceGroup.reset();
     }
 
@@ -369,31 +355,7 @@ public:
     }
 
 private:
-    void RefreshResourcePointers()
-    {
-        m_visibleClustersResource.reset();
-        m_visibleClustersCounterResource.reset();
-        m_visibleClusterCapacity = 0u;
-        m_visibleClustersQuery.each([&](flecs::entity e) {
-            auto& res = e.get<Components::Resource>();
-            if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock()); resource) {
-                m_visibleClustersResource = std::move(resource);
-            }
-            const auto capacity = e.get<CLodVisibleClusterCapacity>();
-            m_visibleClusterCapacity = capacity.maxVisibleClusters;
-        });
-        m_visibleClustersCounterQuery.each([&](flecs::entity e) {
-            if (const auto res = e.try_get<Components::Resource>(); res) {
-                if (const auto resource = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); resource) {
-                    m_visibleClustersCounterResource = std::move(resource);
-                }
-            }
-        });
-    }
-
     PipelineState m_pso;
-    flecs::query<> m_visibleClustersQuery;
-    flecs::query<> m_visibleClustersCounterQuery;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::shared_ptr<GloballyIndexedResource> m_visibleClustersResource;
     std::shared_ptr<GloballyIndexedResource> m_visibleClustersCounterResource;

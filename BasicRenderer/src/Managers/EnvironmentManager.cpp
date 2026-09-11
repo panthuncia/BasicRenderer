@@ -123,7 +123,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		e->SetEnvironmentCubemap(skybox);
 		e->SetReflectionCubemapResolution(m_skyboxResolution); // For HDRI environments, use the same resolution as the skybox
 
-		m_conversionWork.Enqueue({skyHDR->ImagePtr(), envCubemap, e->GetEnvironmentIndex(), m_workingHDRIGroup, m_environmentUpdateMutex});
+		m_workServices.conversion.Enqueue({skyHDR->ImagePtr(), envCubemap, e->GetEnvironmentIndex(), m_workingHDRIGroup, m_environmentUpdateMutex});
 		m_workingHDRIGroup->AddResource(skyHDR->ImagePtr());
 		auto path = GetCacheFilePath(name+L"_environment.dds", L"environments");
 		if (m_requestReadback) {
@@ -169,16 +169,16 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	m_environmentPrefilteredCubemapGroup->AddResource(prefilteredEnvironment->ImagePtr());
 
 
-	m_shWork.Enqueue({skybox->ImagePtr(), e->GetEnvironmentIndex(), e->GetReflectionCubemapResolution()});
-	m_prefilterWork.Enqueue({skybox->ImagePtr(), prefilteredEnvironmentCubemap,
+	m_workServices.sphericalHarmonics.Enqueue({skybox->ImagePtr(), e->GetEnvironmentIndex(), e->GetReflectionCubemapResolution()});
+	m_workServices.prefilter.Enqueue({skybox->ImagePtr(), prefilteredEnvironmentCubemap,
         e->GetReflectionCubemapResolution(), e->GetEnvironmentIndex(), m_workingEnvironmentCubemapGroup, m_environmentUpdateMutex});
 	m_workingEnvironmentCubemapGroup->AddResource(skybox->ImagePtr());
 }
 
 void EnvironmentManager::RemoveEnvironment(Environment* e) {
-    m_conversionWork.DiscardUnsubmitted([index = e->GetEnvironmentIndex()](const ConversionWork& work) { return work.environmentIndex == index; });
-    m_prefilterWork.DiscardUnsubmitted([index = e->GetEnvironmentIndex()](const PrefilterWork& work) { return work.environmentIndex == index; });
-    m_shWork.DiscardUnsubmitted([index = e->GetEnvironmentIndex()](const SHWork& work) { return work.environmentIndex == index; });
+    m_workServices.conversion.DiscardUnsubmitted([index = e->GetEnvironmentIndex()](const br::render::EnvironmentConversionWork& work) { return work.environmentIndex == index; });
+    m_workServices.prefilter.DiscardUnsubmitted([index = e->GetEnvironmentIndex()](const br::render::EnvironmentPrefilterWork& work) { return work.environmentIndex == index; });
+    m_workServices.sphericalHarmonics.DiscardUnsubmitted([index = e->GetEnvironmentIndex()](const br::render::EnvironmentSHWork& work) { return work.environmentIndex == index; });
 	std::lock_guard<std::mutex> lock(*m_environmentUpdateMutex);
 	m_environmentInfoBuffer->Remove(e->GetEnvironmentBufferView());
 	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentPrefilteredCubemap().get());
@@ -211,26 +211,35 @@ std::shared_ptr<IResourceResolver> EnvironmentManager::ProvideResolver(ResourceI
 	return it->second;
 }
 
-void EnvironmentManager::PublishWorkTelemetry() const {
-    const auto conversion = m_conversionWork.ReadCounters();
+void br::render::EnvironmentWorkServices::PublishTelemetry() const {
+    const auto conversion = this->conversion.ReadCounters();
     BT_PLOT("Environment.Conversion.AcceptedJobs", static_cast<int64_t>(conversion.accepted));
     BT_PLOT("Environment.Conversion.PendingJobs", static_cast<int64_t>(conversion.pending));
     BT_PLOT("Environment.Conversion.ReservedJobs", static_cast<int64_t>(conversion.reserved));
     BT_PLOT("Environment.Conversion.SubmittedJobs", static_cast<int64_t>(conversion.submitted));
     BT_PLOT("Environment.Conversion.ReturnedJobs", static_cast<int64_t>(conversion.returned));
     BT_PLOT("Environment.Conversion.DiscardedJobs", static_cast<int64_t>(conversion.discarded));
-    const auto prefilter = m_prefilterWork.ReadCounters();
+    const auto prefilter = this->prefilter.ReadCounters();
     BT_PLOT("Environment.Prefilter.AcceptedJobs", static_cast<int64_t>(prefilter.accepted));
     BT_PLOT("Environment.Prefilter.PendingJobs", static_cast<int64_t>(prefilter.pending));
     BT_PLOT("Environment.Prefilter.ReservedJobs", static_cast<int64_t>(prefilter.reserved));
     BT_PLOT("Environment.Prefilter.SubmittedJobs", static_cast<int64_t>(prefilter.submitted));
     BT_PLOT("Environment.Prefilter.ReturnedJobs", static_cast<int64_t>(prefilter.returned));
     BT_PLOT("Environment.Prefilter.DiscardedJobs", static_cast<int64_t>(prefilter.discarded));
-    const auto sh = m_shWork.ReadCounters();
+    const auto sh = sphericalHarmonics.ReadCounters();
     BT_PLOT("Environment.SH.AcceptedJobs", static_cast<int64_t>(sh.accepted));
     BT_PLOT("Environment.SH.PendingJobs", static_cast<int64_t>(sh.pending));
     BT_PLOT("Environment.SH.ReservedJobs", static_cast<int64_t>(sh.reserved));
     BT_PLOT("Environment.SH.SubmittedJobs", static_cast<int64_t>(sh.submitted));
     BT_PLOT("Environment.SH.ReturnedJobs", static_cast<int64_t>(sh.returned));
     BT_PLOT("Environment.SH.DiscardedJobs", static_cast<int64_t>(sh.discarded));
+}
+void br::render::EnvironmentConversionWork::Commit() const {
+    std::lock_guard lock(*publicationMutex);
+    sourceGroup->RemoveResource(srcTexture.get());
+}
+
+void br::render::EnvironmentPrefilterWork::Commit() const {
+    std::lock_guard lock(*publicationMutex);
+    sourceGroup->RemoveResource(srcCubemap.get());
 }

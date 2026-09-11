@@ -87,9 +87,9 @@ public:
     ForwardRenderPass()
     {
         auto& settingsManager = SettingsManager::GetInstance();
-        getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
-        getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
-        getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+        m_imageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting")();
+        m_punctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting")();
+        m_shadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows")();
         m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
         m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
     }
@@ -131,7 +131,7 @@ public:
             builder->BindRenderTarget(Builtin::Color::HDRColorTarget),
             builder->BindDepthReadWrite(Builtin::PrimaryCamera::DepthTexture) };
 
-        if (getShadowsEnabled()) {
+        if (m_shadowsEnabled) {
             builder->WithShaderResource(Builtin::Shadows::CLodClipmapInfo,
                 Builtin::Shadows::CLodCompactMainCamera,
                 Builtin::Shadows::CLodCompactShadowCameras,
@@ -166,7 +166,7 @@ public:
 
     void Initialize() {
         RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::OpenPBR::OpaqueDielectricEnergyComplement);
-        if (getShadowsEnabled()) {
+        if (m_shadowsEnabled) {
             RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
         }
 
@@ -189,7 +189,8 @@ public:
         data.color = preparation.CaptureView(bindings.color, {org::BindlessViewKind::RenderTarget});
         data.depth = preparation.CaptureView(bindings.depth, {org::BindlessViewKind::DepthStencil});
         data.resolution = context->renderResolution;
-        data.settings = {getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled};
+        data.settings = {context->lighting.shadowsEnabled,
+            context->lighting.punctualLightingEnabled, context->lighting.gtaoEnabled};
         if (!m_meshShaders || !m_indirect)
             return data;
         const auto workloads = published->Find(context->primaryViewID, Engine::Primary::ForwardPass, false);
@@ -222,7 +223,7 @@ private:
     bool m_gtaoEnabled = true;
     bool m_clusteredLightingEnabled = true;
 
-    std::function<bool()> getImageBasedLightingEnabled;
-    std::function<bool()> getPunctualLightingEnabled;
-    std::function<bool()> getShadowsEnabled;
+    bool m_imageBasedLightingEnabled = true;
+    bool m_punctualLightingEnabled = true;
+    bool m_shadowsEnabled = true;
 };

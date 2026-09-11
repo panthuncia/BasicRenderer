@@ -9,10 +9,7 @@
 
 class ClusterGenerationPass : public org::TypedRenderGraphPass<ClusterGenerationPass, br::render::PreparedComputeDispatch> {
 public:
-	ClusterGenerationPass() {
-		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
-		CreatePSO();
-	}
+	ClusterGenerationPass() { CreatePSO(); }
 
 	~ClusterGenerationPass() {
 	}
@@ -33,7 +30,8 @@ public:
 		auto program = CaptureProgramBinding(preparation, m_PSO);
 		data.program = program.program;
 		data.descriptorIndices = std::move(program.descriptorIndices);
-		const auto size = getClusterSize(); data.groupsX = size.x; data.groupsY = size.y; data.groupsZ = size.z;
+		const auto size = update ? update->lightClusterSize : render->lightClusterSize;
+		data.groupsX = size.x; data.groupsY = size.y; data.groupsZ = size.z;
 		return data;
 	}
 	static void Record(const br::render::PreparedComputeDispatch& data, org::PassRecordContext& recording) {
@@ -51,6 +49,5 @@ private:
 			"Light cluster generation CS");
 	}
 
-	std::function<DirectX::XMUINT3()> getClusterSize;
 	PipelineState m_PSO;
 };

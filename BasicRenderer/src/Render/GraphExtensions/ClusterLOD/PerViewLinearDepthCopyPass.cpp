@@ -42,7 +42,7 @@ void PerViewLinearDepthCopyPass::Initialize() {
 void PerViewLinearDepthCopyPass::Update(const UpdateExecutionContext& executionContext) {
     const auto* context = executionContext.hostData->Get<UpdateContext>();
     std::vector<ViewSnapshot> views;
-    for (const auto& view : context->preparedViews) {
+    for (const auto& view : context->Views()) {
         if (!view.visibilityBuffer || !view.linearDepthMap) continue;
         const auto& projection = view.cameraInfo.unjitteredProjection;
         views.push_back({view.visibilityBuffer, view.linearDepthMap,

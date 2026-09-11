@@ -47,7 +47,7 @@ public:
 
     void Update(const UpdateExecutionContext& context) override {
         const auto* input = context.hostData->Get<UpdateContext>();
-        if (input->environmentManager) m_work = input->environmentManager->GetPrefilterWorkQueue();
+        m_work = input->environmentWork.prefilter;
         auto pending = m_work.Pending();
         if (pending != m_pending) { m_pending = std::move(pending); m_declaredResourcesChanged = true; }
     }
@@ -91,8 +91,8 @@ public:
 
 
 private:
-    mutable EnvironmentManager::PrefilterWorkQueue m_work;
-    mutable EnvironmentManager::PrefilterWorkQueue::Snapshot m_pending;
+    mutable br::render::EnvironmentPrefilterWorkQueue m_work;
+    mutable br::render::EnvironmentPrefilterWorkQueue::Snapshot m_pending;
     mutable bool m_declaredResourcesChanged = true;
 
     PipelineState m_pso;

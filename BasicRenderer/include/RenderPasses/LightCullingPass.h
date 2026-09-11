@@ -10,10 +10,7 @@
 
 class LightCullingPass : public org::TypedRenderGraphPass<LightCullingPass, br::render::PreparedComputeDispatch> {
 public:
-	LightCullingPass() {
-		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
-		CreatePSO();
-	}
+	LightCullingPass() { CreatePSO(); }
 
 	~LightCullingPass() {
 	}
@@ -45,8 +42,8 @@ public:
 			? state->lights.payload.Get<br::render::PublishedLightTableState>() : nullptr;
 		data.constants[LIGHT_PAGES_POOL_SIZE] = lights
 			? lights->lightPagePoolSize
-			: (update ? update->preparedLightPagePoolSize : render->preparedLightPagePoolSize);
-		const auto clusterSize = getClusterSize();
+			: (update ? update->LightPagePoolSize() : render->LightPagePoolSize());
+		const auto clusterSize = update ? update->lightClusterSize : render->lightClusterSize;
 		data.groupsX = (clusterSize.x * clusterSize.y * clusterSize.z + 127u) / 128u;
 		return data;
 	}
@@ -74,6 +71,5 @@ private:
 			"Light Culling CS");
 	}
 
-	std::function<DirectX::XMUINT3()> getClusterSize;
 	PipelineState m_PSO;
 };

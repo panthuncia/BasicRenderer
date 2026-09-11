@@ -52,7 +52,7 @@ void ClearDeepVisibilityPass::Update(const UpdateExecutionContext& executionCont
     }
 
     std::vector<std::shared_ptr<PixelBuffer>> headPointerTextures;
-    for (const auto& view : context.preparedViews)
+    for (const auto& view : context.Views())
         if (view.visibilityBuffer && view.deepVisibilityHeadPointers)
             headPointerTextures.push_back(view.deepVisibilityHeadPointers);
 

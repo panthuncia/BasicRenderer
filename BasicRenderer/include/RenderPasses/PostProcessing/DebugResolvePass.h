@@ -6,24 +6,29 @@
 #include "Render/RenderContext.h"
 #include "RenderPasses/PreparedFullscreenDraw.h"
 
+struct DebugResolveBindings { org::ResourceBindingToken target; };
+
 class DebugResolvePass
     : public org::TypedRenderGraphPass<DebugResolvePass,
-          br::render::PreparedFullscreenDraw> {
+          br::render::PreparedFullscreenDraw, DebugResolveBindings> {
 public:
 	DebugResolvePass() {
 		CreatePSO();
 	}
 
-	void Declare(org::PassBuilder& builder) {
-		builder.WithShaderResource(Builtin::DebugVisualization, Builtin::CameraBuffer)
-			.WithRenderTarget(Builtin::Backbuffer);
+	DebugResolveBindings Declare(org::PassBuilder& builder) {
+		builder.WithShaderResource(Builtin::DebugVisualization, Builtin::CameraBuffer);
 		builder.WithConstantBuffer(Builtin::PerFrameBuffer);
+		return {builder.BindRenderTarget(ResourceIdentifier{Builtin::PresentationColor})};
 	}
 
-	br::render::PreparedFullscreenDraw Prepare(const org::PassPrepareContext& preparation) {
+	br::render::PreparedFullscreenDraw Prepare(const DebugResolveBindings& bindings,
+		const org::PassPrepareContext& preparation) const {
 		const auto* context = preparation.preparationData->Get<UpdateContext>();
 		br::render::PreparedFullscreenDraw data{};
-		data.externalRenderTarget = org::ExternalBindingKey::SwapchainColor;
+		data.targetResource = preparation.CaptureResource(bindings.target);
+		data.renderTargetReference = preparation.CaptureView(
+			bindings.target, {org::BindlessViewKind::RenderTarget});
 		data.loadOp = rhi::LoadOp::Load;
 		data.width = context->outputResolution.x; data.height = context->outputResolution.y;
 
@@ -32,7 +37,7 @@ public:
 		return data;
 	}
 
-	static void Record(const br::render::PreparedFullscreenDraw& data,
+	static void Record(const DebugResolveBindings&, const br::render::PreparedFullscreenDraw& data,
 		org::PassRecordContext& recording) {
 		br::render::RecordPreparedFullscreenDraw(data, recording);
 	}

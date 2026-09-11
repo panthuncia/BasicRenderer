@@ -5,8 +5,8 @@
 #include "Mesh/Mesh.h"
 #include "Animation/Skeleton.h"
 
-class SkeletonManager;
 class Material;
+namespace br::render { class PoseInstanceRegistrationService; }
 
 class MeshInstance {
 public:
@@ -51,7 +51,7 @@ public:
         m_pCurrentMeshManager = manager;
     }
 
-    void SetCurrentSkeletonManager(SkeletonManager* manager);
+    void SetPoseRegistrationService(br::render::PoseInstanceRegistrationService* service);
 
 	const PerMeshInstanceCB& GetPerMeshInstanceBufferData() const {
 		return m_perMeshInstanceBufferData;
@@ -98,8 +98,8 @@ private:
     std::shared_ptr<Material> m_materialOverride;
     std::shared_ptr<Skeleton> m_skeleton; // Runtime skeleton; may be shared by a skeleton variant set.
     MeshManager* m_pCurrentMeshManager = nullptr;
-    SkeletonManager* m_pCurrentSkeletonManager = nullptr;
-    std::weak_ptr<std::atomic_bool> m_skeletonManagerLifetime;
+    br::render::PoseInstanceRegistrationService* m_poseRegistration = nullptr;
+    std::weak_ptr<std::atomic_bool> m_poseRegistrationLifetime;
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
     std::unique_ptr<BufferView> m_perMeshOverrideBufferView;
 

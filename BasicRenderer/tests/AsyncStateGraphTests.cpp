@@ -13,6 +13,7 @@
 #include "Render/ViewStateArtifacts.h"
 #include "Render/PoseStateArtifacts.h"
 #include "Render/LightStateArtifacts.h"
+#include "Render/SceneSourceStateStore.h"
 #include "Resources/Resolvers/PublishedStateResourceResolver.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Utilities/TripleGenerationMailbox.h"
@@ -2471,6 +2472,8 @@ int main() {
         firstInput->revision = 11;
         firstInput->cameraBufferSize = 4;
         firstInput->resourceLayoutRevision = 11;
+        firstInput->cameraTableImage = std::make_shared<const std::vector<std::byte>>(
+            std::initializer_list<std::byte>{std::byte{0x11}});
         firstInput->views.push_back({ .id = 17, .cameraBufferIndex = 3, .primary = true });
         const auto first = graph.Request(key, 11, {},
             ArtifactPayload::Make<ViewFamilyBuildInput>(firstInput), 11);
@@ -2480,11 +2483,14 @@ int main() {
         auto root = snapshot.payload.Get<RendererStateFragmentArtifact>();
         auto family = root ? root->fragment.payload.Get<PublishedViewFamilyState>() : nullptr;
         Check(family && family->views.size() == 1 && family->views.front().id == 17);
+        Check(family->cameraTableImage && family->cameraTableImage->front() == std::byte{0x11});
 
         auto secondInput = std::make_shared<ViewFamilyBuildInput>(*firstInput);
         secondInput->revision = 12;
         secondInput->resourceLayoutRevision = 12;
         secondInput->views.front().id = 23;
+        secondInput->cameraTableImage = std::make_shared<const std::vector<std::byte>>(
+            std::initializer_list<std::byte>{std::byte{0x22}});
         const auto second = graph.Request(key, 12, {},
             ArtifactPayload::Make<ViewFamilyBuildInput>(secondInput), 12);
         Check(second);
@@ -2497,7 +2503,8 @@ int main() {
         snapshot = graph.Snapshot(first.version);
         root = snapshot.payload.Get<RendererStateFragmentArtifact>();
         family = root ? root->fragment.payload.Get<PublishedViewFamilyState>() : nullptr;
-        Check(family && family->views.front().id == 17);
+        Check(family && family->views.front().id == 17 && family->cameraTableImage &&
+            family->cameraTableImage->front() == std::byte{0x11});
     }
 
     {
@@ -2506,6 +2513,8 @@ int main() {
         auto input = std::make_shared<PoseStateBuildInput>();
         input->activeInstanceRevision = 7;
         input->activeInstances.push_back({ .instanceSlot = 9, .boneCount = 42 });
+        input->tableImages.push_back(std::make_shared<const std::vector<std::byte>>(
+            std::initializer_list<std::byte>{std::byte{0x33}}));
         const auto request = graph.Request(key, 7, {},
             ArtifactPayload::Make<PoseStateBuildInput>(input), 7);
         Check(request);
@@ -2514,7 +2523,8 @@ int main() {
         const auto root = snapshot.payload.Get<RendererStateFragmentArtifact>();
         const auto poses = root ? root->fragment.payload.Get<PublishedPoseState>() : nullptr;
         Check(poses && poses->activeInstanceRevision == 7 &&
-            poses->activeInstances.front().instanceSlot == 9);
+            poses->activeInstances.front().instanceSlot == 9 &&
+            poses->tableImages.front()->front() == std::byte{0x33});
     }
 
     {
@@ -2532,6 +2542,8 @@ int main() {
         auto input = std::make_shared<LightTableBuildInput>();
         input->revision = 5;
         input->lightCount = 3;
+        input->tableImages.push_back(std::make_shared<const std::vector<std::byte>>(
+            std::initializer_list<std::byte>{std::byte{0x44}}));
         const auto request = graph.Request(key, 5,
             { Exact(selectedViews.Handle()) },
             ArtifactPayload::Make<LightTableBuildInput>(input), 5);
@@ -2541,7 +2553,8 @@ int main() {
         const auto root = snapshot.payload.Get<RendererStateFragmentArtifact>();
         const auto lights = root ? root->fragment.payload.Get<PublishedLightTableState>() : nullptr;
         Check(lights && lights->revision == 5 && lights->lightCount == 3 &&
-            lights->viewFamilyRevision == 21);
+            lights->viewFamilyRevision == 21 &&
+            lights->tableImages.front()->front() == std::byte{0x44});
 
         auto newerViewInput = std::make_shared<ViewFamilyBuildInput>(*viewInput);
         newerViewInput->revision = 22;
@@ -2554,6 +2567,32 @@ int main() {
         const auto retainedState = retainedRoot
             ? retainedRoot->fragment.payload.Get<PublishedLightTableState>() : nullptr;
         Check(retainedState && retainedState->viewFamilyRevision == 21);
+    }
+
+    {
+        flecs::world sourceWorld;
+        SceneSourceStateStore::PhaseMap phases;
+        SceneSourceStateStore store;
+        store.Configure(sourceWorld, phases);
+        {
+            auto lease = store.AcquireWrite(10);
+            Check(&lease.World() == &sourceWorld);
+            Check(&lease.Phases() == &phases);
+            Check(lease.Revision() == 10);
+        }
+        bool rejectedOutOfOrder = false;
+        try {
+            (void)store.AcquireWrite(9);
+        } catch (const std::logic_error&) {
+            rejectedOutOfOrder = true;
+        }
+        Check(rejectedOutOfOrder);
+        {
+            auto lease = store.AcquireWrite(11);
+            Check(lease.Revision() == 11);
+        }
+        store.Reset();
+        Check(!store.Available());
     }
 
     graph.Shutdown();

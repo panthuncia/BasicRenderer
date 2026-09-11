@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -10,11 +11,15 @@
 namespace org { class PixelBuffer; class Resource; }
 
 namespace br::render {
+struct PublishedGpuBufferVersion;
+inline constexpr std::uint64_t ViewCameraTableVariant = 1;
+inline constexpr std::uint64_t ViewCullingCameraTableVariant = 2;
 
 struct DepthHistorySelection {
     std::shared_ptr<org::PixelBuffer> resource;
     std::uint64_t epoch = 0;
     std::uint64_t producerSubmissionID = 0;
+    std::uint64_t producerFrameNumber = 0;
 
     explicit operator bool() const noexcept {
         return resource != nullptr && producerSubmissionID != 0;
@@ -46,6 +51,8 @@ struct ViewFamilyBuildInput {
     std::uint64_t resourceLayoutRevision = 0;
     std::vector<PreparedViewFrameData> views;
     std::vector<std::shared_ptr<org::Resource>> retainedResources;
+    std::shared_ptr<const std::vector<std::byte>> cameraTableImage;
+    std::shared_ptr<const std::vector<std::byte>> cullingCameraTableImage;
 };
 
 struct PublishedViewFamilyState {
@@ -54,6 +61,9 @@ struct PublishedViewFamilyState {
     std::uint64_t resourceLayoutRevision = 0;
     std::vector<PreparedViewFrameData> views;
     std::vector<std::shared_ptr<org::Resource>> retainedResources;
+    std::shared_ptr<const std::vector<std::byte>> cameraTableImage;
+    std::shared_ptr<const std::vector<std::byte>> cullingCameraTableImage;
+    std::vector<std::shared_ptr<const PublishedGpuBufferVersion>> tableVersions;
 };
 
 void RegisterViewStateProducer(AsyncStateGraph& graph);

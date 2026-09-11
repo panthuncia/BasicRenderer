@@ -157,7 +157,7 @@ void ReyesDeepVisibilityRasterizationPass::Update(const UpdateExecutionContext& 
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
 
-    const auto numViews = context.preparedViewCameraBufferSize;
+    const auto numViews = context.ViewCameraBufferSize();
     std::vector<std::shared_ptr<PixelBuffer>> visibilityBuffers;
     std::vector<std::shared_ptr<PixelBuffer>> deepVisibilityHeadPointerBuffers;
 
@@ -165,7 +165,7 @@ void ReyesDeepVisibilityRasterizationPass::Update(const UpdateExecutionContext& 
     uint32_t maxViewHeight = 1u;
     uint64_t totalViewPixels = 0u;
 
-    for (const auto& viewInfo : context.preparedViews) {
+    for (const auto& viewInfo : context.Views()) {
         if (!viewInfo.visibilityBuffer) {
             continue;
         }
@@ -182,7 +182,7 @@ void ReyesDeepVisibilityRasterizationPass::Update(const UpdateExecutionContext& 
     }
 
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-    for (const auto& viewInfo : context.preparedViews) {
+    for (const auto& viewInfo : context.Views()) {
         if (!viewInfo.visibilityBuffer) {
             continue;
         }

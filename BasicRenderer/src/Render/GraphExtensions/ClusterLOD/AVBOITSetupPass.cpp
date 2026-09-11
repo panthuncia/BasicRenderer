@@ -130,7 +130,7 @@ void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
 	m_integratedTransmittanceTexture->EnsureVirtualDescriptorSlotsAllocated();
     m_zeroTransmittanceSliceTexture->EnsureVirtualDescriptorSlotsAllocated();
 
-    for (const auto& view : context.preparedViews) if (view.primary) {
+    for (const auto& view : context.Views()) if (view.primary) {
         m_config.viewNearDepth = view.cameraInfo.zNear;
         m_config.viewFarDepth = view.cameraInfo.zFar;
         break;

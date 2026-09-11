@@ -752,7 +752,7 @@ br::render::PreparedComputeCommandSequence HierarchicalCullingPass::Prepare(
 
     if (m_isFirstPass) {
         const auto workloads = br::render::PrepareCullingWorkloads(
-            render->preparedViews, render->publishedRendererState, m_renderPhase,
+            render->Views(), render->publishedRendererState, m_renderPhase,
             m_clodOnlyWorkloads, m_useShadowCascadeViews, m_rasterOutputKind, 64u,
             "HierarchicalCullingPass");
         std::vector<ObjectCullRecord> records;
@@ -853,7 +853,7 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
     bool rebuildViewTables = false;
     {
         ZoneScopedN("HierarchicalCullingPass::CheckViewResourceRevision");
-        const uint64_t viewResourceRevision = context.preparedViewResourceLayoutRevision;
+        const uint64_t viewResourceRevision = context.ViewResourceLayoutRevision();
         rebuildViewTables = viewResourceRevision != m_lastViewResourceLayoutRevision;
         if (rebuildViewTables) {
             m_lastViewResourceLayoutRevision = viewResourceRevision;
@@ -866,11 +866,11 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
         if (rebuildViewTables || m_cachedViewRasterInfo.empty()) {
             ZoneScopedN("HierarchicalCullingPass::RebuildViewRasterInfo");
             m_visibilityBuffers.clear();
-            const auto numViews = context.preparedViewCameraBufferSize;
+            const auto numViews = context.ViewCameraBufferSize();
             std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
             std::vector<std::pair<uint32_t, std::shared_ptr<PixelBuffer>>> visibilityBuffersByCameraIndex;
             const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
-            for (const auto& viewInfo : context.preparedViews) {
+            for (const auto& viewInfo : context.Views()) {
                 const auto cameraIndex = viewInfo.cameraBufferIndex;
                 if (cameraIndex >= viewRasterInfo.size()) {
                     continue;
@@ -956,7 +956,7 @@ void HierarchicalCullingPass::Update(const UpdateExecutionContext& executionCont
                 viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
             }
 
-            for (const auto& view : context.preparedViews) {
+            for (const auto& view : context.Views()) {
                 const uint32_t cameraBufferIndex = view.cameraBufferIndex;
                 if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
                     continue;

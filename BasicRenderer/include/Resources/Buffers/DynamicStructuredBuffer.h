@@ -11,6 +11,7 @@
 #include <rhi.h>
 #include <memory>
 #include <utility>
+#include <cstring>
 
 #include <spdlog/spdlog.h>
 
@@ -26,6 +27,13 @@ using Microsoft::WRL::ComPtr;
 template<class T>
 class DynamicStructuredBuffer : public BufferBase, public IHasMemoryMetadata, public IDeferredBackingResizeClient {
 public:
+
+    std::vector<std::byte> CaptureCpuShadowBytes() const {
+        std::scoped_lock lock(m_mutex);
+        std::vector<std::byte> bytes(m_data.size() * sizeof(T));
+        if (!bytes.empty()) std::memcpy(bytes.data(), m_data.data(), bytes.size());
+        return bytes;
+    }
 
     static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::string name = "", bool UAV = false) {
         return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(capacity, name, UAV));

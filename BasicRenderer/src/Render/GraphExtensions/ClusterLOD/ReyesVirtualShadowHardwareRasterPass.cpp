@@ -118,10 +118,10 @@ void ReyesVirtualShadowHardwareRasterPass::Update(const UpdateExecutionContext& 
     m_bucketFlags.reserve(context.preparedRasterBucketFlags.size());
     for (const auto flags : context.preparedRasterBucketFlags) m_bucketFlags.push_back(static_cast<uint32_t>(flags));
 
-    const auto numViews = context.preparedViewCameraBufferSize;
+    const auto numViews = context.ViewCameraBufferSize();
     std::vector<CLodViewRasterInfo> nextViewRasterInfos(numViews);
 
-    for (const auto& viewInfo : context.preparedViews) {
+    for (const auto& viewInfo : context.Views()) {
         const auto cameraIndex = viewInfo.cameraBufferIndex;
         CLodViewRasterInfo info{};
         if (viewInfo.shadow && viewInfo.lightType == Components::LightType::Directional) {

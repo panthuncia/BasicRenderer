@@ -2,6 +2,7 @@
 
 #include "Render/PublishedRendererState.h"
 #include "Render/ViewStateArtifacts.h"
+#include "Render/VersionedGpuBufferArtifacts.h"
 
 namespace br::render {
 namespace {
@@ -12,6 +13,7 @@ ArtifactBuildResult BuildLightTable(const ArtifactBuildContext& context) {
         return ArtifactBuildResult::Failure("light-table input/revision mismatch");
     }
     auto state = std::make_shared<PublishedLightTableState>();
+    auto root = std::make_shared<RendererStateFragmentArtifact>();
     state->revision = input->revision;
     state->lightCount = input->lightCount;
     state->lightPagePoolSize = input->lightPagePoolSize;
@@ -27,8 +29,18 @@ ArtifactBuildResult BuildLightTable(const ArtifactBuildContext& context) {
     }
     state->directionalShadows = input->directionalShadows;
     state->retainedResources = input->retainedResources;
+    state->tableImages = input->tableImages;
+    for (const auto& dependency : context.dependencies) {
+        const auto dependencyRoot = dependency.payload.Get<RendererStateFragmentArtifact>();
+        const auto version = dependencyRoot
+            ? dependencyRoot->fragment.payload.Get<PublishedGpuBufferVersion>() : nullptr;
+        if (!version || !version->resource) continue;
+        state->tableVersions.push_back(version);
+        root->fragment.resourceHolds.push_back(version);
+        root->catalogEntries.insert(root->catalogEntries.end(),
+            dependencyRoot->catalogEntries.begin(), dependencyRoot->catalogEntries.end());
+    }
 
-    auto root = std::make_shared<RendererStateFragmentArtifact>();
     root->kind = PublishedFragmentKind::Lights;
     root->fragment.revision = context.revision;
     root->fragment.payload = ArtifactPayload::Make<PublishedLightTableState>(state);

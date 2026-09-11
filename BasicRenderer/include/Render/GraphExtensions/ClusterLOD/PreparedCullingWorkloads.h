@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -40,7 +41,7 @@ struct PreparedCullingWorkload {
 };
 
 inline std::vector<PreparedCullingWorkload> PrepareCullingWorkloads(
-    const std::vector<PreparedViewFrameData>& views,
+    std::span<const PreparedViewFrameData> views,
     const std::shared_ptr<const PublishedRendererState>& rendererState,
     RenderPhase renderPhase,
     bool clodOnlyWorkloads,

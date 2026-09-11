@@ -7,6 +7,8 @@
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
+#include "Resources/Resolvers/PublishedStateResourceResolver.h"
+#include "Render/PoseStateArtifacts.h"
 
 #include <algorithm>
 #include <DirectXMath.h>
@@ -96,6 +98,16 @@ SkeletonManager::SkeletonManager() {
     m_resources[Builtin::SkeletonResources::BoneTransforms] = m_boneTransforms;
     m_resources[Builtin::SkeletonResources::InverseSkinMatrices] = m_inverseSkinMatrices;
     m_resources[Builtin::SkeletonResources::SkinningInstanceInfo] = m_instanceInfo;
+    const auto source = br::render::PublishedStateSource::ProcessSource();
+    const auto addPublished = [&](ResourceIdentifier key, std::shared_ptr<Resource> fallback,
+        std::uint64_t variant) {
+        m_resolvers[key] = std::make_shared<PublishedStateResourceResolver>(source,
+            br::render::PublishedResourceKey{ br::render::PublishedFragmentKind::Poses,
+                br::render::PublishedResourceUsage::ShaderResource, 0, 0, variant },
+            std::move(fallback));
+    };
+    addPublished(Builtin::SkeletonResources::InverseBindMatrices, m_inverseBindMatrices,
+        br::render::PoseInverseBindTableVariant);
 }
 
 SkeletonManager::~SkeletonManager() {
@@ -497,4 +509,27 @@ std::vector<ResourceIdentifier> SkeletonManager::GetSupportedKeys() {
     keys.reserve(m_resources.size());
     for (auto const& [key, _] : m_resources) keys.push_back(key);
     return keys;
+}
+std::vector<std::shared_ptr<const std::vector<std::byte>>> SkeletonManager::CapturePoseTableImages() const {
+    std::vector<std::shared_ptr<const std::vector<std::byte>>> result;
+    result.reserve(4);
+    const auto capture = [&](const auto& buffer) {
+        result.push_back(std::make_shared<const std::vector<std::byte>>(
+            buffer->CaptureCpuShadowBytes()));
+    };
+    capture(m_inverseBindMatrices);
+    capture(m_boneTransforms);
+    capture(m_inverseSkinMatrices);
+    capture(m_instanceInfo);
+    return result;
+}
+std::vector<ResourceIdentifier> SkeletonManager::GetSupportedResolverKeys() {
+    std::vector<ResourceIdentifier> keys;
+    keys.reserve(m_resolvers.size());
+    for (const auto& [key, _] : m_resolvers) keys.push_back(key);
+    return keys;
+}
+std::shared_ptr<IResourceResolver> SkeletonManager::ProvideResolver(ResourceIdentifier const& key) {
+    const auto found = m_resolvers.find(key);
+    return found == m_resolvers.end() ? nullptr : found->second;
 }

@@ -152,6 +152,31 @@ constexpr const char* CLodVirtualShadowTelemetryDebugSettingName = "clodVirtualS
 constexpr const char* ObjectReyesAtlasTelemetryDebugSettingName = "objectReyesAtlasTelemetryDebug";
 constexpr size_t TerrainRvtTelemetryMipBins = 16u;
 
+br::render::SceneIngestionConfiguration CaptureSceneIngestionConfiguration()
+{
+    auto& settings = SettingsManager::GetInstance();
+    br::render::SceneIngestionConfiguration result{};
+    result.renderResolution = settings.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    result.outputResolution = settings.getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+    result.shadowResolution = settings.getSettingGetter<uint16_t>("shadowResolution")();
+    result.directionalCascadeCount = settings.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+    result.maxShadowDistance = settings.getSettingGetter<float>("maxShadowDistance")();
+    result.directionalShadowDistanceLowerBound =
+        settings.getSettingGetter<float>("directionalShadowDistanceLowerBound")();
+    result.directionalShadowSceneExtent =
+        settings.getSettingGetter<float>("directionalShadowSceneExtent")();
+    result.primaryCameraUsesOutputHeight =
+        settings.getSettingGetter<CLodLodHeightMode>(CLodLodHeightModeSettingName)() ==
+        CLodLodHeightMode::OutputHeight;
+    return result;
+}
+
+uint32_t PrimaryCameraLodHeight(const br::render::SceneIngestionConfiguration& configuration)
+{
+    return configuration.primaryCameraUsesOutputHeight && configuration.outputResolution.y != 0u
+        ? configuration.outputResolution.y : configuration.renderResolution.y;
+}
+
 bool OutputTypeRequiresRenderGraphRebuild(unsigned int outputType)
 {
     return outputType == static_cast<unsigned int>(OutputType::SKELETONS);
@@ -842,6 +867,7 @@ void Renderer::Initialize(
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
+	m_pEnvironmentManager->SetWorkServices(m_environmentWorkServices);
     CreateDefaultEnvironmentResources();
     m_pEnvironmentManager->SetRequestReadbackFn([this](std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
         if (!m_pReadbackManager) {
@@ -889,8 +915,45 @@ void Renderer::Initialize(
     });
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pIndirectCommandBufferManager->AttachActiveDrawSource(*m_pObjectManager);
-	m_pSkeletonManager = SkeletonManager::CreateUnique();
+	m_pSkeletonManager = SkeletonManager::CreateShared();
 	m_pMeshManager->SetSkeletonManager(m_pSkeletonManager.get());
+	m_poseInstanceRegistrationService.Configure(m_pSkeletonManager.get());
+	m_sceneRenderableResidencyService.Configure(m_pMeshManager.get(), m_pMaterialManager.get());
+    const auto makeFrameTableFamily = [](std::uint64_t id, const char* name,
+        std::uint32_t stride, br::render::PublishedFragmentKind owner,
+        std::uint64_t variant, bool unorderedAccess = false) {
+        return std::make_unique<br::render::VersionedBufferFamily>(
+            br::render::VersionedBufferFamily::Config{
+                { br::render::ArtifactKind::BufferVersion, id, 0 }, name, stride,
+                unorderedAccess, false, owner,
+                br::render::PublishedResourceUsage::ShaderResource, variant, false });
+    };
+    m_viewTableFamilies[0] = makeFrameTableFamily(100, "ViewCameraTable", sizeof(CameraInfo),
+        br::render::PublishedFragmentKind::Views, br::render::ViewCameraTableVariant);
+    m_viewTableFamilies[1] = makeFrameTableFamily(101, "ViewCullingCameraTable", sizeof(CullingCameraInfo),
+        br::render::PublishedFragmentKind::Views, br::render::ViewCullingCameraTableVariant);
+    constexpr std::array<std::uint64_t, 5> lightVariants{
+        br::render::LightInfoTableVariant, br::render::LightSpotViewTableVariant,
+        br::render::LightPointViewTableVariant, br::render::LightDirectionalViewTableVariant,
+        br::render::LightActiveIndexTableVariant };
+    constexpr std::array<std::uint32_t, 5> lightStrides{
+        sizeof(LightInfo), sizeof(std::uint32_t), sizeof(std::uint32_t), sizeof(std::uint32_t),
+        sizeof(std::uint32_t) };
+    for (std::size_t i = 0; i < m_lightTableFamilies.size(); ++i)
+        m_lightTableFamilies[i] = makeFrameTableFamily(110 + i, "LightFrameTable", lightStrides[i],
+            br::render::PublishedFragmentKind::Lights, lightVariants[i]);
+    constexpr std::array<std::uint64_t, 4> poseVariants{
+        br::render::PoseInverseBindTableVariant, br::render::PoseBoneTransformTableVariant,
+        br::render::PoseInverseSkinTableVariant, br::render::PoseInstanceInfoTableVariant };
+    constexpr std::array<std::uint32_t, 4> poseStrides{
+        sizeof(DirectX::XMMATRIX), sizeof(DirectX::XMMATRIX), sizeof(DirectX::XMMATRIX),
+        sizeof(SkinningInstanceGPUInfo) };
+    // Inverse-bind matrices are immutable pose source data. The remaining
+    // tables are GPU-written frame outputs (including procedural wind) and
+    // cannot be republished from their CPU shadows; they stay owned by the
+    // palette service until slot-local palette outputs are introduced.
+    m_poseTableFamilies[0] = makeFrameTableFamily(120, "PoseInverseBindTable", poseStrides[0],
+        br::render::PublishedFragmentKind::Poses, poseVariants[0]);
     m_pTextureFactory = TextureFactory::CreateUnique();
     m_clodRayTracingSystem = std::make_shared<br::render::CLodRayTracingSystem>();
     if (currentRenderGraph) {
@@ -903,21 +966,33 @@ void Renderer::Initialize(
     CreateGlobalResources();
     ProbeGraphicsCommandListCreation(DeviceManager::GetInstance().GetDevice(), "after CreateGlobalResources");
 
-	m_managerInterface.SetManagers(
-        m_pMeshManager.get(), 
-        m_pObjectManager.get(), 
-        m_pIndirectCommandBufferManager.get(), 
-        m_pViewManager.get(), 
-        m_pLightManager.get(), 
-        m_pEnvironmentManager.get(), 
-        m_pMaterialManager.get(),
-        m_pSkeletonManager.get(),
-        m_pTextureFactory.get(),
-        m_pTerrainManager.get(),
-        std::addressof(m_shaderVariantRequestService),
-		currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr,
-		currentRenderGraph ? currentRenderGraph->GetDescriptorService() : nullptr,
-        m_rendererStateRequests.get());
+    m_sceneAssetRequestService.Configure(
+        m_pTextureFactory.get(), m_pTerrainManager.get(), m_pMaterialManager.get());
+	m_staticWorkloadRequestService.Configure(m_pIndirectCommandBufferManager.get());
+	m_staticObjectRequestService.Configure(m_pObjectManager.get());
+	m_staticGeometryRequestService.Configure(m_pMeshManager.get());
+    m_staticMaterialRequestService.Configure(m_pMaterialManager.get());
+    m_sceneSourceStateStore.Configure(
+        RendererECSManager::GetInstance().GetWorld(),
+        RendererECSManager::GetInstance().GetRenderPhaseEntities());
+    m_sceneEntityMaterializationService.Configure(
+        m_pObjectManager.get(), m_pViewManager.get(), m_pLightManager.get());
+    m_sceneIngestionServices = {
+        .source = std::addressof(m_sceneSourceStateStore),
+        .sceneEntities = std::addressof(m_sceneEntityMaterializationService),
+        .poseInstances = std::addressof(m_poseInstanceRegistrationService),
+        .renderables = std::addressof(m_sceneRenderableResidencyService),
+        .shaderVariants = std::addressof(m_shaderVariantRequestService),
+        .execution = {
+            .uploads = currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr,
+            .descriptors = currentRenderGraph ? currentRenderGraph->GetDescriptorService() : nullptr,
+            .stateRequests = m_rendererStateRequests.get() },
+		.sceneAssetRequests = std::addressof(m_sceneAssetRequestService),
+		.geometryRequests = std::addressof(m_staticGeometryRequestService),
+		.materialRequests = std::addressof(m_staticMaterialRequestService),
+		.objectRequests = std::addressof(m_staticObjectRequestService),
+		.workloadRequests = std::addressof(m_staticWorkloadRequestService)
+    };
     m_pIndirectCommandBufferManager->SetRendererStateServices(
         m_rendererStateRequests.get(),
         currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr);
@@ -950,7 +1025,8 @@ void Renderer::RunSceneBridgeSyncStage() {
     if (!currentScene) {
         return;
     }
-    m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+    m_sceneRenderBridge.Sync(*currentScene, GetSceneIngestionServices(),
+        CaptureSceneIngestionConfiguration());
 }
 
 void Renderer::SetExternalSceneMode(bool enabled) {
@@ -970,7 +1046,8 @@ void Renderer::SetExternalSceneMode(bool enabled) {
 void Renderer::IngestExternalSnapshot(const br::render::SceneFrameSnapshot& snapshot) {
     SetExternalSceneMode(true);
     RegisterExternalSnapshotMeshes(snapshot);
-    m_sceneRenderBridge.IngestSnapshot(snapshot, m_managerInterface);
+    m_sceneRenderBridge.IngestSnapshot(snapshot, GetSceneIngestionServices(),
+        CaptureSceneIngestionConfiguration());
     m_hasCommittedSceneSnapshot = true;
     m_lastCommittedSceneSnapshotSequence = snapshot.snapshotSequence;
     m_lastCommittedSceneSourceFrame = snapshot.sourceFrameNumber;
@@ -1143,9 +1220,9 @@ void Renderer::RegisterExternalSnapshotMeshes(const br::render::SceneFrameSnapsh
             const bool needsExternalInstanceRegistration =
                 !externalInstanceKnown || meshInstance->GetPerMeshInstanceBufferView() == nullptr;
             if (needsExternalInstanceRegistration && meshInstance->HasSkin() && m_pSkeletonManager) {
-                meshInstance->SetCurrentSkeletonManager(m_pSkeletonManager.get());
+                meshInstance->SetPoseRegistrationService(std::addressof(m_poseInstanceRegistrationService));
                 auto skinInst = meshInstance->GetSkin();
-                m_pSkeletonManager->AcquireSkinningInstance(skinInst);
+                m_poseInstanceRegistrationService.Acquire(skinInst);
                 meshInstance->SetSkinningInstanceSlot(skinInst->GetSkinningInstanceSlot());
                 meshInstance->SyncSkinningStateFromSkeleton();
             }
@@ -1351,7 +1428,8 @@ void Renderer::BootstrapCommittedSceneSnapshot() {
 
     auto snapshot = std::make_shared<br::render::SceneFrameSnapshot>(
         m_sceneRenderBridge.ExportSnapshot(*currentScene, m_nextSceneSnapshotSequence++, m_totalFramesRendered));
-    m_sceneRenderBridge.IngestSnapshot(*snapshot, m_managerInterface);
+    m_sceneRenderBridge.IngestSnapshot(*snapshot, GetSceneIngestionServices(),
+        CaptureSceneIngestionConfiguration());
 
     std::scoped_lock lock(m_sceneSnapshotMutex);
     m_hasCommittedSceneSnapshot = true;
@@ -1383,7 +1461,8 @@ void Renderer::CommitCompletedSceneSnapshot() {
 
     {
         BT_ZONE_SCOPE("Renderer::CommitCompletedSceneSnapshot::IngestSnapshot");
-        m_sceneRenderBridge.IngestSnapshot(*completedSnapshot, m_managerInterface);
+        m_sceneRenderBridge.IngestSnapshot(*completedSnapshot, GetSceneIngestionServices(),
+            CaptureSceneIngestionConfiguration());
     }
     {
         BT_ZONE_SCOPE("Renderer::CommitCompletedSceneSnapshot::PublishCommittedSnapshot");
@@ -1557,12 +1636,12 @@ void Renderer::RunRenderResourceSyncStage() {
         });
     }
 
-    if (auto* terrainManager = m_managerInterface.GetTerrainManager()) {
+    if (auto* terrainService = m_sceneIngestionServices.sceneAssetRequests) {
         BT_ZONE_SCOPE("Renderer::Update::RenderResourceSync::ProcessPendingTerrainUpdates");
-        terrainManager->ProcessPendingUpdates();
+        terrainService->ProcessPendingTerrainUpdates();
     }
 
-    auto* objectManager = m_managerInterface.GetObjectManager();
+    auto* objectManager = m_pObjectManager.get();
     std::vector<std::pair<size_t, size_t>> perObjectDirtyRanges;
     std::vector<std::pair<size_t, size_t>> perInstanceTransformDirtyRanges;
     std::vector<std::pair<size_t, size_t>> normalMatrixDirtyRanges;
@@ -1801,7 +1880,7 @@ void Renderer::RunRenderResourceSyncStage() {
                 camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
             }
 
-            m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
+            m_pViewManager->UpdateCamera(renderView.viewID, camera.info);
         });
     }
 
@@ -1832,8 +1911,8 @@ void Renderer::RunRenderResourceSyncStage() {
 
             if (light.lightInfo.shadowCaster && entity.has<Components::LightViewInfo>()) {
                 const Components::LightViewInfo& viewInfo = entity.get<Components::LightViewInfo>();
-                m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
-                m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
+                m_pLightManager->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
+                m_pLightManager->UpdateLightViewInfo(entity);
             }
         });
     }
@@ -1989,7 +2068,8 @@ flecs::entity Renderer::GetValidatedPrimaryRenderCamera(bool attemptResync) {
 
     auto primaryCamera = m_sceneRenderBridge.GetPrimaryCameraEntity();
     if (!m_externalSceneMode && !validateCamera(primaryCamera) && attemptResync && !m_sceneRenderOverlapEnabled) {
-        m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+        m_sceneRenderBridge.Sync(*currentScene, GetSceneIngestionServices(),
+            CaptureSceneIngestionConfiguration());
         primaryCamera = m_sceneRenderBridge.GetPrimaryCameraEntity();
     }
 
@@ -2569,8 +2649,10 @@ void Renderer::SetSettings() {
             FFXManager::GetInstance().InitFFX();
 
             CreateTextures();
-            auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-            m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
+            const auto ingestionConfiguration = CaptureSceneIngestionConfiguration();
+            m_sceneRenderBridge.ResyncPrimaryCameraDepth(m_sceneIngestionServices,
+                ingestionConfiguration.renderResolution.x, ingestionConfiguration.renderResolution.y,
+                PrimaryCameraLodHeight(ingestionConfiguration));
             rebuildRenderGraph = true;
             });
 		}));
@@ -2585,8 +2667,10 @@ void Renderer::SetSettings() {
             FFXManager::GetInstance().Shutdown();
             FFXManager::GetInstance().InitFFX();
             CreateTextures();
-            auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-            m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
+            const auto ingestionConfiguration = CaptureSceneIngestionConfiguration();
+            m_sceneRenderBridge.ResyncPrimaryCameraDepth(m_sceneIngestionServices,
+                ingestionConfiguration.renderResolution.x, ingestionConfiguration.renderResolution.y,
+                PrimaryCameraLodHeight(ingestionConfiguration));
             rebuildRenderGraph = true;
             });
         }));
@@ -2799,6 +2883,30 @@ void Renderer::CreateTextures() {
     org::memory::SetResourceUsageHint(*upscaledHDRColorTarget, "Upscaled color buffers");
 	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
 
+    // Scene recording targets a logical-frame-owned LDR surface.  Only the
+    // presentation copy depends on the acquired swapchain image, so compiled
+    // scene work can eventually be planned and recorded before acquisition.
+    TextureDescription presentationDesc{};
+    presentationDesc.arraySize = 1;
+    presentationDesc.channels = 4;
+    presentationDesc.hasRTV = true;
+    presentationDesc.format = rhi::Format::R8G8B8A8_UNorm;
+    presentationDesc.rtvFormat = rhi::Format::R8G8B8A8_UNorm;
+    presentationDesc.imageDimensions.push_back({outputResolution.x, outputResolution.y, 0, 0});
+    presentationDesc.allowAlias = false;
+    m_presentationColorResources.clear();
+    m_presentationColorResources.reserve(m_numFramesInFlight);
+    for (uint32_t slot = 0; slot < m_numFramesInFlight; ++slot) {
+        auto target = PixelBuffer::CreateSharedUnmaterialized(presentationDesc);
+        target->SetName("Frame Presentation Color " + std::to_string(slot));
+        org::memory::SetResourceUsageHint(*target, "Frame presentation surfaces");
+        m_presentationColorResources.push_back(std::move(target));
+    }
+    if (!m_presentationColorResources.empty()) {
+        m_dynamicPresentationColor = std::make_shared<DynamicResource>(m_presentationColorResources.front());
+        m_dynamicPresentationColor->SetName("Frame Presentation Color");
+    }
+
     TextureDescription motionVectors;
     motionVectors.arraySize = 1;
     motionVectors.channels = 2;
@@ -2895,8 +3003,10 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
     CreateTextures();
 
-    auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-    m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
+    const auto ingestionConfiguration = CaptureSceneIngestionConfiguration();
+    m_sceneRenderBridge.ResyncPrimaryCameraDepth(m_sceneIngestionServices,
+        ingestionConfiguration.renderResolution.x, ingestionConfiguration.renderResolution.y,
+        PrimaryCameraLodHeight(ingestionConfiguration));
 
 	//Rebuild the render graph
 	rebuildRenderGraph = true;
@@ -3250,9 +3360,9 @@ void Renderer::Update(float elapsedSeconds) {
 			(void)m_pMaterialManager->TryActivatePublishedMaterialState(
 				m_context.publishedRendererState);
 		}
-		if (m_pTerrainManager) {
+		if (m_sceneIngestionServices.sceneAssetRequests) {
 			BT_ZONE_SCOPE("Renderer::Update::CommitPublishedRendererState::ActivateTerrain");
-			(void)m_pTerrainManager->TryActivatePublishedTerrainState(
+			(void)m_sceneIngestionServices.sceneAssetRequests->ActivatePublishedTerrainState(
 				m_context.publishedRendererState);
 		}
     });
@@ -3285,14 +3395,53 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.publishedRendererState = m_context.publishedRendererState;
     updateData.publishedManifestLease = m_context.publishedManifestLease;
     updateData.drawStats = drawStats;
-    updateData.objectManager = m_pObjectManager.get();
-    updateData.meshManager = m_pMeshManager.get();
-    updateData.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
-    updateData.environmentManager = m_pEnvironmentManager.get();
-    updateData.materialManager = m_pMaterialManager.get();
+    updateData.materialTextureStreamingStats = m_pMaterialManager
+        ? m_pMaterialManager->GetMaterialTextureStreamingStats()
+        : MaterialTextureStreamingStats{};
+    updateData.environmentWork = m_environmentWorkServices;
+    m_environmentWorkServices.PublishTelemetry();
     updateData.clodRayTracingSystem = m_clodRayTracingSystem;
-    updateData.preparedLightPagePoolSize = m_pLightManager
-        ? m_pLightManager->GetLightPagePoolSize() : 0u;
+    updateData.terrainRegionMaterialEvaluationEnabled =
+        SettingsManager::GetInstance().getSettingGetter<bool>(
+            "enableTerrainRegionMaterialEvaluation")();
+    updateData.outputType = SettingsManager::GetInstance()
+        .getSettingGetter<unsigned int>("outputType")();
+    updateData.tonemapType = SettingsManager::GetInstance()
+        .getSettingGetter<unsigned int>("tonemapType")();
+    updateData.lightClusterSize = SettingsManager::GetInstance()
+        .getSettingGetter<DirectX::XMUINT3>("lightClusterSize")();
+    updateData.lighting = {
+        .imageBasedLightingEnabled = SettingsManager::GetInstance()
+            .getSettingGetter<bool>("enableImageBasedLighting")(),
+        .punctualLightingEnabled = SettingsManager::GetInstance()
+            .getSettingGetter<bool>("enablePunctualLighting")(),
+        .shadowsEnabled = SettingsManager::GetInstance()
+            .getSettingGetter<bool>("enableShadows")(),
+        .gtaoEnabled = SettingsManager::GetInstance()
+            .getSettingGetter<bool>("enableGTAO")(),
+        .clusteredLightingEnabled = SettingsManager::GetInstance()
+            .getSettingGetter<bool>("enableClusteredLighting")() };
+    updateData.proceduralWind = {
+        .displacementScale = SettingsManager::GetInstance().getSettingGetter<float>(
+            ProceduralWindDisplacementScaleSettingName)(),
+        .innerRadius = SettingsManager::GetInstance().getSettingGetter<float>(
+            ProceduralWindInnerRadiusSettingName)(),
+        .outerRadius = SettingsManager::GetInstance().getSettingGetter<float>(
+            ProceduralWindOuterRadiusSettingName)(),
+        .skeletonLodQualityCurve = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>(
+            ProceduralWindSkeletonLodQualityCurveSettingName)(),
+        .skeletonLodStaticCutoff = SettingsManager::GetInstance().getSettingGetter<float>(
+            ProceduralWindSkeletonLodStaticCutoffSettingName)(),
+        .skeletonLodHysteresis = SettingsManager::GetInstance().getSettingGetter<float>(
+            ProceduralWindSkeletonLodHysteresisSettingName)(),
+        .forcedSkeletonLod = SettingsManager::GetInstance().getSettingGetter<int32_t>(
+            ProceduralWindForcedSkeletonLodSettingName)(),
+        .skeletonLodCapacityTarget = SettingsManager::GetInstance().getSettingGetter<float>(
+            ProceduralWindSkeletonLodCapacityTargetSettingName)(),
+        .skeletonLodLateReserve = SettingsManager::GetInstance().getSettingGetter<float>(
+            ProceduralWindSkeletonLodLateReserveSettingName)(),
+        .occlusionCullingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>(
+            "enableOcclusionCulling")() };
     const auto publishedMaterialState = updateData.publishedRendererState
         ? updateData.publishedRendererState->materials.payload
             .Get<br::render::PublishedMaterialState>()
@@ -3314,15 +3463,15 @@ void Renderer::Update(float elapsedSeconds) {
         }
         basic_telemetry::AddCounter("SARP.FrameInputs.BootstrapRasterBucketFallback");
     }
-    updateData.windPaletteService = m_pSkeletonManager.get();
+    updateData.windPaletteService = m_pSkeletonManager;
     updateData.textureDescriptorHeap = m_context.textureDescriptorHeap;
     updateData.samplerDescriptorHeap = m_context.samplerDescriptorHeap;
     updateData.rtvHeap = rtvHeap->GetHandle();
-    updateData.currentScene = m_sceneRenderOverlapEnabled ? nullptr : currentScene.get();
     updateData.primaryCamera = camera.get<Components::Camera>();
     updateData.primaryViewID = m_context.primaryViewID;
     updateData.hasPrimaryCamera = true;
-    updateData.frameIndex = m_preparationFrameIndex;
+    updateData.frameSlot = m_preparationFrameIndex;
+    updateData.frameIndex = updateData.frameSlot;
     updateData.frameFenceValue = m_currentFrameFenceValue;
     updateData.frameNumber = m_totalFramesRendered;
     updateData.renderResolution = renderRes;
@@ -3342,19 +3491,45 @@ void Renderer::Update(float elapsedSeconds) {
     renderSnapshot.primaryCamera = updateData.primaryCamera;
     renderSnapshot.primaryViewID = updateData.primaryViewID;
     renderSnapshot.hasPrimaryCamera = updateData.hasPrimaryCamera;
-    renderSnapshot.frameIndex = updateData.frameIndex;
+    renderSnapshot.frameSlot = updateData.frameSlot;
+    renderSnapshot.frameIndex = renderSnapshot.frameSlot;
+    renderSnapshot.swapchainImageIndex = UINT_MAX;
     renderSnapshot.frameFenceValue = updateData.frameFenceValue;
     renderSnapshot.frameNumber = updateData.frameNumber;
     renderSnapshot.renderResolution = updateData.renderResolution;
     renderSnapshot.outputResolution = updateData.outputResolution;
     renderSnapshot.globalPSOFlags = updateData.globalPSOFlags;
+    renderSnapshot.terrainRegionMaterialEvaluationEnabled =
+        updateData.terrainRegionMaterialEvaluationEnabled;
+    renderSnapshot.outputType = updateData.outputType;
+    renderSnapshot.tonemapType = updateData.tonemapType;
+    renderSnapshot.lightClusterSize = updateData.lightClusterSize;
+    renderSnapshot.lighting = updateData.lighting;
+    renderSnapshot.proceduralWind = updateData.proceduralWind;
     renderSnapshot.deltaTime = updateData.deltaTime;
-    renderSnapshot.preparedViews.clear();
     auto desiredViewFamily = std::make_shared<br::render::ViewFamilyBuildInput>();
     br::render::ArtifactVersionHandle desiredViewFamilyHandle;
     if (m_pViewManager) {
         desiredViewFamily->revision = m_pViewManager->GetPublicationRevision();
         desiredViewFamily->cameraBufferSize = m_pViewManager->GetCameraBufferSize();
+        desiredViewFamily->cameraTableImage = m_pViewManager->CaptureCameraTableImage();
+        desiredViewFamily->cullingCameraTableImage = m_pViewManager->CaptureCullingCameraTableImage();
+        std::vector<br::render::ArtifactRequirement> viewRequirements;
+        if (auto* uploads = currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr;
+            uploads && m_rendererStateRequests) {
+            const std::array images{ desiredViewFamily->cameraTableImage,
+                desiredViewFamily->cullingCameraTableImage };
+            const std::array<std::uint32_t, 2> strides{ sizeof(CameraInfo), sizeof(CullingCameraInfo) };
+            for (std::size_t i = 0; i < images.size(); ++i) {
+                const auto& image = images[i];
+                const auto count = image ? image->size() / strides[i] : 0;
+                const auto request = m_viewTableFamilies[i]->RequestContentSnapshot(
+                    *m_rendererStateRequests, *uploads,
+                    image ? std::span<const std::byte>(*image) : std::span<const std::byte>{},
+                    count, (std::max<std::uint64_t>)(count, 1));
+                if (request) viewRequirements.push_back(br::render::Exact(request.Handle()));
+            }
+        }
         if (auto cameraBuffer = m_pViewManager->ProvideResource(Builtin::CameraBuffer))
             desiredViewFamily->retainedResources.push_back(std::move(cameraBuffer));
         if (auto cullingBuffer = m_pViewManager->ProvideResource(Builtin::CullingCameraBuffer))
@@ -3378,11 +3553,7 @@ void Renderer::Update(float elapsedSeconds) {
                 .visibilityBuffer = view->gpu.visibilityBuffer,
                 .deepVisibilityHeadPointers = view->gpu.clodDeepVisibilityHeadPointers,
                 .linearDepthMap = view->gpu.linearDepthMap,
-                .depthHistory = {
-                    view->gpu.lastFrameLinearDepthMap,
-                    view->gpu.depthHistoryEpoch,
-                    view->gpu.lastFrameLinearDepthValid
-                        ? view->gpu.lastDepthProducerSubmissionID : 0 },
+                .depthHistory = m_depthHistory.Select(view->id, view->gpu.linearDepthMap),
                 .linearDepthSRVIndices = view->gpu.linearDepthSRVIndices,
                 .depthBufferArrayIndex = view->cameraInfo.depthBufferArrayIndex,
                 .visibilitySRVIndex = view->gpu.visibilitySRVIndex,
@@ -3395,15 +3566,13 @@ void Renderer::Update(float elapsedSeconds) {
                 desiredViewFamily->retainedResources.push_back(view->gpu.clodDeepVisibilityHeadPointers);
             if (view->gpu.linearDepthMap)
                 desiredViewFamily->retainedResources.push_back(view->gpu.linearDepthMap);
-            if (view->gpu.lastFrameLinearDepthMap)
-                desiredViewFamily->retainedResources.push_back(view->gpu.lastFrameLinearDepthMap);
         });
         desiredViewFamily->resourceLayoutRevision = m_pViewManager->GetResourceLayoutRevision();
         if (m_rendererStateRequests) {
             const auto revision = (std::max<std::uint64_t>)(
                 desiredViewFamily->revision, 1u);
             auto viewRequest = m_rendererStateRequests->SubmitLatest({
-                { br::render::ArtifactKind::ViewFamily, 0, 0 }, revision, {},
+                { br::render::ArtifactKind::ViewFamily, 0, 0 }, revision, std::move(viewRequirements),
                 br::render::ArtifactPayload::Make<br::render::ViewFamilyBuildInput>(desiredViewFamily),
                 revision });
             if (viewRequest) desiredViewFamilyHandle = viewRequest.Handle();
@@ -3412,19 +3581,25 @@ void Renderer::Update(float elapsedSeconds) {
     const auto publishedViews = updateData.publishedRendererState
         ? updateData.publishedRendererState->views.payload.Get<br::render::PublishedViewFamilyState>()
         : nullptr;
+    std::shared_ptr<const br::render::PublishedViewFamilyState> selectedViews = publishedViews;
     if (publishedViews) {
-        renderSnapshot.preparedViews = publishedViews->views;
-        updateData.preparedViewCameraBufferSize = publishedViews->cameraBufferSize;
-        updateData.preparedViewResourceLayoutRevision = publishedViews->resourceLayoutRevision;
         basic_telemetry::AddCounter("SARP.FrameInputs.PublishedViewFamilySelection");
     } else {
-        renderSnapshot.preparedViews = desiredViewFamily->views;
-        updateData.preparedViewCameraBufferSize = desiredViewFamily->cameraBufferSize;
-        updateData.preparedViewResourceLayoutRevision = desiredViewFamily->resourceLayoutRevision;
+        auto bootstrap = std::make_shared<br::render::PublishedViewFamilyState>();
+        bootstrap->revision = desiredViewFamily->revision;
+        bootstrap->cameraBufferSize = desiredViewFamily->cameraBufferSize;
+        bootstrap->resourceLayoutRevision = desiredViewFamily->resourceLayoutRevision;
+        bootstrap->views = desiredViewFamily->views;
+        bootstrap->retainedResources = desiredViewFamily->retainedResources;
+        bootstrap->cameraTableImage = desiredViewFamily->cameraTableImage;
+        bootstrap->cullingCameraTableImage = desiredViewFamily->cullingCameraTableImage;
+        selectedViews = std::move(bootstrap);
         basic_telemetry::AddCounter("SARP.FrameInputs.BootstrapViewFamilyFallback");
     }
+    updateData.viewFamily = selectedViews;
+    renderSnapshot.viewFamily = std::move(selectedViews);
     basic_telemetry::SetGauge("SARP.FrameInputs.ViewFamily.ViewCount",
-        static_cast<std::int64_t>(renderSnapshot.preparedViews.size()));
+        static_cast<std::int64_t>(renderSnapshot.Views().size()));
 	const auto publishedObjects = updateData.publishedRendererState
 		? updateData.publishedRendererState->drawRecords.payload
 			.Get<br::render::PublishedObjectBufferState>()
@@ -3438,15 +3613,12 @@ void Renderer::Update(float elapsedSeconds) {
 			publishedObjects->activePlacementEntries
 				? static_cast<std::int64_t>(publishedObjects->activePlacementEntries->size()) : 0);
 	}
-    updateData.preparedViews = renderSnapshot.preparedViews;
-    renderSnapshot.preparedViewCameraBufferSize = updateData.preparedViewCameraBufferSize;
-    renderSnapshot.preparedViewResourceLayoutRevision = updateData.preparedViewResourceLayoutRevision;
-    renderSnapshot.preparedLightPagePoolSize = updateData.preparedLightPagePoolSize;
     renderSnapshot.preparedRasterBucketCount = updateData.preparedRasterBucketCount;
     renderSnapshot.preparedRasterBucketFlags = updateData.preparedRasterBucketFlags;
 
+    std::shared_ptr<br::render::LightTableBuildInput> desiredLights;
     if (m_pLightManager && m_rendererStateRequests) {
-        auto desiredLights = std::make_shared<br::render::LightTableBuildInput>();
+        desiredLights = std::make_shared<br::render::LightTableBuildInput>();
         const auto lightSourceRevision = (std::max<std::uint64_t>)(
             m_pLightManager->GetPublicationRevision(), 1u);
         const auto lightViewRevision = desiredViewFamily->revision;
@@ -3459,6 +3631,7 @@ void Renderer::Update(float elapsedSeconds) {
         desiredLights->revision = m_lightArtifactRevision;
         desiredLights->lightCount = m_pLightManager->GetNumLights();
         desiredLights->lightPagePoolSize = m_pLightManager->GetLightPagePoolSize();
+        desiredLights->tableImages = m_pLightManager->CaptureTableImages();
         auto& lightWorld = RendererECSManager::GetInstance().GetWorld();
         auto directionalLights = lightWorld.query_builder<const Components::Light,
             const Components::LightViewInfo>().build();
@@ -3480,6 +3653,20 @@ void Renderer::Update(float elapsedSeconds) {
                 desiredLights->retainedResources.push_back(std::move(resource));
         }
         std::vector<br::render::ArtifactRequirement> lightRequirements;
+        if (auto* uploads = currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr) {
+            const std::array<std::uint32_t, 5> strides{
+                sizeof(LightInfo), sizeof(std::uint32_t), sizeof(std::uint32_t), sizeof(std::uint32_t),
+                sizeof(std::uint32_t) };
+            for (std::size_t i = 0; i < desiredLights->tableImages.size() && i < strides.size(); ++i) {
+                const auto& image = desiredLights->tableImages[i];
+                const auto count = image ? image->size() / strides[i] : 0;
+                const auto request = m_lightTableFamilies[i]->RequestContentSnapshot(
+                    *m_rendererStateRequests, *uploads,
+                    image ? std::span<const std::byte>(*image) : std::span<const std::byte>{},
+                    count, (std::max<std::uint64_t>)(count, 1));
+                if (request) lightRequirements.push_back(br::render::Exact(request.Handle()));
+            }
+        }
         if (desiredViewFamilyHandle) {
             lightRequirements.push_back(br::render::Exact(desiredViewFamilyHandle));
         }
@@ -3489,16 +3676,48 @@ void Renderer::Update(float elapsedSeconds) {
             br::render::ArtifactPayload::Make<br::render::LightTableBuildInput>(desiredLights),
             desiredLights->revision });
     }
-    if (updateData.publishedRendererState &&
-        updateData.publishedRendererState->lights.payload.Get<br::render::PublishedLightTableState>())
+    auto selectedLights = updateData.publishedRendererState
+        ? updateData.publishedRendererState->lights.payload.Get<br::render::PublishedLightTableState>()
+        : nullptr;
+    if (selectedLights) {
         basic_telemetry::AddCounter("SARP.FrameInputs.PublishedLightTableSelection");
+    } else if (desiredLights) {
+        auto bootstrap = std::make_shared<br::render::PublishedLightTableState>();
+        bootstrap->revision = desiredLights->revision;
+        bootstrap->lightCount = desiredLights->lightCount;
+        bootstrap->lightPagePoolSize = desiredLights->lightPagePoolSize;
+        bootstrap->directionalShadows = desiredLights->directionalShadows;
+        bootstrap->retainedResources = desiredLights->retainedResources;
+        bootstrap->tableImages = desiredLights->tableImages;
+        selectedLights = std::move(bootstrap);
+        basic_telemetry::AddCounter("SARP.FrameInputs.BootstrapLightTableFallback");
+    }
+    updateData.lightTables = selectedLights;
+    renderSnapshot.lightTables = selectedLights;
 
     // Snapshot active skeleton membership and immutable base-skeleton data into
     // the state graph. Accepted frames can now outlive later manager mutations.
+    std::shared_ptr<br::render::PoseStateBuildInput> desiredPoses;
     if (m_pSkeletonManager && m_rendererStateRequests) {
-        auto desiredPoses = std::make_shared<br::render::PoseStateBuildInput>();
+        desiredPoses = std::make_shared<br::render::PoseStateBuildInput>();
         desiredPoses->activeInstanceRevision = (std::max<std::uint64_t>)(
             m_pSkeletonManager->GetActiveInstanceRevision(), 1u);
+        desiredPoses->tableImages = m_pSkeletonManager->CapturePoseTableImages();
+        std::vector<br::render::ArtifactRequirement> poseRequirements;
+        if (auto* uploads = currentRenderGraph ? currentRenderGraph->GetUploadService() : nullptr) {
+            const std::array<std::uint32_t, 4> strides{
+                sizeof(DirectX::XMMATRIX), sizeof(DirectX::XMMATRIX), sizeof(DirectX::XMMATRIX),
+                sizeof(SkinningInstanceGPUInfo) };
+            for (std::size_t i = 0; i < 1 && i < desiredPoses->tableImages.size(); ++i) {
+                const auto& image = desiredPoses->tableImages[i];
+                const auto count = image ? image->size() / strides[i] : 0;
+                const auto request = m_poseTableFamilies[i]->RequestContentSnapshot(
+                    *m_rendererStateRequests, *uploads,
+                    image ? std::span<const std::byte>(*image) : std::span<const std::byte>{},
+                    count, (std::max<std::uint64_t>)(count, 1));
+                if (request) poseRequirements.push_back(br::render::Exact(request.Handle()));
+            }
+        }
         for (const auto& instance : m_pSkeletonManager->GetActiveInstanceViews()) {
             if (!instance.skeleton) continue;
             desiredPoses->activeInstances.push_back({
@@ -3514,13 +3733,27 @@ void Renderer::Update(float elapsedSeconds) {
                 desiredPoses->retainedResources.push_back(std::move(resource));
         }
         (void)m_rendererStateRequests->SubmitLatest({
-            { br::render::ArtifactKind::PoseState, 0, 0 }, desiredPoses->activeInstanceRevision, {},
+            { br::render::ArtifactKind::PoseState, 0, 0 }, desiredPoses->activeInstanceRevision,
+            std::move(poseRequirements),
             br::render::ArtifactPayload::Make<br::render::PoseStateBuildInput>(desiredPoses),
             desiredPoses->activeInstanceRevision });
     }
-    if (updateData.publishedRendererState &&
-        updateData.publishedRendererState->poses.payload.Get<br::render::PublishedPoseState>())
+    auto selectedPoses = updateData.publishedRendererState
+        ? updateData.publishedRendererState->poses.payload.Get<br::render::PublishedPoseState>()
+        : nullptr;
+    if (selectedPoses) {
         basic_telemetry::AddCounter("SARP.FrameInputs.PublishedPoseSelection");
+    } else if (desiredPoses) {
+        auto bootstrap = std::make_shared<br::render::PublishedPoseState>();
+        bootstrap->activeInstanceRevision = desiredPoses->activeInstanceRevision;
+        bootstrap->activeInstances = desiredPoses->activeInstances;
+        bootstrap->retainedResources = desiredPoses->retainedResources;
+        bootstrap->tableImages = desiredPoses->tableImages;
+        selectedPoses = std::move(bootstrap);
+        basic_telemetry::AddCounter("SARP.FrameInputs.BootstrapPoseFallback");
+    }
+    updateData.poses = selectedPoses;
+    renderSnapshot.poses = std::move(selectedPoses);
     auto immutableUpdate = std::make_shared<const UpdateContext>(updateData);
     m_frameInputs = std::make_shared<const br::render::RendererFrameInputs>(
         std::move(immutableUpdate),
@@ -3957,6 +4190,15 @@ void Renderer::Update(float elapsedSeconds) {
 
     runCapturedStage("RenderGraphUpdate", [&]() {
         BT_ZONE_SCOPE("Renderer::Update::RenderGraphUpdate");
+        // Dynamic wrapper selection is part of serialized preparation state.
+        // Do not mutate it while the preceding preparation owner may still be
+        // freezing that frame's concrete resource table.
+        currentRenderGraph->WaitForPreparation();
+        if (m_dynamicPresentationColor &&
+            m_preparationFrameIndex < m_presentationColorResources.size()) {
+            m_dynamicPresentationColor->SetResource(
+                m_presentationColorResources[m_preparationFrameIndex]);
+        }
         currentRenderGraph->Update(context, deviceManager.GetDevice());
     });
     if (asyncFrameQueue) {
@@ -4205,7 +4447,7 @@ void Renderer::MaybeRequestCLodVisibilityTelemetry() {
 
     uint32_t primaryActiveSetWorkloads = 0u;
     uint32_t primaryActiveSetMembers = 0u;
-    if (auto* objectManager = m_managerInterface.GetObjectManager()) {
+    if (auto* objectManager = m_pObjectManager.get()) {
         auto activeStats = objectManager->SnapshotActiveDrawSetDebugStats();
         std::uint64_t totalSpan = 0;
         std::uint64_t totalLive = 0;
@@ -5480,6 +5722,11 @@ void Renderer::Render() {
         return;
     }
 
+    // Async mode runs graph update/declaration/preparation on its serialized
+    // owner. Transitional render-context assembly still reads a few renderer
+    // services, so join before those reads until they are publication-only.
+    currentRenderGraph->WaitForPreparation();
+
     if (!m_swapChainReady) {
         if (!m_loggedSwapChainNotReady) {
             spdlog::critical(
@@ -5521,7 +5768,6 @@ void Renderer::Render() {
     {
         BT_ZONE_SCOPE("Renderer::Render::PrepareRenderContext");
         runCapturedStage("PrepareRenderContext", [&]() {
-            m_context.currentScene = m_sceneRenderOverlapEnabled ? nullptr : currentScene.get();
             m_context.hasPrimaryCamera = false;
             m_context.primaryViewID = 0;
             m_context.textureDescriptorHeap = org::runtime::GetActiveSRVDescriptorHeap();
@@ -5529,6 +5775,7 @@ void Renderer::Render() {
             m_context.rtvHeap = rtvHeap.Get();
             m_context.rtvDescriptorSize = rtvDescriptorSize;
             m_context.dsvDescriptorSize = dsvDescriptorSize;
+            m_context.swapchainImageIndex = renderedFrameIndex;
             m_context.frameIndex = renderedFrameIndex;
             m_context.frameNumber = m_totalFramesRendered;
             m_context.frameFenceValue = m_currentFrameFenceValue;
@@ -5536,12 +5783,11 @@ void Renderer::Render() {
             m_context.outputResolution = { outputRes.x, outputRes.y };
             m_context.clodRayTracingSupported = deviceManager.GetCLodRayTracingSupported();
             m_context.rayTracedReflectionsEnabled = m_rayTracedReflections && m_context.clodRayTracingSupported;
-            m_context.objectManager = m_pObjectManager.get();
-            m_context.meshManager = m_pMeshManager.get();
-            m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
-            m_context.environmentManager = m_pEnvironmentManager.get();
-            m_context.materialManager = m_pMaterialManager.get();
-            m_context.clodRayTracingSystem = m_clodRayTracingSystem.get();
+            m_context.materialTextureStreamingStats = m_pMaterialManager
+                ? m_pMaterialManager->GetMaterialTextureStreamingStats()
+                : MaterialTextureStreamingStats{};
+            m_context.environmentWork = m_environmentWorkServices;
+            m_context.clodRayTracingSystem = m_clodRayTracingSystem;
 
             if (m_context.rayTracedReflectionsEnabled && m_clodRayTracingSystem && m_pMeshManager) {
                 std::scoped_lock rayTracingLock(m_clodRayTracingSystem->FrameOperationMutex());
@@ -5821,7 +6067,8 @@ void Renderer::Cleanup() {
 		currentScene->Deactivate();
 	}
 	ClearExternalSnapshotMeshRegistrations();
-	m_sceneRenderBridge.Clear(m_managerInterface);
+	m_sceneRenderBridge.Clear(GetSceneIngestionServices());
+	m_sceneIngestionServices = {};
 	m_renderSyncObjectQuery = {};
 	m_renderSyncCameraQuery = {};
 	m_renderSyncLightQuery = {};
@@ -5840,7 +6087,7 @@ void Renderer::Cleanup() {
     // Close the renderer-state request boundary before any upload/descriptor
     // service it can target is destroyed. CancelAndWait also prevents a late
     // producer completion from publishing into manager teardown.
-    m_managerInterface.SetRendererStateRequests(nullptr);
+    m_sceneIngestionServices.execution.stateRequests = nullptr;
 	if (m_pMeshManager) m_pMeshManager->SetRendererStateRequestService(nullptr);
     if (m_rendererStateCommitScope.Valid()) {
         m_rendererStateCommitScope.CancelAndWait();
@@ -5861,6 +6108,13 @@ void Renderer::Cleanup() {
         m_rendererStatePublisher->Shutdown();
         m_rendererStatePublisher.reset();
     }
+    // Version families retain their latest immutable GPU backing to seed a
+    // successor request.  Producer shutdown above guarantees there can be no
+    // more requests, so release those device-bound roots before descriptor and
+    // allocator teardown rather than waiting for Renderer destruction.
+    for (auto& family : m_viewTableFamilies) family.reset();
+    for (auto& family : m_lightTableFamilies) family.reset();
+    for (auto& family : m_poseTableFamilies) family.reset();
     if (currentRenderGraph) {
         // Publication and texture-streaming producers have now stopped. Cover
         // submissions made after the first wait before cleaning their services.
@@ -5901,7 +6155,11 @@ void Renderer::Cleanup() {
     m_defaultEnvironmentCubemap.reset();
     m_defaultEnvironmentPrefilteredCubemap.reset();
 	currentScene.reset();
+	m_sceneEntityMaterializationService.Configure(nullptr, nullptr, nullptr);
+	m_poseInstanceRegistrationService.Configure(nullptr);
+	m_sceneRenderableResidencyService.Configure(nullptr, nullptr);
 	m_pIndirectCommandBufferManager.reset();
+	m_depthHistory.Clear();
 	m_pViewManager.reset();
 	m_pLightManager.reset();
 	m_pMeshManager.reset();
@@ -5915,11 +6173,13 @@ void Renderer::Cleanup() {
     m_clodRayTracingSystem.reset();
     m_context = {};
     m_frameInputs.reset();
-    m_producerServices = {};
+    m_materialEvaluationInputs = {};
     m_openPBRLookupResources = {};
     m_blueNoiseTexture.reset();
 	ReleaseSharedProcessingPlaceholderTextures();
     m_dynamicBackbuffer.reset();
+    m_dynamicPresentationColor.reset();
+    m_presentationColorResources.clear();
     m_backbufferResources.clear();
     renderTargets.clear();
     m_commandLists.clear();
@@ -5944,6 +6204,10 @@ void Renderer::Cleanup() {
     RendererECSManager::GetInstance().FlushDeferredWorldOperations();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
+    // The ingestion source store borrows the renderer ECS world. Release that
+    // association before the singleton destroys the world so late availability
+    // checks cannot observe a dangling source boundary.
+    m_sceneSourceStateStore.Reset();
     RendererECSManager::GetInstance().Cleanup();
 	// ECS components and manager destructors can retire resources. Keep the
 	// runtime descriptor/backing services alive through their final release.
@@ -5977,7 +6241,7 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	if (!newScene) {
     InvalidateSceneOverlapState();
         ClearExternalSnapshotMeshRegistrations();
-        m_sceneRenderBridge.Clear(m_managerInterface);
+        m_sceneRenderBridge.Clear(GetSceneIngestionServices());
         if (currentScene) {
             currentScene->Deactivate();
         }
@@ -5989,7 +6253,7 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 
 	if (currentScene != newScene) {
 		ClearExternalSnapshotMeshRegistrations();
-		m_sceneRenderBridge.Clear(m_managerInterface);
+		m_sceneRenderBridge.Clear(GetSceneIngestionServices());
         if (currentScene) {
             currentScene->Deactivate();
         }
@@ -6000,7 +6264,7 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
     //currentScene->SetDepthMap(m_depthMap);
-    currentScene->Activate(m_managerInterface);
+    currentScene->Activate(m_sceneIngestionServices);
     currentScene->PropagateTransforms();
     if (m_sceneRenderOverlapEnabled) {
         BootstrapCommittedSceneSnapshot();
@@ -6149,10 +6413,11 @@ void Renderer::SetupInputHandlers() {
 
 void Renderer::RegisterPipelineExtensions() {
     currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(
-        m_managerInterface.GetTextureFactory(),
-        currentRenderGraph->GetUploadService(),
-        m_pReadbackManager.get(),
-        m_managerInterface.GetMaterialManager()),
+        std::make_shared<br::render::RenderGraphIOService>(
+            *m_pTextureFactory,
+            *currentRenderGraph->GetUploadService(),
+            *m_pReadbackManager,
+            *m_pMaterialManager)),
         "BuiltinIO");
     currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
         currentRenderGraph->GetReadbackServiceOwner()),
@@ -6297,7 +6562,7 @@ void Renderer::CreateRenderGraph() {
             org::memory::CreateECSMemorySnapshotProvider(RendererECSManager::GetInstance().GetWorld()));
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
 
-        if (auto* textureFactory = m_managerInterface.GetTextureFactory()) {
+        if (auto* textureFactory = m_pTextureFactory.get()) {
             textureFactory->SetReadbackService(currentRenderGraph->GetReadbackService());
         }
 
@@ -6357,13 +6622,52 @@ void Renderer::CreateRenderGraph() {
     std::shared_ptr<PixelBuffer> depthTexture = depth.depthMap;
 
     const bool terrainRvtEnabled = m_pipelineRecipe.Contains<br::pipeline::TerrainRvtTechnique>();
-    m_producerServices.pipelines = &PSOManager::GetInstance();
-    m_producerServices.commandSignatures = &CommandSignatureManager::GetInstance();
-    m_producerServices.settings = &SettingsManager::GetInstance();
-    m_producerServices.ecs = &RendererECSManager::GetInstance();
-    m_producerServices.renderContext = &m_context;
-    m_producerServices.clodSlabResources = m_pMeshManager
+    m_materialEvaluationInputs = {};
+    m_materialEvaluationInputs.pipelines = &PSOManager::GetInstance();
+    m_materialEvaluationInputs.commandSignatures = &CommandSignatureManager::GetInstance();
+    m_materialEvaluationInputs.clodSlabResources = m_pMeshManager
         ? m_pMeshManager->GetCLodSlabResourceGroup() : nullptr;
+    {
+        auto& world = RendererECSManager::GetInstance().GetWorld();
+        const auto visibilityTag = world.component<CLodExtensionVisibilityBufferTag>();
+        const auto capture = [&](auto componentTag, auto&& accept) {
+            world.query_builder<>()
+                .with<CLodExtensionTypeTag>(visibilityTag)
+                .with(componentTag)
+                .build()
+                .each([&](flecs::entity entity) {
+                    if (const auto resource = entity.try_get<Components::Resource>(); resource) {
+                        if (auto retained = std::static_pointer_cast<GloballyIndexedResource>(
+                                resource->resource.lock())) {
+                            accept(entity, std::move(retained));
+                        }
+                    }
+                });
+        };
+        capture(world.component<VisibleClustersBufferTag>(), [&](flecs::entity entity, auto resource) {
+            m_materialEvaluationInputs.visibleClusters = std::move(resource);
+            if (const auto capacity = entity.try_get<CLodVisibleClusterCapacity>(); capacity)
+                m_materialEvaluationInputs.visibleClusterCapacity = capacity->maxVisibleClusters;
+        });
+        capture(world.component<VisibleClustersCounterTag>(), [&](flecs::entity, auto resource) {
+            m_materialEvaluationInputs.visibleClusterCounter = std::move(resource);
+        });
+        capture(world.component<VisibleClusterTransformIndicesBufferTag>(), [&](flecs::entity, auto resource) {
+            m_materialEvaluationInputs.visibleClusterTransformIndices = std::move(resource);
+        });
+        capture(world.component<CLodReyesDiceQueueTag>(), [&](flecs::entity, auto resource) {
+            m_materialEvaluationInputs.reyesDiceQueue = std::move(resource);
+        });
+        capture(world.component<CLodReyesTessTableConfigsTag>(), [&](flecs::entity, auto resource) {
+            m_materialEvaluationInputs.reyesTessTableConfigs = std::move(resource);
+        });
+        capture(world.component<CLodReyesTessTableVerticesTag>(), [&](flecs::entity, auto resource) {
+            m_materialEvaluationInputs.reyesTessTableVertices = std::move(resource);
+        });
+        capture(world.component<CLodReyesTessTableTrianglesTag>(), [&](flecs::entity, auto resource) {
+            m_materialEvaluationInputs.reyesTessTableTriangles = std::move(resource);
+        });
+    }
     br::pipeline::PipelineBuildContext buildContext(
         *newGraph,
         m_pipelineRecipe.Bindings(),
@@ -6377,6 +6681,7 @@ void Renderer::CreateRenderGraph() {
                     Builtin::PrimaryCamera::ProjectedDepthTexture,
                     m_visibilityRendering ? depth.projectedDepthMap : depthTexture);
                 newGraph->RegisterResource(Builtin::Backbuffer, m_dynamicBackbuffer);
+                newGraph->RegisterResource(Builtin::PresentationColor, m_dynamicPresentationColor);
                 newGraph->RegisterResource(Builtin::PerFrameBuffer, ::ResourceManager::GetInstance().GetPerFrameBuffer());
                 break;
             case BrdfIntegration:
@@ -6460,7 +6765,7 @@ void Renderer::CreateRenderGraph() {
             }
             case VisibilityMaterialBinning:
                 RegisterVisUtilResources(newGraph.get(), false);
-                BuildVisibilityMaterialBinningPipeline(newGraph.get());
+                BuildVisibilityMaterialBinningPipeline(newGraph.get(), m_materialEvaluationInputs);
                 break;
             case TerrainRvt:
                 RegisterVisUtilResources(
@@ -6469,10 +6774,10 @@ void Renderer::CreateRenderGraph() {
                 BuildTerrainRvtPipeline(newGraph.get());
                 break;
             case TerrainRegionMaterialEvaluation:
-                BuildTerrainRegionMaterialEvaluationPipeline(newGraph.get(), m_producerServices);
+                BuildTerrainRegionMaterialEvaluationPipeline(newGraph.get(), m_materialEvaluationInputs);
                 break;
             case MaterialEvaluation:
-                BuildMaterialEvaluationPipeline(newGraph.get(), m_producerServices, terrainRvtEnabled);
+                BuildMaterialEvaluationPipeline(newGraph.get(), m_materialEvaluationInputs, terrainRvtEnabled);
                 break;
             case Gtao:
                 RegisterGTAOResources(newGraph.get());
@@ -6516,7 +6821,8 @@ void Renderer::CreateRenderGraph() {
                     newGraph->BuildPass<DilateMotionVectorsPass>("DilateMotionVectorsPass");
                     newGraph->SetPassTechnique("DilateMotionVectorsPass", "Post Process::Upscaling");
                 }
-                newGraph->BuildPass<UpscalingPass>("UpscalingPass");
+                newGraph->BuildPass<UpscalingPass>("UpscalingPass",
+                    br::render::UpscalingGenerationService::CaptureCurrent());
                 newGraph->SetPassTechnique("UpscalingPass", "Post Process::Upscaling");
                 break;
             case Bloom:
@@ -6529,10 +6835,12 @@ void Renderer::CreateRenderGraph() {
                 newGraph->SetPassTechnique("TonemappingPass", "Post Process::Tonemapping");
                 break;
             case DebugOutput: {
+                auto debugSnapshots = br::render::DebugSceneSnapshotService::Create(
+                    RendererECSManager::GetInstance().GetWorld());
                 const bool skeletons = SettingsManager::GetInstance().getSettingGetter<unsigned int>("outputType")() ==
                     static_cast<unsigned int>(OutputType::SKELETONS) && DeviceManager::GetInstance().GetMeshShadersSupported();
                 if (skeletons) {
-                    newGraph->BuildPass<DebugSkeletonPass>("DebugSkeletonPass");
+                    newGraph->BuildPass<DebugSkeletonPass>("DebugSkeletonPass", debugSnapshots);
                     newGraph->SetPassTechnique("DebugSkeletonPass", "Debug::Visualization");
                 }
                 else {
@@ -6540,7 +6848,7 @@ void Renderer::CreateRenderGraph() {
                     newGraph->SetPassTechnique("DebugResolvePass", "Debug::Visualization");
                 }
                 if (getDrawBoundingSpheres()) {
-                    newGraph->BuildPass<DebugSpherePass>("DebugSpherePass");
+                    newGraph->BuildPass<DebugSpherePass>("DebugSpherePass", debugSnapshots);
                     newGraph->SetPassTechnique("DebugSpherePass", "Debug::Visualization");
                 }
                 break;
@@ -6550,9 +6858,11 @@ void Renderer::CreateRenderGraph() {
                 newGraph->SetPassTechnique("MenuRenderPass", "Debug::UI");
                 break;
             case DepthHistory:
-                BuildLinearDepthHistoryCopyPass(newGraph.get(), m_pViewManager.get());
+                BuildLinearDepthHistoryCopyPass(newGraph.get(), &m_depthHistory);
                 break;
             case Present:
+                newGraph->BuildPass<PresentationCopyPass>("PresentationCopyPass");
+                newGraph->SetPassTechnique("PresentationCopyPass", "Frame::Present");
                 newGraph->BuildPass<PresentPass>("PresentPass");
                 newGraph->SetPassTechnique("PresentPass", "Frame::Present");
                 break;

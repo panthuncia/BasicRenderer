@@ -1,7 +1,12 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <memory>
 
+#include <DirectXMath.h>
+
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/PipelineState.h"
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
@@ -67,4 +72,20 @@ private:
     bool m_resetReasonStructureMismatch = false;
     bool m_resetReasonLightDirectionChanged = false;
     bool m_feedbackRecoveryRefresh = false;
+
+    // Temporal setup state belongs to this graph generation. Keeping it on the
+    // pass prevents a newly built graph from mutating history still selected by
+    // an older retained generation.
+    std::array<CLodVirtualShadowClipmapInfo, CLodVirtualShadowMaxSupportedClipmapCount>
+        m_previousClipmapInfos{};
+    std::array<int64_t, CLodVirtualShadowMaxSupportedClipmapCount>
+        m_previousClipmapPageOffsetX{};
+    std::array<int64_t, CLodVirtualShadowMaxSupportedClipmapCount>
+        m_previousClipmapPageOffsetY{};
+    DirectX::XMFLOAT3 m_previousDirectionalLightDirection{};
+    DirectX::XMUINT2 m_previousRenderResolution{};
+    uint32_t m_pendingRenderResolutionResetFrames = 0u;
+    bool m_previousClipmapInfosValid = false;
+    bool m_previousDirectionalLightDirectionValid = false;
+    bool m_previousRenderResolutionValid = false;
 };

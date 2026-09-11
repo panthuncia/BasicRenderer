@@ -1910,8 +1910,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         return std::format("{:.2f} {}", value / divisor, suffix);
     };
     std::optional<MaterialTextureStreamingStats> materialTextureStreamingStats;
-    if (showMaterialTextureStreaming && context.materialManager) {
-        materialTextureStreamingStats.emplace(context.materialManager->GetMaterialTextureStreamingStats());
+    if (showMaterialTextureStreaming) {
+        materialTextureStreamingStats.emplace(context.materialTextureStreamingStats);
     }
 
     const float fps = ImGui::GetIO().Framerate;

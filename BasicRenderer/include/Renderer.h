@@ -28,6 +28,12 @@
 #include "Managers/InputManager.h"
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Managers/ViewManager.h"
+#include "Render/DepthHistoryService.h"
+#include "Render/SceneAssetRequestService.h"
+#include "Render/StaticWorkloadRequestService.h"
+#include "Render/StaticObjectRequestService.h"
+#include "Render/StaticGeometryRequestService.h"
+#include "Render/StaticMaterialRequestService.h"
 #include "Managers/LightManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
@@ -47,14 +53,20 @@
 #include "Render/RendererSettings.h"
 #include "Render/OpenPBRLookupResources.h"
 #include "Render/SceneRenderBridge.h"
+#include "Render/SceneSourceStateStore.h"
+#include "Render/SceneEntityMaterializationService.h"
+#include "Render/SceneIngestionServices.h"
+#include "Render/PoseInstanceRegistrationService.h"
+#include "Render/SceneRenderableResidencyService.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodRayTracingSystem.h"
 #include "Render/ShaderVariantRequestService.h"
 #include "Render/Pipeline/PipelineRecipe.h"
-#include "Render/ProducerPassServices.h"
+#include "Render/MaterialEvaluationBuildInputs.h"
 #include "Render/ProducerPersistentState.h"
 #include "Render/AsyncStateGraph.h"
 #include "Render/PublishedRendererState.h"
 #include "Render/RendererStateRequestService.h"
+#include "Render/VersionedGpuBufferArtifacts.h"
 #include "Render/RendererFrameInputs.h"
 
 class DynamicResource;
@@ -185,8 +197,8 @@ public:
     SamplingReadinessSnapshot GetSamplingReadinessSnapshot(bool includeExpensiveDiagnostics = true) const;
     void SetDeterministicSamplingMode(bool enabled);
     bool GetDeterministicSamplingMode() const { return m_deterministicSamplingMode; }
-    ManagerInterface& GetManagerInterface() { return m_managerInterface; }
-    const ManagerInterface& GetManagerInterface() const { return m_managerInterface; }
+    br::render::SceneIngestionServices& GetSceneIngestionServices() { return m_sceneIngestionServices; }
+    const br::render::SceneIngestionServices& GetSceneIngestionServices() const { return m_sceneIngestionServices; }
     uint64_t GetTotalFramesRendered() const { return m_totalFramesRendered; }
     RenderGraph* GetRenderGraph() { return currentRenderGraph.get(); }
     const RenderGraph* GetRenderGraph() const { return currentRenderGraph.get(); }
@@ -216,6 +228,8 @@ private:
 	std::vector<rhi::ResourceHandle> renderTargets;
 	std::vector<std::shared_ptr<ExternalTextureResource>> m_backbufferResources;
 	std::shared_ptr<DynamicResource> m_dynamicBackbuffer;
+	std::vector<std::shared_ptr<PixelBuffer>> m_presentationColorResources;
+	std::shared_ptr<DynamicResource> m_dynamicPresentationColor;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;
@@ -263,7 +277,7 @@ private:
     std::uint64_t m_lightArtifactRevision = 1;
     std::uint64_t m_lastLightSourceRevision = 0;
     std::uint64_t m_lastLightViewFamilyRevision = 0;
-    ProducerPassServices m_producerServices;
+    MaterialEvaluationBuildInputs m_materialEvaluationInputs;
     // Persistent producer state survives graph rebuilds and full/producer
     // recipe switches. It is released only with the renderer/device lifetime.
     std::shared_ptr<ProducerPersistentState> m_producerPersistentState = std::make_shared<ProducerPersistentState>();
@@ -284,9 +298,11 @@ private:
     std::unique_ptr<ObjectManager> m_pObjectManager = nullptr;
     std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
     std::unique_ptr<ViewManager> m_pViewManager = nullptr;
+    br::render::DepthHistoryPublicationService m_depthHistory;
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
+	br::render::EnvironmentWorkServices m_environmentWorkServices;
     std::unique_ptr<MaterialManager> m_pMaterialManager = nullptr;
-	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
+	std::shared_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
     std::unique_ptr<TerrainManager> m_pTerrainManager = nullptr;
     std::unique_ptr<br::ReadbackManager> m_pReadbackManager = nullptr;
     std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
@@ -295,10 +311,20 @@ private:
     std::optional<br::render::AsyncStateGraphTraceConfig> m_pendingAsyncStateGraphTrace;
     std::unique_ptr<br::render::RendererStatePublisher> m_rendererStatePublisher;
     std::unique_ptr<br::render::RendererStateRequestService> m_rendererStateRequests;
+    std::array<std::unique_ptr<br::render::VersionedBufferFamily>, 2> m_viewTableFamilies;
+    std::array<std::unique_ptr<br::render::VersionedBufferFamily>, 5> m_lightTableFamilies;
+    std::array<std::unique_ptr<br::render::VersionedBufferFamily>, 4> m_poseTableFamilies;
     TaskScope m_rendererStateCommitScope;
     ShaderVariantRequestService m_shaderVariantRequestService;
 
-	ManagerInterface m_managerInterface;
+    br::render::SceneIngestionServices m_sceneIngestionServices;
+    br::render::PoseInstanceRegistrationService m_poseInstanceRegistrationService;
+    br::render::SceneRenderableResidencyService m_sceneRenderableResidencyService;
+    br::render::SceneAssetRequestService m_sceneAssetRequestService;
+	br::render::StaticWorkloadRequestService m_staticWorkloadRequestService;
+	br::render::StaticObjectRequestService m_staticObjectRequestService;
+	br::render::StaticGeometryRequestService m_staticGeometryRequestService;
+	br::render::StaticMaterialRequestService m_staticMaterialRequestService;
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
     FrameTimer m_frameTimer;
 
@@ -325,7 +351,6 @@ private:
     bool HasCommittedSceneSnapshot() const;
     bool NeedsSceneSnapshotBootstrap() const;
     br::render::SceneOverlapStatus GetSceneOverlapStatus() const;
-
     void WaitForFrame(uint8_t frameIndex);
     void SignalFence(rhi::Queue commandQueue, uint8_t currentFrameIndex);
     void AdvanceFrameIndex();
@@ -406,6 +431,8 @@ private:
     DeferredFunctions m_preFrameDeferredFunctions;
     int32_t m_lastFrameTaskNodeIndex = -1;
     br::render::SceneRenderBridge m_sceneRenderBridge;
+    br::render::SceneSourceStateStore m_sceneSourceStateStore;
+    br::render::SceneEntityMaterializationService m_sceneEntityMaterializationService;
     bool m_sceneRenderOverlapEnabled = true;
     bool m_externalSceneMode = false;
     bool m_swapChainReady = true;

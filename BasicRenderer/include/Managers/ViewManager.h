@@ -9,7 +9,6 @@
 #include <flecs.h>
 
 #include "OpenRenderGraph/OpenRenderGraph.h"
-#include "Render/DepthHistoryService.h"
 #include "Render/ShadowViewService.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Scene/Components.h"
@@ -58,10 +57,6 @@ struct ViewResources {
 
 	std::shared_ptr<PixelBuffer> depthMap = nullptr;
     std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
-    std::shared_ptr<PixelBuffer> lastFrameLinearDepthMap = nullptr;
-    bool lastFrameLinearDepthValid = false;
-    uint64_t depthHistoryEpoch = 0;
-    uint64_t lastDepthProducerSubmissionID = 0;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
     std::shared_ptr<PixelBuffer> clodDeepVisibilityHeadPointers = nullptr;
     // Descriptor indices are published atomically with their retained view
@@ -124,7 +119,6 @@ struct ViewEvents {
 };
 
 class ViewManager : public IResourceProvider,
-                    public br::render::IDepthHistoryService,
                     public br::render::IShadowViewService {
 public:
     static std::unique_ptr<ViewManager> CreateUnique() {
@@ -165,12 +159,16 @@ public:
     uint32_t ShadowViewCameraBufferIndex(uint64_t viewID) const override;
 
 	uint32_t GetCameraBufferSize() const { return static_cast<uint32_t>(m_cameraBuffer->Size()); }
+    std::shared_ptr<const std::vector<std::byte>> CaptureCameraTableImage() const {
+        return std::make_shared<const std::vector<std::byte>>(m_cameraBuffer->CaptureCpuShadowBytes());
+    }
+    std::shared_ptr<const std::vector<std::byte>> CaptureCullingCameraTableImage() const {
+        return std::make_shared<const std::vector<std::byte>>(m_cullingCameraBuffer->CaptureCpuShadowBytes());
+    }
     uint64_t GetResourceLayoutRevision() const { return m_resourceLayoutRevision; }
     uint64_t GetPublicationRevision() const noexcept {
         return m_publicationRevision.load(std::memory_order_acquire);
     }
-    void MarkDepthHistoryValid(uint64_t viewID);
-	std::shared_ptr<const org::PreparedLifecycleEffect> ReserveDepthHistoryPublication() override;
 
     // Access
     View* Get(uint64_t viewID);
@@ -202,10 +200,6 @@ public:
     std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
     std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 private:
-    struct PublicationOwner {
-        std::mutex mutex;
-        ViewManager* manager = nullptr;
-    };
     ViewManager();
 
     std::unordered_map<uint64_t, View> m_views;
@@ -220,13 +214,10 @@ private:
     std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
 
     std::shared_ptr<ResourceGroup> m_linearDepthGroup;
-    std::shared_ptr<ResourceGroup> m_lastFrameLinearDepthGroup;
-    std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> m_lastFrameLinearDepthBySource;
 
     uint64_t m_resourceLayoutRevision = 1u;
     std::atomic_uint64_t m_publicationRevision{1};
 
     std::mutex m_cameraUpdateMutex;
     ViewEvents m_events;
-    std::shared_ptr<PublicationOwner> m_publicationOwner;
 };

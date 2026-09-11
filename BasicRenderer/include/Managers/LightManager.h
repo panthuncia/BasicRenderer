@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <atomic>
+#include <cstddef>
 
 #include "ShaderBuffers.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
@@ -28,6 +29,7 @@ struct AddLightReturn {
 
 class LightManager: public IResourceProvider {
 public:
+    std::vector<std::shared_ptr<const std::vector<std::byte>>> CaptureTableImages() const;
 	static std::unique_ptr<LightManager> CreateUnique() {
 		return std::unique_ptr<LightManager>(new LightManager());
 	}

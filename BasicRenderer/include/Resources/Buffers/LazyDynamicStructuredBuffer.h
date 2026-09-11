@@ -287,6 +287,11 @@ public:
         return m_capacity;
     }
 
+    std::vector<std::byte> CaptureCpuShadowBytes() const {
+        std::lock_guard<std::recursive_mutex> lock(m_uploadPolicyMirrorMutex);
+        return m_cpuShadowData;
+    }
+
 	size_t GetElementSize() const override {
 		return m_elementSize;
 	}

@@ -30,6 +30,9 @@ public:
     static std::unique_ptr<SkeletonManager> CreateUnique() {
         return std::unique_ptr<SkeletonManager>(new SkeletonManager());
     }
+    static std::shared_ptr<SkeletonManager> CreateShared() {
+        return std::shared_ptr<SkeletonManager>(new SkeletonManager());
+    }
     ~SkeletonManager();
 
     // Called when a renderable becomes active/inactive and references a skinning instance.
@@ -50,12 +53,15 @@ public:
     void UpdateAllDirtyInstances();
 	std::vector<ActiveInstanceView> GetActiveInstanceViews() const;
 	uint64_t GetActiveInstanceRevision() const noexcept { return m_activeInstanceRevision; }
+    std::vector<std::shared_ptr<const std::vector<std::byte>>> CapturePoseTableImages() const;
 	TransientWindRegion ReserveTransientWindRegion(uint32_t matrixCapacity) override;
 	void EnsureTransientWindInstanceSlots(uint32_t drawRecordCapacity) override;
 
     // IResourceProvider
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
+    std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
+    std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 
 private:
     SkeletonManager();
@@ -105,6 +111,7 @@ private:
 
     // Resource provider map
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
+    std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
     std::shared_ptr<std::atomic_bool> m_lifetimeToken;
 
     // Records

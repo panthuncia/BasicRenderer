@@ -4,21 +4,28 @@
 #include "Render/RenderContext.h"
 
 #include <memory>
+#include <stdexcept>
 #include <typeindex>
 
 namespace br::render {
 
 // Owned host publication for one accepted logical frame. The top-level context
-// values are immutable and never alias Renderer::m_context, but their manager
-// pointers remain transitional mutable dependencies. Replace those pointers
-// with exact publication leases and service requests before worker preparation.
+// values are immutable and never alias Renderer::m_context. Persistent scene
+// data is selected through the manifest lease; the remaining mutable handles
+// are narrow, explicitly declared services whose reservations are frame-owned.
 // The graph request and every raw IHostExecutionData view retain this owner.
 class RendererFrameInputs final : public org::IHostExecutionData {
 public:
     RendererFrameInputs(
         std::shared_ptr<const UpdateContext> update,
-        std::shared_ptr<const RenderContext> render) noexcept
-        : m_update(std::move(update)), m_render(std::move(render)) {}
+        std::shared_ptr<const RenderContext> render)
+        : m_update(std::move(update)), m_render(std::move(render)) {
+        if (!m_update || !m_render)
+            throw std::invalid_argument("Accepted renderer frame inputs require both update and render values");
+        if (m_update->frameNumber != m_render->frameNumber ||
+            m_update->frameSlot != m_render->frameSlot)
+            throw std::invalid_argument("Accepted renderer frame inputs contain mismatched frame identities");
+    }
 
     const void* TryGet(std::type_index type) const noexcept override {
         if (type == std::type_index(typeid(UpdateContext))) return m_update.get();
@@ -29,6 +36,8 @@ public:
 
     const std::shared_ptr<const UpdateContext>& Update() const noexcept { return m_update; }
     const std::shared_ptr<const RenderContext>& Render() const noexcept { return m_render; }
+    uint64_t FrameNumber() const noexcept { return m_update->frameNumber; }
+    uint32_t FrameSlot() const noexcept { return m_update->frameSlot; }
 
 private:
     std::shared_ptr<const UpdateContext> m_update;
