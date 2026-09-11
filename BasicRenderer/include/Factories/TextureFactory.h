@@ -27,14 +27,16 @@ class MaterialTextureTransferService;
 
 namespace org::runtime {
     class IReadbackService;
+    class IUploadService;
 }
 
 // Central API for textures that have initial texel data.
 class TextureFactory {
 public:
-    static std::unique_ptr<TextureFactory> CreateUnique() {
-		return std::unique_ptr<TextureFactory>(new TextureFactory());
+    static std::unique_ptr<TextureFactory> CreateUnique(std::shared_ptr<org::runtime::IUploadService> uploadService) {
+		return std::unique_ptr<TextureFactory>(new TextureFactory(std::move(uploadService)));
     }
+    void SetUploadService(std::shared_ptr<org::runtime::IUploadService> uploadService) { m_uploadService = std::move(uploadService); }
     // Owned initial texel bytes for a texture creation request.
 	// Subresource order is: [slice0 mip0..mipN-1, slice1 ...].
     struct TextureInitialData {
@@ -73,7 +75,7 @@ public:
     std::shared_ptr<RenderPass> GetBC7CompressionCopyPass() const { return m_bc7CompressionCopyPass; }
     std::shared_ptr<RenderPass> GetBC7CompressionReadbackPass() const { return m_bc7CompressionReadbackPass; }
 
-    void SetReadbackService(org::runtime::IReadbackService* readbackService);
+    void SetReadbackService(std::shared_ptr<org::runtime::IReadbackService> readbackService);
     bool SubmitBC7CompressionJob(
         const std::shared_ptr<TextureProcessingJobHandle>& handle,
         std::string_view debugName = {}) const;
@@ -290,8 +292,8 @@ private:
               BC7CompressionReadbackFrameData>,
           public IDynamicDeclaredResources {
     public:
-        void SetReadbackService(org::runtime::IReadbackService* readbackService);
-        bool HasReadbackService() const { return m_readbackService != nullptr; }
+        void SetReadbackService(std::shared_ptr<org::runtime::IReadbackService> readbackService);
+        bool HasReadbackService() const { return static_cast<bool>(m_readbackService); }
         void EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job);
 
         void Update(const UpdateExecutionContext& context) override;
@@ -308,11 +310,12 @@ private:
     private:
         std::vector<std::shared_ptr<BC7CompressionJob>> m_pending;
         mutable std::mutex m_pendingMutex;
-        org::runtime::IReadbackService* m_readbackService = nullptr;
+        std::shared_ptr<org::runtime::IReadbackService> m_readbackService;
         std::atomic_bool m_declaredResourcesChanged = true;
     };
 
-    TextureFactory() {
+    explicit TextureFactory(std::shared_ptr<org::runtime::IUploadService> uploadService)
+        : m_uploadService(std::move(uploadService)) {
 		m_mipmappingPass = std::make_shared<MipmappingPass>();
 		m_bc7CompressionPass = std::make_shared<BC7CompressionPass>();
 		m_bc7CompressionCopyPass = std::make_shared<BC7CompressionCopyPass>();
@@ -323,5 +326,6 @@ private:
 	std::shared_ptr<RenderPass> m_bc7CompressionPass;
 	std::shared_ptr<RenderPass> m_bc7CompressionCopyPass;
 	std::shared_ptr<RenderPass> m_bc7CompressionReadbackPass;
+    std::shared_ptr<org::runtime::IUploadService> m_uploadService;
     std::shared_ptr<std::atomic_uint32_t> m_bc7InFlightJobs = std::make_shared<std::atomic_uint32_t>(0u);
 };

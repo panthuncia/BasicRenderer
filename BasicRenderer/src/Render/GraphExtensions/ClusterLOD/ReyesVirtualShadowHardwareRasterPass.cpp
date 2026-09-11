@@ -6,7 +6,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
@@ -141,7 +141,7 @@ void ReyesVirtualShadowHardwareRasterPass::Update(const UpdateExecutionContext& 
     if (m_viewRasterInfos != nextViewRasterInfos) {
         m_viewRasterInfos = std::move(nextViewRasterInfos);
         m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(m_viewRasterInfos.size()));
-        BUFFER_UPLOAD(
+        UploadBufferData(
             m_viewRasterInfos.data(),
             static_cast<uint32_t>(m_viewRasterInfos.size() * sizeof(CLodViewRasterInfo)),
             org::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),

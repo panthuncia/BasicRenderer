@@ -8,7 +8,6 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "RenderPasses/Base/TypedRenderGraphPass.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 #include "../../../../shaders/PerPassRootConstants/clodVirtualShadowBuildArgsRootConstants.h"

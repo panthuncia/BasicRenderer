@@ -315,6 +315,7 @@ private:
     std::array<std::unique_ptr<br::render::VersionedBufferFamily>, 5> m_lightTableFamilies;
     std::array<std::unique_ptr<br::render::VersionedBufferFamily>, 4> m_poseTableFamilies;
     TaskScope m_rendererStateCommitScope;
+    TaskScope m_presentationTailScope;
     ShaderVariantRequestService m_shaderVariantRequestService;
 
     br::render::SceneIngestionServices m_sceneIngestionServices;
@@ -481,6 +482,7 @@ private:
     bool m_clodTelemetryReadbackPending = false;
     bool m_clodRasterArgsReadbackPending = false;
     bool m_clodVisibleCounterReadbackPending = false;
+    bool m_clodVisibleRecordsReadbackPending = false;
     bool m_clodReplayStateReadbackPending = false;
     bool m_loggedCLodVisibilityTelemetryEnabled = false;
     bool m_clodVisibilityTelemetryDebugEnabledByRenderer = false;

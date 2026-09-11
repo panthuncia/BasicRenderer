@@ -94,6 +94,7 @@ struct VersionedGpuBufferWrite {
 };
 
 struct VersionedGpuBufferBuildInput {
+    std::shared_ptr<org::runtime::IUploadService> uploadOwner;
     org::runtime::IUploadService* uploadService = nullptr;
     std::string debugName;
     std::uint64_t writeSequence = 0;
@@ -201,18 +202,20 @@ public:
 
     explicit VersionedBufferFamily(Config config);
     [[nodiscard]] ArtifactRequestResult RequestSnapshot(RendererStateRequestService& requests,
-        org::runtime::IUploadService& uploads, std::uint64_t revision,
+        std::shared_ptr<org::runtime::IUploadService> uploads, std::uint64_t revision,
         std::span<const std::byte> bytes, std::uint64_t elementCount,
         std::uint64_t capacity = 0);
     [[nodiscard]] ArtifactRequestResult RequestGpuWritten(
-        RendererStateRequestService& requests, org::runtime::IUploadService& uploads,
+        RendererStateRequestService& requests,
+        std::shared_ptr<org::runtime::IUploadService> uploads,
         std::uint64_t revision, std::uint64_t elementCount, std::uint64_t capacity = 0);
     [[nodiscard]] ArtifactRequestResult RequestContentSnapshot(
-        RendererStateRequestService& requests, org::runtime::IUploadService& uploads,
+        RendererStateRequestService& requests,
+        std::shared_ptr<org::runtime::IUploadService> uploads,
         std::span<const std::byte> bytes, std::uint64_t elementCount,
         std::uint64_t capacity = 0);
     [[nodiscard]] ArtifactRequestResult RequestCapture(RendererStateRequestService& requests,
-        org::runtime::IUploadService& uploads, std::uint64_t revision,
+        std::shared_ptr<org::runtime::IUploadService> uploads, std::uint64_t revision,
         VersionedGpuBufferJournal::Capture capture);
     void Acknowledge(std::shared_ptr<const PublishedGpuBufferVersion> version);
     [[nodiscard]] const Config& Configuration() const noexcept { return m_config; }

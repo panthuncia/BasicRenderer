@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -15,14 +16,21 @@ struct PublishedGpuBufferVersion;
 inline constexpr std::uint64_t ViewCameraTableVariant = 1;
 inline constexpr std::uint64_t ViewCullingCameraTableVariant = 2;
 
+struct DepthHistoryDependency {
+    mutable std::atomic<std::uint64_t> submissionID{0};
+    mutable std::atomic_bool cancelled{false};
+};
+
 struct DepthHistorySelection {
     std::shared_ptr<org::PixelBuffer> resource;
     std::uint64_t epoch = 0;
     std::uint64_t producerSubmissionID = 0;
     std::uint64_t producerFrameNumber = 0;
+    std::shared_ptr<const DepthHistoryDependency> dependency;
 
     explicit operator bool() const noexcept {
-        return resource != nullptr && producerSubmissionID != 0;
+        return resource != nullptr && producerFrameNumber != 0
+            && (!dependency || !dependency->cancelled.load(std::memory_order_acquire));
     }
 };
 

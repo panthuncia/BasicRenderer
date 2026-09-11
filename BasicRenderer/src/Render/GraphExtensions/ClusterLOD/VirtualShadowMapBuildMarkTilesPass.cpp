@@ -4,7 +4,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "../shaders/PerPassRootConstants/clodVirtualShadowBuildMarkTilesRootConstants.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
@@ -36,7 +36,7 @@ void VirtualShadowMapBuildMarkTilesPass::Update(const UpdateExecutionContext& ex
 {
     (void)executionContext;
     const uint32_t zero = 0u;
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_tileCountBuffer), 0);
+    UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_tileCountBuffer), 0);
 }
 
 

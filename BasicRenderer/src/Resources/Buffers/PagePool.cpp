@@ -2,11 +2,11 @@
 
 #include <cassert>
 #include <algorithm>
+#include <stdexcept>
 #include <spdlog/spdlog.h>
 
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Resources/Buffers/Buffer.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 
 namespace {
 	std::shared_ptr<Buffer> CreatePagePoolSlabBuffer(uint64_t byteSize, const std::string& name)
@@ -159,7 +159,7 @@ void PagePool::UploadToPage(uint32_t globalPageID, uint32_t intraPageByteOffset,
 	if (m_uploadFn) {
 		m_uploadFn(data, dataSize, target, slabOffset);
 	} else {
-		BUFFER_UPLOAD(data, dataSize, target, slabOffset);
+		throw std::runtime_error("PagePool upload owner is not configured");
 	}
 }
 
@@ -187,7 +187,7 @@ void PagePool::FlushPageTableUpdates() {
 	if (m_uploadFn) {
 		m_uploadFn(m_pageTableCpu.data(), tableBytes, target, 0);
 	} else {
-		BUFFER_UPLOAD(m_pageTableCpu.data(), tableBytes, target, 0);
+		throw std::runtime_error("PagePool upload owner is not configured");
 	}
 
 	m_pageTableDirty = false;

@@ -10,7 +10,7 @@
 #include "Render/RenderContext.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 #include "RenderPasses/PreparedComputeBarrier.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Resources/components.h"
@@ -372,7 +372,7 @@ void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& exec
     }
 
     m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
-    BUFFER_UPLOAD(
+    UploadBufferData(
         viewRasterInfo.data(),
         static_cast<uint32_t>(viewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
         org::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),

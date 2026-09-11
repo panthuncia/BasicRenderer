@@ -2575,21 +2575,48 @@ int main() {
         SceneSourceStateStore store;
         store.Configure(sourceWorld, phases);
         {
-            auto lease = store.AcquireWrite(10);
+            auto lease = store.BeginBatch(10, 100);
             Check(&lease.World() == &sourceWorld);
             Check(&lease.Phases() == &phases);
             Check(lease.Revision() == 10);
+            lease.Commit();
         }
         bool rejectedOutOfOrder = false;
         try {
-            (void)store.AcquireWrite(9);
+            (void)store.BeginBatch(9, 90);
         } catch (const std::logic_error&) {
             rejectedOutOfOrder = true;
         }
         Check(rejectedOutOfOrder);
         {
-            auto lease = store.AcquireWrite(11);
+            auto abandoned = store.BeginBatch(11, 110);
+            Check(!abandoned.IsReplay());
+        }
+        {
+            // An abandoned batch does not advance the committed revision.
+            auto lease = store.BeginBatch(10, 100);
+            Check(lease.IsReplay());
+        }
+        {
+            auto lease = store.BeginBatch(11, 111);
             Check(lease.Revision() == 11);
+            lease.Commit();
+        }
+        {
+            auto replay = store.BeginBatch(11, 111);
+            Check(replay.IsReplay());
+        }
+        bool rejectedConflict = false;
+        try {
+            (void)store.BeginBatch(11, 112);
+        } catch (const std::logic_error&) {
+            rejectedConflict = true;
+        }
+        Check(rejectedConflict);
+        {
+            auto internal = store.BeginBatch(0, 120);
+            Check(internal.Revision() == 12);
+            internal.Commit();
         }
         store.Reset();
         Check(!store.Available());

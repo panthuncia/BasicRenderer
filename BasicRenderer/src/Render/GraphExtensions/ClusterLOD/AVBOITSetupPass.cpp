@@ -3,7 +3,7 @@
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/GloballyIndexedResource.h"
@@ -101,7 +101,7 @@ AVBOITSetupBindings AVBOITSetupPass::Declare(org::PassBuilder& builder)
     m_config.depthDistributionExponent = CLodAVBOITDefaultDepthDistributionExponent;
     m_config.lookupDepthBiasInSlices = CLodAVBOITDefaultLookupDepthBiasInSlices;
     m_config.zeroTransmittanceThreshold = CLodAVBOITDefaultZeroTransmittanceThreshold;
-    BUFFER_UPLOAD(&m_config, sizeof(m_config),
+    UploadBufferData(&m_config, sizeof(m_config),
         org::runtime::UploadTarget::FromShared(m_configBuffer), 0);
     return bindings;
 }
@@ -136,11 +136,11 @@ void AVBOITSetupPass::Update(const UpdateExecutionContext& executionContext)
         break;
     }
 
-    BUFFER_UPLOAD(&m_config, sizeof(m_config), org::runtime::UploadTarget::FromShared(m_configBuffer), 0);
+    UploadBufferData(&m_config, sizeof(m_config), org::runtime::UploadTarget::FromShared(m_configBuffer), 0);
 
     if (m_fitStateBuffer && !m_fitStateInitialized) {
         const CLodAVBOITFitState fitState{};
-        BUFFER_UPLOAD(&fitState, sizeof(CLodAVBOITFitState), org::runtime::UploadTarget::FromShared(m_fitStateBuffer), 0);
+        UploadBufferData(&fitState, sizeof(CLodAVBOITFitState), org::runtime::UploadTarget::FromShared(m_fitStateBuffer), 0);
         m_fitStateInitialized = true;
     }
 }

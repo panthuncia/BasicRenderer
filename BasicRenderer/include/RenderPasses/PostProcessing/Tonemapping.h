@@ -73,7 +73,8 @@ public:
 
         // Rest will be filled in by the luminanceHistogramAverage shader
 
-        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), org::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
+        UploadBufferData(&lpmConstants, sizeof(LPMConstants),
+            org::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
     }
 
 	br::render::PreparedFullscreenDraw Prepare(const TonemappingBindings& bindings,

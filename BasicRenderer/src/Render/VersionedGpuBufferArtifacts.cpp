@@ -505,14 +505,16 @@ VersionedBufferFamily::VersionedBufferFamily(Config config)
 }
 
 ArtifactRequestResult VersionedBufferFamily::RequestSnapshot(
-    RendererStateRequestService& requests, org::runtime::IUploadService& uploads,
+    RendererStateRequestService& requests,
+    std::shared_ptr<org::runtime::IUploadService> uploads,
     std::uint64_t revision, std::span<const std::byte> bytes,
     std::uint64_t elementCount, std::uint64_t capacity) {
-    if (revision == 0 || bytes.size() != elementCount * m_config.elementStride) {
+    if (!uploads || revision == 0 || bytes.size() != elementCount * m_config.elementStride) {
         return { ArtifactRequestStatus::ConflictingRevision, 0, {} };
     }
     auto input = std::make_shared<VersionedGpuBufferBuildInput>();
-    input->uploadService = &uploads;
+	input->uploadOwner = std::move(uploads);
+    input->uploadService = input->uploadOwner.get();
     input->debugName = m_config.debugName;
     input->writeSequence = revision;
     input->elementStride = m_config.elementStride;
@@ -543,13 +545,15 @@ ArtifactRequestResult VersionedBufferFamily::RequestSnapshot(
 }
 
 ArtifactRequestResult VersionedBufferFamily::RequestGpuWritten(
-    RendererStateRequestService& requests, org::runtime::IUploadService& uploads,
+    RendererStateRequestService& requests,
+    std::shared_ptr<org::runtime::IUploadService> uploads,
     std::uint64_t revision, std::uint64_t elementCount, std::uint64_t capacity) {
-    if (revision == 0 || !m_config.gpuWritten) {
+    if (!uploads || revision == 0 || !m_config.gpuWritten) {
         return { ArtifactRequestStatus::ConflictingRevision, 0, {} };
     }
     auto input = std::make_shared<VersionedGpuBufferBuildInput>();
-    input->uploadService = &uploads;
+	input->uploadOwner = std::move(uploads);
+    input->uploadService = input->uploadOwner.get();
     input->debugName = m_config.debugName;
     input->writeSequence = revision;
     input->elementStride = m_config.elementStride;
@@ -570,7 +574,8 @@ ArtifactRequestResult VersionedBufferFamily::RequestGpuWritten(
 }
 
 ArtifactRequestResult VersionedBufferFamily::RequestContentSnapshot(
-    RendererStateRequestService& requests, org::runtime::IUploadService& uploads,
+    RendererStateRequestService& requests,
+    std::shared_ptr<org::runtime::IUploadService> uploads,
     std::span<const std::byte> bytes, std::uint64_t elementCount,
     std::uint64_t capacity) {
     std::uint64_t contentFingerprint = 1469598103934665603ull;
@@ -589,14 +594,15 @@ ArtifactRequestResult VersionedBufferFamily::RequestContentSnapshot(
         }
         contentRevision = m_lastContentRevision;
     }
-    return RequestSnapshot(requests, uploads, contentRevision, bytes,
+    return RequestSnapshot(requests, std::move(uploads), contentRevision, bytes,
         elementCount, capacity);
 }
 
 ArtifactRequestResult VersionedBufferFamily::RequestCapture(
-    RendererStateRequestService& requests, org::runtime::IUploadService& uploads,
+    RendererStateRequestService& requests,
+    std::shared_ptr<org::runtime::IUploadService> uploads,
     std::uint64_t revision, VersionedGpuBufferJournal::Capture capture) {
-    if (revision == 0 || capture.writeSequence != revision) {
+    if (!uploads || revision == 0 || capture.writeSequence != revision) {
         return { ArtifactRequestStatus::ConflictingRevision, 0, {} };
     }
     // A journal sequence names its semantic desired image. Acknowledge may
@@ -611,7 +617,8 @@ ArtifactRequestResult VersionedBufferFamily::RequestCapture(
             m_lastJournalHandle.lease };
     }
     auto input = std::make_shared<VersionedGpuBufferBuildInput>();
-    input->uploadService = &uploads;
+	input->uploadOwner = std::move(uploads);
+    input->uploadService = input->uploadOwner.get();
     input->debugName = m_config.debugName;
     input->writeSequence = capture.writeSequence;
     input->elementStride = m_config.elementStride;

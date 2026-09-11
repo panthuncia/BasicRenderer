@@ -30,7 +30,7 @@
 #include "Render/IndirectStateArtifacts.h"
 #include "Render/ObjectBufferStateArtifacts.h"
 #include "Render/GeometryResidencyStateArtifacts.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/components.h"
 #include "Resources/Resolvers/ECSResourceResolver.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
@@ -795,8 +795,6 @@ void HierarchicalDispatchCullingPass::Declare(org::PassBuilder& builder)
             uavIndex(m_pageJobVisibleClusterTransformIndicesBuffer);
         m_cachedPageJobDescriptors = descriptors;
         m_hasCachedPageJobDescriptors = true;
-        BUFFER_UPLOAD(&descriptors, sizeof(descriptors),
-            org::runtime::UploadTarget::FromShared(m_workGraphComputePageJobDescriptorsBuffer), 0);
     }
     if (m_voxelRasterWorkCapacity != 0u) {
         CLodVoxelRasterQueueDescriptors descriptors{};
@@ -807,8 +805,6 @@ void HierarchicalDispatchCullingPass::Declare(org::PassBuilder& builder)
         descriptors.workRecordCapacity = m_voxelRasterWorkCapacity;
         m_cachedVoxelQueueDescriptors = descriptors;
         m_hasCachedVoxelQueueDescriptors = true;
-        BUFFER_UPLOAD(&descriptors, sizeof(descriptors),
-            org::runtime::UploadTarget::FromShared(m_voxelRasterQueueDescriptorsBuffer), 0);
     }
 
     builder.WithConstantBuffer(Builtin::PerFrameBuffer);
@@ -1667,6 +1663,12 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     if (!updateContext) {
         return;
     }
+	if (m_hasCachedPageJobDescriptors && m_workGraphComputePageJobDescriptorsBuffer)
+		UploadBufferData(&m_cachedPageJobDescriptors, sizeof(m_cachedPageJobDescriptors),
+			org::runtime::UploadTarget::FromShared(m_workGraphComputePageJobDescriptorsBuffer), 0);
+	if (m_hasCachedVoxelQueueDescriptors && m_voxelRasterQueueDescriptorsBuffer)
+		UploadBufferData(&m_cachedVoxelQueueDescriptors, sizeof(m_cachedVoxelQueueDescriptors),
+			org::runtime::UploadTarget::FromShared(m_voxelRasterQueueDescriptorsBuffer), 0);
 
     auto& context = *updateContext;
     // This is a logical-frame cache tag, not a recording side effect. Advance
@@ -1720,12 +1722,12 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     uint32_t zero = 0u;
     {
         ZoneScopedN("HierarchicalDispatchCullingPass::UploadCounterResets");
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
         if (m_swVisibleClustersCounterBuffer) {
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
+            UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
         }
         if (m_pageJobVisibleClustersCounterBuffer) {
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pageJobVisibleClustersCounterBuffer), 0);
+            UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pageJobVisibleClustersCounterBuffer), 0);
         }
     }
 
@@ -1750,11 +1752,11 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
 
     {
         ZoneScopedN("HierarchicalDispatchCullingPass::UploadPureComputeCounterResets");
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeCurrentNodeCounterBuffer), 0);
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeNextNodeCounterBuffer), 0);
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeCurrentLeafCounterBuffer), 0);
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeNextLeafCounterBuffer), 0);
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeClusterCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeCurrentNodeCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeNextNodeCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeCurrentLeafCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeNextLeafCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_pureComputeClusterCounterBuffer), 0);
     }
 
     bool rebuildViewTables = false;
@@ -1810,7 +1812,7 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
             m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(m_cachedViewRasterInfo.size()));
         }
         if (!m_cachedViewRasterInfo.empty()) {
-            BUFFER_UPLOAD(
+            UploadBufferData(
                 m_cachedViewRasterInfo.data(),
                 static_cast<uint32_t>(m_cachedViewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
                 org::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
@@ -1861,7 +1863,7 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
 
             m_cachedViewDepthSrvIndices = std::move(viewDepthSrvIndices);
             m_hasUploadedViewDepthSrvIndices = true;
-            BUFFER_UPLOAD(
+            UploadBufferData(
                 m_cachedViewDepthSrvIndices.data(),
                 static_cast<uint32_t>(m_cachedViewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
                 org::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
@@ -1884,7 +1886,7 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
         replayState.nodeDropped = 0;
         replayState.meshletDropped = 0;
         replayState.visibleClusterCombinedCount = 0;
-        BUFFER_UPLOAD(
+        UploadBufferData(
             &replayState,
             sizeof(CLodReplayBufferState),
             org::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
@@ -1894,7 +1896,7 @@ void HierarchicalDispatchCullingPass::Update(const UpdateExecutionContext& execu
     if (IsCLodWorkGraphTelemetryEnabled()) {
         ZoneScopedN("HierarchicalDispatchCullingPass::UploadTelemetryReset");
         m_zeroTelemetryScratch.assign(CLodWorkGraphTelemetryBufferCount, 0u);
-        BUFFER_UPLOAD(
+        UploadBufferData(
             m_zeroTelemetryScratch.data(),
             static_cast<uint32_t>(m_zeroTelemetryScratch.size() * sizeof(uint32_t)),
             org::runtime::UploadTarget::FromShared(m_workGraphTelemetryBuffer),

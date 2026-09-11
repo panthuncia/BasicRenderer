@@ -150,6 +150,7 @@ private:
     void OnUploadPolicyFlush() override {
         SyncUploadPolicyState();
         m_uploadPolicyState.FlushToUploadService(
+            *RetainBufferUploadService(),
             org::runtime::UploadTarget::FromShared(shared_from_this()),
             [this](size_t offset, size_t size) -> const void* {
                 if (offset + size > m_cpuShadowData.size()) {

@@ -40,6 +40,7 @@ class PublishedStateResourceResolver;
 namespace org::runtime {
 class IReadbackService;
 class IUploadService;
+class IDescriptorService;
 }
 
 struct MaterialTextureStreamingRecord {
@@ -123,7 +124,10 @@ public:
 
 	void Initialize(TextureFactory& textureFactory, uint32_t framesInFlight);
 	void SetRendererStateRequestService(br::render::RendererStateRequestService* service,
-		org::runtime::IUploadService* uploads = nullptr);
+		std::shared_ptr<org::runtime::IUploadService> uploads = {});
+	void SetDescriptorService(std::shared_ptr<org::runtime::IDescriptorService> descriptors) {
+		m_descriptorService = std::move(descriptors);
+	}
 	void Shutdown();
 	void EnqueueFrameTick(uint64_t frameIndex);
 	void EnqueueTextureUploadAdvance(const std::shared_ptr<TextureAsset>& texture, const char* reason = "external");
@@ -265,7 +269,8 @@ private:
 	std::atomic<uint64_t> m_nextBindingID{1u};
 	TextureFactory* m_textureFactory = nullptr;
 	br::render::RendererStateRequestService* m_rendererStateRequests = nullptr;
-	org::runtime::IUploadService* m_uploadService = nullptr;
+	std::shared_ptr<org::runtime::IUploadService> m_uploadService;
+	std::shared_ptr<org::runtime::IDescriptorService> m_descriptorService;
 	br::render::ArtifactObservation m_graphBindingObservation;
 	struct ObservedGraphBindingState {
 		br::render::ArtifactVersionID version{};
@@ -294,6 +299,12 @@ private:
 		uint64_t fenceValue = 0;
 		bool inFlight = false;
 	};
+	struct ReadbackCallbackState {
+		std::mutex mutex;
+		TextureStreamingManager* owner = nullptr;
+	};
+	std::shared_ptr<ReadbackCallbackState> m_readbackCallbackState =
+		std::make_shared<ReadbackCallbackState>();
 	rhi::TimelinePtr m_readbackFencePtr;
 	rhi::Timeline m_readbackFence;
 	std::atomic<uint64_t> m_readbackFenceCounter{0};

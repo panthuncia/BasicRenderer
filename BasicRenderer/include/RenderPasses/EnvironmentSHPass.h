@@ -7,14 +7,16 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/EnvironmentManager.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
-#include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Render/Runtime/IDescriptorService.h"
 #include "Utilities/Utilities.h"
 
 #include <vector>
 
 class EnvironmentSHPass : public org::TypedRenderGraphPass<EnvironmentSHPass, br::render::PreparedComputeDispatchSequence>, public IDynamicDeclaredResources {
 public:
-	EnvironmentSHPass() {
+	EnvironmentSHPass() = default;
+
+	void Initialize() {
 		rhi::SamplerDesc shSamplerDesc = {};
 		shSamplerDesc.minFilter = rhi::Filter::Linear;
 		shSamplerDesc.magFilter = rhi::Filter::Linear;
@@ -28,7 +30,7 @@ public:
 		shSamplerDesc.minLod = 0.0f;
 		shSamplerDesc.maxLod = (std::numeric_limits<float>::max)();
 
-		m_samplerIndex = org::runtime::CreateIndexedSamplerFromActiveDescriptorService(shSamplerDesc);
+		m_samplerIndex = DescriptorService().CreateIndexedSampler(shSamplerDesc);
 
 		CreatePSO();
 	}

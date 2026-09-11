@@ -23,7 +23,7 @@ public:
 			? preparation.preparationData->Get<RenderContext>() : nullptr;
 		if (!context) return {};
 		return {
-			.drawData = Menu::GetInstance().PrepareDrawData(*context),
+			.drawData = context->uiDrawData,
 			.target = preparation.CaptureView(bindings.target,
 				{org::BindlessViewKind::RenderTarget}),
 			.outputResolution = context->outputResolution,

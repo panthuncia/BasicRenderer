@@ -2,7 +2,7 @@
 
 #include "Animation/Skeleton.h"
 #include "Resources/Buffers/BufferView.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/IUploadService.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <DirectXMath.h>
 #include <limits>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -23,7 +25,19 @@ struct MatrixUploadSpan {
     uint32_t matrixCount = 0;
 };
 
-void UploadMatrixSpans(const std::shared_ptr<DynamicBuffer>& target, std::vector<MatrixUploadSpan>& spans) {
+void DispatchUpload(org::runtime::IUploadService& uploadService, const void* data, size_t size,
+    org::runtime::UploadTarget target, size_t offset, const char* file, int line) {
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+    uploadService.UploadData(data, size, std::move(target), offset, file, line);
+#else
+    (void)file;
+    (void)line;
+    uploadService.UploadData(data, size, std::move(target), offset);
+#endif
+}
+
+void UploadMatrixSpans(org::runtime::IUploadService& uploadService,
+    const std::shared_ptr<DynamicBuffer>& target, std::vector<MatrixUploadSpan>& spans) {
     std::erase_if(spans, [](const MatrixUploadSpan& span) {
         return span.data == nullptr || span.matrixCount == 0;
     });
@@ -48,10 +62,10 @@ void UploadMatrixSpans(const std::shared_ptr<DynamicBuffer>& target, std::vector
 
         const auto& first = spans[groupStart];
         if (groupEnd == groupStart + 1) {
-            BUFFER_UPLOAD(first.data,
+            DispatchUpload(uploadService, first.data,
                 static_cast<size_t>(first.matrixCount) * sizeof(DirectX::XMMATRIX),
                 org::runtime::UploadTarget::FromShared(target),
-                first.offsetBytes);
+                first.offsetBytes, __FILE__, __LINE__);
         }
         else {
             const size_t matrixCount = (groupEndOffset - first.offsetBytes) / sizeof(DirectX::XMMATRIX);
@@ -62,10 +76,10 @@ void UploadMatrixSpans(const std::shared_ptr<DynamicBuffer>& target, std::vector
                 staging.insert(staging.end(), span.data, span.data + span.matrixCount);
             }
 
-            BUFFER_UPLOAD(staging.data(),
+            DispatchUpload(uploadService, staging.data(),
                 staging.size() * sizeof(DirectX::XMMATRIX),
                 org::runtime::UploadTarget::FromShared(target),
-                first.offsetBytes);
+                first.offsetBytes, __FILE__, __LINE__);
         }
 
         groupStart = groupEnd;
@@ -78,7 +92,8 @@ static uint32_t BytesToMatrixIndex(size_t byteOffset) {
     return static_cast<uint32_t>(byteOffset / sizeof(DirectX::XMMATRIX));
 }
 
-SkeletonManager::SkeletonManager() {
+SkeletonManager::SkeletonManager(std::shared_ptr<org::runtime::IUploadService> uploadService)
+    : m_uploadService(std::move(uploadService)) {
     m_lifetimeToken = std::make_shared<std::atomic_bool>(true);
     m_inverseBindMatrices = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "InverseBindMatricesPacked");
     m_boneTransforms = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "BoneSkinMatricesPacked", false, true);
@@ -371,12 +386,12 @@ void SkeletonManager::UpdateInstanceTransforms(Skeleton& inst) {
 		rec.currentTransformIndex ^= 1u;
 	}
 	rec.transformOffsetMatrices = rec.transformOffsetsMatrices[rec.currentTransformIndex];
-    BUFFER_UPLOAD(skinMatrices.data(), bytes,
+    DispatchUpload(UploadService(), skinMatrices.data(), bytes,
         org::runtime::UploadTarget::FromShared(m_boneTransforms),
-		static_cast<size_t>(rec.transformOffsetMatrices) * sizeof(DirectX::XMMATRIX));
-    BUFFER_UPLOAD(inverseSkinMatrices.data(), bytes,
+		static_cast<size_t>(rec.transformOffsetMatrices) * sizeof(DirectX::XMMATRIX), __FILE__, __LINE__);
+    DispatchUpload(UploadService(), inverseSkinMatrices.data(), bytes,
         org::runtime::UploadTarget::FromShared(m_inverseSkinMatrices),
-        rec.inverseSkinView->GetOffset());
+        rec.inverseSkinView->GetOffset(), __FILE__, __LINE__);
 	SkinningInstanceGPUInfo info = (*m_instanceInfo)[rec.instanceSlot];
 	info.transformOffsetMatrices = rec.transformOffsetMatrices;
 	info.previousTransformOffsetMatrices = rec.hasTransformHistory
@@ -483,8 +498,8 @@ void SkeletonManager::UpdateAllDirtyInstances() {
         });
     }
 
-    UploadMatrixSpans(m_boneTransforms, boneMatrixSpans);
-    UploadMatrixSpans(m_inverseSkinMatrices, inverseSkinSpans);
+    UploadMatrixSpans(UploadService(), m_boneTransforms, boneMatrixSpans);
+    UploadMatrixSpans(UploadService(), m_inverseSkinMatrices, inverseSkinSpans);
 
     for (auto& upload : pending) {
 		auto& rec = *upload.record;
@@ -522,6 +537,15 @@ std::vector<std::shared_ptr<const std::vector<std::byte>>> SkeletonManager::Capt
     capture(m_inverseSkinMatrices);
     capture(m_instanceInfo);
     return result;
+}
+
+void SkeletonManager::SetUploadService(std::shared_ptr<org::runtime::IUploadService> uploadService) {
+    m_uploadService = std::move(uploadService);
+}
+
+org::runtime::IUploadService& SkeletonManager::UploadService() const {
+    if (!m_uploadService) throw std::runtime_error("SkeletonManager upload service generation is unavailable");
+    return *m_uploadService;
 }
 std::vector<ResourceIdentifier> SkeletonManager::GetSupportedResolverKeys() {
     std::vector<ResourceIdentifier> keys;

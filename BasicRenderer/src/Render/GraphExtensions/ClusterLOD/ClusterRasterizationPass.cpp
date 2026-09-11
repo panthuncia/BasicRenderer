@@ -14,7 +14,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/MemoryIntrospectionAPI.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "BuiltinResources.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "RenderPasses/PreparedRenderIndirect.h"
@@ -454,7 +454,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     if (m_viewRasterInfos != viewRasterInfo || resourcesChanged) {
         m_viewRasterInfos = std::move(viewRasterInfo);
         m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(m_viewRasterInfos.size()));
-        BUFFER_UPLOAD(
+        UploadBufferData(
             m_viewRasterInfos.data(),
             static_cast<uint32_t>(m_viewRasterInfos.size() * sizeof(CLodViewRasterInfo)),
             org::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),

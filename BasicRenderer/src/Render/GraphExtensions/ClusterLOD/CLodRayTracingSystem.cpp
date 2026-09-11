@@ -1,4 +1,5 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodRayTracingSystem.h"
+#include "Render/Runtime/IUploadService.h"
 
 #include <algorithm>
 #include <cstring>
@@ -8,7 +9,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 #include "../shaders/PerPassRootConstants/clodRayTracingSetupRootConstants.h"
@@ -17,6 +17,32 @@
 #include <rhi_interop_dx12.h>
 
 namespace br::render {
+
+CLodRayTracingSystem::CLodRayTracingSystem(
+    std::shared_ptr<org::runtime::IUploadService> uploads)
+    : m_uploadService(std::move(uploads)) {}
+
+void CLodRayTracingSystem::SetUploadService(
+    std::shared_ptr<org::runtime::IUploadService> uploads) noexcept {
+    m_uploadService = std::move(uploads);
+}
+
+org::runtime::IUploadService& CLodRayTracingSystem::UploadService() const {
+    auto uploads = m_uploadService.lock();
+    if (!uploads) throw std::runtime_error("CLod ray tracing upload service is unavailable");
+    return *uploads;
+}
+
+void CLodRayTracingSystem::UploadBufferData(const void* data, size_t size,
+    org::runtime::UploadTarget target, size_t offset, std::source_location source) const {
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+    UploadService().UploadData(data, size, std::move(target), offset,
+        source.file_name(), static_cast<int>(source.line()));
+#else
+    (void)source;
+    UploadService().UploadData(data, size, std::move(target), offset);
+#endif
+}
 
 namespace {
 
@@ -369,7 +395,7 @@ void CLodRayTracingSystem::UpdateGpuResources(rhi::Device device, const RayTraci
     }
 
     m_stats.buildableClusters = outputClusterBase;
-    BUFFER_UPLOAD(
+    UploadBufferData(
         m_gpuPageSources.data(),
         static_cast<uint32_t>(m_gpuPageSources.size() * sizeof(GpuPageSource)),
         org::runtime::UploadTarget::FromShared(m_pageSourceBuffer),
@@ -458,7 +484,7 @@ void CLodRayTracingSystem::UpdateGpuResources(rhi::Device device, const RayTraci
         m_tlasStorageBytes = m_tlasDataBytes;
     }
 
-    BUFFER_UPLOAD(
+    UploadBufferData(
         &aggregateBlasInfo,
         sizeof(aggregateBlasInfo),
         org::runtime::UploadTarget::FromShared(m_blasBuildInfoBuffer),
@@ -697,7 +723,7 @@ void CLodRayTracingSystem::EnsureRayTracingPipeline(rhi::Device device, const Ra
         }
     }
 
-    BUFFER_UPLOAD(
+    UploadBufferData(
         shaderTable.data(),
         static_cast<uint32_t>(shaderTable.size()),
         org::runtime::UploadTarget::FromShared(m_shaderTableBuffer),

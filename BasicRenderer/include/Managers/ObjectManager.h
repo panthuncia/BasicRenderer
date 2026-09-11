@@ -578,7 +578,7 @@ public:
 	std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
 	void SetRendererStateServices(br::render::RendererStateRequestService* requests,
-		org::runtime::IUploadService* uploads, std::uint32_t framesInFlight);
+		std::shared_ptr<org::runtime::IUploadService> uploads, std::uint32_t framesInFlight);
 	using DesiredBufferStateReadyCallback = std::function<void()>;
 	void SetDesiredBufferStateReadyCallback(DesiredBufferStateReadyCallback callback);
 	std::uint64_t PublishDesiredBufferState();
@@ -710,7 +710,7 @@ private:
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<PublishedStateResourceResolver>,
 		ResourceIdentifier::Hasher> m_graphBufferResolvers;
 	br::render::RendererStateRequestService* m_rendererStateRequests = nullptr;
-	org::runtime::IUploadService* m_uploadService = nullptr;
+	std::shared_ptr<org::runtime::IUploadService> m_uploadService;
 	std::uint64_t m_objectBufferStateRevision = 0;
 	br::render::ArtifactVersionHandle m_objectBufferStateVersion{};
 	std::atomic<std::uint64_t> m_activeObjectBufferStateRevision{ 0 };

@@ -4,6 +4,7 @@
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "OpenRenderGraph/OpenRenderGraph.h"
@@ -15,6 +16,7 @@
 class Skeleton; // base skeleton asset or instance
 namespace org { class BufferView; }
 using org::BufferView;
+namespace org::runtime { class IUploadService; }
 
 class SkeletonManager : public IResourceProvider, public br::render::IWindPaletteService {
 public:
@@ -27,11 +29,11 @@ public:
 		uint32_t boneCount = 0u;
 	};
 
-    static std::unique_ptr<SkeletonManager> CreateUnique() {
-        return std::unique_ptr<SkeletonManager>(new SkeletonManager());
+    static std::unique_ptr<SkeletonManager> CreateUnique(std::shared_ptr<org::runtime::IUploadService> uploadService = {}) {
+        return std::unique_ptr<SkeletonManager>(new SkeletonManager(std::move(uploadService)));
     }
-    static std::shared_ptr<SkeletonManager> CreateShared() {
-        return std::shared_ptr<SkeletonManager>(new SkeletonManager());
+    static std::shared_ptr<SkeletonManager> CreateShared(std::shared_ptr<org::runtime::IUploadService> uploadService = {}) {
+        return std::shared_ptr<SkeletonManager>(new SkeletonManager(std::move(uploadService)));
     }
     ~SkeletonManager();
 
@@ -40,6 +42,7 @@ public:
     uint32_t AcquireSkinningInstance(const std::shared_ptr<Skeleton>& skinningInstance);
     void     ReleaseSkinningInstance(Skeleton* skinningInstance);
     std::weak_ptr<std::atomic_bool> GetLifetimeToken() const noexcept { return m_lifetimeToken; }
+    void SetUploadService(std::shared_ptr<org::runtime::IUploadService> uploadService);
 
     // Tick animations for all active skeletons
     void TickAnimations(float elapsedSeconds);
@@ -64,7 +67,8 @@ public:
     std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 
 private:
-    SkeletonManager();
+    explicit SkeletonManager(std::shared_ptr<org::runtime::IUploadService> uploadService);
+    org::runtime::IUploadService& UploadService() const;
 
     struct BaseRecord {
         std::unique_ptr<BufferView> invBindView;
@@ -113,6 +117,7 @@ private:
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
     std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
     std::shared_ptr<std::atomic_bool> m_lifetimeToken;
+    std::shared_ptr<org::runtime::IUploadService> m_uploadService;
 
     // Records
     std::unordered_map<const Skeleton*, BaseRecord>    m_bases;

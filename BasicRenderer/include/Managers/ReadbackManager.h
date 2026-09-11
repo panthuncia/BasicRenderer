@@ -54,12 +54,20 @@ private:
         uint64_t fenceValue = 0;
     };
 
+    struct State {
+        std::mutex mutex;
+        std::vector<ReadbackInfo> queuedReadbacks;
+        std::vector<ReadbackRequest> readbackRequests;
+        std::atomic<uint64_t> nextFenceValue{ 0 };
+        bool accepting = true;
+    };
+
     class ReadbackPass
         : public org::TypedRenderGraphPass<ReadbackPass, ReadbackFrameData>,
           public IDynamicDeclaredResources {
     public:
-        explicit ReadbackPass(ReadbackManager& owner)
-            : m_owner(owner) {
+        explicit ReadbackPass(std::shared_ptr<State> state)
+            : m_state(std::move(state)) {
         }
 
         void Declare(org::PassBuilder& builder);
@@ -72,13 +80,9 @@ private:
         }
 
     private:
-        ReadbackManager& m_owner;
+        std::shared_ptr<State> m_state;
         rhi::Timeline m_readbackFence;
     };
-
-    uint64_t AcquireNextFenceValue() noexcept {
-        return m_nextFenceValue.fetch_add(1, std::memory_order_relaxed) + 1;
-    }
 
     void ClearReadbacks();
 
@@ -97,11 +101,8 @@ private:
         uint64_t fenceValue);
 
     std::shared_ptr<ReadbackPass> m_readbackPass;
+    std::shared_ptr<State> m_state;
     rhi::Timeline m_readbackFence;
-    std::atomic<uint64_t> m_nextFenceValue{ 0 };
-    std::mutex m_mutex;
-    std::vector<ReadbackInfo> m_queuedReadbacks;
-    std::vector<ReadbackRequest> m_readbackRequests;
 };
 
 } // namespace br

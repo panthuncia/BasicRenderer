@@ -9,7 +9,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/RendererComponents.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/PixelBuffer.h"
@@ -112,7 +112,7 @@ void VirtualShadowMapInvalidatePagesPass::Update(const UpdateExecutionContext& e
     }
     m_pendingBoundsCount = static_cast<uint32_t>(extensionBounds.size());
     if (!extensionBounds.empty()) {
-        BUFFER_UPLOAD(
+        UploadBufferData(
             extensionBounds.data(),
             static_cast<uint32_t>(extensionBounds.size() * sizeof(BoundsGpu)),
             org::runtime::UploadTarget::FromShared(m_boundsInvalidationBuffer),
@@ -159,20 +159,20 @@ void VirtualShadowMapInvalidatePagesPass::Update(const UpdateExecutionContext& e
 
     m_pendingInputCount = static_cast<uint32_t>(inputs.size());
     if (!inputs.empty()) {
-        BUFFER_UPLOAD(
+        UploadBufferData(
             inputs.data(),
             static_cast<uint32_t>(inputs.size() * sizeof(CLodVirtualShadowInvalidationInput)),
             org::runtime::UploadTarget::FromShared(m_invalidationInputsBuffer),
             0);
     }
 
-    BUFFER_UPLOAD(
+    UploadBufferData(
         &m_pendingInputCount,
         sizeof(m_pendingInputCount),
         org::runtime::UploadTarget::FromShared(m_invalidationCountBuffer),
         0);
 
-    BUFFER_UPLOAD(
+    UploadBufferData(
         invalidatedInstancesBitset.data(),
         static_cast<uint32_t>(invalidatedInstancesBitset.size() * sizeof(uint32_t)),
         org::runtime::UploadTarget::FromShared(m_invalidatedInstancesBitsetBuffer),

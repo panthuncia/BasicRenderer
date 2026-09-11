@@ -22,14 +22,16 @@ namespace org { class DynamicBuffer; }
 using org::DynamicBuffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
+namespace org::runtime { class IUploadService; }
 
 class EnvironmentManager : public IResourceProvider {
 public:
 	using RequestReadbackFn = std::function<void(std::shared_ptr<PixelBuffer>, std::wstring, std::function<void()>, bool)>;
 
-	static std::unique_ptr<EnvironmentManager> CreateUnique() {
-		return std::unique_ptr<EnvironmentManager>(new EnvironmentManager());
+	static std::unique_ptr<EnvironmentManager> CreateUnique(std::shared_ptr<org::runtime::IUploadService> uploadService) {
+		return std::unique_ptr<EnvironmentManager>(new EnvironmentManager(std::move(uploadService)));
 	}
+	void SetUploadService(std::shared_ptr<org::runtime::IUploadService> uploadService) { m_uploadService = std::move(uploadService); }
 
 	void SetRequestReadbackFn(RequestReadbackFn fn) {
 		m_requestReadback = std::move(fn);
@@ -54,7 +56,8 @@ public:
 	std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 
 private:
-	EnvironmentManager();
+	explicit EnvironmentManager(std::shared_ptr<org::runtime::IUploadService> uploadService);
+	std::shared_ptr<org::runtime::IUploadService> m_uploadService;
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
 

@@ -1408,10 +1408,10 @@ void ProceduralWindExtension::GatherStructuralPasses(RenderGraph& rg, std::vecto
 	out.push_back(RenderGraph::ExternalPassDesc::Compute("ProceduralWind::FinalizeSimulationAllocationsPhase2", std::make_shared<WindFinalizeAllocationsPass>(resources)).At(lateInsertion));
     out.push_back(RenderGraph::ExternalPassDesc::Compute("ProceduralWind::SimulateInstancesPhase2", std::make_shared<WindIndirectSimulatePass>(resources, true)).At(lateInsertion));
     auto debugInsertion = RenderGraph::ExternalInsertPoint::After("TonemappingPass");
-    // This pass writes the swapchain backbuffer. PresentPass must remain the
+    // Keep debug composition before the scene output becomes presentation-ready.
     // final backbuffer access so the enhanced RENDER_TARGET -> PRESENT
     // transition is not undone before IDXGISwapChain::Present.
-    debugInsertion.AlsoBefore("PresentPass");
+    debugInsertion.AlsoBefore("PresentationReadyPass");
     out.push_back(RenderGraph::ExternalPassDesc::Render(
         "ProceduralWind::DebugActiveSkeletons",
         std::make_shared<WindSkeletonDebugPass>(resources))

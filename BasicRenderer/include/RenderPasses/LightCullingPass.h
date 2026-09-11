@@ -54,7 +54,7 @@ public:
 	void Update(const UpdateExecutionContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromHandle(m_lightPagesCounterHandle), 0);
+		UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromHandle(m_lightPagesCounterHandle), 0);
 	}
 
 private:

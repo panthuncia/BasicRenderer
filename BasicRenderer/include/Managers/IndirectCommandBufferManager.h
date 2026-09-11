@@ -76,7 +76,7 @@ public:
         std::uint64_t residentDrawRecordCount,
         const std::shared_ptr<const br::render::PublishedRendererState>& selectedState);
     void SetRendererStateServices(br::render::RendererStateRequestService* requests,
-        org::runtime::IUploadService* uploads);
+        std::shared_ptr<org::runtime::IUploadService> uploads);
     // End preparation while borrowed request/upload services are still alive.
     // Idempotent; must run before those services are destroyed.
     void Shutdown();
@@ -123,7 +123,7 @@ private:
     std::unordered_map<std::uint64_t, std::uint64_t> m_viewLifetimeRevisions;
     unsigned int m_incrementSize = 1000;
     br::render::RendererStateRequestService* m_rendererStateRequests = nullptr;
-    org::runtime::IUploadService* m_uploadService = nullptr;
+    std::shared_ptr<org::runtime::IUploadService> m_uploadService;
     std::unordered_map<DrawWorkloadKey, ActiveJournal, DrawWorkloadKey::Hasher> m_activeJournals;
     mutable std::mutex m_desiredMutex;
     TaskScope m_buildScope;

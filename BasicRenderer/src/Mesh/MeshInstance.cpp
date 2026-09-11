@@ -5,6 +5,19 @@
 
 #include <algorithm>
 
+std::shared_ptr<MeshInstance> MeshInstance::CreateFrozenCopy(const MeshInstance& source) {
+    auto frozen = std::shared_ptr<MeshInstance>(new MeshInstance(source.m_mesh));
+    frozen->m_materialOverride = source.m_materialOverride;
+    frozen->m_perMeshInstanceBufferData = source.m_perMeshInstanceBufferData;
+    frozen->m_animationSpeed = source.m_animationSpeed;
+    if (source.m_skeleton) {
+        frozen->m_skeleton = std::make_shared<Skeleton>(*source.m_skeleton);
+    } else {
+        frozen->m_skeleton.reset();
+    }
+    return frozen;
+}
+
 MeshInstance::~MeshInstance() {
     ReleaseSkinningInstance_();
 }

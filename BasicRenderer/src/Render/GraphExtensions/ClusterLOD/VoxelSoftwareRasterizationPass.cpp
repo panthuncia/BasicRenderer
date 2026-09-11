@@ -6,7 +6,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/ViewManager.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/components.h"
@@ -275,7 +275,7 @@ void VoxelSoftwareRasterizationPass::Update(const UpdateExecutionContext& execut
     }
 
     m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
-    BUFFER_UPLOAD(
+    UploadBufferData(
         viewRasterInfo.data(),
         static_cast<uint32_t>(viewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
         org::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),

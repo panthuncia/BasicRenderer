@@ -23,6 +23,7 @@ namespace org { class PixelBuffer; }
 using org::PixelBuffer;
 template<class T> class DynamicStructuredBuffer;
 class SortedUnsignedIntBuffer;
+struct PreparedImGuiDrawData;
 
 namespace br::render {
 class CLodRayTracingSystem;
@@ -63,6 +64,9 @@ struct RenderContext {
 	std::shared_ptr<const br::render::PublishedViewFamilyState> viewFamily;
 	std::shared_ptr<const br::render::PublishedLightTableState> lightTables;
 	std::shared_ptr<const br::render::PublishedPoseState> poses;
+	// Deep-copied at frame acceptance. Preparation and recording never consult
+	// ImGui's mutable global draw lists.
+	std::shared_ptr<const PreparedImGuiDrawData> uiDrawData;
 	// Owner-thread snapshot used by delayed typed/transitioning packets. A
 	// recording worker must not enumerate the live ViewManager container.
 	uint32_t preparedRasterBucketCount = 0;

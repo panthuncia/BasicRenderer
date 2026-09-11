@@ -13,6 +13,7 @@
 #include "Render/RasterBucketFlags.h"
 #include "Render/Runtime/IReadbackService.h"
 #include "Render/Runtime/IUploadService.h"
+#include "Render/Runtime/IDescriptorService.h"
 
 #include <algorithm>
 #include <cctype>
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 
@@ -125,7 +127,9 @@ namespace {
 		return info;
 	}
 
-	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(const Material& material) {
+	PerMaterialOpenPBRCB BuildOpenPBRMaterialData(
+		const Material& material,
+		org::runtime::IDescriptorService& descriptorService) {
 		const OpenPBRMaterialParameters& materialParameters = material.GetOpenPBRMaterial();
 		const OpenPBRTextureBindings& textures = material.GetOpenPBRTextures();
 		constexpr uint32_t kInvalidDescriptor = std::numeric_limits<uint32_t>::max();
@@ -189,7 +193,7 @@ namespace {
 
 			auto image = binding.texture->ImagePtr();
 			textureIndex = image ? image->GetSRVInfo(0).slot.index : kInvalidDescriptor;
-			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			samplerIndex = binding.texture->SamplerDescriptorIndex(descriptorService);
 			streamingTextureID = IsMaterialTextureStreamingEnabledSetting() ? binding.texture->GetStreamingTextureID() : kInvalidStreamingTextureID;
 			if (binding.channels.size() > 0u) channels.x = binding.channels[0];
 			if (binding.channels.size() > 1u) channels.y = binding.channels[1];
@@ -215,7 +219,7 @@ namespace {
 
 			auto image = binding.texture->ImagePtr();
 			textureIndex = image ? image->GetSRVInfo(0).slot.index : kInvalidDescriptor;
-			samplerIndex = binding.texture->SamplerDescriptorIndex();
+			samplerIndex = binding.texture->SamplerDescriptorIndex(descriptorService);
 			streamingTextureID = IsMaterialTextureStreamingEnabledSetting() ? binding.texture->GetStreamingTextureID() : kInvalidStreamingTextureID;
 			if (!binding.channels.empty()) {
 				channel = binding.channels[0];
@@ -669,17 +673,33 @@ void MaterialManager::RegisterMaterialSource(const std::shared_ptr<Material>& ma
 	m_ingestedMaterialSourcesByID[material->GetMaterialID()] = material;
 }
 
+void MaterialManager::SetDescriptorService(std::shared_ptr<org::runtime::IDescriptorService> descriptors) {
+	std::lock_guard mutationLock(m_materialMutationMutex);
+	if (m_descriptorService == descriptors) return;
+	m_descriptorService = std::move(descriptors);
+	if (m_textureStreamingManager) m_textureStreamingManager->SetDescriptorService(m_descriptorService);
+	for (const auto& [materialID, material] : m_activeMaterialsByID) {
+		if (material && m_dirtyMaterialIDSet.insert(materialID).second) m_dirtyMaterialIDs.push_back(materialID);
+	}
+	for (const auto& [materialID, weakMaterial] : m_ingestedMaterialSourcesByID) {
+		if (!weakMaterial.expired() && m_dirtyMaterialIDSet.insert(materialID).second) m_dirtyMaterialIDs.push_back(materialID);
+	}
+}
+
 MaterialManager::MaterialUsageCapture MaterialManager::CaptureMaterialUsage(
 	Material& material, unsigned int count, bool refreshTextureBindings) {
+	if (!m_descriptorService) {
+		throw std::runtime_error("MaterialManager: descriptor service unavailable while capturing material usage");
+	}
 	std::lock_guard mutationLock(m_materialMutationMutex);
-	if (refreshTextureBindings) material.RefreshTextureBindings();
+	if (refreshTextureBindings) material.RefreshTextureBindings(m_descriptorService.get());
 	MaterialUsageCapture capture{};
 	auto& entry = capture.entry;
 	entry.materialID = material.GetMaterialID();
 	entry.count = count;
 	entry.base = material.GetData();
 	entry.evaluation = BuildMaterialEvalData(material);
-	entry.openPbr = BuildOpenPBRMaterialData(material);
+	entry.openPbr = BuildOpenPBRMaterialData(material, *m_descriptorService);
 	entry.compileFlags = material.Technique().compileFlags;
 	capture.textureServiceInputs = CollectMaterialTextureAssets(material);
 	entry.retainedTextureResources = CollectMaterialTextureResources(material);
@@ -693,7 +713,7 @@ MaterialManager::MaterialUsageCapture MaterialManager::CaptureMaterialUsage(
 			? binding.image->GetSRVInfo(0).slot.index : UINT32_MAX;
 		entry.textureBindings.push_back({
 			texture->GetStreamingTextureID(), binding.bindingRevision, imageIndex,
-			texture->SamplerDescriptorIndex() });
+			texture->SamplerDescriptorIndex(*m_descriptorService) });
 	}
 	return capture;
 }
@@ -918,7 +938,7 @@ void MaterialManager::FlushDirtyMaterial(Material& material, bool refreshTexture
 		ZoneScopedN("MaterialManager::FlushDirtyMaterial::BuildMaterialCBs");
 		{
 			ZoneScopedN("MaterialManager::FlushDirtyMaterial::RefreshTextureBindings");
-			material.RefreshTextureBindings();
+			material.RefreshTextureBindings(m_descriptorService.get());
 		}
 		{
 			ZoneScopedN("MaterialManager::FlushDirtyMaterial::BuildMaterialCBs::Base");
@@ -930,7 +950,10 @@ void MaterialManager::FlushDirtyMaterial(Material& material, bool refreshTexture
 		}
 		{
 			ZoneScopedN("MaterialManager::FlushDirtyMaterial::BuildMaterialCBs::OpenPBR");
-			openPBRData = BuildOpenPBRMaterialData(material);
+			if (!m_descriptorService) {
+				throw std::runtime_error("MaterialManager: descriptor service unavailable while publishing material data");
+			}
+			openPBRData = BuildOpenPBRMaterialData(material, *m_descriptorService);
 		}
 	}
 	if (materialSlot >= m_materialUploadSignatures.size()) {
@@ -1711,13 +1734,13 @@ std::uint64_t MaterialManager::CommitGpuVisibleSnapshot(bool forceGraphSnapshot)
 				basic_telemetry::AddCounter("SARP.Material.GraphTableVersionsReused", 3);
 			} else {
 				tableRequests[0] = m_materialBufferFamilies[0]->RequestCapture(
-					*m_rendererStateRequests, *m_uploadService, rowsRevision,
+					*m_rendererStateRequests, m_uploadService, rowsRevision,
 					std::move(baseCapture));
 				tableRequests[1] = m_materialBufferFamilies[1]->RequestCapture(
-					*m_rendererStateRequests, *m_uploadService, rowsRevision,
+					*m_rendererStateRequests, m_uploadService, rowsRevision,
 					std::move(evalCapture));
 				tableRequests[2] = m_materialBufferFamilies[2]->RequestCapture(
-					*m_rendererStateRequests, *m_uploadService, rowsRevision,
+					*m_rendererStateRequests, m_uploadService, rowsRevision,
 					std::move(openPbrCapture));
 			}
 			const auto& baseRequest = tableRequests[0];

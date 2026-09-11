@@ -12,6 +12,7 @@ class LightManager;
 class ObjectManager;
 class ViewManager;
 struct DrawWorkloadKey;
+namespace br::render { class SceneRenderableResidencyService; }
 
 namespace br::render {
 
@@ -26,7 +27,8 @@ public:
         const Components::InstanceTransforms* instanceTransforms = nullptr;
     };
 
-    void Configure(ObjectManager* objects, ViewManager* views, LightManager* lights) noexcept;
+    void Configure(ObjectManager* objects, ViewManager* views, LightManager* lights,
+        SceneRenderableResidencyService* renderables) noexcept;
     [[nodiscard]] bool Available() const noexcept;
 
     void Destroy(flecs::entity entity) const;
@@ -47,6 +49,7 @@ private:
     ObjectManager* m_objects = nullptr;
     ViewManager* m_views = nullptr;
     LightManager* m_lights = nullptr;
+    SceneRenderableResidencyService* m_renderables = nullptr;
 };
 
 } // namespace br::render

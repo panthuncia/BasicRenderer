@@ -1,42 +1,38 @@
 #include "Resources/Sampler.h"
-#include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Render/Runtime/IDescriptorService.h"
 
 std::shared_ptr<Sampler> Sampler::m_defaultSampler = nullptr;
 std::shared_ptr<Sampler> Sampler::m_defaultShadowSampler = nullptr;
 std::unordered_map<rhi::SamplerDesc, std::shared_ptr<Sampler>, rhi::SamplerDescHash, rhi::SamplerDescEq> Sampler::m_samplerCache;
 
-Sampler::Sampler(rhi::SamplerDesc samplerDesc, bool createDescriptor)
-	: m_index(0), m_hasDescriptorIndex(false), m_samplerDesc(samplerDesc) {
-	if (createDescriptor) {
-		m_index = org::runtime::CreateIndexedSamplerFromActiveDescriptorService(m_samplerDesc);
-		m_hasDescriptorIndex = true;
-	}
-}
+Sampler::Sampler(rhi::SamplerDesc samplerDesc)
+	: m_index(0), m_hasDescriptorIndex(false), m_samplerDesc(samplerDesc) {}
 
 std::shared_ptr<Sampler> Sampler::CreateSampler(rhi::SamplerDesc samplerDesc) {
 	auto it = m_samplerCache.find(samplerDesc);
 	if (it != m_samplerCache.end()) {
 		return it->second;
 	}
-	return std::shared_ptr<Sampler>(new Sampler(samplerDesc, true));
+	auto sampler = std::shared_ptr<Sampler>(new Sampler(samplerDesc));
+	m_samplerCache.emplace(samplerDesc, sampler);
+	return sampler;
 }
 
 std::shared_ptr<Sampler> Sampler::CreateCpuOnlySampler(rhi::SamplerDesc samplerDesc) {
-	return std::shared_ptr<Sampler>(new Sampler(samplerDesc, false));
+	return std::shared_ptr<Sampler>(new Sampler(samplerDesc));
 }
 
-bool Sampler::CanCreateDescriptorSamplers() {
-	return org::runtime::GetActiveDescriptorService() != nullptr;
-}
-
-UINT Sampler::GetDescriptorIndex() const {
-	if (m_hasDescriptorIndex.load(std::memory_order_acquire)) {
+UINT Sampler::GetDescriptorIndex(org::runtime::IDescriptorService& descriptorService) const {
+	if (m_hasDescriptorIndex.load(std::memory_order_acquire) &&
+		m_descriptorOwner.load(std::memory_order_acquire) == &descriptorService) {
 		return m_index;
 	}
 
 	std::lock_guard<std::mutex> lock(m_descriptorMutex);
-	if (!m_hasDescriptorIndex.load(std::memory_order_relaxed)) {
-		m_index = org::runtime::CreateIndexedSamplerFromActiveDescriptorService(m_samplerDesc);
+	if (!m_hasDescriptorIndex.load(std::memory_order_relaxed) ||
+		m_descriptorOwner.load(std::memory_order_relaxed) != &descriptorService) {
+		m_index = descriptorService.CreateIndexedSampler(m_samplerDesc);
+		m_descriptorOwner.store(&descriptorService, std::memory_order_release);
 		m_hasDescriptorIndex.store(true, std::memory_order_release);
 	}
 	return m_index;
@@ -62,11 +58,9 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 
 		// Headless import/preprocess tools still need material texture metadata,
 		// but have no active GPU descriptor service. Keep the sampler description
-		// CPU-only; GetDescriptorIndex() will materialize it lazily if the asset is
+		// CPU-only; GetDescriptorIndex(service) materializes it lazily if the asset is
 		// subsequently used by a renderer with an active descriptor service.
-		m_defaultSampler = CanCreateDescriptorSamplers()
-			? Sampler::CreateSampler(samplerDesc)
-			: Sampler::CreateCpuOnlySampler(samplerDesc);
+		m_defaultSampler = Sampler::CreateSampler(samplerDesc);
 	}
 	return m_defaultSampler;
 }

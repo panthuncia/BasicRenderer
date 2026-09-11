@@ -2,6 +2,7 @@
 #include <stdexcept>
 
 #include "Render/Pipeline/PipelineRecipe.h"
+#include "Render/DepthHistoryService.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 
 namespace {
@@ -33,6 +34,63 @@ void TestResolverSnapshotLifetime()
     Require(!lifetime.expired(), "queued snapshot must outlive its resolver");
     retained.reset();
     Require(lifetime.expired(), "declaration cache must not own itself through dependency identity");
+}
+
+std::shared_ptr<org::PixelBuffer> MakeHistoryResource()
+{
+    org::TextureDescription description;
+    description.format = rhi::Format::R32_Float;
+    description.imageDimensions.push_back({ 16u, 16u, 0u, 0u });
+    description.hasSRV = true;
+    return org::PixelBuffer::CreateSharedUnmaterialized(description);
+}
+
+void TestDepthHistoryReservationOwnership()
+{
+    auto resource = MakeHistoryResource();
+    auto views = std::make_shared<br::render::PublishedViewFamilyState>();
+    views->views.push_back({ .id = 17, .linearDepthMap = resource });
+
+    auto service = std::make_unique<br::render::DepthHistoryPublicationService>();
+    auto first = service->ReserveDepthHistoryPublication(views, 41);
+    auto pending = service->Select(17, resource);
+    Require(pending && pending.producerFrameNumber == 41,
+        "an accepted producer must immediately become selectable history");
+    Require(pending.producerSubmissionID == 0,
+        "unsubmitted history must expose an unresolved submission dependency");
+
+    first->Submitted({ .submissionID = 73 });
+    auto submitted = service->Select(17, resource);
+    Require(submitted && submitted.producerSubmissionID == 73,
+        "submission must resolve the selected history dependency");
+
+    auto second = service->ReserveDepthHistoryPublication(views, 42);
+    auto selectedSecond = service->Select(17, resource);
+    Require(selectedSecond && selectedSecond.producerFrameNumber == 42,
+        "the immediate pending predecessor must supersede older published history");
+    second->Abandoned(org::AbandonReason::PreparationFailed);
+    Require(!selectedSecond,
+        "cancelling a producer must invalidate selections already copied by consumers");
+    auto restored = service->Select(17, resource);
+    Require(restored && restored.producerFrameNumber == 41,
+        "cancelling pending history must reveal the last submitted compatible producer");
+
+    auto stale = service->ReserveDepthHistoryPublication(views, 43);
+    auto staleSelection = service->Select(17, resource);
+    service->Clear();
+    Require(!staleSelection, "a generation boundary must invalidate copied history selections");
+    stale->Submitted({ .submissionID = 74 });
+    Require(!service->Select(17, resource),
+        "a delayed callback from an old generation must not republish history");
+
+    auto retainedSubmission = service->ReserveDepthHistoryPublication(views, 44);
+    auto retainedSelection = service->Select(17, resource);
+    auto retainedCancellation = service->ReserveDepthHistoryPublication(views, 45);
+    service.reset();
+    retainedSubmission->Submitted({ .submissionID = 75 });
+    Require(retainedSelection && retainedSelection.dependency->submissionID == 75,
+        "delayed history callbacks must retain their service state");
+    retainedCancellation->Abandoned(org::AbandonReason::Shutdown);
 }
 
 void TestDemoPreset()
@@ -140,6 +198,7 @@ int main()
 {
     try {
         TestResolverSnapshotLifetime();
+        TestDepthHistoryReservationOwnership();
         TestDemoPreset();
         TestSarpPreset();
         TestGeometryMaterialProducerPreset();

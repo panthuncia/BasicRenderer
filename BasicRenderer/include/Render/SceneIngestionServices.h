@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <unordered_map>
 #include <DirectXMath.h>
 #include <flecs.h>
@@ -39,9 +41,25 @@ struct SceneIngestionConfiguration {
 // Services used to turn immutable artifact descriptions into publishable GPU
 // versions. Reservations created here are owned by the resulting transaction.
 struct ArtifactExecutionAccess {
-    org::runtime::IUploadService* uploads = nullptr;
-    org::runtime::IDescriptorService* descriptors = nullptr;
+    struct Generation {
+        Generation(
+            std::shared_ptr<org::runtime::IUploadService> uploadOwner,
+            std::shared_ptr<org::runtime::IDescriptorService> descriptorOwner) noexcept
+            : uploads(std::move(uploadOwner)), descriptors(std::move(descriptorOwner)) {}
+
+        std::atomic<std::shared_ptr<org::runtime::IUploadService>> uploads;
+        std::atomic<std::shared_ptr<org::runtime::IDescriptorService>> descriptors;
+    };
+
     RendererStateRequestService* stateRequests = nullptr;
+    std::shared_ptr<Generation> generation;
+
+    [[nodiscard]] std::shared_ptr<org::runtime::IUploadService> RetainUploads() const noexcept {
+        return generation ? generation->uploads.load(std::memory_order_acquire) : std::shared_ptr<org::runtime::IUploadService>{};
+    }
+    [[nodiscard]] std::shared_ptr<org::runtime::IDescriptorService> RetainDescriptors() const noexcept {
+        return generation ? generation->descriptors.load(std::memory_order_acquire) : std::shared_ptr<org::runtime::IDescriptorService>{};
+    }
 };
 
 // Capability set retained by the host's asynchronous static-scene producer.

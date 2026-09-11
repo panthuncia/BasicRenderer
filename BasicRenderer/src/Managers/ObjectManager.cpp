@@ -391,11 +391,11 @@ void ObjectManager::StartDeferredRetireWorker() {
 
 void ObjectManager::SetRendererStateServices(
 	br::render::RendererStateRequestService* requests,
-	org::runtime::IUploadService* uploads, std::uint32_t framesInFlight) {
+	std::shared_ptr<org::runtime::IUploadService> uploads, std::uint32_t framesInFlight) {
 	m_rendererStateRequests = requests;
-	m_uploadService = uploads;
+	m_uploadService = std::move(uploads);
 	m_graphFramesInFlight = (std::max)(framesInFlight, 1u);
-	if (!requests || !uploads || !m_graphBufferBindings.empty()) return;
+	if (!requests || !m_uploadService || !m_graphBufferBindings.empty()) return;
 
 	const std::array definitions{
 		std::tuple{ ResourceIdentifier{ Builtin::PerObjectBuffer }, m_perObjectBuffers,
@@ -574,7 +574,8 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 		desiredRevisions[bindingIndex] = revision;
 		if (binding.submittedVersion.revision != revision) {
 			auto input = std::make_shared<br::render::VersionedGpuBufferBuildInput>();
-			input->uploadService = m_uploadService;
+			input->uploadOwner = m_uploadService;
+			input->uploadService = input->uploadOwner.get();
 			input->debugName = "Published::" + binding.identifier.ToString();
 			input->writeSequence = capture.writeSequence;
 			input->elementStride = binding.elementStride;
@@ -607,7 +608,8 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 	bool visibilityIntentPending = false;
 	if (m_visibilityGenerationSubmittedVersion.revision != visibilityRevision) {
 		auto input = std::make_shared<br::render::VersionedGpuBufferBuildInput>();
-		input->uploadService = m_uploadService;
+		input->uploadOwner = m_uploadService;
+		input->uploadService = input->uploadOwner.get();
 		input->debugName = "Published::DrawRecordVisibilityGeneration";
 		input->writeSequence = visibilityCapture.writeSequence;
 		input->elementStride = sizeof(std::uint32_t);
@@ -658,7 +660,8 @@ std::uint64_t ObjectManager::PublishDesiredBufferState() {
 		const auto revision = (std::max<std::uint64_t>)(capture.writeSequence, 1u);
 		if (submittedVersion.revision == revision) return true;
 		auto input = std::make_shared<br::render::VersionedGpuBufferBuildInput>();
-		input->uploadService = m_uploadService;
+		input->uploadOwner = m_uploadService;
+		input->uploadService = input->uploadOwner.get();
 		input->debugName = std::string(debugName);
 		input->writeSequence = capture.writeSequence;
 		input->elementStride = stride;

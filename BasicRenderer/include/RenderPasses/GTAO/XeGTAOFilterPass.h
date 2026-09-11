@@ -7,8 +7,8 @@
 #include "ThirdParty/XeGTAO.h"
 #include "Resources/PixelBuffer.h"
 #include <Resources/Buffers/Buffer.h>
-#include "Render/Runtime/DescriptorServiceAccess.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/IDescriptorService.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
 struct GTAOFilterBindings {
@@ -44,7 +44,7 @@ public:
             static_cast<unsigned int>(updateContext->frameNumber),
             updateContext->primaryCamera);
 
-        BUFFER_UPLOAD(
+        UploadBufferData(
             &gtaoInfo,
             sizeof(GTAOInfo),
             org::runtime::UploadTarget::FromHandle(m_gtaoConstantsHandle),
@@ -112,7 +112,7 @@ private:
         samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
         samplerDesc.minLod = 0.0f;
         samplerDesc.maxLod = 0.0f;
-        m_samplerIndex = org::runtime::CreateIndexedSamplerFromActiveDescriptorService(samplerDesc);
+        m_samplerIndex = DescriptorService().CreateIndexedSampler(samplerDesc);
     }
 
     void CreateXeGTAOComputePSO()

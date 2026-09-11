@@ -12,7 +12,6 @@
 #include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
 
 namespace {
@@ -934,6 +933,7 @@ void DynamicBuffer::StageOrUploadLocked(const void* data, size_t size, size_t of
         return;
     }
 
+    EnsureUploadPolicyRegistration();
     if (org::runtime::GetActiveUploadPolicyService() == nullptr) {
         SyncUploadPolicyState();
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
@@ -941,7 +941,7 @@ void DynamicBuffer::StageOrUploadLocked(const void* data, size_t size, size_t of
 #else
         m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
-        BUFFER_UPLOAD(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+        UploadBufferData(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset, __FILE__, __LINE__);
         return;
     }
 
@@ -958,7 +958,7 @@ void DynamicBuffer::StageOrUploadLocked(const void* data, size_t size, size_t of
         return;
     }
 
-    BUFFER_UPLOAD(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+    UploadBufferData(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset, __FILE__, __LINE__);
 }
 
 void DynamicBuffer::EnsureCpuShadowSize(size_t size) {
@@ -1244,9 +1244,9 @@ void DynamicBuffer::ApplyResizeBackingLocked(std::unique_ptr<GpuBufferBacking> n
             // replacement must come from that shadow, not from the upload-policy
             // coalescing mirror, because long-lived sparse buffers can contain
             // bytes written through bulk or external upload paths.
-            if (org::runtime::GetActiveUploadService() != nullptr) {
+            if (RetainUploadService() != nullptr) {
                 BT_ZONE_SCOPE("DynamicBuffer::ApplyResizeBackingLocked::ReplayCpuShadowUploadService");
-                BUFFER_UPLOAD(m_cpuShadowData.data(), replayBytes, org::runtime::UploadTarget::FromShared(shared_from_this()), 0u);
+                UploadBufferData(m_cpuShadowData.data(), replayBytes, org::runtime::UploadTarget::FromShared(shared_from_this()), 0u, __FILE__, __LINE__);
                 spdlog::debug(
                     "DynamicBuffer '{}' id={} GrowBuffer replayed CPU shadow bytes={}",
                     m_name,

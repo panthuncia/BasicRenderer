@@ -102,6 +102,12 @@ public:
 	void ProxyDevice();
     void Setup();
 	void Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+	// Records using the mode captured by a retained graph generation. This does
+	// not consult the mutable settings/current-mode selection.
+	void EvaluateCaptured(UpscalingMode mode, rhi::CommandList& commandList,
+		const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds,
+		PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget,
+		PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
     void RequestHistoryReset() { m_resetUpscalerHistory = true; }
 	void Shutdown();
 

@@ -14,6 +14,7 @@
 #include "Render/TextureBindingArtifacts.h"
 #include "Resources/Resolvers/PublishedStateResourceResolver.h"
 #include "Render/Runtime/IReadbackService.h"
+#include "Render/Runtime/IDescriptorService.h"
 #include "RenderPasses/Base/CopyPass.h"
 #include "Resources/Buffers/Buffer.h"
 
@@ -21,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 
 #include <tracy/Tracy.hpp>
 #include <BasicTelemetry/Telemetry.h>
@@ -65,7 +67,8 @@ namespace {
 		return totalBytes;
 	}
 
-	TextureStreamingGPUInfo BuildTextureStreamingGPUInfo(const TextureAsset& texture) {
+	TextureStreamingGPUInfo BuildTextureStreamingGPUInfo(const TextureAsset& texture,
+		org::runtime::IDescriptorService& descriptorService) {
 		const TextureStreamingState& state = texture.GetStreamingState();
 		TextureStreamingGPUInfo info = {};
 		if (state.eligible) {
@@ -84,7 +87,7 @@ namespace {
 		info.bindingRevisionLo = static_cast<uint32_t>(state.bindingRevision & 0xffffffffull);
 		info.bindingRevisionHi = static_cast<uint32_t>(state.bindingRevision >> 32u);
 		info.imageDescriptorIndex = TextureSrvIndex(texture.ImagePtr());
-		info.samplerDescriptorIndex = texture.SamplerDescriptorIndex();
+		info.samplerDescriptorIndex = texture.SamplerDescriptorIndex(descriptorService);
 		return info;
 	}
 
@@ -179,6 +182,7 @@ namespace {
 
 TextureStreamingManager::TextureStreamingManager()
 {
+	m_readbackCallbackState->owner = this;
 	TextureStreamingGPUInfo fallback{};
 	m_textureImageTableJournal.Initialize(
 		std::as_bytes(std::span{ &fallback, std::size_t{ 1 } }), 1, 1);
@@ -220,9 +224,10 @@ TextureStreamingManager::~TextureStreamingManager()
 }
 
 void TextureStreamingManager::SetRendererStateRequestService(
-	br::render::RendererStateRequestService* service, org::runtime::IUploadService* uploads)
+	br::render::RendererStateRequestService* service,
+	std::shared_ptr<org::runtime::IUploadService> uploads)
 {
-	m_uploadService = uploads;
+	m_uploadService = std::move(uploads);
 	m_graphBindingObservation.Reset();
 	{
 		std::lock_guard lock(m_graphBindingAwaiterMutex);
@@ -254,6 +259,10 @@ void TextureStreamingManager::SetRendererStateRequestService(
 
 void TextureStreamingManager::Initialize(TextureFactory& textureFactory, uint32_t framesInFlight)
 {
+	{
+		std::lock_guard lock(m_readbackCallbackState->mutex);
+		m_readbackCallbackState->owner = this;
+	}
 	m_framesInFlight = (std::max)(framesInFlight, 1u);
 	if (m_initialized.exchange(true, std::memory_order_acq_rel)) {
 		return;
@@ -284,6 +293,10 @@ void TextureStreamingManager::Initialize(TextureFactory& textureFactory, uint32_
 
 void TextureStreamingManager::Shutdown()
 {
+	{
+		std::lock_guard lock(m_readbackCallbackState->mutex);
+		m_readbackCallbackState->owner = nullptr;
+	}
 	if (!m_initialized.exchange(false, std::memory_order_acq_rel)) {
 		return;
 	}
@@ -585,7 +598,8 @@ void TextureStreamingManager::ApplyRegisterCommand(WorkerCommand&& command)
 				input->streamingTextureID = streamingTextureID;
 				input->bindingRevision = published.bindingRevision;
 				input->streamingStateRevision = texture->GetStreamingStateRevision();
-				input->samplerDescriptorIndex = texture->SamplerDescriptorIndex();
+				if (!m_descriptorService) throw std::runtime_error("TextureStreamingManager: descriptor service unavailable while seeding binding");
+				input->samplerDescriptorIndex = texture->SamplerDescriptorIndex(*m_descriptorService);
 				input->image = published.image;
 				input->streamingMetadata = BuildTextureStreamingGPUInfo(
 					published.streamingState, texture->GetFullMip0Width(), texture->GetFullMip0Height());
@@ -1029,20 +1043,27 @@ std::shared_ptr<RenderPass> TextureStreamingManager::CreateTextureStreamingFeedb
 	const uint64_t fenceValue = m_readbackFenceCounter.fetch_add(1u, std::memory_order_acq_rel) + 1u;
 	return std::make_shared<MaterialTextureStreamingReadbackPass>(
 		std::move(source), std::move(staging), bytes, ExternalTimelinePoint{m_readbackFence, fenceValue},
-		[this, selectedSlot, fenceValue]() {
+		[state = m_readbackCallbackState, selectedSlot, fenceValue]() {
+			std::lock_guard stateLock(state->mutex);
+			auto* owner = state->owner;
+			if (!owner) return;
 			{
-				std::lock_guard lock(m_readbackSlotMutex);
-				if (selectedSlot >= m_readbackSlots.size() || !m_readbackSlots[selectedSlot].inFlight) return;
-				m_readbackSlots[selectedSlot].fenceValue = fenceValue;
+				std::lock_guard lock(owner->m_readbackSlotMutex);
+				if (selectedSlot >= owner->m_readbackSlots.size()
+					|| !owner->m_readbackSlots[selectedSlot].inFlight) return;
+				owner->m_readbackSlots[selectedSlot].fenceValue = fenceValue;
 			}
-			ScheduleDrain();
+			owner->ScheduleDrain();
 		},
-		[this, selectedSlot]() {
-			std::lock_guard lock(m_readbackSlotMutex);
-			if (selectedSlot >= m_readbackSlots.size()) {
+		[state = m_readbackCallbackState, selectedSlot]() {
+			std::lock_guard stateLock(state->mutex);
+			auto* owner = state->owner;
+			if (!owner) return;
+			std::lock_guard lock(owner->m_readbackSlotMutex);
+			if (selectedSlot >= owner->m_readbackSlots.size()) {
 				return;
 			}
-			auto& slot = m_readbackSlots[selectedSlot];
+			auto& slot = owner->m_readbackSlots[selectedSlot];
 			if (slot.inFlight && slot.fenceValue == 0) {
 				slot.activeStreamingTextureIDs.clear();
 				slot.inFlight = false;
@@ -1155,7 +1176,8 @@ void TextureStreamingManager::QueueBindingChanged(TextureAsset& texture, std::sh
 	change.metadata = BuildTextureStreamingGPUInfo(
 		prepared.streamingState, texture.GetFullMip0Width(), texture.GetFullMip0Height());
 	change.metadata.imageDescriptorIndex = TextureSrvIndex(change.newImage);
-	change.metadata.samplerDescriptorIndex = texture.SamplerDescriptorIndex();
+	if (!m_descriptorService) throw std::runtime_error("TextureStreamingManager: descriptor service unavailable while queuing binding");
+	change.metadata.samplerDescriptorIndex = texture.SamplerDescriptorIndex(*m_descriptorService);
 	change.requiresExactGraphPublication = std::ranges::any_of(
 		ownersIt->second, [this](uint64_t bindingID) {
 			const auto owner = m_bindingsByID.find(bindingID);
@@ -1201,7 +1223,7 @@ void TextureStreamingManager::QueueBindingChanged(TextureAsset& texture, std::sh
 		input->streamingTextureID = change.streamingTextureID;
 		input->bindingRevision = change.bindingRevision;
 		input->streamingStateRevision = change.streamingStateRevision;
-		input->samplerDescriptorIndex = texture.SamplerDescriptorIndex();
+		input->samplerDescriptorIndex = texture.SamplerDescriptorIndex(*m_descriptorService);
 		input->image = change.newImage;
 		input->transfer = change.transfer;
 		input->gpuSubmissions = change.transfer->gpuSubmissions;
@@ -1426,8 +1448,9 @@ std::size_t TextureStreamingManager::DrainPendingBindingChanges()
 				input->streamingTextureID = change.streamingTextureID;
 				input->bindingRevision = change.bindingRevision;
 				input->streamingStateRevision = change.streamingStateRevision;
+				if (!m_descriptorService) throw std::runtime_error("TextureStreamingManager: descriptor service unavailable while draining binding");
 				input->samplerDescriptorIndex = change.texture
-					? change.texture->SamplerDescriptorIndex() : 0u;
+					? change.texture->SamplerDescriptorIndex(*m_descriptorService) : 0u;
 				input->image = change.newImage;
 				input->transfer = change.transfer;
 				input->gpuSubmissions = transferSubmission;
@@ -1537,7 +1560,8 @@ std::size_t TextureStreamingManager::DrainPendingBindingChanges()
 			// feedback/requested-mip changes) without superseding the adopted image.
 			// Gating this write on the queued state revision could therefore leave the
 			// stable streaming ID pointing at an older, subsequently retired SRV.
-			const auto publishedMetadata = BuildTextureStreamingGPUInfo(*change.texture);
+			if (!m_descriptorService) throw std::runtime_error("Texture streaming descriptor service generation is unavailable");
+			const auto publishedMetadata = BuildTextureStreamingGPUInfo(*change.texture, *m_descriptorService);
 			// The mutable buffer is only a bootstrap fallback. Once a rendered
 			// image-table epoch exists, updating it duplicates uploads and can race
 			// the exact snapshot selected by the frame.
@@ -1667,7 +1691,7 @@ void TextureStreamingManager::PublishTextureImageTable()
 	}
 	auto capture = m_textureImageTableJournal.CaptureDesired();
 	const auto buffer = m_textureImageTableFamily->RequestCapture(
-		*m_rendererStateRequests, *m_uploadService, m_textureImageTableEpoch,
+		*m_rendererStateRequests, m_uploadService, m_textureImageTableEpoch,
 		std::move(capture));
 	if (!buffer) {
 		basic_telemetry::AddCounter("SARP.TextureStreaming.ImageTableBufferRejected");
@@ -1814,7 +1838,9 @@ bool TextureStreamingManager::UpdateTextureStreamingMetadata(const std::shared_p
 
 	if (bootstrapMetadata) {
 		ZoneScopedN("TextureStreamingManager::UpdateTextureStreamingMetadata::UploadMetadata");
-		if (!m_textureStreamingMetadataBuffer->TryUpdateAt(streamingTextureID, BuildTextureStreamingGPUInfo(*texture))) {
+		if (!m_descriptorService) throw std::runtime_error("Texture streaming descriptor service generation is unavailable");
+		if (!m_textureStreamingMetadataBuffer->TryUpdateAt(streamingTextureID,
+			BuildTextureStreamingGPUInfo(*texture, *m_descriptorService))) {
 			return false;
 		}
 	}
@@ -1877,7 +1903,8 @@ void TextureStreamingManager::FlushPendingTextureImageTableMetadata()
 		const std::uint32_t streamingTextureID = texture->GetStreamingTextureID();
 		if (streamingTextureID == 0u) continue;
 
-		const TextureStreamingGPUInfo metadata = BuildTextureStreamingGPUInfo(*texture);
+		if (!m_descriptorService) throw std::runtime_error("Texture streaming descriptor service generation is unavailable");
+		const TextureStreamingGPUInfo metadata = BuildTextureStreamingGPUInfo(*texture, *m_descriptorService);
 		const auto desiredExtent = (std::max)(m_textureImageTableLogicalExtent,
 			static_cast<std::uint64_t>(streamingTextureID) + 1u);
 		m_textureImageTableJournal.RequestCapacity(desiredExtent);

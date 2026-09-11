@@ -327,7 +327,10 @@ public:
 		std::scoped_lock lock(m_uploadAdvanceMutex);
 		m_sampler = sampler ? std::move(sampler) : Sampler::GetDefaultSampler();
 	}
-    UINT SamplerDescriptorIndex() const { std::scoped_lock lock(m_uploadAdvanceMutex); return m_sampler->GetDescriptorIndex(); }
+    UINT SamplerDescriptorIndex(org::runtime::IDescriptorService& descriptorService) const {
+        std::scoped_lock lock(m_uploadAdvanceMutex);
+        return m_sampler->GetDescriptorIndex(descriptorService);
+    }
 
     const TextureFileMeta& Meta() const { return m_meta; }
     TextureFileMeta& Meta() { return m_meta; }

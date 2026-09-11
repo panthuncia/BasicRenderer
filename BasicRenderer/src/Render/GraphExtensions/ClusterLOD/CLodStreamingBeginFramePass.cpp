@@ -7,7 +7,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/PassBuilders.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Managers/UploadInstance.h"
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
@@ -116,7 +116,7 @@ void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& execution
         const bool activeGroupsBitsUploadPending = m_getActiveGroupsBitsUpload
             && m_getActiveGroupsBitsUpload(m_activeGroupsBitsUploadScratch, activeGroupScanCount);
         if (activeGroupsBitsUploadPending && !m_activeGroupsBitsUploadScratch.empty()) {
-            BUFFER_UPLOAD(
+            UploadBufferData(
                 m_activeGroupsBitsUploadScratch.data(),
                 static_cast<uint32_t>(m_activeGroupsBitsUploadScratch.size() * sizeof(uint32_t)),
                 org::runtime::UploadTarget::FromShared(m_activeGroupsBits),
@@ -130,7 +130,7 @@ void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& execution
         state.activeGroupScanCount = activeGroupScanCount;
         state.unloadAfterFrames = 0u;
         state.activeGroupsBitsetWordCount = CLodBitsetWordCount(activeGroupScanCount);
-        BUFFER_UPLOAD(
+        UploadBufferData(
             &state,
             sizeof(CLodStreamingRuntimeState),
             org::runtime::UploadTarget::FromShared(m_runtimeState),

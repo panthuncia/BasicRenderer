@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <string_view>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -27,6 +28,7 @@
 #include "Render/TextureBindingArtifacts.h"
 #include "Render/VersionedGpuBufferArtifacts.h"
 #include "Render/Runtime/IUploadService.h"
+#include "Render/Runtime/IDescriptorService.h"
 #include "Resources/Resolvers/PublishedStateResourceResolver.h"
 
 namespace {
@@ -325,6 +327,7 @@ namespace {
         const std::shared_ptr<TextureAsset>& texture,
         TextureFactory* textureFactory,
         MaterialManager* materialManager,
+		org::runtime::IDescriptorService& descriptorService,
         std::shared_ptr<ResourceGroup>& textureGroup,
         std::vector<std::shared_ptr<TextureAsset>>& retainedTextures,
         bool generateMipmaps,
@@ -353,7 +356,7 @@ namespace {
         }
         if (auto image = texture->ImagePtr()) {
             textureIndex = image->GetSRVInfo(0).slot.index;
-            samplerIndex = texture->SamplerDescriptorIndex();
+            samplerIndex = texture->SamplerDescriptorIndex(descriptorService);
             if (texture->IsUsingFallbackImage()) {
                 static std::atomic_uint32_t fallbackImageWarningCount{ 0 };
                 const uint32_t warningIndex = fallbackImageWarningCount.fetch_add(1, std::memory_order_relaxed);
@@ -482,6 +485,9 @@ TerrainManager::TerrainManager()
 
 std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, TextureFactory* textureFactory, MaterialManager* materialManager)
 {
+    if (!m_descriptorService) {
+        throw std::runtime_error("TerrainManager: descriptor service unavailable while activating terrain");
+    }
     const auto totalBegin = std::chrono::steady_clock::now();
     ClearActiveTerrain();
     m_textureStreamingManager = materialManager ? materialManager->GetTextureStreamingManager() : nullptr;
@@ -546,6 +552,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                 source.diffuse,
                 textureFactory,
                 materialManager,
+                *m_descriptorService,
                 m_textureGroup,
                 m_layerTextures,
                 true,
@@ -571,6 +578,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                     source.normal,
                     textureFactory,
                     materialManager,
+                    *m_descriptorService,
                     m_textureGroup,
                     m_layerTextures,
                     true,
@@ -597,6 +605,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                 source.height,
                 textureFactory,
                 materialManager,
+                *m_descriptorService,
                 m_textureGroup,
                 m_layerTextures,
                 true,
@@ -622,6 +631,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                 source.rmaos,
                 textureFactory,
                 materialManager,
+                *m_descriptorService,
                 m_textureGroup,
                 m_layerTextures,
                 true,
@@ -652,6 +662,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                     source.stochastic.diffuse.gaussian,
                     textureFactory,
                     materialManager,
+                    *m_descriptorService,
                     m_textureGroup,
                     m_layerTextures,
                     true,
@@ -665,6 +676,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                     source.stochastic.diffuse.inverseLut,
                     textureFactory,
                     materialManager,
+                    *m_descriptorService,
                     m_textureGroup,
                     m_layerTextures,
                     false,
@@ -710,6 +722,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                     source.stochastic.normal.gaussian,
                     textureFactory,
                     materialManager,
+                    *m_descriptorService,
                     m_textureGroup,
                     m_layerTextures,
                     true,
@@ -723,6 +736,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                     source.stochastic.normal.inverseLut,
                     textureFactory,
                     materialManager,
+                    *m_descriptorService,
                     m_textureGroup,
                     m_layerTextures,
                     false,
@@ -742,6 +756,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                     source.stochastic.height.gaussian,
                     textureFactory,
                     materialManager,
+                    *m_descriptorService,
                     m_textureGroup,
                     m_layerTextures,
                     true,
@@ -755,6 +770,7 @@ std::uint32_t TerrainManager::SetActiveTerrain(const TerrainMaterialDesc& desc, 
                     source.stochastic.height.inverseLut,
                     textureFactory,
                     materialManager,
+                    *m_descriptorService,
                     m_textureGroup,
                     m_layerTextures,
                     false,
@@ -975,7 +991,7 @@ void TerrainManager::RequestGraphState()
 {
 	if (!m_rendererStateRequests || !m_uploadService || m_terrainRowsRevision == 0) return;
 	auto* requests = static_cast<br::render::RendererStateRequestService*>(m_rendererStateRequests);
-	auto* uploads = static_cast<org::runtime::IUploadService*>(m_uploadService);
+	auto uploads = m_uploadService;
 	const std::array<br::render::ArtifactKey, 6> keys{
 		br::render::ArtifactKey{ br::render::ArtifactKind::BufferVersion, 0, br::render::kTerrainSetsVariant },
 		br::render::ArtifactKey{ br::render::ArtifactKind::BufferVersion, 0, br::render::kTerrainLayersVariant },
@@ -1004,7 +1020,7 @@ void TerrainManager::RequestGraphState()
 	ensureFamily(5, keys[5], "Published::Terrain::WeightBlocks", m_weightBlockData);
 	std::array<br::render::ArtifactRequestResult, 6> bufferRequests{};
 	const auto requestBuffer = [&](std::size_t index, const auto& values) {
-		bufferRequests[index] = m_bufferFamilies[index]->RequestSnapshot(*requests, *uploads,
+		bufferRequests[index] = m_bufferFamilies[index]->RequestSnapshot(*requests, uploads,
 			m_terrainRowsRevision, std::as_bytes(std::span(values)), values.size());
 	};
 	requestBuffer(0, sets);
@@ -1024,7 +1040,8 @@ void TerrainManager::RequestGraphState()
 	input->terrainGeneration = m_terrainGeneration;
 	input->baseLayers = m_layerData;
 	input->requestService = requests;
-	input->uploadService = uploads;
+	input->uploadOwner = uploads;
+	input->uploadService = input->uploadOwner.get();
 	input->layerBufferFamily = m_bufferFamilies[1];
 	for (std::size_t index = 0; index < bufferRequests.size(); ++index)
 		input->bufferVersions[index] = bufferRequests[index].version;

@@ -5,7 +5,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 
@@ -48,7 +48,7 @@ void AVBOITOccupancyHistogramPass::Update(const UpdateExecutionContext& executio
     }
 
     const std::array<uint32_t, CLodAVBOITDefaultVirtualSliceCount> zeroHistogram{};
-    BUFFER_UPLOAD(
+    UploadBufferData(
         zeroHistogram.data(),
         sizeof(zeroHistogram),
         org::runtime::UploadTarget::FromShared(m_occupancyHistogramBuffer),

@@ -5,7 +5,7 @@
 #include "Render/RenderContext.h"
 #include "Resources/PixelBuffer.h"
 #include "ThirdParty/XeGTAO.h"
-#include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Render/Runtime/IDescriptorService.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
 struct GTAOMainBindings {
@@ -99,7 +99,7 @@ private:
         samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
         samplerDesc.minLod = 0.0f;
         samplerDesc.maxLod = 0.0f;
-        m_samplerIndex = org::runtime::CreateIndexedSamplerFromActiveDescriptorService(samplerDesc);
+        m_samplerIndex = DescriptorService().CreateIndexedSampler(samplerDesc);
     }
 
     void CreateXeGTAOComputePSO() {

@@ -25,7 +25,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingReadbackSources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodDirectStorageLaunchPass.h"
 #include "Render/Runtime/ExternalSignalReservation.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Managers/UploadInstance.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Render/MemoryIntrospectionAPI.h"
@@ -329,7 +329,9 @@ namespace {
         std::span<const ExternalTimelinePoint> SignalsAfterCompletion() const override {
             return {&m_signal, 1u};
         }
-        void Submitted(org::SubmissionContext) const override { m_resolved.store(true); }
+        void Submitted(org::SubmissionContext) const override {
+            (void)m_resolved.exchange(true, std::memory_order_acq_rel);
+        }
         void Abandoned(org::AbandonReason) const override {
             if (m_resolved.exchange(true)) return;
             for (const auto& batch : m_batches) {
@@ -494,7 +496,9 @@ namespace {
         std::span<const ExternalTimelinePoint> SignalsAfterCompletion() const override {
             return {&m_signal, 1u};
         }
-        void Submitted(org::SubmissionContext) const override { m_resolved.store(true); }
+        void Submitted(org::SubmissionContext) const override {
+            (void)m_resolved.exchange(true, std::memory_order_acq_rel);
+        }
         void Abandoned(org::AbandonReason) const override {
             if (!m_resolved.exchange(true) && m_cancel) m_cancel();
         }
@@ -1915,7 +1919,7 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
             RenderGraph::ExternalPassDesc::Compute(
                 "CLod::StreamingFeedbackSort",
                 feedbackSortPass)
-                .At(RenderGraph::ExternalInsertPoint::After("PresentPass"))
+                .At(RenderGraph::ExternalInsertPoint::After("PresentationReadyPass"))
                 .PreferQueue(QueueKind::Graphics));
     }
 
@@ -2003,14 +2007,16 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
             RequestStreamingFrameWork();
             return { m_streamingReadbackFenceHandle, fenceValue };
         },
-        [this](uint32_t selectedSlot) {
-            if (selectedSlot >= m_readbackStagingSlots.size()) return;
+        [wakeState = m_streamingWakeState](uint32_t selectedSlot) {
+            std::lock_guard lock(wakeState->mutex);
+            auto* owner = wakeState->owner;
+            if (!owner || selectedSlot >= owner->m_readbackStagingSlots.size()) return;
             auto expected = ReadbackStagingSlot::State::Recording;
-            if (m_readbackStagingSlots[selectedSlot].state.compare_exchange_strong(
+            if (owner->m_readbackStagingSlots[selectedSlot].state.compare_exchange_strong(
                 expected, ReadbackStagingSlot::State::Free,
                 std::memory_order_acq_rel, std::memory_order_acquire)) return;
             expected = ReadbackStagingSlot::State::Submitted;
-            m_readbackStagingSlots[selectedSlot].state.compare_exchange_strong(
+            owner->m_readbackStagingSlots[selectedSlot].state.compare_exchange_strong(
                 expected, ReadbackStagingSlot::State::Free,
                 std::memory_order_acq_rel, std::memory_order_acquire);
         });
@@ -2020,7 +2026,7 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
             "CLod::StreamingReadbackCopy",
             readbackPass)
             .At(RenderGraph::ExternalInsertPoint::After(
-                hasStreamingFeedbackSort ? "CLod::StreamingFeedbackSort" : "PresentPass"))
+                hasStreamingFeedbackSort ? "CLod::StreamingFeedbackSort" : "PresentationReadyPass"))
             .PreferQueue(QueueKind::Graphics));
 
     CLodDirectStorageLaunchInputs launchInputs{};
@@ -2066,7 +2072,7 @@ void CLodStreamingSystem::GatherStructuralTailPasses(RenderGraph& rg, std::vecto
         RenderGraph::ExternalPassDesc::Copy(
             "CLod::DirectStorageLaunch",
             std::make_shared<CLodDirectStorageLaunchPass>(std::move(launchInputs)))
-            .At(RenderGraph::ExternalInsertPoint::After("PresentPass"))
+            .At(RenderGraph::ExternalInsertPoint::After("PresentationReadyPass"))
             .PreferQueue(QueueKind::Graphics));
 }
 
@@ -3263,10 +3269,7 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, ICLodGe
 }
 
 uint64_t CLodStreamingSystem::StreamingUploadVisibilityDelayTicks() const {
-    const uint32_t framesInFlight = static_cast<uint32_t>(std::max<uint8_t>(
-        org::runtime::GetOpenRenderGraphSettings().numFramesInFlight,
-        uint8_t{1}));
-    return static_cast<uint64_t>(std::max<uint32_t>(m_streamingReadbackRingSize, framesInFlight) + 2u);
+    return static_cast<uint64_t>(m_streamingReadbackRingSize + 2u);
 }
 
 void CLodStreamingSystem::RecordNonResidentBitsUploadQueued() {
@@ -4504,11 +4507,7 @@ void CLodStreamingSystem::RetirePhysicalPage(uint32_t page, ICLodGeometryStorage
 
     if (m_pageState[page] == CLodPhysicalPageState::Retiring) {
         if (page < m_pageRetireAfterTick.size()) {
-            const uint32_t framesInFlight = static_cast<uint32_t>(std::max<uint8_t>(
-                org::runtime::GetOpenRenderGraphSettings().numFramesInFlight,
-                uint8_t{1}));
-            const uint64_t retireDelayTicks = static_cast<uint64_t>(
-                std::max<uint32_t>(m_streamingReadbackRingSize, framesInFlight) + 2u);
+            const uint64_t retireDelayTicks = static_cast<uint64_t>(m_streamingReadbackRingSize + 2u);
             m_pageRetireAfterTick[page] = std::max(m_pageRetireAfterTick[page], m_streamingDiagnosticTick + retireDelayTicks);
         }
         if (pinned && page < m_pageRetirePinned.size()) {
@@ -4556,11 +4555,7 @@ void CLodStreamingSystem::RetirePhysicalPage(uint32_t page, ICLodGeometryStorage
     m_pageState[page] = CLodPhysicalPageState::Retiring;
     m_retiringPhysicalPages.push_back(page);
     if (page < m_pageRetireAfterTick.size()) {
-        const uint32_t framesInFlight = static_cast<uint32_t>(std::max<uint8_t>(
-            org::runtime::GetOpenRenderGraphSettings().numFramesInFlight,
-            uint8_t{1}));
-        const uint64_t retireDelayTicks = static_cast<uint64_t>(
-            std::max<uint32_t>(m_streamingReadbackRingSize, framesInFlight) + 2u);
+        const uint64_t retireDelayTicks = static_cast<uint64_t>(m_streamingReadbackRingSize + 2u);
         m_pageRetireAfterTick[page] = m_streamingDiagnosticTick + retireDelayTicks;
     }
     if (page < m_pageRetirePinned.size()) {

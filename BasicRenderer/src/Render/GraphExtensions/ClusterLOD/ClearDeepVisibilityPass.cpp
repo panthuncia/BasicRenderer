@@ -5,7 +5,7 @@
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 
@@ -41,14 +41,14 @@ void ClearDeepVisibilityPass::Update(const UpdateExecutionContext& executionCont
 
     const uint32_t zero = 0u;
     if (m_deepVisibilityCounterBuffer) {
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_deepVisibilityCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_deepVisibilityCounterBuffer), 0);
     }
     if (m_deepVisibilityOverflowCounterBuffer) {
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_deepVisibilityOverflowCounterBuffer), 0);
+        UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_deepVisibilityOverflowCounterBuffer), 0);
     }
     if (m_deepVisibilityStatsBuffer) {
         const CLodDeepVisibilityStats zeroStats{};
-        BUFFER_UPLOAD(&zeroStats, sizeof(CLodDeepVisibilityStats), org::runtime::UploadTarget::FromShared(m_deepVisibilityStatsBuffer), 0);
+        UploadBufferData(&zeroStats, sizeof(CLodDeepVisibilityStats), org::runtime::UploadTarget::FromShared(m_deepVisibilityStatsBuffer), 0);
     }
 
     std::vector<std::shared_ptr<PixelBuffer>> headPointerTextures;

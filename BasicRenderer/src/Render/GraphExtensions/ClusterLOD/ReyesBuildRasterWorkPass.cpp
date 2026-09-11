@@ -5,7 +5,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "BuiltinResources.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "ShaderBuffers.h"
@@ -140,7 +140,7 @@ void ReyesBuildRasterWorkPass::Update(const UpdateExecutionContext& executionCon
 {
     (void)executionContext;
     const uint32_t zero = 0u;
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_rasterWorkCounterBuffer), 0);
+    UploadBufferData(&zero, sizeof(uint32_t), org::runtime::UploadTarget::FromShared(m_rasterWorkCounterBuffer), 0);
 }
 
 br::render::PreparedComputeIndirect ReyesBuildRasterWorkPass::Prepare(

@@ -14,6 +14,9 @@ public:
 	static std::shared_ptr<MeshInstance> CreateShared(std::shared_ptr<Mesh> mesh) {
 		return std::shared_ptr<MeshInstance>(new MeshInstance(mesh));
 	}
+    // Capture editable instance state while retaining immutable mesh and
+    // material artifacts. The copy owns no manager registration or views.
+    static std::shared_ptr<MeshInstance> CreateFrozenCopy(const MeshInstance& source);
     static std::unique_ptr<MeshInstance> CreateUnique(std::shared_ptr<Mesh> mesh) {
         return std::unique_ptr<MeshInstance>(new MeshInstance(mesh));
     }

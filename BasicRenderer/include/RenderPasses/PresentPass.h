@@ -44,3 +44,14 @@ public:
 	}
 	static void Record(org::PassRecordContext&) {}
 };
+
+// Terminal scene-graph declaration. It freezes the slot-owned presentation
+// image in CopySource state; swapchain acquisition, destination transitions,
+// copying, and Present belong to the FIFO presentation tail.
+class PresentationReadyPass : public org::TypedRenderGraphPass<PresentationReadyPass> {
+public:
+	void Declare(org::PassBuilder& builder) {
+		builder.BindCopySource(ResourceIdentifier{Builtin::PresentationColor});
+	}
+	static void Record(org::PassRecordContext&) {}
+};

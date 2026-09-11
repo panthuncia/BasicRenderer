@@ -139,7 +139,8 @@ void SaveTextureReadbackToDds(
 }
 
 ReadbackManager::ReadbackManager() {
-    m_readbackPass = std::make_shared<ReadbackPass>(*this);
+    m_state = std::make_shared<State>();
+    m_readbackPass = std::make_shared<ReadbackPass>(m_state);
 }
 
 void ReadbackManager::Initialize(rhi::Timeline readbackFence) {
@@ -151,8 +152,9 @@ void ReadbackManager::Initialize(rhi::Timeline readbackFence) {
 }
 
 void ReadbackManager::RequestReadback(std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
-    std::scoped_lock lock(m_mutex);
-    m_queuedReadbacks.push_back(ReadbackInfo{
+    std::scoped_lock lock(m_state->mutex);
+    if (!m_state->accepting) return;
+    m_state->queuedReadbacks.push_back(ReadbackInfo{
         .cubemap = cubemap,
         .texture = std::move(texture),
         .outputFile = std::move(outputFile),
@@ -161,27 +163,28 @@ void ReadbackManager::RequestReadback(std::shared_ptr<PixelBuffer> texture, std:
 }
 
 void ReadbackManager::ClearReadbacks() {
-    std::scoped_lock lock(m_mutex);
-    m_queuedReadbacks.clear();
+    std::scoped_lock lock(m_state->mutex);
+    m_state->queuedReadbacks.clear();
 }
 
 void ReadbackManager::Cleanup() {
-    std::scoped_lock lock(m_mutex);
-    m_queuedReadbacks.clear();
-    m_readbackRequests.clear();
+    std::scoped_lock lock(m_state->mutex);
+    m_state->accepting = false;
+    m_state->queuedReadbacks.clear();
+    m_state->readbackRequests.clear();
     m_readbackPass.reset();
 }
 
 bool ReadbackManager::ReadbackPass::DeclaredResourcesChanged() const
 {
-    std::scoped_lock lock(m_owner.m_mutex);
-    return !m_owner.m_queuedReadbacks.empty();
+    std::scoped_lock lock(m_state->mutex);
+    return m_state->accepting && !m_state->queuedReadbacks.empty();
 }
 
 void ReadbackManager::ReadbackPass::Declare(org::PassBuilder& builder)
 {
-    std::scoped_lock lock(m_owner.m_mutex);
-    for (const auto& readback : m_owner.m_queuedReadbacks)
+    std::scoped_lock lock(m_state->mutex);
+    for (const auto& readback : m_state->queuedReadbacks)
         if (readback.texture) builder.WithCopySource(readback.texture);
     builder.PreferQueue(QueueKind::Graphics);
 }
@@ -192,13 +195,15 @@ ReadbackManager::ReadbackFrameData ReadbackManager::ReadbackPass::Prepare(
     ReadbackFrameData frame;
     std::vector<ReadbackInfo> inputs;
     {
-        std::scoped_lock lock(m_owner.m_mutex);
-        inputs = std::move(m_owner.m_queuedReadbacks);
-        m_owner.m_queuedReadbacks.clear();
+        std::scoped_lock lock(m_state->mutex);
+        if (!m_state->accepting) return frame;
+        inputs = std::move(m_state->queuedReadbacks);
+        m_state->queuedReadbacks.clear();
     }
     if (inputs.empty()) return frame;
 
-    const uint64_t fenceValue = m_owner.AcquireNextFenceValue();
+    const uint64_t fenceValue =
+        m_state->nextFenceValue.fetch_add(1, std::memory_order_relaxed) + 1;
     std::vector<ReadbackRequest> requests;
     auto device = DeviceManager::GetInstance().GetDevice();
     for (const auto& input : inputs) {
@@ -252,7 +257,7 @@ ReadbackManager::ReadbackFrameData ReadbackManager::ReadbackPass::Prepare(
     }
 
     struct Reservation final : org::PreparedLifecycleEffect {
-        ReadbackManager* owner = nullptr;
+        std::shared_ptr<State> state;
         std::vector<ReadbackInfo> inputs;
         mutable std::vector<ReadbackRequest> requests;
         ExternalTimelinePoint signal{};
@@ -262,19 +267,20 @@ ReadbackManager::ReadbackFrameData ReadbackManager::ReadbackPass::Prepare(
         }
         void Submitted(org::SubmissionContext) const override {
             if (resolved.exchange(true)) return;
-            std::scoped_lock lock(owner->m_mutex);
+            std::scoped_lock lock(state->mutex);
             for (auto& request : requests)
-                owner->m_readbackRequests.push_back(std::move(request));
+                state->readbackRequests.push_back(std::move(request));
         }
         void Abandoned(org::AbandonReason) const override {
             if (resolved.exchange(true)) return;
-            std::scoped_lock lock(owner->m_mutex);
+            std::scoped_lock lock(state->mutex);
+            if (!state->accepting) return;
             for (auto& input : inputs)
-                owner->m_queuedReadbacks.push_back(std::move(input));
+                state->queuedReadbacks.push_back(std::move(input));
         }
     };
     auto reservation = std::make_shared<Reservation>();
-    reservation->owner = &m_owner;
+    reservation->state = m_state;
     reservation->inputs = std::move(inputs);
     reservation->requests = std::move(requests);
     reservation->signal = {m_readbackFence, fenceValue};
@@ -365,8 +371,8 @@ void ReadbackManager::SaveCubemapToDDS(
         });
         };
 
-    std::scoped_lock lock(m_mutex);
-    m_readbackRequests.push_back(std::move(readbackRequest));
+    std::scoped_lock lock(m_state->mutex);
+    m_state->readbackRequests.push_back(std::move(readbackRequest));
 }
 
 void ReadbackManager::SaveTextureToDDS(
@@ -435,29 +441,31 @@ void ReadbackManager::SaveTextureToDDS(
         });
         };
 
-    std::scoped_lock lock(m_mutex);
-    m_readbackRequests.push_back(std::move(readbackRequest));
+    std::scoped_lock lock(m_state->mutex);
+    m_state->readbackRequests.push_back(std::move(readbackRequest));
 }
 
 void ReadbackManager::ProcessReadbackRequests() {
-    std::scoped_lock lock(m_mutex);
-
     const auto completedValue = m_readbackFence.GetCompletedValue();
-
+    std::vector<std::function<void()>> completedCallbacks;
     std::vector<ReadbackRequest> remainingRequests;
-    remainingRequests.reserve(m_readbackRequests.size());
-    for (auto& request : m_readbackRequests) {
-        if (completedValue >= request.fenceValue) {
-            if (request.callback) {
-                request.callback();
+    {
+        std::scoped_lock lock(m_state->mutex);
+        remainingRequests.reserve(m_state->readbackRequests.size());
+        for (auto& request : m_state->readbackRequests) {
+            if (completedValue >= request.fenceValue) {
+                if (request.callback)
+                    completedCallbacks.push_back(std::move(request.callback));
+            }
+            else {
+                remainingRequests.push_back(std::move(request));
             }
         }
-        else {
-            remainingRequests.push_back(std::move(request));
-        }
+        m_state->readbackRequests = std::move(remainingRequests);
     }
-
-    m_readbackRequests = std::move(remainingRequests);
+    // User callbacks may request another readback; never invoke them while the
+    // service-state mutex is held.
+    for (auto& callback : completedCallbacks) callback();
 }
 
 } // namespace br

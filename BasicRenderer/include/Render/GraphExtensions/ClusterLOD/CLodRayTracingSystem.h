@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <source_location>
 #include <vector>
 
 #include "Managers/MeshManager.h"
@@ -13,11 +14,15 @@ namespace org { class Buffer; }
 using org::Buffer;
 namespace org { class PixelBuffer; }
 using org::PixelBuffer;
+namespace org::runtime { class IUploadService; }
+namespace org::runtime { struct UploadTarget; }
 
 namespace br::render {
 
 class CLodRayTracingSystem {
 public:
+    explicit CLodRayTracingSystem(std::shared_ptr<org::runtime::IUploadService> uploads = {});
+    void SetUploadService(std::shared_ptr<org::runtime::IUploadService> uploads) noexcept;
     std::mutex& FrameOperationMutex() noexcept { return m_frameOperationMutex; }
     struct Stats {
         uint32_t residentGroups = 0;
@@ -92,7 +97,11 @@ public:
     rhi::AccelerationStructure GetTlas() const { return m_tlas ? m_tlas.Get() : rhi::AccelerationStructure{}; }
 
 private:
+    org::runtime::IUploadService& UploadService() const;
+    void UploadBufferData(const void* data, size_t size, org::runtime::UploadTarget target,
+        size_t offset, std::source_location source = std::source_location::current()) const;
     std::mutex m_frameOperationMutex;
+    std::weak_ptr<org::runtime::IUploadService> m_uploadService;
     void EnsureBuffers(
         uint32_t pageSourceCount,
         uint32_t clusterCount,

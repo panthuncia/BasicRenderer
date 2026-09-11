@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -11,6 +12,7 @@
 #include "Materials/Material.h"
 #include "Mesh/MeshInstance.h"
 #include "Render/DrawWorkload.h"
+#include "Render/SceneRenderableResidencyService.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Resources/Sampler.h"
 #include "Resources/components.h"
@@ -323,19 +325,27 @@ void SyncLightDerivedState(
 namespace br::render {
 
 void SceneEntityMaterializationService::Configure(
-    ObjectManager* objects, ViewManager* views, LightManager* lights) noexcept {
+    ObjectManager* objects, ViewManager* views, LightManager* lights,
+    SceneRenderableResidencyService* renderables) noexcept {
     m_objects = objects;
     m_views = views;
     m_lights = lights;
+    m_renderables = renderables;
 }
 
 bool SceneEntityMaterializationService::Available() const noexcept {
-    return m_objects && m_views && m_lights;
+    return m_objects && m_views && m_lights && m_renderables && m_renderables->Available();
 }
 
 void SceneEntityMaterializationService::Destroy(flecs::entity entity) const {
     if (!entity.is_alive()) return;
     DestroyRendererObject(entity, *m_objects);
+    if (const auto* instances = entity.try_get<Components::MeshInstances>()) {
+        for (const auto& instance : instances->meshInstances) {
+            if (instance && instance->GetPerMeshInstanceBufferView())
+                m_renderables->ReleaseInstance(*instance);
+        }
+    }
     DestroyRendererCamera(entity, *m_views);
     DestroyRendererLight(entity, *m_lights);
 }
@@ -348,6 +358,30 @@ void SceneEntityMaterializationService::MaterializeRenderables(
     builds.reserve(requests.size());
     entities.reserve(requests.size());
     for (const auto& request : requests) {
+        const auto incomingSignature = BuildRenderableSignature(request.meshes);
+        const auto* priorSignature = request.entity.try_get<RenderableSignature>();
+        const bool replacingInstances = priorSignature == nullptr ||
+            priorSignature->meshInstanceKeys != incomingSignature.meshInstanceKeys;
+        if (replacingInstances) {
+            if (const auto* oldInstances = request.entity.try_get<Components::MeshInstances>()) {
+                for (const auto& instance : oldInstances->meshInstances) {
+                    if (instance && instance->GetPerMeshInstanceBufferView())
+                        m_renderables->ReleaseInstance(*instance);
+                }
+            }
+            if (request.meshes) {
+                for (const auto& instance : request.meshes->meshInstances) {
+                    if (!instance) continue;
+                    // Exported mesh instances intentionally own no mutable
+                    // manager allocation. Materialize a fresh renderer-owned
+                    // instance row before ObjectManager creates draw records.
+                    if (!m_renderables->MaterializeInstance(*instance, false)) {
+                        throw std::runtime_error(
+                            "SceneEntityMaterializationService failed to materialize mesh instance");
+                    }
+                }
+            }
+        }
         ObjectManager::ObjectBuildInfo build;
         if (SyncRenderableDerivedStateForBulk(request.entity, request.meshes,
             request.instanceTransforms, *m_objects, build, phases)) {

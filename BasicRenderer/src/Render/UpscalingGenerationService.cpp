@@ -27,7 +27,7 @@ void UpscalingGenerationService::Evaluate(rhi::CommandList& commands,
     const Components::Camera& camera, std::uint64_t frameNumber,
     double deltaTime, org::PixelBuffer* hdr, org::PixelBuffer* output,
     org::PixelBuffer* depth, org::PixelBuffer* motion) const {
-    UpscalingManager::GetInstance().Evaluate(commands, &camera, frameNumber,
+    UpscalingManager::GetInstance().EvaluateCaptured(m_mode, commands, &camera, frameNumber,
         deltaTime, hdr, output, depth, motion);
 }
 

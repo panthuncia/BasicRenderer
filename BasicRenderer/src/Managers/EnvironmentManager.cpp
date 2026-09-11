@@ -17,7 +17,8 @@
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
-EnvironmentManager::EnvironmentManager() {
+EnvironmentManager::EnvironmentManager(std::shared_ptr<org::runtime::IUploadService> uploadService)
+	: m_uploadService(std::move(uploadService)) {
 	auto& resourceManager = ::ResourceManager::GetInstance();
 	m_skyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution")();
 	m_reflectionCubemapResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("reflectionCubemapResolution")();
@@ -85,7 +86,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	unsigned int res = m_reflectionCubemapResolution;
 	if (std::filesystem::exists(skyboxPath)) {
 		skybox = LoadCubemapFromFile(skyboxPath, true, true);
-		auto factory = TextureFactory::CreateUnique();
+		auto factory = TextureFactory::CreateUnique(m_uploadService);
 		skybox->EnsureUploaded(*factory);
 		skybox->SetName("Skybox cubemap");
 		org::memory::SetResourceUsageHint(*skybox->ImagePtr(), "Environment lighting");
@@ -95,7 +96,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	}
 	else {
 		auto skyHDR = LoadTextureFromFile(s2ws(hdriPath));
-		auto factory = TextureFactory::CreateUnique();
+		auto factory = TextureFactory::CreateUnique(m_uploadService);
 		skyHDR->EnsureUploaded(*factory);
 
 		TextureDescription skyboxDesc;

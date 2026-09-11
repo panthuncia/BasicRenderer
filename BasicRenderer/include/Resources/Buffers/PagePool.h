@@ -128,8 +128,8 @@ public:
 	// Upload callback signature: (data, dataSize, target, dstOffset).
 	using UploadFn = std::function<void(const void*, size_t, org::runtime::UploadTarget, size_t)>;
 
-	// Override the upload function used by UploadToPage / FlushPageTableUpdates.
-	// When not set, the default BUFFER_UPLOAD macro path is used.
+	// Install the generation-bound upload function used by UploadToPage and
+	// FlushPageTableUpdates. Upload entry points fail if no owner is installed.
 	void SetUploadFunction(UploadFn fn) { m_uploadFn = std::move(fn); }
 
 private:
@@ -162,7 +162,7 @@ private:
 	// ResourceGroup tracking all slab buffers for render graph auto-invalidation.
 	std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
-	// Optional upload function override; when empty, falls back to BUFFER_UPLOAD.
+	// Generation-bound upload function. Cleared when the streaming owner shuts down.
 	UploadFn m_uploadFn;
 
 	// Allocate a new slab. Streaming slabs are capped by numStreamingSlabs.

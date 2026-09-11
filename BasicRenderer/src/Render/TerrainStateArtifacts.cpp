@@ -69,7 +69,7 @@ ArtifactBuildResult BuildTerrainState(const ArtifactBuildContext& context) {
     // therefore have its own monotonic content revision rather than reusing
     // context.revision for different bytes.
     const auto layerRequest = input->layerBufferFamily->RequestContentSnapshot(
-        *input->requestService, *input->uploadService,
+        *input->requestService, input->uploadOwner,
         std::as_bytes(std::span(layers)), layers.size());
     if (!layerRequest) {
         return ArtifactBuildResult::Failure("terrain derived layer-buffer request rejected");

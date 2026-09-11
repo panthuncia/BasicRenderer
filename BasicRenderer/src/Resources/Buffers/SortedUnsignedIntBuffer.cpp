@@ -5,7 +5,6 @@
 #include <spdlog/spdlog.h>
 
 #include "Resources/GPUBacking/GpuBufferBacking.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
 #include "Managers/Singletons/DeviceManager.h"
 
@@ -398,6 +397,7 @@ void SortedUnsignedIntBuffer::StageOrUpload(const void* data, size_t size, size_
         return;
     }
 
+    EnsureUploadPolicyRegistration();
     if (org::runtime::GetActiveUploadPolicyService() == nullptr) {
         SyncUploadPolicyState();
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
@@ -405,7 +405,7 @@ void SortedUnsignedIntBuffer::StageOrUpload(const void* data, size_t size, size_
 #else
         m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
-        BUFFER_UPLOAD(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+        UploadBufferData(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset, __FILE__, __LINE__);
         return;
     }
 
@@ -422,7 +422,7 @@ void SortedUnsignedIntBuffer::StageOrUpload(const void* data, size_t size, size_
         return;
     }
 
-    BUFFER_UPLOAD(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+    UploadBufferData(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset, __FILE__, __LINE__);
 }
 
 void SortedUnsignedIntBuffer::CreateBuffer(uint64_t capacity) {
@@ -463,8 +463,8 @@ void SortedUnsignedIntBuffer::ApplyResizeBacking(std::unique_ptr<GpuBufferBackin
     const size_t replayBytes = (std::min)(newCapacity * stride, static_cast<uint64_t>(m_cpuShadowData.size()));
     if (replayBytes > 0u) {
         SyncUploadPolicyState();
-        if (org::runtime::GetActiveUploadService() != nullptr) {
-            BUFFER_UPLOAD(m_cpuShadowData.data(), replayBytes, org::runtime::UploadTarget::FromShared(shared_from_this()), 0u);
+        if (RetainUploadService() != nullptr) {
+            UploadBufferData(m_cpuShadowData.data(), replayBytes, org::runtime::UploadTarget::FromShared(shared_from_this()), 0u, __FILE__, __LINE__);
             spdlog::debug(
                 "SortedUnsignedIntBuffer '{}' id={} GrowBuffer replayed CPU bytes={}",
                 GetName(),

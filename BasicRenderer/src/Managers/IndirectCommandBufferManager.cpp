@@ -130,13 +130,14 @@ void IndirectCommandBufferManager::RequestWorkloadCounts(std::span<const Workloa
 }
 
 void IndirectCommandBufferManager::SetRendererStateServices(
-    br::render::RendererStateRequestService* requests, org::runtime::IUploadService* uploads) {
+    br::render::RendererStateRequestService* requests,
+	std::shared_ptr<org::runtime::IUploadService> uploads) {
     if (m_rendererStateRequests != requests) {
         std::lock_guard lock(m_submissionCacheMutex);
         m_submittedArtifacts.clear();
     }
     m_rendererStateRequests = requests;
-    m_uploadService = uploads;
+    m_uploadService = std::move(uploads);
     if (requests && !m_buildScope.Valid()) {
         m_buildScope = TaskSchedulerManager::GetInstance().CreateScope(
             "IndirectCommandBufferManager::DesiredState");
@@ -540,7 +541,8 @@ bool IndirectCommandBufferManager::BuildDesiredState(DesiredSnapshot snapshot) {
         if (!activeListHandle) {
             ++activeListArtifactsRequested;
             auto activeInput = std::make_shared<br::render::VersionedGpuBufferBuildInput>();
-            activeInput->uploadService = m_uploadService;
+            activeInput->uploadOwner = m_uploadService;
+            activeInput->uploadService = activeInput->uploadOwner.get();
             activeInput->debugName = "PublishedActiveDrawList";
             activeInput->writeSequence = dto.activeListRevision;
             activeInput->elementStride = sizeof(br::render::ActiveDrawEntryDTO);
@@ -600,7 +602,8 @@ bool IndirectCommandBufferManager::BuildDesiredState(DesiredSnapshot snapshot) {
                 if (!argumentHandle) {
                     auto argumentInput =
                         std::make_shared<br::render::VersionedGpuBufferBuildInput>();
-                    argumentInput->uploadService = m_uploadService;
+                    argumentInput->uploadOwner = m_uploadService;
+                    argumentInput->uploadService = argumentInput->uploadOwner.get();
                     argumentInput->debugName = "PublishedIndirectArguments";
                     argumentInput->writeSequence = capacity;
                     argumentInput->elementStride = sizeof(DispatchMeshIndirectCommand);

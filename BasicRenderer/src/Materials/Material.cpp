@@ -346,7 +346,7 @@ void Material::SetHeightmap(std::shared_ptr<TextureAsset> heightmap) {
         org::memory::SetResourceUsageHint(*image, "Material textures");
     }
     m_materialData.heightMapIndex = image->GetSRVInfo(0).slot.index;
-    m_materialData.heightSamplerIndex = heightmap->SamplerDescriptorIndex();
+    m_materialData.heightSamplerIndex = 0u;
 }
 
 void Material::SetTextureScale(float scale) {
@@ -496,7 +496,7 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory, TextureUplo
     RefreshTextureBindings();
 }
 
-void Material::RefreshTextureBindings() {
+void Material::RefreshTextureBindings(org::runtime::IDescriptorService* descriptorService) {
     const bool textureStreamingEnabled = IsMaterialTextureStreamingEnabledSetting();
 	// Rebuild the complete descriptor tuple from the current TextureAssets.  Leaving
 	// one field untouched when an asset is removed or temporarily has no published
@@ -541,7 +541,7 @@ void Material::RefreshTextureBindings() {
     };
 
     if (m_baseColorTexture != nullptr) {
-        m_materialData.baseColorSamplerIndex = m_baseColorTexture->SamplerDescriptorIndex();
+        m_materialData.baseColorSamplerIndex = descriptorService ? m_baseColorTexture->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.baseColorStreamingTextureID = textureStreamingEnabled ? m_baseColorTexture->GetStreamingTextureID() : 0u;
         m_materialData.baseColorChannels = RgbaChannelsOrDefault(m_baseColorChannels);
         m_materialData.baseColorUvSetIndex = m_baseColorUvSetIndex;
@@ -552,7 +552,7 @@ void Material::RefreshTextureBindings() {
         }
     }
     if (m_normalTexture != nullptr) {
-        m_materialData.normalSamplerIndex = m_normalTexture->SamplerDescriptorIndex();
+        m_materialData.normalSamplerIndex = descriptorService ? m_normalTexture->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.normalStreamingTextureID = textureStreamingEnabled ? m_normalTexture->GetStreamingTextureID() : 0u;
         m_materialData.normalChannels = RgbChannelsOrDefault(m_normalChannels);
         m_materialData.normalUvSetIndex = m_normalUvSetIndex;
@@ -585,7 +585,7 @@ void Material::RefreshTextureBindings() {
         }
     }
     if (m_aoMap != nullptr) {
-        m_materialData.aoSamplerIndex = m_aoMap->SamplerDescriptorIndex();
+        m_materialData.aoSamplerIndex = descriptorService ? m_aoMap->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.aoStreamingTextureID = textureStreamingEnabled ? m_aoMap->GetStreamingTextureID() : 0u;
         m_materialData.aoChannel = FirstChannelOrDefault(m_aoChannel, 0u);
         m_materialData.aoUvSetIndex = m_aoUvSetIndex;
@@ -596,7 +596,7 @@ void Material::RefreshTextureBindings() {
         }
     }
     if (m_heightMap != nullptr) {
-        m_materialData.heightSamplerIndex = m_heightMap->SamplerDescriptorIndex();
+        m_materialData.heightSamplerIndex = descriptorService ? m_heightMap->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.heightStreamingTextureID = textureStreamingEnabled ? m_heightMap->GetStreamingTextureID() : 0u;
         m_materialData.heightChannel = FirstChannelOrDefault(m_heightChannel, 0u);
         m_materialData.heightUvSetIndex = m_heightUvSetIndex;
@@ -607,7 +607,7 @@ void Material::RefreshTextureBindings() {
         }
     }
     if (m_metallicTexture != nullptr) {
-        m_materialData.metallicSamplerIndex = m_metallicTexture->SamplerDescriptorIndex();
+        m_materialData.metallicSamplerIndex = descriptorService ? m_metallicTexture->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.metallicStreamingTextureID = textureStreamingEnabled ? m_metallicTexture->GetStreamingTextureID() : 0u;
         m_materialData.metallicChannel = FirstChannelOrDefault(m_metallicChannel, 0u);
         m_materialData.metallicUvSetIndex = m_metallicUvSetIndex;
@@ -618,7 +618,7 @@ void Material::RefreshTextureBindings() {
         }
     }
     if (m_roughnessTexture != nullptr) {
-        m_materialData.roughnessSamplerIndex = m_roughnessTexture->SamplerDescriptorIndex();
+        m_materialData.roughnessSamplerIndex = descriptorService ? m_roughnessTexture->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.roughnessStreamingTextureID = textureStreamingEnabled ? m_roughnessTexture->GetStreamingTextureID() : 0u;
         m_materialData.roughnessChannel = FirstChannelOrDefault(m_roughnessChannel, 0u);
         m_materialData.roughnessUvSetIndex = m_roughnessUvSetIndex;
@@ -635,7 +635,7 @@ void Material::RefreshTextureBindings() {
     }
 
     if (m_emissiveTexture != nullptr) {
-        m_materialData.emissiveSamplerIndex = m_emissiveTexture->SamplerDescriptorIndex();
+        m_materialData.emissiveSamplerIndex = descriptorService ? m_emissiveTexture->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.emissiveStreamingTextureID = textureStreamingEnabled ? m_emissiveTexture->GetStreamingTextureID() : 0u;
         m_materialData.emissiveChannels = RgbChannelsOrDefault(m_emissiveChannels);
         m_materialData.emissiveUvSetIndex = m_emissiveUvSetIndex;
@@ -647,7 +647,7 @@ void Material::RefreshTextureBindings() {
     }
 
     if (m_opacityTexture != nullptr) {
-        m_materialData.opacitySamplerIndex = m_opacityTexture->SamplerDescriptorIndex();
+        m_materialData.opacitySamplerIndex = descriptorService ? m_opacityTexture->SamplerDescriptorIndex(*descriptorService) : 0u;
         m_materialData.opacityStreamingTextureID = textureStreamingEnabled ? m_opacityTexture->GetStreamingTextureID() : 0u;
         m_materialData.opacityUvSetIndex = m_opacityUvSetIndex;
         auto image = m_opacityTexture->ImagePtr();

@@ -4,7 +4,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Render/Runtime/IDescriptorService.h"
 #include "RenderPasses/PreparedComputeDispatch.h"
 
 struct GTAODenoiseBindings {
@@ -89,7 +89,7 @@ private:
         samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
         samplerDesc.minLod = 0.0f;
         samplerDesc.maxLod = 0.0f;
-        m_samplerIndex = org::runtime::CreateIndexedSamplerFromActiveDescriptorService(samplerDesc);
+        m_samplerIndex = DescriptorService().CreateIndexedSampler(samplerDesc);
     }
 
     void CreateXeGTAOComputePSO()

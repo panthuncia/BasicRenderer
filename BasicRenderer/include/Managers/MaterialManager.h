@@ -24,6 +24,7 @@
 namespace org::runtime {
 class IReadbackService;
 class IUploadService;
+class IDescriptorService;
 }
 namespace org { class DynamicGloballyIndexedResource; }
 namespace br::render { class RendererStateRequestService; class VersionedGpuBufferBackingPool; }
@@ -101,11 +102,12 @@ public:
 	bool TryActivatePublishedMaterialState(
 		const std::shared_ptr<const br::render::PublishedRendererState>& published);
 	void SetRendererStateServices(br::render::RendererStateRequestService* requests,
-		org::runtime::IUploadService* uploads) {
+		std::shared_ptr<org::runtime::IUploadService> uploads) {
 		m_rendererStateRequests = requests;
 		m_uploadService = uploads;
 		if (m_textureStreamingManager) m_textureStreamingManager->SetRendererStateRequestService(requests, uploads);
 	}
+	void SetDescriptorService(std::shared_ptr<org::runtime::IDescriptorService> descriptors);
 	unsigned int GetRasterBucketCount() const { return m_rasterBucketsUsed; }
 	unsigned int GetRasterBucketForFlags(MaterialRasterFlags rasterFlags) const {
 		auto it = m_rasterFlagToBucketMapping.find(static_cast<uint32_t>(rasterFlags));
@@ -202,7 +204,8 @@ private:
 	std::chrono::steady_clock::time_point m_lastMaterialUpdateStatsLog = {};
 	RequestTextureReadbackFn m_requestTextureReadback;
 	br::render::RendererStateRequestService* m_rendererStateRequests = nullptr;
-	org::runtime::IUploadService* m_uploadService = nullptr;
+	std::shared_ptr<org::runtime::IUploadService> m_uploadService;
+	std::shared_ptr<org::runtime::IDescriptorService> m_descriptorService;
 	std::atomic_uint64_t m_materialRowsRevision{ 1 };
 	bool m_materialGraphActive = false;
 	std::uint64_t m_activeMaterialPublishedRevision = 0;

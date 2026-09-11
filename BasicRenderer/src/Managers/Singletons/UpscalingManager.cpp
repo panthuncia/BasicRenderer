@@ -732,8 +732,9 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
         .depth = 1,
     };
 
-    const bool graphOwnsCopyBarriers = DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan
-        && m_upscalingMode == UpscalingMode::None;
+    // This function is reached only for a generation whose captured mode is
+    // None. The mutable manager selection may already describe a successor.
+    const bool graphOwnsCopyBarriers = DeviceManager::GetInstance().GetBackend() == rhi::Backend::Vulkan;
 
     rhi::TextureSubresourceRange copyRange{};
     copyRange.baseMip = mipSlice;
@@ -793,9 +794,18 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
 }
 
 void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
-    std::scoped_lock evaluateLock(m_evaluateMutex);
     SyncSettingsFromSettingsManager();
     const UpscalingMode effectiveMode = ResolveEffectiveUpscalingMode(m_upscalingMode, m_dlssSupported);
+    EvaluateCaptured(effectiveMode, commandList, camera, frameNumber, elapsedSeconds,
+        pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
+}
+
+void UpscalingManager::EvaluateCaptured(UpscalingMode mode, rhi::CommandList& commandList,
+    const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds,
+    PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget,
+    PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    std::scoped_lock evaluateLock(m_evaluateMutex);
+    const UpscalingMode effectiveMode = ResolveEffectiveUpscalingMode(mode, m_dlssSupported);
     switch (effectiveMode)
     {
 	    case UpscalingMode::None:

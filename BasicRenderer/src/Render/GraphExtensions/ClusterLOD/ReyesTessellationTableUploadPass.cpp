@@ -1,7 +1,7 @@
 #include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTableUploadPass.h"
 
 #include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTable.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
 
@@ -33,7 +33,7 @@ void ReyesTessellationTableUploadPass::Update(const UpdateExecutionContext& exec
         if (!target) return;
         const auto generation = target->GetBackingGeneration();
         if (m_uploadedGenerations[index] == generation) return;
-        BUFFER_UPLOAD(
+        UploadBufferData(
             bytes.data(),
             static_cast<uint32_t>(bytes.size() * sizeof(bytes.front())),
             org::runtime::UploadTarget::FromShared(target),

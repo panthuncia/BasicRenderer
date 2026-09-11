@@ -3,7 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 
@@ -47,7 +47,7 @@ void AVBOITEarlyDepthBuildPass::Update(const UpdateExecutionContext& executionCo
     }
 
     const uint32_t zeroCount = 0u;
-    BUFFER_UPLOAD(
+    UploadBufferData(
         &zeroCount,
         sizeof(uint32_t),
         org::runtime::UploadTarget::FromShared(m_tileCountBuffer),

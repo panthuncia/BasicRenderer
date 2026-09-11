@@ -45,6 +45,7 @@ private:
     uint64_t m_primaryCameraEntityId = 0;
     uint64_t m_currentIngestionFrame = 0;
     SceneSourceStateStore* m_sourceStore = nullptr;
+    std::vector<std::shared_ptr<Mesh>> m_retainedSourceMeshes;
 
     // Cached export queries (mutable because ExportSnapshot is const)
     mutable flecs::query<Components::StableSceneID, Components::Matrix, Components::MeshInstances> m_exportRenderableQuery;

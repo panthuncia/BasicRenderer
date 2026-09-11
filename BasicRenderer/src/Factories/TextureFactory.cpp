@@ -15,6 +15,7 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/ReadbackRequest.h"
 #include "Render/Runtime/IReadbackService.h"
+#include "Render/Runtime/IUploadService.h"
 #include "ThirdParty/stb/stb_image.h"
 #include "rhi_helpers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
@@ -31,6 +32,7 @@
 
 namespace {
     void UploadTextureData(
+        org::runtime::IUploadService& uploadService,
         const std::shared_ptr<Resource>& dstTexture,
         const TextureDescription& desc,
         const std::vector<std::shared_ptr<std::vector<uint8_t>>>& initialData,
@@ -155,9 +157,8 @@ namespace {
             }
         }
 
-        auto device = DeviceManager::GetInstance().GetDevice();
-
-        TEXTURE_UPLOAD_SUBRESOURCES(
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+        uploadService.UploadTextureSubresources(
             org::runtime::UploadTarget::FromShared(dstTexture),
             desc.format,
             baseW,
@@ -166,7 +167,13 @@ namespace {
             static_cast<uint32_t>(mipLevels),
             arraySlices,
             srd.data(),
+            static_cast<uint32_t>(srd.size()), __FILE__, __LINE__);
+#else
+        uploadService.UploadTextureSubresources(
+            org::runtime::UploadTarget::FromShared(dstTexture), desc.format, baseW, baseH,
+            1, static_cast<uint32_t>(mipLevels), arraySlices, srd.data(),
             static_cast<uint32_t>(srd.size()));
+#endif
     }
 }
 
@@ -759,7 +766,8 @@ std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
 		org::memory::SetResourceMemoryIdentifier(*pb, std::string(debugName));
     }
 
-    UploadTextureData(pb, desc, initialData.subresources, pb->GetMipLevels());
+    if (!m_uploadService) throw std::runtime_error("TextureFactory upload service generation is unavailable");
+    UploadTextureData(*m_uploadService, pb, desc, initialData.subresources, pb->GetMipLevels());
 
     // Enqueue GPU mipgen (only if mipLevels > 1)
     if (doMipmapping && pb->GetMipLevels() > 1) {
@@ -770,9 +778,11 @@ std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
     return pb;
 }
 
-void TextureFactory::SetReadbackService(org::runtime::IReadbackService* readbackService)
+void TextureFactory::SetReadbackService(
+    std::shared_ptr<org::runtime::IReadbackService> readbackService)
 {
-    std::static_pointer_cast<BC7CompressionReadbackPass>(m_bc7CompressionReadbackPass)->SetReadbackService(readbackService);
+    std::static_pointer_cast<BC7CompressionReadbackPass>(m_bc7CompressionReadbackPass)
+        ->SetReadbackService(std::move(readbackService));
 }
 
 bool TextureFactory::SubmitBC7CompressionJob(
@@ -1536,9 +1546,10 @@ void TextureFactory::BC7CompressionCopyPass::Record(
     }
 }
 
-void TextureFactory::BC7CompressionReadbackPass::SetReadbackService(org::runtime::IReadbackService* readbackService)
+void TextureFactory::BC7CompressionReadbackPass::SetReadbackService(
+    std::shared_ptr<org::runtime::IReadbackService> readbackService)
 {
-    m_readbackService = readbackService;
+    m_readbackService = std::move(readbackService);
 }
 
 void TextureFactory::BC7CompressionReadbackPass::EnqueueJob(const std::shared_ptr<BC7CompressionJob>& job)
@@ -1595,7 +1606,7 @@ TextureFactory::BC7CompressionReadbackPass::Prepare(const org::PassPrepareContex
 
     class Reservation final : public org::PreparedLifecycleEffect {
     public:
-        Reservation(org::runtime::IReadbackService* service,
+        Reservation(std::shared_ptr<org::runtime::IReadbackService> service,
             std::shared_ptr<rhi::TimelinePtr> timeline,
             std::vector<ReadbackCaptureRequest> requests,
             std::vector<std::shared_ptr<BC7CompressionJob>> jobs,
@@ -1628,7 +1639,7 @@ TextureFactory::BC7CompressionReadbackPass::Prepare(const org::PassPrepareContex
             }
         }
     private:
-        org::runtime::IReadbackService* m_service;
+        std::shared_ptr<org::runtime::IReadbackService> m_service;
         std::shared_ptr<rhi::TimelinePtr> m_timeline;
         mutable std::vector<ReadbackCaptureRequest> m_requests;
         std::vector<std::shared_ptr<BC7CompressionJob>> m_jobs;

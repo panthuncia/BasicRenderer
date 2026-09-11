@@ -1,14 +1,17 @@
 #include "Render/SceneRenderBridge.h"
 
 #include <algorithm>
+#include <exception>
 #include <unordered_set>
 #include <vector>
 
+#include <spdlog/spdlog.h>
 #include <tracy/Tracy.hpp>
 
 #include "Render/SceneIngestionServices.h"
 #include "Render/SceneEntityMaterializationService.h"
 #include "Render/SceneSourceStateStore.h"
+#include "Materials/Material.h"
 #include "Mesh/MeshInstance.h"
 #include "Scene/Components.h"
 #include "Resources/components.h"
@@ -16,6 +19,39 @@
 namespace {
 
 struct BridgedSceneEntity {};
+
+// Ingestion mutates the renderer ECS and legacy allocation services as one
+// ordered operation. Until those stores support rollback, an exception after
+// mutation begins leaves their relationship indeterminate. Continuing would
+// allow a later source revision to publish from partially materialized state.
+class CriticalIngestionGuard {
+public:
+    explicit CriticalIngestionGuard(std::uint64_t sourceRevision) noexcept
+        : m_sourceRevision(sourceRevision), m_uncaughtOnEntry(std::uncaught_exceptions()) {}
+
+    CriticalIngestionGuard(const CriticalIngestionGuard&) = delete;
+    CriticalIngestionGuard& operator=(const CriticalIngestionGuard&) = delete;
+
+    ~CriticalIngestionGuard() noexcept {
+        if (!m_committed && std::uncaught_exceptions() > m_uncaughtOnEntry) {
+            try {
+                spdlog::critical(
+                    "Scene ingestion revision {} failed after renderer-state mutation began; terminating because rollback is unavailable",
+                    m_sourceRevision);
+            } catch (...) {
+            }
+            std::terminate();
+        }
+    }
+
+    void Commit() noexcept { m_committed = true; }
+
+private:
+    std::uint64_t m_sourceRevision = 0;
+    int m_uncaughtOnEntry = 0;
+    bool m_committed = false;
+};
+
 bool HasSkinningPassEligibleMeshes(const Components::MeshInstances* meshInstances) {
     if (!meshInstances) {
         return false;
@@ -139,6 +175,18 @@ bool MatricesEqual(const DirectX::XMMATRIX& a, const DirectX::XMMATRIX& b) {
     return true;
 }
 
+Components::MeshInstances FreezeMeshInstances(const Components::MeshInstances& source) {
+    Components::MeshInstances frozen;
+    frozen.generation = source.generation;
+    frozen.meshInstances.reserve(source.meshInstances.size());
+    for (const auto& instance : source.meshInstances) {
+        frozen.meshInstances.push_back(instance
+            ? MeshInstance::CreateFrozenCopy(*instance)
+            : nullptr);
+    }
+    return frozen;
+}
+
 } // namespace
 
 namespace br::render {
@@ -231,6 +279,12 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
             || meshLibrary->generation != m_lastExportedMeshLibraryGeneration;
         if (snapshot.meshLibraryChanged) {
             snapshot.meshLibrary = *meshLibrary;
+            snapshot.retainedMeshArtifacts.reserve(meshLibrary->meshes.size());
+            for (const auto& [_, weakMesh] : meshLibrary->meshes) {
+                if (auto mesh = weakMesh.lock()) {
+                    snapshot.retainedMeshArtifacts.push_back(std::move(mesh));
+                }
+            }
             m_lastExportedMeshLibraryGeneration = meshLibrary->generation;
             m_hasLastExportedMeshLibrary = true;
         }
@@ -293,7 +347,7 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
                 SnapshotRenderable renderable;
                 renderable.stableID = stableSceneID.value;
                 renderable.matrix = matrix;
-                renderable.meshInstances = meshInstances;
+                renderable.meshInstances = FreezeMeshInstances(meshInstances);
                 if (instanceTransforms) {
                     renderable.instanceTransforms = *instanceTransforms;
                     renderable.hasInstanceTransforms = true;
@@ -581,6 +635,8 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
 
 void SceneRenderBridge::Clear(const SceneIngestionServices& services) {
     m_sourceStore = nullptr;
+    m_retainedSourceMeshes.clear();
+    m_retainedSourceMeshes.clear();
     if (!services.source || !services.source->Available()) {
         m_bridgedEntities.clear();
         m_sceneRootEntityId = 0;
@@ -630,13 +686,107 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot,
     if (!services.source || !services.source->Available()) {
         throw std::runtime_error("SceneRenderBridge requires renderer source-state storage");
     }
-    auto source = services.source->AcquireWrite(snapshot.snapshotSequence);
+    // The snapshot sequence is externally assigned. Include its immutable
+    // envelope in replay identity so duplicate delivery is idempotent while a
+    // conflicting reuse of the same sequence is rejected.
+    std::uint64_t fingerprint = 1469598103934665603ull;
+    const auto mix = [&fingerprint](std::uint64_t value) {
+        fingerprint ^= value;
+        fingerprint *= 1099511628211ull;
+    };
+    const auto mixBytes = [&fingerprint](const void* data, std::size_t size) {
+        const auto* bytes = static_cast<const std::byte*>(data);
+        for (std::size_t i = 0; i < size; ++i) {
+            fingerprint ^= std::to_integer<std::uint8_t>(bytes[i]);
+            fingerprint *= 1099511628211ull;
+        }
+    };
+    const auto mixString = [&mixBytes](std::string_view value) {
+        mixBytes(value.data(), value.size());
+    };
+    const auto mixIDs = [&mix](const auto& values) {
+        std::vector<std::uint64_t> ordered(values.begin(), values.end());
+        std::ranges::sort(ordered);
+        for (const auto value : ordered) mix(value);
+    };
+    mix(snapshot.sceneID);
+    mix(snapshot.sourceFrameNumber);
+    mix(snapshot.changedRenderables.size());
+    mix(snapshot.changedCameras.size());
+    mix(snapshot.changedLights.size());
+    mix(snapshot.removedRenderableIDs.size());
+    mix(snapshot.removedCameraIDs.size());
+    mix(snapshot.removedLightIDs.size());
+    mix(snapshot.aliveRenderableIDs.size());
+    mix(snapshot.aliveCameraIDs.size());
+    mix(snapshot.aliveLightIDs.size());
+    for (const auto& value : snapshot.changedRenderables) {
+        mix(value.stableID);
+        mix(value.meshInstances.generation);
+        mix(value.instanceTransforms.generation);
+        mix(value.meshInstances.meshInstances.size());
+        for (const auto& instance : value.meshInstances.meshInstances) {
+            if (!instance) {
+                mix(0);
+                continue;
+            }
+            const auto mesh = instance->GetMesh();
+            const auto material = instance->GetEffectiveMaterial();
+            mix(mesh ? mesh->GetGlobalID() : 0);
+            mix(material ? material->GetMaterialID() : 0);
+            const auto& instanceData = instance->GetPerMeshInstanceBufferData();
+            mixBytes(&instanceData, sizeof(instanceData));
+            const auto skeleton = instance->GetSkin();
+            if (skeleton) {
+                mix(skeleton->GetBoneCount());
+                mixBytes(skeleton->GetBoneMatrices().data(),
+                    skeleton->GetBoneMatrices().size_bytes());
+            } else {
+                mix(0);
+            }
+        }
+        mix(value.instanceTransforms.transforms.size());
+        for (const auto& transform : value.instanceTransforms.transforms) {
+            mixBytes(&transform.matrix, sizeof(transform.matrix));
+        }
+        mix(value.instanceTransforms.meshInstanceTransformIndices.size());
+        for (const auto index : value.instanceTransforms.meshInstanceTransformIndices) mix(index);
+        mixBytes(&value.matrix.matrix, sizeof(value.matrix.matrix));
+        mixString(value.name);
+        mix(value.skinned);
+        mix(value.skipShadowPass);
+    }
+    for (const auto& value : snapshot.changedCameras) {
+        mix(value.stableID);
+        mixBytes(&value.matrix.matrix, sizeof(value.matrix.matrix));
+        mixBytes(&value.camera, sizeof(value.camera));
+        mixString(value.name);
+    }
+    for (const auto& value : snapshot.changedLights) {
+        mix(value.stableID);
+        mixBytes(&value.matrix.matrix, sizeof(value.matrix.matrix));
+        mixBytes(&value.light, sizeof(value.light));
+        mixString(value.name);
+    }
+    mixIDs(snapshot.removedRenderableIDs);
+    mixIDs(snapshot.removedCameraIDs);
+    mixIDs(snapshot.removedLightIDs);
+    mixIDs(snapshot.aliveRenderableIDs);
+    mixIDs(snapshot.aliveCameraIDs);
+    mixIDs(snapshot.aliveLightIDs);
+    auto source = services.source->BeginBatch(snapshot.snapshotSequence, fingerprint);
+    if (source.IsReplay()) return;
     auto& renderWorld = source.World();
     m_sourceStore = services.source;
     auto* sceneEntities = services.sceneEntities;
     if (!sceneEntities || !sceneEntities->Available()) {
         throw std::runtime_error("SceneRenderBridge requires scene-entity materialization");
     }
+
+    // Validation above remains recoverable and cannot have changed renderer
+    // state. From this point onward, any exception is process-fatal until the
+    // source store and all materialization services gain atomic rollback.
+    CriticalIngestionGuard criticalIngestion(snapshot.snapshotSequence);
 
     const auto renderResolution = configuration.renderResolution;
     const auto outputResolution = configuration.outputResolution;
@@ -667,6 +817,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot,
         }
         if (snapshot.meshLibraryChanged) {
             renderWorld.set<Components::GlobalMeshLibrary>(snapshot.meshLibrary);
+            m_retainedSourceMeshes = snapshot.retainedMeshArtifacts;
         }
     }
 
@@ -843,6 +994,8 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot,
             m_bridgedEntities.erase(stableSceneID);
         }
     }
+    source.Commit();
+    criticalIngestion.Commit();
 }
 
 void SceneRenderBridge::Sync(Scene& scene, const SceneIngestionServices& services,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wrl.h>
+#include <memory>
 #include <vector>
 
 #include <rhi.h>
@@ -16,6 +17,7 @@ using org::BufferView;
 class SortedUnsignedIntBuffer;
 namespace org { class Buffer; }
 using org::Buffer;
+namespace org::runtime { class IUploadService; }
 
 class ResourceManager {
 public:
@@ -25,7 +27,8 @@ public:
         return instance;
     }
 
-    void Initialize();
+    void Initialize(std::shared_ptr<org::runtime::IUploadService> uploadService);
+    void SetUploadService(std::shared_ptr<org::runtime::IUploadService> uploadService);
     void Cleanup();
 
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
@@ -64,6 +67,7 @@ private:
     UINT currentFrameIndex;
 
     rhi::ResourcePtr m_uavCounterReset;
+    std::shared_ptr<org::runtime::IUploadService> m_uploadService;
 
 	int defaultShadowSamplerIndex = -1;
 

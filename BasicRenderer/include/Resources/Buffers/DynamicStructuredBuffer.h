@@ -19,7 +19,6 @@
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Interfaces/IHasMemoryMetadata.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
 
 using Microsoft::WRL::ComPtr;
@@ -256,6 +255,7 @@ private:
         std::scoped_lock lock(m_mutex);
         SyncUploadPolicyState();
         m_uploadPolicyState.FlushToUploadService(
+            *RetainBufferUploadService(),
             org::runtime::UploadTarget::FromShared(shared_from_this()),
             [this](size_t offset, size_t size) -> const void* {
                 const auto byteSize = m_data.size() * sizeof(T);
@@ -388,6 +388,7 @@ private:
     }
 
     void StageOrUpload(const void* data, size_t size, size_t offset) {
+        EnsureUploadPolicyRegistration();
         if (org::runtime::GetActiveUploadPolicyService() == nullptr) {
             SyncUploadPolicyState();
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
@@ -395,7 +396,7 @@ private:
 #else
             m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
 #endif
-            BUFFER_UPLOAD(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+            UploadBufferData(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset, __FILE__, __LINE__);
             return;
         }
 
@@ -412,7 +413,7 @@ private:
             return;
         }
 
-        BUFFER_UPLOAD(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+        UploadBufferData(data, size, org::runtime::UploadTarget::FromShared(shared_from_this()), offset, __FILE__, __LINE__);
     }
 
     void AssignDescriptorSlots(uint32_t capacity)
@@ -501,8 +502,8 @@ private:
         if (replayElements > 0u) {
             SyncUploadPolicyState();
             const size_t replayBytes = replayElements * sizeof(T);
-            if (org::runtime::GetActiveUploadService() != nullptr) {
-                BUFFER_UPLOAD(m_data.data(), replayBytes, org::runtime::UploadTarget::FromShared(shared_from_this()), 0u);
+            if (RetainUploadService() != nullptr) {
+                UploadBufferData(m_data.data(), replayBytes, org::runtime::UploadTarget::FromShared(shared_from_this()), 0u, __FILE__, __LINE__);
                 spdlog::debug(
                     "DynamicStructuredBuffer '{}' id={} GrowBuffer replayed CPU rows={} bytes={}",
                     name,

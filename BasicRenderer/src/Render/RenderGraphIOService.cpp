@@ -8,9 +8,9 @@
 namespace br::render {
 
 RenderGraphIOService::RenderGraphIOService(TextureFactory& textures,
-    org::runtime::IUploadService& uploads, br::ReadbackManager& readbacks,
+    std::shared_ptr<org::runtime::IUploadService> uploads, br::ReadbackManager& readbacks,
     ITextureStreamingFeedbackService& feedback) noexcept
-    : m_textures(&textures), m_uploads(&uploads), m_readbacks(&readbacks),
+    : m_textures(&textures), m_uploads(std::move(uploads)), m_readbacks(&readbacks),
       m_textureStreamingFeedback(&feedback) {}
 
 void RenderGraphIOService::SetRegistry(org::ResourceRegistry& registry) {

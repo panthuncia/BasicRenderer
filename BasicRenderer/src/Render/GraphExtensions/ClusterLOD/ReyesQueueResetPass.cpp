@@ -3,7 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
-#include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "../shaders/PerPassRootConstants/clodReyesResetRootConstants.h"
@@ -158,5 +158,5 @@ void ReyesQueueResetPass::Update(const UpdateExecutionContext& executionContext)
     telemetry.objectReyesAtlasDebugMinPatchUvYU16 = 0xFFFFFFFFu;
     telemetry.objectReyesAtlasDebugMinPageUvSetCount = 0xFFFFFFFFu;
     telemetry.objectReyesAtlasDebugMinHeightUvSetIndex = 0xFFFFFFFFu;
-    BUFFER_UPLOAD(&telemetry, sizeof(CLodReyesTelemetry), org::runtime::UploadTarget::FromShared(m_telemetryBuffer), 0);
+    UploadBufferData(&telemetry, sizeof(CLodReyesTelemetry), org::runtime::UploadTarget::FromShared(m_telemetryBuffer), 0);
 }

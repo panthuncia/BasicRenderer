@@ -20,6 +20,7 @@ class TextureFactory;
 class MaterialManager;
 class TextureStreamingManager;
 class PublishedStateResourceResolver;
+namespace org::runtime { class IDescriptorService; class IUploadService; }
 
 inline constexpr float kDefaultTerrainLayerUvScale = 24.0f / 4096.0f;
 inline constexpr float kDefaultTerrainRegionSizeWorld = 2048.0f;
@@ -106,9 +107,13 @@ public:
     // terrain publication boundary.
     void ProcessPendingUpdates();
     void ClearActiveTerrain();
-	void SetRendererStateServices(void* requests, void* uploads) noexcept {
+	void SetRendererStateServices(
+		void* requests,
+		std::shared_ptr<org::runtime::IUploadService> uploads,
+		std::shared_ptr<org::runtime::IDescriptorService> descriptors) noexcept {
 		m_rendererStateRequests = requests;
-		m_uploadService = uploads;
+		m_uploadService = std::move(uploads);
+		m_descriptorService = std::move(descriptors);
 	}
 	bool TryActivatePublishedTerrainState(
 		const std::shared_ptr<const br::render::PublishedRendererState>& published);
@@ -154,7 +159,8 @@ private:
     std::vector<GraphTextureBinding> m_graphTextureBindings;
     TextureStreamingManager* m_textureStreamingManager = nullptr;
 	void* m_rendererStateRequests = nullptr;
-	void* m_uploadService = nullptr;
+	std::shared_ptr<org::runtime::IUploadService> m_uploadService;
+	std::shared_ptr<org::runtime::IDescriptorService> m_descriptorService;
 	std::array<std::shared_ptr<PublishedStateResourceResolver>, 7> m_terrainResolvers;
 	std::array<std::shared_ptr<br::render::VersionedBufferFamily>, 6> m_bufferFamilies;
 	std::uint64_t m_terrainRowsRevision = 0;

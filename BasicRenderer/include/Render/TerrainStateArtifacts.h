@@ -42,6 +42,7 @@ struct TerrainStateBuildInput {
     std::vector<TerrainLayerGPU> baseLayers;
     std::vector<TerrainTextureTarget> textureTargets;
     RendererStateRequestService* requestService = nullptr;
+	std::shared_ptr<org::runtime::IUploadService> uploadOwner;
     org::runtime::IUploadService* uploadService = nullptr;
     std::shared_ptr<VersionedBufferFamily> layerBufferFamily;
 };
