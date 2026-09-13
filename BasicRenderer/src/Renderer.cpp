@@ -6584,6 +6584,10 @@ void Renderer::SetCameraSpeed(float speed) {
     }
 }
 
+void Renderer::WaitForAsyncPreparation() {
+    if (currentRenderGraph) currentRenderGraph->WaitForPreparation();
+}
+
 void Renderer::MoveForward() {
     spdlog::info("Moving forward!");
 }

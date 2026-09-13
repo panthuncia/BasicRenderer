@@ -187,6 +187,10 @@ public:
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
     void SetCameraSpeed(float speed);
+    // Establishes the scene-mutation boundary for hosts that update ECS state
+    // outside Renderer::Update. Required when async graph preparation may have
+    // outlived a Render call that returned before its normal join point.
+    void WaitForAsyncPreparation();
     void SetEnvironment(std::string name);
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 	bool IsInitialized() const { return m_isInitialized; }
